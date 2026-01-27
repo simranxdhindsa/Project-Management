@@ -1,0 +1,132 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Frontend specific
+frontend/dist/
+frontend/node_modules/
+
+# Backend specific
+backend/tasksync-pro
+backend/main
+backend/*.exe
+
+# Lock files (optional - remove if you want to track them)
+# package-lock.json
+# yarn.lock
+
+# Go binary output
+backend/cmd/server/server
+backend/cmd/server/server.exe
+
+# Claude AI
+.claude/
+
+# Secrets and credentials (NEVER commit these)
+*.pem
+*.key
+*.crt
+credentials.json
+service-account.json
+secrets.yaml
+secrets.yml
+.secrets
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Debug files
+__debug_bin*
+
+# Vercel
+.vercel/
+
+# Render
+render.yaml.bak
+
+# Turbo
+.turbo/
+
+# Parcel cache
+.cache/
+.parcel-cache/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# ESLint cache
+.eslintcache
+
+# Prettier cache
+.prettiercache
+
+# pnpm
+pnpm-lock.yaml
+
+# macOS
+*.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
