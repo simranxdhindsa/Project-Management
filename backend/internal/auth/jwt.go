@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/dhindsa/tasksync-pro/internal/models"
+	"github.com/dhindsa/project-management/internal/models"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -19,25 +19,43 @@ func init() {
 	jwtSecret = []byte(secret)
 }
 
+// Token duration constants
+const (
+	ShortTokenDuration = 24 * time.Hour       // 1 day for non-remember-me
+	LongTokenDuration  = 30 * 24 * time.Hour  // 30 days for remember-me
+)
+
 // CustomClaims extends jwt.RegisteredClaims with user info
 type CustomClaims struct {
-	UserID string      `json:"user_id"`
-	Email  string      `json:"email"`
-	Role   models.Role `json:"role"`
+	UserID     string      `json:"user_id"`
+	Email      string      `json:"email"`
+	Role       models.Role `json:"role"`
+	RememberMe bool        `json:"remember_me"`
 	jwt.RegisteredClaims
 }
 
-// GenerateToken creates a new JWT token for a user
+// GenerateToken creates a new JWT token for a user (default: 24 hours)
 func GenerateToken(user *models.User) (string, error) {
+	return GenerateTokenWithDuration(user, false)
+}
+
+// GenerateTokenWithDuration creates a JWT token with configurable duration
+func GenerateTokenWithDuration(user *models.User, rememberMe bool) (string, error) {
+	duration := ShortTokenDuration
+	if rememberMe {
+		duration = LongTokenDuration
+	}
+
 	claims := CustomClaims{
-		UserID: user.ID,
-		Email:  user.Email,
-		Role:   user.Role,
+		UserID:     user.ID,
+		Email:      user.Email,
+		Role:       user.Role,
+		RememberMe: rememberMe,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			NotBefore: jwt.NewNumericDate(time.Now()),
-			Issuer:    "tasksync-pro",
+			Issuer:    "project-management",
 			Subject:   user.ID,
 		},
 	}
@@ -67,6 +85,7 @@ func ValidateToken(tokenString string) (*CustomClaims, error) {
 }
 
 // RefreshToken generates a new token if the current one is valid
+// It preserves the remember_me setting from the original token
 func RefreshToken(tokenString string) (string, error) {
 	claims, err := ValidateToken(tokenString)
 	if err != nil {
@@ -80,5 +99,20 @@ func RefreshToken(tokenString string) (string, error) {
 		Role:  claims.Role,
 	}
 
-	return GenerateToken(user)
+	// Preserve the remember_me setting - this resets the 30-day timer
+	return GenerateTokenWithDuration(user, claims.RememberMe)
+}
+
+// GetTokenRemainingTime returns how much time is left before token expires
+func GetTokenRemainingTime(tokenString string) (time.Duration, error) {
+	claims, err := ValidateToken(tokenString)
+	if err != nil {
+		return 0, err
+	}
+
+	if claims.ExpiresAt == nil {
+		return 0, errors.New("token has no expiration")
+	}
+
+	return time.Until(claims.ExpiresAt.Time), nil
 }

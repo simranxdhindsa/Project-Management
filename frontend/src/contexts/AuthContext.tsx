@@ -1,20 +1,40 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import api, { type User } from '@/services/api'
 
 interface AuthContextType {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
-  login: (credential: string) => Promise<void>
+  login: (credential: string, rememberMe?: boolean) => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
+// Refresh token every 12 hours to keep the session alive (sliding session)
+const TOKEN_REFRESH_INTERVAL = 12 * 60 * 60 * 1000 // 12 hours in ms
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Refresh the token to extend the session
+  const refreshToken = useCallback(async () => {
+    try {
+      const token = api.getToken()
+      if (!token) return
+
+      const response = await api.refreshToken()
+      if (response.success && response.data) {
+        api.setToken(response.data.token)
+      }
+    } catch (error) {
+      console.error('Token refresh failed:', error)
+      // Don't logout on refresh failure - token may still be valid
+    }
+  }, [])
 
   const refreshUser = useCallback(async () => {
     try {
@@ -27,6 +47,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await api.getMe()
       if (response.success && response.data) {
         setUser(response.data)
+        // Start token refresh interval when user is authenticated
+        if (!refreshIntervalRef.current) {
+          refreshIntervalRef.current = setInterval(refreshToken, TOKEN_REFRESH_INTERVAL)
+        }
       } else {
         setUser(null)
         api.setToken(null)
@@ -34,6 +58,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       setUser(null)
       api.setToken(null)
+    }
+  }, [refreshToken])
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current)
+      }
     }
   }, [])
 
@@ -46,13 +79,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth()
   }, [refreshUser])
 
-  const login = async (credential: string) => {
+  const login = async (credential: string, rememberMe: boolean = false) => {
     setIsLoading(true)
     try {
-      const response = await api.googleAuth(credential)
+      const response = await api.googleAuth(credential, rememberMe)
       if (response.success && response.data) {
         api.setToken(response.data.token)
         setUser(response.data.user)
+        // Start token refresh interval
+        if (!refreshIntervalRef.current) {
+          refreshIntervalRef.current = setInterval(refreshToken, TOKEN_REFRESH_INTERVAL)
+        }
       }
     } finally {
       setIsLoading(false)
@@ -65,6 +102,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       api.setToken(null)
       setUser(null)
+      // Clear refresh interval
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current)
+        refreshIntervalRef.current = null
+      }
     }
   }
 

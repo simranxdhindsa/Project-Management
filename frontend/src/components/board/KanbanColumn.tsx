@@ -5,7 +5,7 @@ import {
 } from '@dnd-kit/sortable'
 
 import { SortableTaskCard } from './SortableTaskCard'
-import { Task, TaskStatus } from '../../types'
+import type { Task, TaskStatus } from '../../types'
 
 interface KanbanColumnProps {
   id: TaskStatus

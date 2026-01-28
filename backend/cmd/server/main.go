@@ -6,12 +6,20 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/dhindsa/tasksync-pro/internal/handlers"
-	"github.com/dhindsa/tasksync-pro/internal/middleware"
-	"github.com/dhindsa/tasksync-pro/internal/models"
+	"github.com/dhindsa/project-management/internal/handlers"
+	"github.com/dhindsa/project-management/internal/middleware"
+	"github.com/dhindsa/project-management/internal/models"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/rs/cors"
 )
+
+func init() {
+	// Load .env file before anything else
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using environment variables")
+	}
+}
 
 // Response represents a standard API response
 type Response struct {
@@ -78,11 +86,23 @@ func main() {
 	api.HandleFunc("/webhooks/asana", asanaHandler.HandleWebhook).Methods("POST")
 
 	// Slack routes (protected)
+	slackHandler := handlers.NewSlackHandler()
 	slackRoutes := api.PathPrefix("/slack").Subrouter()
 	slackRoutes.Use(middleware.AuthMiddleware)
-	slackRoutes.HandleFunc("/connect", slackConnectHandler).Methods("POST")
-	slackRoutes.HandleFunc("/messages", slackMessagesHandler).Methods("GET")
-	slackRoutes.HandleFunc("/analyze", slackAnalyzeHandler).Methods("POST")
+	slackRoutes.HandleFunc("/connect", slackHandler.Connect).Methods("POST")
+	slackRoutes.HandleFunc("/disconnect", slackHandler.Disconnect).Methods("POST")
+	slackRoutes.HandleFunc("/status", slackHandler.GetStatus).Methods("GET")
+	slackRoutes.HandleFunc("/channels", slackHandler.GetChannels).Methods("GET")
+	slackRoutes.HandleFunc("/channel", slackHandler.SetChannel).Methods("POST")
+	slackRoutes.HandleFunc("/messages", slackHandler.GetMessages).Methods("GET")
+	slackRoutes.HandleFunc("/messages/yesterday", slackHandler.GetYesterdayMessages).Methods("GET")
+
+	// AI Analysis routes (protected)
+	aiHandler := handlers.NewAIHandler()
+	aiRoutes := api.PathPrefix("/ai").Subrouter()
+	aiRoutes.Use(middleware.AuthMiddleware)
+	aiRoutes.HandleFunc("/analyze", aiHandler.AnalyzeSlackMessages).Methods("POST")
+	aiRoutes.HandleFunc("/discrepancies", aiHandler.GetDiscrepancies).Methods("GET")
 
 	// Calendar routes (protected)
 	calendarRoutes := api.PathPrefix("/calendar").Subrouter()
@@ -115,6 +135,18 @@ func main() {
 	userRoutes.HandleFunc("/{id}/role", updateUserRoleHandler).Methods("PATCH")
 	userRoutes.HandleFunc("/{id}", deleteUserHandler).Methods("DELETE")
 
+	// Whitelist/Access Control routes (protected - admin only)
+	whitelistHandler := handlers.NewWhitelistHandler()
+	whitelistRoutes := api.PathPrefix("/settings/access").Subrouter()
+	whitelistRoutes.Use(middleware.AuthMiddleware)
+	whitelistRoutes.HandleFunc("", whitelistHandler.GetWhitelistSettingsHandler).Methods("GET")
+	whitelistRoutes.HandleFunc("/emails", whitelistHandler.GetAllowedEmailsHandler).Methods("GET")
+	whitelistRoutes.HandleFunc("/emails", whitelistHandler.AddAllowedEmailHandler).Methods("POST")
+	whitelistRoutes.HandleFunc("/emails/{email}", whitelistHandler.RemoveAllowedEmailHandler).Methods("DELETE")
+	whitelistRoutes.HandleFunc("/domains", whitelistHandler.GetAllowedDomainsHandler).Methods("GET")
+	whitelistRoutes.HandleFunc("/domains", whitelistHandler.AddAllowedDomainHandler).Methods("POST")
+	whitelistRoutes.HandleFunc("/domains/{domain}", whitelistHandler.RemoveAllowedDomainHandler).Methods("DELETE")
+
 	// CORS configuration
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:5173", "http://localhost:3000"},
@@ -131,7 +163,7 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("🚀 TaskSync Pro API server starting on port %s", port)
+	log.Printf("🚀 Project Management API server starting on port %s", port)
 	log.Printf("📍 Health check: http://localhost:%s/api/health", port)
 
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
@@ -143,7 +175,7 @@ func main() {
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, Response{
 		Success: true,
-		Message: "TaskSync Pro API is running",
+		Message: "Project Management API is running",
 		Data: map[string]string{
 			"version": "1.0.0",
 			"status":  "healthy",
@@ -265,39 +297,8 @@ func tasksByDateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // NOTE: Asana handlers moved to internal/handlers/asana.go
-
-// Slack handlers
-
-func slackConnectHandler(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "Slack bot connection - to be implemented",
-	})
-}
-
-func slackMessagesHandler(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data: []map[string]interface{}{
-			{"user": "John", "text": "Done with the API docs", "timestamp": "2024-01-26T10:30:00Z"},
-			{"user": "Sarah", "text": "Still working on Slack integration", "timestamp": "2024-01-26T14:15:00Z"},
-		},
-	})
-}
-
-func slackAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
-	// This will use Gemini AI to analyze messages
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "AI Analysis - to be implemented with Gemini",
-		Data: map[string]interface{}{
-			"analysis": []map[string]interface{}{
-				{"task": "API docs", "status": "completed", "confidence": 0.95},
-				{"task": "Slack integration", "status": "in_progress", "confidence": 0.88},
-			},
-		},
-	})
-}
+// NOTE: Slack handlers moved to internal/handlers/slack.go
+// NOTE: AI handlers moved to internal/handlers/ai.go
 
 // Calendar handlers
 

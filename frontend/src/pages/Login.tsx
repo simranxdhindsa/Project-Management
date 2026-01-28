@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { KanbanSquare, CheckCircle, Zap, Shield } from 'lucide-react'
 
@@ -32,17 +32,18 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 
 export default function Login() {
   const { login, isLoading } = useAuth()
+  const [rememberMe, setRememberMe] = useState(true) // Default to checked
 
   const handleGoogleCallback = useCallback(
     async (response: { credential: string }) => {
       try {
-        await login(response.credential)
+        await login(response.credential, rememberMe)
         // Redirect will happen automatically via App.tsx
       } catch (error) {
         console.error('Login failed:', error)
       }
     },
-    [login]
+    [login, rememberMe]
   )
 
   useEffect(() => {
@@ -108,7 +109,7 @@ export default function Login() {
           <div className="login-logo animate-float">
             <KanbanSquare size={48} />
           </div>
-          <h1 className="login-title text-gradient">TaskSync Pro</h1>
+          <h1 className="login-title text-gradient">Project Management</h1>
           <p className="login-subtitle">
             Sync your Asana tasks, analyze Slack progress with AI
           </p>
@@ -128,7 +129,18 @@ export default function Login() {
                 <span className="loading-text">Signing in...</span>
               </div>
             ) : GOOGLE_CLIENT_ID ? (
-              <div id="google-signin-button"></div>
+              <>
+                <div id="google-signin-button"></div>
+                <label className="remember-me-label">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="remember-me-checkbox"
+                  />
+                  <span className="remember-me-text">Remember Me</span>
+                </label>
+              </>
             ) : (
               <div className="login-demo-notice">
                 <p>Google Client ID not configured.</p>

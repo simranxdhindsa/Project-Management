@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard,
@@ -11,11 +12,17 @@ import {
   Search,
   Plus,
   ChevronRight,
-  LogOut
+  LogOut,
+  Link2
 } from 'lucide-react'
+import { IntegrationsPage } from './IntegrationsPage'
+import { SettingsPage } from './SettingsPage'
+
+type Page = 'dashboard' | 'board' | 'list' | 'calendar' | 'reports' | 'team' | 'settings' | 'integrations'
 
 export default function Dashboard() {
   const { user, logout } = useAuth()
+  const [currentPage, setCurrentPage] = useState<Page>('dashboard')
 
   const handleLogout = async () => {
     await logout()
@@ -39,50 +46,80 @@ export default function Dashboard() {
           <div className="logo-icon">
             <KanbanSquare size={24} />
           </div>
-          <span className="logo-text text-gradient">TaskSync Pro</span>
+          <span className="logo-text text-gradient">Project Management</span>
         </div>
 
         <nav className="sidebar-nav">
           <div className="nav-section">
             <span className="nav-section-title">Main</span>
-            <a href="#" className="sidebar-nav-item active">
+            <button
+              className={`sidebar-nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('dashboard')}
+            >
               <LayoutDashboard size={20} />
               <span>Dashboard</span>
-            </a>
-            <a href="#" className="sidebar-nav-item">
+            </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'board' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('board')}
+            >
               <KanbanSquare size={20} />
               <span>Board View</span>
-            </a>
-            <a href="#" className="sidebar-nav-item">
+            </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'list' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('list')}
+            >
               <List size={20} />
               <span>List View</span>
-            </a>
-            <a href="#" className="sidebar-nav-item">
+            </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('calendar')}
+            >
               <Calendar size={20} />
               <span>Calendar</span>
-            </a>
+            </button>
           </div>
 
           <div className="nav-section">
             <span className="nav-section-title">Analytics</span>
-            <a href="#" className="sidebar-nav-item">
+            <button
+              className={`sidebar-nav-item ${currentPage === 'reports' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('reports')}
+            >
               <BarChart3 size={20} />
               <span>Reports</span>
-            </a>
+            </button>
           </div>
 
           <div className="nav-section">
             <span className="nav-section-title">Settings</span>
             {user?.role === 'admin' && (
-              <a href="#" className="sidebar-nav-item">
+              <button
+                className={`sidebar-nav-item ${currentPage === 'team' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('team')}
+              >
                 <Users size={20} />
                 <span>Team</span>
-              </a>
+              </button>
             )}
-            <a href="#" className="sidebar-nav-item">
-              <Settings size={20} />
-              <span>Settings</span>
-            </a>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'integrations' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('integrations')}
+            >
+              <Link2 size={20} />
+              <span>Integrations</span>
+            </button>
+            {user?.role === 'admin' && (
+              <button
+                className={`sidebar-nav-item ${currentPage === 'settings' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('settings')}
+              >
+                <Settings size={20} />
+                <span>Access Control</span>
+              </button>
+            )}
             <button className="sidebar-nav-item logout-button" onClick={handleLogout}>
               <LogOut size={20} />
               <span>Logout</span>
@@ -108,7 +145,16 @@ export default function Dashboard() {
       {/* Header */}
       <header className="header animate-fade-in-down">
         <div className="header-left">
-          <h1 className="header-title">Dashboard</h1>
+          <h1 className="header-title">
+            {currentPage === 'dashboard' && 'Dashboard'}
+            {currentPage === 'board' && 'Board View'}
+            {currentPage === 'list' && 'List View'}
+            {currentPage === 'calendar' && 'Calendar'}
+            {currentPage === 'reports' && 'Reports'}
+            {currentPage === 'team' && 'Team Management'}
+            {currentPage === 'settings' && 'Access Control'}
+            {currentPage === 'integrations' && 'Integrations'}
+          </h1>
         </div>
         <div className="header-actions">
           <div className="search-bar">
@@ -132,6 +178,13 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="main-content">
+        {/* Render page based on currentPage */}
+        {currentPage === 'integrations' && <IntegrationsPage />}
+        {currentPage === 'settings' && <SettingsPage />}
+
+        {/* Dashboard Content */}
+        {currentPage === 'dashboard' && (
+          <>
         {/* Welcome Message */}
         <div className="welcome-banner glass-static animate-fade-in-up">
           <div className="welcome-content">
@@ -306,6 +359,53 @@ export default function Dashboard() {
             </div>
           </div>
         </section>
+          </>
+        )}
+
+        {/* Board View Placeholder */}
+        {currentPage === 'board' && (
+          <div className="coming-soon">
+            <KanbanSquare size={48} />
+            <h2>Board View</h2>
+            <p>Full Kanban board with drag-and-drop coming soon!</p>
+          </div>
+        )}
+
+        {/* List View Placeholder */}
+        {currentPage === 'list' && (
+          <div className="coming-soon">
+            <List size={48} />
+            <h2>List View</h2>
+            <p>Task list view with sorting and filtering coming soon!</p>
+          </div>
+        )}
+
+        {/* Calendar Placeholder */}
+        {currentPage === 'calendar' && (
+          <div className="coming-soon">
+            <Calendar size={48} />
+            <h2>Calendar View</h2>
+            <p>Calendar view with task scheduling coming soon!</p>
+          </div>
+        )}
+
+        {/* Reports Placeholder */}
+        {currentPage === 'reports' && (
+          <div className="coming-soon">
+            <BarChart3 size={48} />
+            <h2>Reports</h2>
+            <p>Team productivity reports and analytics coming soon!</p>
+          </div>
+        )}
+
+        {/* Team Placeholder */}
+        {currentPage === 'team' && (
+          <div className="coming-soon">
+            <Users size={48} />
+            <h2>Team Management</h2>
+            <p>Team management features coming soon!</p>
+          </div>
+        )}
       </main>
     </div>
   )

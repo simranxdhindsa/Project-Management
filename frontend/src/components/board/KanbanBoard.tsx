@@ -7,20 +7,13 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  DragStartEvent,
-  DragOverEvent,
-  DragEndEvent,
 } from '@dnd-kit/core'
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable'
+import type { DragStartEvent, DragOverEvent, DragEndEvent } from '@dnd-kit/core'
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 
 import { KanbanColumn } from './KanbanColumn'
 import { TaskCard } from './TaskCard'
-import { Task, TaskStatus } from '../../types'
+import type { Task, TaskStatus } from '../../types'
 
 interface KanbanBoardProps {
   tasks: Task[]

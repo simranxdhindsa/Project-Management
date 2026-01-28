@@ -55,7 +55,7 @@ frontend/dist/
 frontend/node_modules/
 
 # Backend specific
-backend/tasksync-pro
+backend/project-management
 backend/main
 backend/*.exe
 
@@ -130,3 +130,5 @@ $RECYCLE.BIN/
 *.msm
 *.msp
 *.lnk
+
+nul

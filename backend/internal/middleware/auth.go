@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dhindsa/tasksync-pro/internal/auth"
-	"github.com/dhindsa/tasksync-pro/internal/models"
+	"github.com/dhindsa/project-management/internal/auth"
+	"github.com/dhindsa/project-management/internal/models"
 )
 
 // ContextKey type for context values

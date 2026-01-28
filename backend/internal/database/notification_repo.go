@@ -3,7 +3,7 @@ package database
 import (
 	"context"
 
-	"github.com/dhindsa/tasksync-pro/internal/models"
+	"github.com/dhindsa/project-management/internal/models"
 )
 
 // NotificationRepository handles notification database operations

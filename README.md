@@ -1,4 +1,4 @@
-# TaskSync Pro
+# Project Management
 
 A modern project management tool that syncs with Asana, provides Kanban/List views, and uses AI to analyze Slack messages to determine task completion status.
 
@@ -47,8 +47,8 @@ A modern project management tool that syncs with Asana, provides Kanban/List vie
 
 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/tasksync-pro.git
-cd tasksync-pro
+git clone https://github.com/yourusername/project-management.git
+cd project-management
 ```
 
 2. Install frontend dependencies
@@ -88,7 +88,7 @@ npm run build
 **Backend**
 ```bash
 cd backend
-go build -o tasksync-pro cmd/server/main.go
+go build -o project-management cmd/server/main.go
 ```
 
 ## Project Structure

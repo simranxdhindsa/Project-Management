@@ -15,15 +15,15 @@ export interface Task {
   description?: string
   status: TaskStatus
   priority: TaskPriority
-  project_id: string
+  project_id?: string
   assignee_id?: string
   assignee?: Assignee
   asana_id?: string
   asana_url?: string
   due_date?: string
-  created_at: string
-  updated_at: string
-  created_by: string
+  created_at?: string
+  updated_at?: string
+  created_by?: string
 }
 
 export interface CreateTaskRequest {

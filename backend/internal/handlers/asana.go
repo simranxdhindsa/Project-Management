@@ -5,10 +5,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/dhindsa/tasksync-pro/internal/database"
-	"github.com/dhindsa/tasksync-pro/internal/middleware"
-	"github.com/dhindsa/tasksync-pro/internal/models"
-	"github.com/dhindsa/tasksync-pro/internal/services/asana"
+	"github.com/dhindsa/project-management/internal/database"
+	"github.com/dhindsa/project-management/internal/middleware"
+	"github.com/dhindsa/project-management/internal/models"
+	"github.com/dhindsa/project-management/internal/services/asana"
 	"github.com/gorilla/mux"
 )
 

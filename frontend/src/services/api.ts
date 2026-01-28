@@ -60,10 +60,16 @@ class ApiService {
   }
 
   // Auth endpoints
-  async googleAuth(credential: string) {
+  async googleAuth(credential: string, rememberMe: boolean = false) {
     return this.request<{ user: User; token: string }>('/auth/google', {
       method: 'POST',
-      body: JSON.stringify({ credential }),
+      body: JSON.stringify({ credential, remember_me: rememberMe }),
+    })
+  }
+
+  async refreshToken() {
+    return this.request<{ token: string }>('/auth/refresh', {
+      method: 'POST',
     })
   }
 
@@ -107,19 +113,51 @@ class ApiService {
   }
 
   // Asana endpoints
-  async connectAsana(token: string) {
+  async connectAsana(accessToken: string, workspaceId?: string) {
     return this.request('/asana/connect', {
       method: 'POST',
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ access_token: accessToken, workspace_id: workspaceId }),
     })
+  }
+
+  async disconnectAsana() {
+    return this.request('/asana/disconnect', { method: 'POST' })
+  }
+
+  async getAsanaStatus() {
+    return this.request<{
+      connected: boolean
+      workspace_id?: string
+      workspace_name?: string
+      last_sync_at?: string
+    }>('/asana/status')
   }
 
   async getAsanaProjects() {
     return this.request<AsanaProject[]>('/asana/projects')
   }
 
-  async syncAsana() {
-    return this.request('/asana/sync', { method: 'POST' })
+  async linkProjectToAsana(projectId: string, asanaProjectId: string) {
+    return this.request(`/projects/${projectId}/asana/link`, {
+      method: 'POST',
+      body: JSON.stringify({ asana_project_id: asanaProjectId }),
+    })
+  }
+
+  async syncProjectWithAsana(projectId: string) {
+    return this.request<{
+      tasks_synced: number
+      tasks_created: number
+      tasks_updated: number
+      errors?: string[]
+    }>(`/projects/${projectId}/asana/sync`, { method: 'POST' })
+  }
+
+  async syncTaskToAsana(taskId: string, status: string) {
+    return this.request(`/tasks/${taskId}/asana/sync`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    })
   }
 
   // Slack endpoints
@@ -138,8 +176,14 @@ class ApiService {
     return this.request<SlackMessage[]>(`/slack/messages${query}`)
   }
 
-  async analyzeSlackMessages() {
-    return this.request<SlackAnalysis>('/slack/analyze', { method: 'POST' })
+  async analyzeSlackMessages(projectId: string) {
+    return this.request<AIAnalysisResponse>(`/ai/analyze?project_id=${projectId}`, {
+      method: 'POST',
+    })
+  }
+
+  async getDiscrepancies() {
+    return this.request<{ discrepancies: Discrepancy[] }>('/ai/discrepancies')
   }
 
   // Calendar endpoints
@@ -199,6 +243,45 @@ class ApiService {
   async deleteUser(userId: string) {
     return this.request(`/users/${userId}`, { method: 'DELETE' })
   }
+
+  // Access Control / Whitelist endpoints
+  async getAccessSettings() {
+    return this.request<AccessSettings>('/settings/access')
+  }
+
+  async getAllowedEmails() {
+    return this.request<AllowedEmail[]>('/settings/access/emails')
+  }
+
+  async addAllowedEmail(email: string, role: string) {
+    return this.request<AllowedEmail>('/settings/access/emails', {
+      method: 'POST',
+      body: JSON.stringify({ email, role }),
+    })
+  }
+
+  async removeAllowedEmail(email: string) {
+    return this.request(`/settings/access/emails/${encodeURIComponent(email)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async getAllowedDomains() {
+    return this.request<AllowedDomain[]>('/settings/access/domains')
+  }
+
+  async addAllowedDomain(domain: string, role: string) {
+    return this.request<AllowedDomain>('/settings/access/domains', {
+      method: 'POST',
+      body: JSON.stringify({ domain, role }),
+    })
+  }
+
+  async removeAllowedDomain(domain: string) {
+    return this.request(`/settings/access/domains/${encodeURIComponent(domain)}`, {
+      method: 'DELETE',
+    })
+  }
 }
 
 // Types
@@ -218,16 +301,24 @@ export interface Task {
   description: string
   status: 'todo' | 'in_progress' | 'review' | 'done'
   priority: 'low' | 'medium' | 'high'
-  assignee?: string
+  project_id: string
+  assignee_id?: string
+  assignee?: {
+    id: string
+    name: string
+    email: string
+    picture?: string
+  }
   asana_id?: string
   asana_url?: string
   due_date?: string
   created_at?: string
   updated_at?: string
+  created_by?: string
 }
 
 export interface AsanaProject {
-  id: string
+  gid: string
   name: string
 }
 
@@ -243,6 +334,32 @@ export interface SlackAnalysis {
     status: string
     confidence: number
   }>
+}
+
+export interface TaskStatusAnalysis {
+  task_title: string
+  detected_status: string
+  confidence: number
+  evidence: string[]
+  message_ids: string[]
+}
+
+export interface Discrepancy {
+  task_title: string
+  slack_status: string
+  asana_status: string
+  confidence: number
+  message_ids: string[]
+}
+
+export interface AIAnalysisResponse {
+  analysis: TaskStatusAnalysis[]
+  discrepancies: Discrepancy[]
+  summary: {
+    tasks_analyzed: number
+    messages_read: number
+    discrepancies: number
+  }
 }
 
 export interface CalendarData {
@@ -279,6 +396,25 @@ export interface ProjectHealthReport {
   blocked_tasks: number
   on_track_tasks: number
   health_score: number
+}
+
+export interface AllowedEmail {
+  email: string
+  role: 'admin' | 'project_manager' | 'member' | 'viewer'
+  is_default: boolean
+  added_at?: string
+}
+
+export interface AllowedDomain {
+  domain: string
+  role: 'admin' | 'project_manager' | 'member' | 'viewer'
+  added_at?: string
+}
+
+export interface AccessSettings {
+  default_admin_email: string
+  allowed_emails: AllowedEmail[]
+  allowed_domains: AllowedDomain[]
 }
 
 // Export singleton instance

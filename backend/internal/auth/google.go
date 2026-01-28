@@ -10,29 +10,33 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dhindsa/tasksync-pro/internal/models"
+	"github.com/dhindsa/project-management/internal/models"
 )
 
-var (
-	googleClientID     string
-	googleClientSecret string
-	googleRedirectURI  string
-)
+// getGoogleClientID returns the Google Client ID from environment
+func getGoogleClientID() string {
+	return os.Getenv("GOOGLE_CLIENT_ID")
+}
 
-func init() {
-	googleClientID = os.Getenv("GOOGLE_CLIENT_ID")
-	googleClientSecret = os.Getenv("GOOGLE_CLIENT_SECRET")
-	googleRedirectURI = os.Getenv("GOOGLE_REDIRECT_URI")
-	if googleRedirectURI == "" {
-		googleRedirectURI = "http://localhost:5173/auth/callback"
+// getGoogleClientSecret returns the Google Client Secret from environment
+func getGoogleClientSecret() string {
+	return os.Getenv("GOOGLE_CLIENT_SECRET")
+}
+
+// getGoogleRedirectURI returns the Google Redirect URI from environment
+func getGoogleRedirectURI() string {
+	uri := os.Getenv("GOOGLE_REDIRECT_URI")
+	if uri == "" {
+		return "http://localhost:5173/auth/callback"
 	}
+	return uri
 }
 
 // GetGoogleAuthURL returns the Google OAuth authorization URL
 func GetGoogleAuthURL(state string) string {
 	params := url.Values{}
-	params.Add("client_id", googleClientID)
-	params.Add("redirect_uri", googleRedirectURI)
+	params.Add("client_id", getGoogleClientID())
+	params.Add("redirect_uri", getGoogleRedirectURI())
 	params.Add("response_type", "code")
 	params.Add("scope", "openid email profile")
 	params.Add("state", state)
@@ -46,9 +50,9 @@ func GetGoogleAuthURL(state string) string {
 func ExchangeCodeForToken(code string) (string, error) {
 	data := url.Values{}
 	data.Set("code", code)
-	data.Set("client_id", googleClientID)
-	data.Set("client_secret", googleClientSecret)
-	data.Set("redirect_uri", googleRedirectURI)
+	data.Set("client_id", getGoogleClientID())
+	data.Set("client_secret", getGoogleClientSecret())
+	data.Set("redirect_uri", getGoogleRedirectURI())
 	data.Set("grant_type", "authorization_code")
 
 	resp, err := http.Post(
@@ -153,7 +157,7 @@ func ValidateGoogleToken(idToken string) (*models.GoogleUserInfo, error) {
 	}
 
 	// Verify the token is for our app
-	if tokenInfo.Aud != googleClientID {
+	if tokenInfo.Aud != getGoogleClientID() {
 		return nil, errors.New("token not intended for this application")
 	}
 

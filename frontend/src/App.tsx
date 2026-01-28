@@ -10,7 +10,7 @@ function AppContent() {
       <div className="loading-screen">
         <div className="loading-screen-content">
           <div className="loading-spinner"></div>
-          <p className="loading-screen-text">Loading TaskSync Pro...</p>
+          <p className="loading-screen-text">Loading Project Management...</p>
         </div>
       </div>
     )

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/dhindsa/tasksync-pro/internal/models"
+	"github.com/dhindsa/project-management/internal/models"
 )
 
 // IntegrationRepository handles integration database operations

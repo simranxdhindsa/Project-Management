@@ -12,6 +12,9 @@ const (
 	RoleViewer         Role = "viewer"
 )
 
+// DefaultAdminEmail is the email that always has admin access
+const DefaultAdminEmail = "sirmanjot@apyhub.com"
+
 // User represents a user in the system
 type User struct {
 	ID        string    `json:"id"`
@@ -45,4 +48,23 @@ type TokenClaims struct {
 	UserID string `json:"user_id"`
 	Email  string `json:"email"`
 	Role   Role   `json:"role"`
+}
+
+// AllowedEmail represents an email that is allowed to access the system
+type AllowedEmail struct {
+	ID        string    `json:"id" db:"id"`
+	Email     string    `json:"email" db:"email"`
+	Role      Role      `json:"role" db:"role"`
+	AddedBy   string    `json:"added_by" db:"added_by"`
+	IsDefault bool      `json:"is_default" db:"is_default"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+}
+
+// AllowedDomain represents a domain that is allowed (e.g., @apyhub.com)
+type AllowedDomain struct {
+	ID        string    `json:"id" db:"id"`
+	Domain    string    `json:"domain" db:"domain"` // e.g., "apyhub.com"
+	Role      Role      `json:"role" db:"role"`     // Default role for users from this domain
+	AddedBy   string    `json:"added_by" db:"added_by"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }

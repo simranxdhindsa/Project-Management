@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dhindsa/tasksync-pro/internal/database"
-	"github.com/dhindsa/tasksync-pro/internal/models"
+	"github.com/dhindsa/project-management/internal/database"
+	"github.com/dhindsa/project-management/internal/models"
 )
 
 // SyncService handles two-way synchronization with Asana

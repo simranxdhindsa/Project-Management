@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dhindsa/tasksync-pro/internal/models"
+	"github.com/dhindsa/project-management/internal/models"
 )
 
 // TaskRepository handles task database operations
