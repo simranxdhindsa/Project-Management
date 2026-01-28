@@ -1,9 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
@@ -15,6 +20,8 @@ import (
 // AsanaHandler handles Asana integration API requests
 type AsanaHandler struct {
 	integrationRepo *database.IntegrationRepository
+	taskRepo        *database.TaskRepository
+	projectRepo     *database.ProjectRepository
 	syncService     *asana.SyncService
 	webhookService  *asana.WebhookService
 }
@@ -23,6 +30,8 @@ type AsanaHandler struct {
 func NewAsanaHandler() *AsanaHandler {
 	return &AsanaHandler{
 		integrationRepo: database.NewIntegrationRepository(),
+		taskRepo:        database.NewTaskRepository(),
+		projectRepo:     database.NewProjectRepository(),
 		syncService:     asana.NewSyncService(),
 		webhookService:  asana.NewWebhookService(),
 	}
@@ -361,4 +370,208 @@ func (h *AsanaHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Always respond with 200 OK quickly to Asana
 	w.WriteHeader(http.StatusOK)
+}
+
+// ImportFromEnv imports tasks from Asana using PAT from environment variable
+// This is a simplified endpoint for quick testing without OAuth setup
+func (h *AsanaHandler) ImportFromEnv(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get PAT and project ID from environment
+	asanaPAT := os.Getenv("ASANA_PAT")
+	asanaProjectID := os.Getenv("ASANA_PROJECT_ID")
+
+	if asanaPAT == "" || asanaProjectID == "" {
+		http.Error(w, "ASANA_PAT and ASANA_PROJECT_ID environment variables are required", http.StatusBadRequest)
+		return
+	}
+
+	client := asana.NewClient(asanaPAT)
+	ctx := r.Context()
+
+	// Get tasks from Asana
+	asanaTasks, err := client.GetProjectTasks(ctx, asanaProjectID)
+	if err != nil {
+		http.Error(w, "Failed to fetch Asana tasks: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Get or create default project
+	defaultProjectID, err := h.getOrCreateDefaultProject(ctx, userID)
+	if err != nil {
+		http.Error(w, "Failed to get/create default project: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	result := &asana.SyncResult{}
+
+	for _, asanaTask := range asanaTasks {
+		// Check if task exists
+		existingTask, err := h.taskRepo.GetByAsanaID(ctx, asanaTask.GID)
+		if err != nil && !strings.Contains(err.Error(), "no rows") {
+			result.Errors = append(result.Errors, "Error checking task "+asanaTask.GID+": "+err.Error())
+			continue
+		}
+
+		status := h.mapAsanaStatusToLocal(asanaTask)
+
+		if existingTask != nil {
+			// Update existing
+			existingTask.Title = asanaTask.Name
+			existingTask.Description = asanaTask.Notes
+			existingTask.Status = status
+			if asanaTask.DueOn != nil {
+				dueDate, _ := time.Parse("2006-01-02", *asanaTask.DueOn)
+				existingTask.DueDate = &dueDate
+			}
+			if err := h.taskRepo.Update(ctx, existingTask); err != nil {
+				result.Errors = append(result.Errors, "Error updating task: "+err.Error())
+				continue
+			}
+			result.TasksUpdated++
+		} else {
+			// Create new task
+			newTask := &models.Task{
+				Title:       asanaTask.Name,
+				Description: asanaTask.Notes,
+				Status:      status,
+				Priority:    models.TaskPriorityMedium,
+				ProjectID:   defaultProjectID,
+				AsanaID:     &asanaTask.GID,
+				AsanaURL:    &asanaTask.PermalinkURL,
+				CreatedBy:   userID,
+			}
+			if asanaTask.DueOn != nil {
+				dueDate, _ := time.Parse("2006-01-02", *asanaTask.DueOn)
+				newTask.DueDate = &dueDate
+			}
+
+			if err := h.taskRepo.Create(ctx, newTask); err != nil {
+				result.Errors = append(result.Errors, "Error creating task: "+err.Error())
+				continue
+			}
+			result.TasksCreated++
+		}
+		result.TasksSynced++
+	}
+
+	log.Printf("Imported %d tasks from Asana (created: %d, updated: %d)", result.TasksSynced, result.TasksCreated, result.TasksUpdated)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Import completed",
+		"data":    result,
+	})
+}
+
+// PushToAsana pushes a single task update to Asana
+func (h *AsanaHandler) PushToAsana(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	taskID := vars["id"]
+
+	// Get PAT from environment
+	asanaPAT := os.Getenv("ASANA_PAT")
+	if asanaPAT == "" {
+		http.Error(w, "ASANA_PAT environment variable is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get local task
+	task, err := h.taskRepo.GetByID(r.Context(), taskID)
+	if err != nil {
+		http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if task.AsanaID == nil || *task.AsanaID == "" {
+		http.Error(w, "Task is not linked to Asana", http.StatusBadRequest)
+		return
+	}
+
+	client := asana.NewClient(asanaPAT)
+
+	// Update task in Asana
+	completed := task.Status == models.TaskStatusDone
+	updateReq := asana.UpdateTaskRequest{
+		Name:      &task.Title,
+		Notes:     &task.Description,
+		Completed: &completed,
+	}
+	if task.DueDate != nil {
+		dueStr := task.DueDate.Format("2006-01-02")
+		updateReq.DueOn = &dueStr
+	}
+
+	_, err = client.UpdateTask(r.Context(), *task.AsanaID, updateReq)
+	if err != nil {
+		http.Error(w, "Failed to update Asana task: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Task synced to Asana",
+	})
+}
+
+// getOrCreateDefaultProject gets or creates a default project for the user
+func (h *AsanaHandler) getOrCreateDefaultProject(ctx context.Context, userID string) (string, error) {
+	// Try to get existing projects for user
+	projects, err := h.projectRepo.GetByOwnerID(ctx, userID)
+	if err == nil && len(projects) > 0 {
+		return projects[0].ID, nil
+	}
+
+	// Create default project
+	asanaProjectID := os.Getenv("ASANA_PROJECT_ID")
+	project := &models.Project{
+		Name:           "Default Project",
+		Description:    "Auto-created project for imported tasks",
+		OwnerID:        userID,
+		AsanaProjectID: &asanaProjectID,
+	}
+
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		return "", err
+	}
+
+	return project.ID, nil
+}
+
+// mapAsanaStatusToLocal maps Asana task state to local status
+func (h *AsanaHandler) mapAsanaStatusToLocal(task asana.Task) models.TaskStatus {
+	if task.Completed {
+		return models.TaskStatusDone
+	}
+
+	// Check section for more granular status
+	for _, membership := range task.Memberships {
+		if membership.Section != nil {
+			sectionName := strings.ToLower(membership.Section.Name)
+			switch {
+			case strings.Contains(sectionName, "done") || strings.Contains(sectionName, "complete"):
+				return models.TaskStatusDone
+			case strings.Contains(sectionName, "progress") || strings.Contains(sectionName, "doing"):
+				return models.TaskStatusInProgress
+			case strings.Contains(sectionName, "review"):
+				return models.TaskStatusReview
+			case strings.Contains(sectionName, "todo") || strings.Contains(sectionName, "backlog"):
+				return models.TaskStatusTodo
+			}
+		}
+	}
+
+	return models.TaskStatusTodo
 }

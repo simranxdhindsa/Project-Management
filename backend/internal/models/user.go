@@ -56,7 +56,6 @@ type AllowedEmail struct {
 	Email     string    `json:"email" db:"email"`
 	Role      Role      `json:"role" db:"role"`
 	AddedBy   string    `json:"added_by" db:"added_by"`
-	IsDefault bool      `json:"is_default" db:"is_default"`
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 

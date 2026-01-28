@@ -9,6 +9,7 @@ export function BoardPage() {
   const [error, setError] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [syncing, setSyncing] = useState(false)
 
   // Fetch tasks on mount
   useEffect(() => {
@@ -31,10 +32,13 @@ export function BoardPage() {
   }
 
   const handleTaskMove = async (taskId: string, newStatus: TaskStatus) => {
+    // Find the task to check if it has asana_id
+    const task = tasks.find(t => t.id === taskId)
+
     // Optimistic update
     setTasks((prev) =>
-      prev.map((task) =>
-        task.id === taskId ? { ...task, status: newStatus } : task
+      prev.map((t) =>
+        t.id === taskId ? { ...t, status: newStatus } : t
       )
     )
 
@@ -42,10 +46,12 @@ export function BoardPage() {
       // Update on server
       await api.updateTaskStatus(taskId, newStatus)
 
-      // Sync with Asana (if connected)
-      await api.syncTaskToAsana(taskId, newStatus).catch(() => {
-        // Silently ignore Asana sync errors
-      })
+      // Push to Asana if task is linked
+      if (task?.asana_id) {
+        await api.pushTaskToAsana(taskId).catch((err) => {
+          console.log('Asana sync skipped:', err)
+        })
+      }
     } catch (err) {
       // Revert on error
       fetchTasks()
@@ -71,6 +77,24 @@ export function BoardPage() {
       }
     } catch (err) {
       console.error('Error creating task:', err)
+    }
+  }
+
+  const handleAsanaSync = async () => {
+    try {
+      setSyncing(true)
+      const response = await api.importFromAsana()
+      if (response.success) {
+        // Refresh tasks after sync
+        await fetchTasks()
+        const data = response.data as { tasks_synced: number; tasks_created: number; tasks_updated: number }
+        alert(`Sync complete! Created: ${data.tasks_created}, Updated: ${data.tasks_updated}`)
+      }
+    } catch (err) {
+      console.error('Error syncing with Asana:', err)
+      alert('Failed to sync with Asana')
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -108,6 +132,16 @@ export function BoardPage() {
         </div>
         <div className="board-header-right">
           <div className="board-filters">
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={handleAsanaSync}
+              disabled={syncing}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={syncing ? 'animate-spin' : ''}>
+                <path d="M21 12a9 9 0 11-6.219-8.56" />
+              </svg>
+              {syncing ? 'Syncing...' : 'Sync Asana'}
+            </button>
             <button className="btn btn-ghost btn-sm">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />

@@ -160,6 +160,21 @@ class ApiService {
     })
   }
 
+  // Import tasks from Asana using env PAT (quick sync)
+  async importFromAsana() {
+    return this.request<{
+      tasks_synced: number
+      tasks_created: number
+      tasks_updated: number
+      errors?: string[]
+    }>('/asana/import', { method: 'POST' })
+  }
+
+  // Push single task to Asana
+  async pushTaskToAsana(taskId: string) {
+    return this.request(`/tasks/${taskId}/asana/push`, { method: 'POST' })
+  }
+
   // Slack endpoints
   async connectSlack(botToken: string) {
     return this.request('/slack/connect', {

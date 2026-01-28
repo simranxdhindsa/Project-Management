@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -8,15 +9,21 @@ import (
 	"time"
 
 	"github.com/dhindsa/project-management/internal/auth"
+	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
 	"github.com/dhindsa/project-management/internal/models"
+	"github.com/google/uuid"
 )
 
-// In-memory user store (replace with database in production)
+// Repositories for database operations
+var userRepo = database.NewUserRepository()
+var whitelistRepo = database.NewWhitelistRepository()
+
+// In-memory user store (fallback when database is unavailable)
 var users = make(map[string]*models.User)
 var usersMu sync.RWMutex
 
-// In-memory whitelist (loaded from database or defaults)
+// In-memory whitelist (fallback when database is unavailable)
 var allowedEmails = map[string]models.Role{
 	strings.ToLower(models.DefaultAdminEmail): models.RoleAdmin,
 }
@@ -54,6 +61,15 @@ func isEmailAllowed(email string) (bool, models.Role) {
 		return true, models.RoleAdmin
 	}
 
+	// Try database first if available
+	if database.GetPool() != nil {
+		allowed, role := whitelistRepo.IsEmailAllowed(context.Background(), email)
+		if allowed {
+			return true, role
+		}
+	}
+
+	// Fallback to in-memory whitelist
 	whitelistMu.RLock()
 	defer whitelistMu.RUnlock()
 
@@ -191,31 +207,70 @@ func HandleGoogleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	usersMu.Lock()
-	defer usersMu.Unlock()
+	var user *models.User
+	ctx := r.Context()
 
-	// Find or create user
-	user, exists := users[googleUser.Email]
-	if !exists {
-		// Create new user with the role from whitelist
-		user = &models.User{
-			ID:        googleUser.ID,
-			Email:     googleUser.Email,
-			Name:      googleUser.Name,
-			Picture:   googleUser.Picture,
-			Role:      assignedRole,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+	// Try database first if available
+	if database.GetPool() != nil {
+		// Try to find existing user
+		existingUser, err := userRepo.GetByEmail(ctx, googleUser.Email)
+		if err == nil {
+			// Update existing user
+			existingUser.Name = googleUser.Name
+			existingUser.Picture = googleUser.Picture
+			existingUser.UpdatedAt = time.Now()
+			// Don't change role for existing users unless they're the default admin
+			if strings.ToLower(googleUser.Email) == strings.ToLower(models.DefaultAdminEmail) {
+				existingUser.Role = models.RoleAdmin
+			}
+			userRepo.Update(ctx, existingUser)
+			user = existingUser
+		} else {
+			// Create new user with the role from whitelist
+			user = &models.User{
+				ID:        uuid.New().String(),
+				Email:     googleUser.Email,
+				Name:      googleUser.Name,
+				Picture:   googleUser.Picture,
+				Role:      assignedRole,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			if err := userRepo.Create(ctx, user); err != nil {
+				// Log error but continue with in-memory fallback
+				user = nil
+			}
 		}
-		users[googleUser.Email] = user
-	} else {
-		// Update existing user info
-		user.Name = googleUser.Name
-		user.Picture = googleUser.Picture
-		user.UpdatedAt = time.Now()
-		// Don't change role for existing users unless they're the default admin
-		if strings.ToLower(googleUser.Email) == strings.ToLower(models.DefaultAdminEmail) {
-			user.Role = models.RoleAdmin
+	}
+
+	// Fallback to in-memory store
+	if user == nil {
+		usersMu.Lock()
+		defer usersMu.Unlock()
+
+		existingUser, exists := users[googleUser.Email]
+		if !exists {
+			// Create new user with the role from whitelist
+			user = &models.User{
+				ID:        uuid.New().String(),
+				Email:     googleUser.Email,
+				Name:      googleUser.Name,
+				Picture:   googleUser.Picture,
+				Role:      assignedRole,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			users[googleUser.Email] = user
+		} else {
+			// Update existing user info
+			existingUser.Name = googleUser.Name
+			existingUser.Picture = googleUser.Picture
+			existingUser.UpdatedAt = time.Now()
+			// Don't change role for existing users unless they're the default admin
+			if strings.ToLower(googleUser.Email) == strings.ToLower(models.DefaultAdminEmail) {
+				existingUser.Role = models.RoleAdmin
+			}
+			user = existingUser
 		}
 	}
 
@@ -249,16 +304,30 @@ func HandleGetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	usersMu.RLock()
-	fullUser, exists := users[user.Email]
-	usersMu.RUnlock()
+	var fullUser *models.User
 
-	if !exists {
-		sendJSON(w, http.StatusNotFound, Response{
-			Success: false,
-			Message: "User not found",
-		})
-		return
+	// Try database first if available
+	if database.GetPool() != nil {
+		dbUser, err := userRepo.GetByEmail(r.Context(), user.Email)
+		if err == nil {
+			fullUser = dbUser
+		}
+	}
+
+	// Fallback to in-memory store
+	if fullUser == nil {
+		usersMu.RLock()
+		memUser, exists := users[user.Email]
+		usersMu.RUnlock()
+
+		if !exists {
+			sendJSON(w, http.StatusNotFound, Response{
+				Success: false,
+				Message: "User not found",
+			})
+			return
+		}
+		fullUser = memUser
 	}
 
 	sendJSON(w, http.StatusOK, Response{

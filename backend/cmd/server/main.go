@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/handlers"
 	"github.com/dhindsa/project-management/internal/middleware"
 	"github.com/dhindsa/project-management/internal/models"
@@ -29,6 +30,16 @@ type Response struct {
 }
 
 func main() {
+	// Connect to database
+	log.Println("📦 Connecting to database...")
+	if err := database.Connect(); err != nil {
+		log.Printf("⚠️  Database connection failed: %v", err)
+		log.Println("⚠️  Running without database - using in-memory storage")
+	} else {
+		log.Println("✅ Database connected successfully")
+		defer database.Close()
+	}
+
 	// Initialize router
 	r := mux.NewRouter()
 
@@ -50,14 +61,19 @@ func main() {
 	authProtected.HandleFunc("/refresh", handlers.HandleRefreshToken).Methods("POST")
 
 	// Task routes (protected)
+	taskHandler := handlers.NewTaskHandler()
 	taskRoutes := api.PathPrefix("/tasks").Subrouter()
 	taskRoutes.Use(middleware.AuthMiddleware)
-	taskRoutes.HandleFunc("", getTasksHandler).Methods("GET")
-	taskRoutes.HandleFunc("", createTaskHandler).Methods("POST")
-	taskRoutes.HandleFunc("/yesterday-pending", getYesterdayPendingHandler).Methods("GET")
-	taskRoutes.HandleFunc("/by-date/{date}", tasksByDateHandler).Methods("GET")
-	taskRoutes.HandleFunc("/{id}", getTaskHandler).Methods("GET")
-	taskRoutes.HandleFunc("/{id}/status", updateTaskStatusHandler).Methods("PATCH")
+	taskRoutes.HandleFunc("", taskHandler.GetTasks).Methods("GET")
+	taskRoutes.HandleFunc("", taskHandler.CreateTask).Methods("POST")
+	taskRoutes.HandleFunc("/yesterday-pending", taskHandler.GetYesterdayPending).Methods("GET")
+	taskRoutes.HandleFunc("/stats", taskHandler.GetTaskStats).Methods("GET")
+	taskRoutes.HandleFunc("/bulk-status", taskHandler.BulkUpdateStatus).Methods("PATCH")
+	taskRoutes.HandleFunc("/by-date/{date}", taskHandler.GetTasksByDate).Methods("GET")
+	taskRoutes.HandleFunc("/{id}", taskHandler.GetTask).Methods("GET")
+	taskRoutes.HandleFunc("/{id}", taskHandler.UpdateTask).Methods("PUT")
+	taskRoutes.HandleFunc("/{id}", taskHandler.DeleteTask).Methods("DELETE")
+	taskRoutes.HandleFunc("/{id}/status", taskHandler.UpdateTaskStatus).Methods("PATCH")
 
 	// Asana routes (protected)
 	asanaHandler := handlers.NewAsanaHandler()
@@ -69,6 +85,7 @@ func main() {
 	asanaRoutes.HandleFunc("/workspaces", asanaHandler.GetAsanaWorkspaces).Methods("GET")
 	asanaRoutes.HandleFunc("/projects", asanaHandler.GetAsanaProjects).Methods("GET")
 	asanaRoutes.HandleFunc("/projects/{asana_project_id}/sections", asanaHandler.GetAsanaSections).Methods("GET")
+	asanaRoutes.HandleFunc("/import", asanaHandler.ImportFromEnv).Methods("POST") // Quick import using env PAT
 
 	// Project-specific Asana routes (protected)
 	projectAsanaRoutes := api.PathPrefix("/projects/{id}/asana").Subrouter()
@@ -81,6 +98,7 @@ func main() {
 	taskAsanaRoutes := api.PathPrefix("/tasks/{id}/asana").Subrouter()
 	taskAsanaRoutes.Use(middleware.AuthMiddleware)
 	taskAsanaRoutes.HandleFunc("/sync", asanaHandler.SyncTaskStatus).Methods("POST")
+	taskAsanaRoutes.HandleFunc("/push", asanaHandler.PushToAsana).Methods("POST") // Push single task to Asana
 
 	// Asana webhook endpoint (public - called by Asana)
 	api.HandleFunc("/webhooks/asana", asanaHandler.HandleWebhook).Methods("POST")
@@ -183,118 +201,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Task handlers
-
-func getTasksHandler(w http.ResponseWriter, r *http.Request) {
-	user := middleware.GetUserFromContext(r)
-
-	// Sample data for demo
-	tasks := []map[string]interface{}{
-		{
-			"id":          "1",
-			"title":       "Update API documentation",
-			"description": "Add new endpoints and update examples",
-			"status":      "todo",
-			"priority":    "high",
-			"assignee":    user.Email,
-			"asana_id":    "12345",
-			"asana_url":   "https://app.asana.com/0/project/12345",
-		},
-		{
-			"id":          "2",
-			"title":       "Implement Slack integration",
-			"description": "Connect bot to read channel messages",
-			"status":      "in_progress",
-			"priority":    "high",
-			"assignee":    user.Email,
-		},
-		{
-			"id":          "3",
-			"title":       "Asana sync feature",
-			"description": "Two-way task synchronization",
-			"status":      "review",
-			"priority":    "medium",
-			"assignee":    "team@example.com",
-		},
-	}
-
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data:    tasks,
-	})
-}
-
-func getYesterdayPendingHandler(w http.ResponseWriter, r *http.Request) {
-	// Return tasks that were in progress or todo yesterday
-	pendingTasks := []map[string]interface{}{
-		{
-			"id":          "1",
-			"title":       "Update API documentation",
-			"description": "Add new endpoints and update examples",
-			"status":      "todo",
-			"priority":    "high",
-			"from_date":   "2024-01-25",
-		},
-		{
-			"id":          "2",
-			"title":       "Implement Slack integration",
-			"description": "Connect bot to read channel messages",
-			"status":      "in_progress",
-			"priority":    "high",
-			"from_date":   "2024-01-25",
-		},
-	}
-
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "Yesterday's pending tasks",
-		Data:    pendingTasks,
-	})
-}
-
-func createTaskHandler(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusCreated, Response{
-		Success: true,
-		Message: "Task created - to be implemented with Asana sync",
-	})
-}
-
-func getTaskHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "Get task " + vars["id"],
-		Data: map[string]interface{}{
-			"id":          vars["id"],
-			"title":       "Sample Task",
-			"description": "Task details here",
-			"status":      "in_progress",
-		},
-	})
-}
-
-func updateTaskStatusHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-
-	var body struct {
-		Status string `json:"status"`
-	}
-	json.NewDecoder(r.Body).Decode(&body)
-
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "Task " + vars["id"] + " status updated to " + body.Status,
-	})
-}
-
-func tasksByDateHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "Tasks for date " + vars["date"],
-		Data:    []interface{}{},
-	})
-}
+// NOTE: Task handlers moved to internal/handlers/tasks.go
 
 // NOTE: Asana handlers moved to internal/handlers/asana.go
 // NOTE: Slack handlers moved to internal/handlers/slack.go

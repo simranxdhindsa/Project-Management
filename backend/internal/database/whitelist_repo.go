@@ -28,15 +28,14 @@ func (r *WhitelistRepository) AddAllowedEmail(ctx context.Context, email string,
 		Email:     strings.ToLower(email),
 		Role:      role,
 		AddedBy:   addedBy,
-		IsDefault: false,
 		CreatedAt: time.Now(),
 	}
 
 	_, err := pool.Exec(ctx, `
-		INSERT INTO allowed_emails (id, email, role, added_by, is_default, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO allowed_emails (id, email, role, added_by, created_at)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (email) DO UPDATE SET role = $3
-	`, allowedEmail.ID, allowedEmail.Email, allowedEmail.Role, allowedEmail.AddedBy, allowedEmail.IsDefault, allowedEmail.CreatedAt)
+	`, allowedEmail.ID, allowedEmail.Email, allowedEmail.Role, allowedEmail.AddedBy, allowedEmail.CreatedAt)
 
 	if err != nil {
 		return nil, err
@@ -50,7 +49,7 @@ func (r *WhitelistRepository) GetAllowedEmails(ctx context.Context) ([]*models.A
 	pool := GetPool()
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, email, role, added_by, is_default, created_at
+		SELECT id, email, role, added_by, created_at
 		FROM allowed_emails
 		ORDER BY created_at DESC
 	`)
@@ -62,7 +61,7 @@ func (r *WhitelistRepository) GetAllowedEmails(ctx context.Context) ([]*models.A
 	var emails []*models.AllowedEmail
 	for rows.Next() {
 		var email models.AllowedEmail
-		err := rows.Scan(&email.ID, &email.Email, &email.Role, &email.AddedBy, &email.IsDefault, &email.CreatedAt)
+		err := rows.Scan(&email.ID, &email.Email, &email.Role, &email.AddedBy, &email.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -111,11 +110,7 @@ func (r *WhitelistRepository) IsEmailAllowed(ctx context.Context, email string) 
 func (r *WhitelistRepository) RemoveAllowedEmail(ctx context.Context, emailID string) error {
 	pool := GetPool()
 
-	// Don't allow removing default emails
-	_, err := pool.Exec(ctx, `
-		DELETE FROM allowed_emails WHERE id = $1 AND is_default = false
-	`, emailID)
-
+	_, err := pool.Exec(ctx, `DELETE FROM allowed_emails WHERE id = $1`, emailID)
 	return err
 }
 

@@ -114,13 +114,13 @@ func (r *TaskRepository) UpdateStatus(ctx context.Context, taskID string, status
 	return r.recordHistory(ctx, taskID, status, changedBy)
 }
 
-// recordHistory records a status change in task_history
+// recordHistory records a status change in task_status_history
 func (r *TaskRepository) recordHistory(ctx context.Context, taskID string, status models.TaskStatus, changedBy string) error {
 	pool := GetPool()
 
 	_, err := pool.Exec(ctx, `
-		INSERT INTO task_history (task_id, status, changed_at, changed_by)
-		VALUES ($1, $2, NOW(), $3)
+		INSERT INTO task_status_history (task_id, new_status, changed_by, source, created_at)
+		VALUES ($1, $2, $3, 'app', NOW())
 	`, taskID, status, changedBy)
 
 	return err
@@ -209,10 +209,10 @@ func (r *TaskRepository) GetYesterdayPending(ctx context.Context, projectID stri
 	// Get tasks that were in todo or in_progress status at end of yesterday
 	query := `
 		WITH yesterday_tasks AS (
-			SELECT DISTINCT ON (th.task_id) th.task_id, th.status
-			FROM task_history th
-			WHERE DATE(th.changed_at) = DATE(NOW() - INTERVAL '1 day')
-			ORDER BY th.task_id, th.changed_at DESC
+			SELECT DISTINCT ON (th.task_id) th.task_id, th.new_status
+			FROM task_status_history th
+			WHERE DATE(th.created_at) = DATE(NOW() - INTERVAL '1 day')
+			ORDER BY th.task_id, th.created_at DESC
 		)
 		SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id,
 		       t.assignee_id, t.asana_id, t.asana_url, t.due_date, t.created_at,
@@ -220,7 +220,7 @@ func (r *TaskRepository) GetYesterdayPending(ctx context.Context, projectID stri
 		FROM tasks t
 		LEFT JOIN users u ON t.assignee_id = u.id
 		INNER JOIN yesterday_tasks yt ON t.id = yt.task_id
-		WHERE yt.status IN ('todo', 'in_progress')
+		WHERE yt.new_status IN ('todo', 'in_progress')
 		AND t.project_id = $1
 		ORDER BY t.priority DESC, t.created_at ASC
 	`
