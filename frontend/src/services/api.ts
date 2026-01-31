@@ -175,11 +175,56 @@ class ApiService {
     return this.request(`/tasks/${taskId}/asana/push`, { method: 'POST' })
   }
 
+  // Get synced sections (columns) from database
+  async getProjectSections() {
+    return this.request<AsanaSection[]>('/asana/sections')
+  }
+
+  // Update task section (move to different column)
+  async updateTaskSection(taskId: string, sectionGid: string, sectionName: string) {
+    return this.request(`/tasks/${taskId}/section`, {
+      method: 'PATCH',
+      body: JSON.stringify({ section_gid: sectionGid, section_name: sectionName }),
+    })
+  }
+
   // Slack endpoints
-  async connectSlack(botToken: string) {
+  async connectSlack(botToken: string, channelId?: string) {
     return this.request('/slack/connect', {
       method: 'POST',
-      body: JSON.stringify({ botToken }),
+      body: JSON.stringify({ bot_token: botToken, channel_id: channelId || '' }),
+    })
+  }
+
+  async disconnectSlack() {
+    return this.request('/slack/disconnect', {
+      method: 'POST',
+    })
+  }
+
+  async getSlackStatus() {
+    return this.request<{
+      connected: boolean
+      team_id?: string
+      team_name?: string
+      channel_id?: string
+      channel_name?: string
+    }>('/slack/status')
+  }
+
+  async getSlackChannels() {
+    return this.request<{
+      id: string
+      name: string
+      is_private: boolean
+      is_member: boolean
+    }[]>('/slack/channels')
+  }
+
+  async setSlackChannel(channelId: string, channelName: string) {
+    return this.request('/slack/channel', {
+      method: 'POST',
+      body: JSON.stringify({ channel_id: channelId, channel_name: channelName }),
     })
   }
 
@@ -188,12 +233,51 @@ class ApiService {
     if (dateRange?.from) params.append('from', dateRange.from)
     if (dateRange?.to) params.append('to', dateRange.to)
     const query = params.toString() ? `?${params}` : ''
-    return this.request<SlackMessage[]>(`/slack/messages${query}`)
+    return this.request<{ messages: SlackMessage[]; count: number }>(`/slack/messages${query}`)
+  }
+
+  async getYesterdaySlackMessages() {
+    return this.request<{ messages: SlackMessage[]; count: number }>('/slack/messages/yesterday')
   }
 
   async analyzeSlackMessages(projectId: string) {
     return this.request<AIAnalysisResponse>(`/ai/analyze?project_id=${projectId}`, {
       method: 'POST',
+    })
+  }
+
+  async analyzeManualInput(morningAssignments: string, eveningUpdates: string) {
+    return this.request<{
+      tasks_detected: string[]
+      analysis: {
+        task_title: string
+        detected_status: string
+        confidence: number
+        evidence: string[]
+      }[]
+      person_breakdown: {
+        name: string
+        assigned: string[]
+        completed: string[]
+        pending: string[]
+        blocked: string[]
+        stats: {
+          total: number
+          completed: number
+          pending: number
+          blocked: number
+        }
+      }[]
+      summary: {
+        total_tasks: number
+        completed: number
+        in_progress: number
+        blocked: number
+        not_mentioned: number
+      }
+    }>('/ai/analyze-manual', {
+      method: 'POST',
+      body: JSON.stringify({ morning_assignments: morningAssignments, evening_updates: eveningUpdates }),
     })
   }
 
@@ -297,6 +381,124 @@ class ApiService {
       method: 'DELETE',
     })
   }
+
+  // Daily Task List endpoints
+  async getDailyTaskList(date: string, projectId?: string) {
+    const params = new URLSearchParams()
+    if (projectId) params.append('project_id', projectId)
+    const query = params.toString() ? `?${params}` : ''
+    return this.request<DailyTaskList>(`/daily-tasks/${date}${query}`)
+  }
+
+  async generateDailyTaskList(date: string, projectId?: string) {
+    return this.request<DailyTaskList>(`/daily-tasks/${date}/generate`, {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId || 'default' }),
+    })
+  }
+
+  async getDailyTaskListFormatted(date: string, projectId?: string) {
+    const params = new URLSearchParams()
+    if (projectId) params.append('project_id', projectId)
+    const query = params.toString() ? `?${params}` : ''
+    return this.request<{ formatted_text: string; date: string }>(
+      `/daily-tasks/${date}/formatted${query}`
+    )
+  }
+
+  async reorderDailyTasks(date: string, assignmentId: string, taskItemIds: string[]) {
+    return this.request(`/daily-tasks/${date}/reorder`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assignment_id: assignmentId, task_item_ids: taskItemIds }),
+    })
+  }
+
+  async addDailyTaskItem(assignmentId: string, title: string, priority: string, taskId?: string) {
+    return this.request<DailyTaskItem>('/daily-tasks/items', {
+      method: 'POST',
+      body: JSON.stringify({ assignment_id: assignmentId, title, priority, task_id: taskId }),
+    })
+  }
+
+  async deleteDailyTaskItem(itemId: string) {
+    return this.request(`/daily-tasks/items/${itemId}`, { method: 'DELETE' })
+  }
+
+  async addDailyAssignment(date: string, userName: string, slackHandle: string, projectId?: string) {
+    const params = new URLSearchParams()
+    if (projectId) params.append('project_id', projectId)
+    const query = params.toString() ? `?${params}` : ''
+    return this.request<UserTaskAssignment>(`/daily-tasks/${date}/assignments${query}`, {
+      method: 'POST',
+      body: JSON.stringify({ user_name: userName, slack_handle: slackHandle }),
+    })
+  }
+
+  async deleteDailyAssignment(assignmentId: string) {
+    return this.request(`/daily-tasks/assignments/${assignmentId}`, { method: 'DELETE' })
+  }
+
+  // Integration Settings endpoints
+
+  // Get Asana configuration status (all authenticated users)
+  async getAsanaConfigStatus() {
+    return this.request<{ configured: boolean; has_project: boolean }>('/settings/integrations/asana/status')
+  }
+
+  // Get full Asana settings (admin only)
+  async getAsanaSettings() {
+    return this.request<AsanaSettings>('/settings/integrations/asana')
+  }
+
+  async updateAsanaSettings(settings: UpdateAsanaSettingsRequest) {
+    return this.request('/settings/integrations/asana', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    })
+  }
+
+  async testAsanaConnection() {
+    return this.request<{
+      connected: boolean
+      user: string
+      projects: AsanaProject[]
+    }>('/settings/integrations/asana/test', { method: 'POST' })
+  }
+
+  async getAsanaProjectsForSettings() {
+    return this.request<AsanaProject[]>('/settings/integrations/asana/projects')
+  }
+
+  // Bot Config endpoints
+  async listBots() {
+    return this.request<BotConfig[]>('/bots')
+  }
+
+  async getBot(botId: string) {
+    return this.request<BotConfig>(`/bots/${botId}`)
+  }
+
+  async createBot(bot: CreateBotConfigRequest) {
+    return this.request<BotConfig>('/bots', {
+      method: 'POST',
+      body: JSON.stringify(bot),
+    })
+  }
+
+  async updateBot(botId: string, updates: UpdateBotConfigRequest) {
+    return this.request<BotConfig>(`/bots/${botId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    })
+  }
+
+  async deleteBot(botId: string) {
+    return this.request(`/bots/${botId}`, { method: 'DELETE' })
+  }
+
+  async getBotTemplates() {
+    return this.request<BotConfig[]>('/bots/templates')
+  }
 }
 
 // Types
@@ -326,6 +528,8 @@ export interface Task {
   }
   asana_id?: string
   asana_url?: string
+  asana_section_gid?: string
+  section_name?: string
   due_date?: string
   created_at?: string
   updated_at?: string
@@ -335,6 +539,13 @@ export interface Task {
 export interface AsanaProject {
   gid: string
   name: string
+}
+
+export interface AsanaSection {
+  gid: string
+  name: string
+  position: number
+  color?: string
 }
 
 export interface SlackMessage {
@@ -375,6 +586,37 @@ export interface AIAnalysisResponse {
     messages_read: number
     discrepancies: number
   }
+}
+
+export interface DailyTaskItem {
+  id: string
+  assignment_id: string
+  task_id?: string
+  title: string
+  priority: 'high' | 'medium' | 'low'
+  position: number
+  carried_over: boolean
+  created_at?: string
+}
+
+export interface UserTaskAssignment {
+  id: string
+  daily_list_id: string
+  user_id?: string
+  user_name: string
+  slack_handle: string
+  position: number
+  tasks: DailyTaskItem[]
+  created_at?: string
+}
+
+export interface DailyTaskList {
+  id: string
+  date: string
+  project_id: string
+  assignments: UserTaskAssignment[]
+  created_at?: string
+  updated_at?: string
 }
 
 export interface CalendarData {
@@ -430,6 +672,59 @@ export interface AccessSettings {
   default_admin_email: string
   allowed_emails: AllowedEmail[]
   allowed_domains: AllowedDomain[]
+}
+
+export interface AsanaSettings {
+  pat: string  // Masked PAT (e.g., "****xxxx")
+  project_id: string
+  workspace_id: string
+  configured: boolean
+}
+
+export interface UpdateAsanaSettingsRequest {
+  pat?: string
+  project_id?: string
+  workspace_id?: string
+}
+
+// Bot Config Types
+export interface BotVariable {
+  name: string
+  label: string
+  type: 'text' | 'select' | 'date' | 'team_member'
+  default: string
+  options?: string[]
+  required: boolean
+  description?: string
+}
+
+export interface BotConfig {
+  id: string
+  name: string
+  description: string
+  bot_type: 'slack_analysis' | 'daily_report' | 'custom'
+  prompt: string
+  variables: string // JSON string of BotVariable[]
+  is_active: boolean
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CreateBotConfigRequest {
+  name: string
+  description: string
+  bot_type: string
+  prompt: string
+  variables: string
+}
+
+export interface UpdateBotConfigRequest {
+  name?: string
+  description?: string
+  prompt?: string
+  variables?: string
+  is_active?: boolean
 }
 
 // Export singleton instance

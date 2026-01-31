@@ -67,13 +67,14 @@ func main() {
 	taskRoutes.HandleFunc("", taskHandler.GetTasks).Methods("GET")
 	taskRoutes.HandleFunc("", taskHandler.CreateTask).Methods("POST")
 	taskRoutes.HandleFunc("/yesterday-pending", taskHandler.GetYesterdayPending).Methods("GET")
-	taskRoutes.HandleFunc("/stats", taskHandler.GetTaskStats).Methods("GET")
+	taskRoutes.HandleFunc("/stats", taskHandler.GetStats).Methods("GET")
 	taskRoutes.HandleFunc("/bulk-status", taskHandler.BulkUpdateStatus).Methods("PATCH")
 	taskRoutes.HandleFunc("/by-date/{date}", taskHandler.GetTasksByDate).Methods("GET")
 	taskRoutes.HandleFunc("/{id}", taskHandler.GetTask).Methods("GET")
 	taskRoutes.HandleFunc("/{id}", taskHandler.UpdateTask).Methods("PUT")
 	taskRoutes.HandleFunc("/{id}", taskHandler.DeleteTask).Methods("DELETE")
 	taskRoutes.HandleFunc("/{id}/status", taskHandler.UpdateTaskStatus).Methods("PATCH")
+	taskRoutes.HandleFunc("/{id}/section", taskHandler.UpdateTaskSection).Methods("PATCH")
 
 	// Asana routes (protected)
 	asanaHandler := handlers.NewAsanaHandler()
@@ -85,7 +86,8 @@ func main() {
 	asanaRoutes.HandleFunc("/workspaces", asanaHandler.GetAsanaWorkspaces).Methods("GET")
 	asanaRoutes.HandleFunc("/projects", asanaHandler.GetAsanaProjects).Methods("GET")
 	asanaRoutes.HandleFunc("/projects/{asana_project_id}/sections", asanaHandler.GetAsanaSections).Methods("GET")
-	asanaRoutes.HandleFunc("/import", asanaHandler.ImportFromEnv).Methods("POST") // Quick import using env PAT
+	asanaRoutes.HandleFunc("/sections", asanaHandler.GetProjectSectionsFromDB).Methods("GET") // Get synced sections from DB
+	asanaRoutes.HandleFunc("/import", asanaHandler.ImportFromEnv).Methods("POST")            // Quick import using env PAT
 
 	// Project-specific Asana routes (protected)
 	projectAsanaRoutes := api.PathPrefix("/projects/{id}/asana").Subrouter()
@@ -120,7 +122,32 @@ func main() {
 	aiRoutes := api.PathPrefix("/ai").Subrouter()
 	aiRoutes.Use(middleware.AuthMiddleware)
 	aiRoutes.HandleFunc("/analyze", aiHandler.AnalyzeSlackMessages).Methods("POST")
+	aiRoutes.HandleFunc("/analyze-manual", aiHandler.AnalyzeManualInput).Methods("POST")
 	aiRoutes.HandleFunc("/discrepancies", aiHandler.GetDiscrepancies).Methods("GET")
+
+	// Daily Task List routes (protected)
+	dailyTaskHandler := handlers.NewDailyTaskHandler()
+	dailyTaskRoutes := api.PathPrefix("/daily-tasks").Subrouter()
+	dailyTaskRoutes.Use(middleware.AuthMiddleware)
+	dailyTaskRoutes.HandleFunc("/{date}", dailyTaskHandler.GetDailyTaskList).Methods("GET")
+	dailyTaskRoutes.HandleFunc("/{date}/generate", dailyTaskHandler.GenerateDailyTaskList).Methods("POST")
+	dailyTaskRoutes.HandleFunc("/{date}/formatted", dailyTaskHandler.GetFormattedTaskList).Methods("GET")
+	dailyTaskRoutes.HandleFunc("/{date}/reorder", dailyTaskHandler.ReorderTasks).Methods("PATCH")
+	dailyTaskRoutes.HandleFunc("/{date}/assignments", dailyTaskHandler.AddAssignment).Methods("POST")
+	dailyTaskRoutes.HandleFunc("/assignments/{assignmentId}", dailyTaskHandler.DeleteAssignment).Methods("DELETE")
+	dailyTaskRoutes.HandleFunc("/items", dailyTaskHandler.AddTaskItem).Methods("POST")
+	dailyTaskRoutes.HandleFunc("/items/{itemId}", dailyTaskHandler.DeleteTaskItem).Methods("DELETE")
+
+	// Bot Config routes (protected)
+	botConfigHandler := handlers.NewBotConfigHandler()
+	botRoutes := api.PathPrefix("/bots").Subrouter()
+	botRoutes.Use(middleware.AuthMiddleware)
+	botRoutes.HandleFunc("", botConfigHandler.ListBots).Methods("GET")
+	botRoutes.HandleFunc("/templates", botConfigHandler.GetTemplates).Methods("GET")
+	botRoutes.HandleFunc("", botConfigHandler.CreateBot).Methods("POST")
+	botRoutes.HandleFunc("/{id}", botConfigHandler.GetBot).Methods("GET")
+	botRoutes.HandleFunc("/{id}", botConfigHandler.UpdateBot).Methods("PUT")
+	botRoutes.HandleFunc("/{id}", botConfigHandler.DeleteBot).Methods("DELETE")
 
 	// Calendar routes (protected)
 	calendarRoutes := api.PathPrefix("/calendar").Subrouter()
@@ -164,6 +191,23 @@ func main() {
 	whitelistRoutes.HandleFunc("/domains", whitelistHandler.GetAllowedDomainsHandler).Methods("GET")
 	whitelistRoutes.HandleFunc("/domains", whitelistHandler.AddAllowedDomainHandler).Methods("POST")
 	whitelistRoutes.HandleFunc("/domains/{domain}", whitelistHandler.RemoveAllowedDomainHandler).Methods("DELETE")
+
+	// Integration Settings routes
+	settingsHandler := handlers.NewSettingsHandler()
+
+	// Public route for checking if Asana is configured (all authenticated users)
+	integrationStatusRoutes := api.PathPrefix("/settings/integrations").Subrouter()
+	integrationStatusRoutes.Use(middleware.AuthMiddleware)
+	integrationStatusRoutes.HandleFunc("/asana/status", settingsHandler.GetAsanaConfigStatus).Methods("GET")
+
+	// Admin-only routes for managing settings
+	integrationSettingsRoutes := api.PathPrefix("/settings/integrations").Subrouter()
+	integrationSettingsRoutes.Use(middleware.AuthMiddleware)
+	integrationSettingsRoutes.Use(middleware.AdminOnly)
+	integrationSettingsRoutes.HandleFunc("/asana", settingsHandler.GetAsanaSettings).Methods("GET")
+	integrationSettingsRoutes.HandleFunc("/asana", settingsHandler.UpdateAsanaSettings).Methods("PUT")
+	integrationSettingsRoutes.HandleFunc("/asana/test", settingsHandler.TestAsanaConnection).Methods("POST")
+	integrationSettingsRoutes.HandleFunc("/asana/projects", settingsHandler.GetAsanaProjects).Methods("GET")
 
 	// CORS configuration
 	c := cors.New(cors.Options{

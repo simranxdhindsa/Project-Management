@@ -1,0 +1,670 @@
+import { useState, useEffect, useCallback } from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Check,
+  RefreshCw,
+  Plus,
+  Trash2,
+  GripVertical,
+  UserPlus,
+  X,
+} from 'lucide-react'
+import api from '../services/api'
+import type { DailyTaskList, UserTaskAssignment, DailyTaskItem } from '../services/api'
+
+// ====== Sortable Task Item Component ======
+function SortableTaskItem({
+  item,
+  onDelete,
+}: {
+  item: DailyTaskItem
+  onDelete: (id: string) => void
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  const priorityColors: Record<string, string> = {
+    high: 'var(--color-danger)',
+    medium: 'var(--color-warning)',
+    low: 'var(--color-success)',
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="daily-task-item"
+    >
+      <div
+        className="drag-handle"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} />
+      </div>
+      <div className="daily-task-item-content">
+        <span className="daily-task-title">{item.title}</span>
+        <div className="daily-task-badges">
+          {item.priority === 'high' && (
+            <span
+              className="priority-tag"
+              style={{ backgroundColor: priorityColors.high }}
+            >
+              HIGH
+            </span>
+          )}
+          {item.carried_over && (
+            <span className="carried-over-tag">carried over</span>
+          )}
+        </div>
+      </div>
+      <button
+        className="daily-task-delete"
+        onClick={() => onDelete(item.id)}
+        title="Remove task"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
+// ====== Drag Overlay Item ======
+function DragOverlayItem({ item }: { item: DailyTaskItem }) {
+  return (
+    <div className="daily-task-item dragging-overlay">
+      <div className="drag-handle">
+        <GripVertical size={14} />
+      </div>
+      <div className="daily-task-item-content">
+        <span className="daily-task-title">{item.title}</span>
+      </div>
+    </div>
+  )
+}
+
+// ====== Main Page Component ======
+export function DailyTaskListPage() {
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const today = new Date()
+    return today.toISOString().split('T')[0]
+  })
+  const [taskList, setTaskList] = useState<DailyTaskList | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [activeItem, setActiveItem] = useState<DailyTaskItem | null>(null)
+  const [showAddPerson, setShowAddPerson] = useState(false)
+  const [newPersonName, setNewPersonName] = useState('')
+  const [newPersonHandle, setNewPersonHandle] = useState('')
+  const [addingTaskFor, setAddingTaskFor] = useState<string | null>(null)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskPriority, setNewTaskPriority] = useState('medium')
+
+  // Calendar state
+  const [calendarDate, setCalendarDate] = useState(() => new Date())
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  // Fetch task list for selected date
+  const fetchTaskList = useCallback(async () => {
+    setLoading(true)
+    try {
+      const response = await api.getDailyTaskList(selectedDate)
+      if (response.success && response.data) {
+        setTaskList(response.data)
+      } else {
+        setTaskList(null)
+      }
+    } catch {
+      setTaskList(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedDate])
+
+  useEffect(() => {
+    fetchTaskList()
+  }, [fetchTaskList])
+
+  // Generate task list
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      const response = await api.generateDailyTaskList(selectedDate)
+      if (response.success && response.data) {
+        setTaskList(response.data)
+      }
+    } catch (err) {
+      console.error('Error generating task list:', err)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  // Copy to clipboard with Slack formatting
+  const handleCopy = async () => {
+    try {
+      const response = await api.getDailyTaskListFormatted(selectedDate)
+      if (response.success && response.data) {
+        await navigator.clipboard.writeText(response.data.formatted_text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }
+    } catch {
+      // Fallback: generate text client-side
+      if (taskList) {
+        const text = generateSlackText(taskList)
+        await navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }
+    }
+  }
+
+  // Client-side Slack text generation
+  const generateSlackText = (list: DailyTaskList): string => {
+    let text = '`todays task list`\n'
+    for (const assignment of list.assignments) {
+      text += `\n\`${assignment.slack_handle}\`\n`
+      for (const task of assignment.tasks) {
+        const priority = task.priority === 'high' ? ' (High)' : ''
+        text += `• ${task.title}${priority}\n`
+      }
+    }
+    return text
+  }
+
+  // Drag handlers
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event
+    if (!taskList) return
+    for (const assignment of taskList.assignments) {
+      const item = assignment.tasks.find((t) => t.id === active.id)
+      if (item) {
+        setActiveItem(item)
+        break
+      }
+    }
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    setActiveItem(null)
+    if (!over || !taskList || active.id === over.id) return
+
+    // Find which assignment contains both items
+    const updatedAssignments = taskList.assignments.map((assignment) => {
+      const activeIndex = assignment.tasks.findIndex((t) => t.id === active.id)
+      const overIndex = assignment.tasks.findIndex((t) => t.id === over.id)
+
+      if (activeIndex !== -1 && overIndex !== -1) {
+        const newTasks = arrayMove(assignment.tasks, activeIndex, overIndex)
+        // Update positions
+        const reorderedTasks = newTasks.map((t, i) => ({ ...t, position: i }))
+
+        // Save to backend
+        api.reorderDailyTasks(
+          selectedDate,
+          assignment.id,
+          reorderedTasks.map((t) => t.id)
+        ).catch(console.error)
+
+        return { ...assignment, tasks: reorderedTasks }
+      }
+      return assignment
+    })
+
+    setTaskList({ ...taskList, assignments: updatedAssignments })
+  }
+
+  // Delete task item
+  const handleDeleteItem = async (itemId: string) => {
+    if (!taskList) return
+    try {
+      await api.deleteDailyTaskItem(itemId)
+      const updatedAssignments = taskList.assignments.map((a) => ({
+        ...a,
+        tasks: a.tasks.filter((t) => t.id !== itemId),
+      }))
+      setTaskList({ ...taskList, assignments: updatedAssignments })
+    } catch (err) {
+      console.error('Error deleting item:', err)
+    }
+  }
+
+  // Add task item
+  const handleAddTaskItem = async (assignmentId: string) => {
+    if (!newTaskTitle.trim() || !taskList) return
+    try {
+      const response = await api.addDailyTaskItem(
+        assignmentId,
+        newTaskTitle.trim(),
+        newTaskPriority
+      )
+      if (response.success && response.data) {
+        const updatedAssignments = taskList.assignments.map((a) =>
+          a.id === assignmentId
+            ? { ...a, tasks: [...a.tasks, response.data as DailyTaskItem] }
+            : a
+        )
+        setTaskList({ ...taskList, assignments: updatedAssignments })
+        setNewTaskTitle('')
+        setNewTaskPriority('medium')
+        setAddingTaskFor(null)
+      }
+    } catch (err) {
+      console.error('Error adding task item:', err)
+    }
+  }
+
+  // Add person/assignment
+  const handleAddPerson = async () => {
+    if (!newPersonName.trim() || !newPersonHandle.trim()) return
+    try {
+      const handle = newPersonHandle.startsWith('@')
+        ? newPersonHandle
+        : `@${newPersonHandle}`
+      const response = await api.addDailyAssignment(
+        selectedDate,
+        newPersonName.trim(),
+        handle
+      )
+      if (response.success && response.data) {
+        if (taskList) {
+          setTaskList({
+            ...taskList,
+            assignments: [
+              ...taskList.assignments,
+              response.data as UserTaskAssignment,
+            ],
+          })
+        }
+        setNewPersonName('')
+        setNewPersonHandle('')
+        setShowAddPerson(false)
+      }
+    } catch (err) {
+      console.error('Error adding assignment:', err)
+    }
+  }
+
+  // Delete assignment
+  const handleDeleteAssignment = async (assignmentId: string) => {
+    if (!taskList) return
+    try {
+      await api.deleteDailyAssignment(assignmentId)
+      setTaskList({
+        ...taskList,
+        assignments: taskList.assignments.filter((a) => a.id !== assignmentId),
+      })
+    } catch (err) {
+      console.error('Error deleting assignment:', err)
+    }
+  }
+
+  // Calendar helpers
+  const getDaysInMonth = (date: Date) => {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+  }
+
+  const getFirstDayOfMonth = (date: Date) => {
+    return new Date(date.getFullYear(), date.getMonth(), 1).getDay()
+  }
+
+  const formatDateStr = (year: number, month: number, day: number) => {
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  }
+
+  const isToday = (dateStr: string) => {
+    return dateStr === new Date().toISOString().split('T')[0]
+  }
+
+  const navigateMonth = (direction: number) => {
+    setCalendarDate(
+      new Date(calendarDate.getFullYear(), calendarDate.getMonth() + direction, 1)
+    )
+  }
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ]
+
+  const daysInMonth = getDaysInMonth(calendarDate)
+  const firstDay = getFirstDayOfMonth(calendarDate)
+
+  return (
+    <div className="daily-task-page">
+      {/* Left Side - Calendar + Controls */}
+      <div className="daily-task-sidebar">
+        {/* Mini Calendar */}
+        <div className="daily-calendar glass-card">
+          <div className="calendar-nav">
+            <button className="calendar-nav-btn" onClick={() => navigateMonth(-1)}>
+              <ChevronLeft size={16} />
+            </button>
+            <span className="calendar-month-label">
+              {monthNames[calendarDate.getMonth()]} {calendarDate.getFullYear()}
+            </span>
+            <button className="calendar-nav-btn" onClick={() => navigateMonth(1)}>
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <div className="calendar-grid">
+            <div className="calendar-header-row">
+              {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+                <span key={d} className="calendar-day-label">{d}</span>
+              ))}
+            </div>
+            <div className="calendar-body">
+              {Array.from({ length: firstDay }).map((_, i) => (
+                <span key={`empty-${i}`} className="calendar-day empty" />
+              ))}
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const day = i + 1
+                const dateStr = formatDateStr(
+                  calendarDate.getFullYear(),
+                  calendarDate.getMonth(),
+                  day
+                )
+                const selected = dateStr === selectedDate
+                const today = isToday(dateStr)
+                return (
+                  <button
+                    key={day}
+                    className={`calendar-day ${selected ? 'selected' : ''} ${today ? 'today' : ''}`}
+                    onClick={() => setSelectedDate(dateStr)}
+                  >
+                    {day}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <button
+            className="btn btn-ghost btn-sm calendar-today-btn"
+            onClick={() => {
+              const today = new Date()
+              setSelectedDate(today.toISOString().split('T')[0])
+              setCalendarDate(today)
+            }}
+          >
+            <Calendar size={14} />
+            Today
+          </button>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="daily-actions">
+          <button
+            className="btn btn-primary daily-action-btn"
+            onClick={handleGenerate}
+            disabled={generating}
+          >
+            <RefreshCw size={16} className={generating ? 'animate-spin' : ''} />
+            {generating ? 'Generating...' : 'Generate List'}
+          </button>
+          <button
+            className="btn btn-secondary daily-action-btn"
+            onClick={handleCopy}
+            disabled={!taskList || taskList.assignments.length === 0}
+          >
+            {copied ? <Check size={16} /> : <Copy size={16} />}
+            {copied ? 'Copied!' : 'Copy for Slack'}
+          </button>
+        </div>
+
+        {/* Slack Preview */}
+        {taskList && taskList.assignments.length > 0 && (
+          <div className="slack-preview glass-card">
+            <h4 className="slack-preview-title">Slack Preview</h4>
+            <pre className="slack-preview-text">
+              {generateSlackText(taskList)}
+            </pre>
+          </div>
+        )}
+      </div>
+
+      {/* Right Side - Task List */}
+      <div className="daily-task-main">
+        <div className="daily-task-header">
+          <h2 className="daily-task-date-title">
+            {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })}
+          </h2>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setShowAddPerson(true)}
+            disabled={!taskList}
+          >
+            <UserPlus size={16} />
+            Add Person
+          </button>
+        </div>
+
+        {loading && (
+          <div className="daily-loading">
+            <div className="loading-spinner" />
+            <p>Loading task list...</p>
+          </div>
+        )}
+
+        {!loading && !taskList && (
+          <div className="daily-empty-state glass-card">
+            <Calendar size={48} />
+            <h3>No Task List Yet</h3>
+            <p>
+              Click "Generate List" to create today's task list from pending tasks,
+              or add people manually.
+            </p>
+            <button className="btn btn-primary" onClick={handleGenerate} disabled={generating}>
+              <RefreshCw size={16} className={generating ? 'animate-spin' : ''} />
+              Generate Task List
+            </button>
+          </div>
+        )}
+
+        {!loading && taskList && taskList.assignments.length === 0 && (
+          <div className="daily-empty-state glass-card">
+            <Calendar size={48} />
+            <h3>No Tasks Found</h3>
+            <p>
+              No pending tasks found for this date. You can add people and tasks
+              manually.
+            </p>
+          </div>
+        )}
+
+        {!loading && taskList && taskList.assignments.length > 0 && (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="daily-assignments">
+              {taskList.assignments.map((assignment) => (
+                <div key={assignment.id} className="daily-assignment-card glass-card">
+                  <div className="assignment-header">
+                    <div className="assignment-info">
+                      <span className="assignment-handle">{assignment.slack_handle}</span>
+                      <span className="assignment-name">{assignment.user_name}</span>
+                      <span className="assignment-task-count">
+                        {assignment.tasks.length} tasks
+                      </span>
+                    </div>
+                    <div className="assignment-actions">
+                      <button
+                        className="btn-icon-sm"
+                        onClick={() => {
+                          setAddingTaskFor(
+                            addingTaskFor === assignment.id ? null : assignment.id
+                          )
+                          setNewTaskTitle('')
+                          setNewTaskPriority('medium')
+                        }}
+                        title="Add task"
+                      >
+                        <Plus size={14} />
+                      </button>
+                      <button
+                        className="btn-icon-sm btn-danger-ghost"
+                        onClick={() => handleDeleteAssignment(assignment.id)}
+                        title="Remove person"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <SortableContext
+                    items={assignment.tasks.map((t) => t.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="assignment-tasks">
+                      {assignment.tasks.map((item) => (
+                        <SortableTaskItem
+                          key={item.id}
+                          item={item}
+                          onDelete={handleDeleteItem}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+
+                  {/* Add Task Form */}
+                  {addingTaskFor === assignment.id && (
+                    <div className="add-task-form">
+                      <input
+                        type="text"
+                        className="add-task-input"
+                        placeholder="Task title..."
+                        value={newTaskTitle}
+                        onChange={(e) => setNewTaskTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleAddTaskItem(assignment.id)
+                          if (e.key === 'Escape') setAddingTaskFor(null)
+                        }}
+                        autoFocus
+                      />
+                      <select
+                        className="add-task-priority"
+                        value={newTaskPriority}
+                        onChange={(e) => setNewTaskPriority(e.target.value)}
+                      >
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                      </select>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleAddTaskItem(assignment.id)}
+                      >
+                        Add
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setAddingTaskFor(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <DragOverlay>
+              {activeItem ? <DragOverlayItem item={activeItem} /> : null}
+            </DragOverlay>
+          </DndContext>
+        )}
+
+        {/* Add Person Modal */}
+        {showAddPerson && (
+          <div className="modal-overlay" onClick={() => setShowAddPerson(false)}>
+            <div className="daily-add-person-modal glass-card" onClick={(e) => e.stopPropagation()}>
+              <h3>Add Person</h3>
+              <div className="form-group">
+                <label>Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Rajvir Singh"
+                  value={newPersonName}
+                  onChange={(e) => setNewPersonName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <label>Slack Handle</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. @Rajvir Singh"
+                  value={newPersonHandle}
+                  onChange={(e) => setNewPersonHandle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddPerson()
+                  }}
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setShowAddPerson(false)}
+                >
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={handleAddPerson}>
+                  Add Person
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

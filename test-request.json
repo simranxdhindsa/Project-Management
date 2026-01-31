@@ -1,0 +1,4 @@
+{
+  "morning_assignments": "`todays task list`\n\n`@Rajvir Singh`\n• PDF page numbers deprecation (High)\n• No confirmation modal for quit course\n• Mic/audio playback conflict\n\n`@Harpinder Singh`\n• Report API first access issue\n• AI display mode changes\n• Skeleton loading on onboarding\n\n`@Vishal`\n• BE Studio: Evaluation Bot config\n• FE MC: Duplicate user error message",
+  "evening_updates": "Updates for today:\n\n@Rajvir: Completed the PDF deprecation task and the quit modal. Still working on the mic conflict.\n\n@Harpinder: Fixed the Report API issue. The AI display and skeleton loading are done.\n\n@Vishal: BE Bot config is complete. The FE duplicate error is blocked - waiting for design approval."
+}

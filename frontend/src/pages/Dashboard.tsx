@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useTaskStats } from '@/hooks/useTaskStats'
+import { useTasks } from '@/hooks/useTasks'
 import {
   LayoutDashboard,
   KanbanSquare,
   List,
   Calendar,
+  ClipboardList,
+  Bot,
   Bell,
   BarChart3,
   Settings,
@@ -13,16 +17,23 @@ import {
   Plus,
   ChevronRight,
   LogOut,
-  Link2
+  Link2,
+  Brain
 } from 'lucide-react'
 import { IntegrationsPage } from './IntegrationsPage'
 import { SettingsPage } from './SettingsPage'
+import { BoardPage } from './BoardPage'
+import { DailyTaskListPage } from './DailyTaskListPage'
+import { BotConfigPage } from './BotConfigPage'
+import { AIAnalysisPage } from './AIAnalysisPage'
 
-type Page = 'dashboard' | 'board' | 'list' | 'calendar' | 'reports' | 'team' | 'settings' | 'integrations'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'calendar' | 'reports' | 'ai-analysis' | 'bots' | 'team' | 'settings' | 'integrations'
 
 export default function Dashboard() {
   const { user, logout } = useAuth()
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
+  const { stats } = useTaskStats()
+  const { tasks } = useTasks()
 
   const handleLogout = async () => {
     await logout()
@@ -37,6 +48,12 @@ export default function Dashboard() {
       .toUpperCase()
       .slice(0, 2)
   }
+
+  // Group tasks by status for kanban preview
+  const todoTasks = tasks.filter(t => t.status === 'todo').slice(0, 3)
+  const inProgressTasks = tasks.filter(t => t.status === 'in_progress').slice(0, 3)
+  const reviewTasks = tasks.filter(t => t.status === 'review').slice(0, 3)
+  const doneTasks = tasks.filter(t => t.status === 'done').slice(0, 3)
 
   return (
     <div className="app-container">
@@ -74,6 +91,13 @@ export default function Dashboard() {
               <span>List View</span>
             </button>
             <button
+              className={`sidebar-nav-item ${currentPage === 'daily-tasks' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('daily-tasks')}
+            >
+              <ClipboardList size={20} />
+              <span>Daily Tasks</span>
+            </button>
+            <button
               className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
               onClick={() => setCurrentPage('calendar')}
             >
@@ -84,6 +108,13 @@ export default function Dashboard() {
 
           <div className="nav-section">
             <span className="nav-section-title">Analytics</span>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'ai-analysis' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('ai-analysis')}
+            >
+              <Brain size={20} />
+              <span>AI Analysis</span>
+            </button>
             <button
               className={`sidebar-nav-item ${currentPage === 'reports' ? 'active' : ''}`}
               onClick={() => setCurrentPage('reports')}
@@ -104,6 +135,13 @@ export default function Dashboard() {
                 <span>Team</span>
               </button>
             )}
+            <button
+              className={`sidebar-nav-item ${currentPage === 'bots' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('bots')}
+            >
+              <Bot size={20} />
+              <span>Bot Config</span>
+            </button>
             <button
               className={`sidebar-nav-item ${currentPage === 'integrations' ? 'active' : ''}`}
               onClick={() => setCurrentPage('integrations')}
@@ -149,9 +187,12 @@ export default function Dashboard() {
             {currentPage === 'dashboard' && 'Dashboard'}
             {currentPage === 'board' && 'Board View'}
             {currentPage === 'list' && 'List View'}
+            {currentPage === 'daily-tasks' && 'Daily Task List'}
             {currentPage === 'calendar' && 'Calendar'}
+            {currentPage === 'ai-analysis' && 'AI Task Analysis'}
             {currentPage === 'reports' && 'Reports'}
             {currentPage === 'team' && 'Team Management'}
+            {currentPage === 'bots' && 'Bot Configuration'}
             {currentPage === 'settings' && 'Access Control'}
             {currentPage === 'integrations' && 'Integrations'}
           </h1>
@@ -192,7 +233,7 @@ export default function Dashboard() {
               Welcome back, {user?.name?.split(' ')[0] || 'there'}!
             </h2>
             <p className="welcome-subtitle">
-              You have <strong>4 pending tasks</strong> from yesterday and <strong>3 new notifications</strong>.
+              You have <strong>{stats.todo + stats.in_progress} pending tasks</strong> and <strong>{stats.overdue} overdue</strong>.
             </p>
           </div>
           <button className="btn-secondary btn-md">View Pending Tasks</button>
@@ -205,7 +246,7 @@ export default function Dashboard() {
               <KanbanSquare size={24} />
             </div>
             <div className="stat-info">
-              <span className="stat-value">24</span>
+              <span className="stat-value">{stats.total}</span>
               <span className="stat-label">Total Tasks</span>
             </div>
           </div>
@@ -214,7 +255,7 @@ export default function Dashboard() {
               <ChevronRight size={24} />
             </div>
             <div className="stat-info">
-              <span className="stat-value">8</span>
+              <span className="stat-value">{stats.in_progress}</span>
               <span className="stat-label">In Progress</span>
             </div>
           </div>
@@ -223,7 +264,7 @@ export default function Dashboard() {
               <BarChart3 size={24} />
             </div>
             <div className="stat-info">
-              <span className="stat-value">12</span>
+              <span className="stat-value">{stats.done}</span>
               <span className="stat-label">Completed</span>
             </div>
           </div>
@@ -232,7 +273,7 @@ export default function Dashboard() {
               <Bell size={24} />
             </div>
             <div className="stat-info">
-              <span className="stat-value">4</span>
+              <span className="stat-value">{stats.overdue}</span>
               <span className="stat-label">Overdue</span>
             </div>
           </div>
@@ -252,35 +293,23 @@ export default function Dashboard() {
             <div className="kanban-column">
               <div className="kanban-column-header">
                 <span className="kanban-column-title">To Do</span>
-                <span className="kanban-column-count">3</span>
+                <span className="kanban-column-count">{stats.todo}</span>
               </div>
               <div className="kanban-column-body">
-                <div className="task-card priority-high">
-                  <h4 className="task-title">Update API documentation</h4>
-                  <p className="task-description">Add new endpoints and update examples</p>
-                  <div className="task-meta">
-                    <span className="badge badge-todo">To Do</span>
-                    <div className="avatar avatar-sm">JD</div>
-                  </div>
-                </div>
-                <div className="task-card priority-medium">
-                  <h4 className="task-title">Review pull request #42</h4>
-                  <p className="task-description">Frontend component updates</p>
-                  <div className="task-meta">
-                    <span className="badge badge-todo">To Do</span>
-                    <div className="avatar avatar-sm">SK</div>
-                  </div>
-                </div>
-                <div className="task-card priority-low">
-                  <h4 className="task-title">Team standup notes</h4>
-                  <p className="task-description">Prepare agenda for tomorrow</p>
-                  <div className="task-meta">
-                    <span className="badge badge-todo">To Do</span>
-                    <div className="avatar avatar-sm">
-                      {user ? getInitials(user.name) : 'U'}
+                {todoTasks.length > 0 ? todoTasks.map(task => (
+                  <div key={task.id} className={`task-card priority-${task.priority || 'medium'}`}>
+                    <h4 className="task-title">{task.title}</h4>
+                    {task.description && <p className="task-description">{task.description}</p>}
+                    <div className="task-meta">
+                      <span className="badge badge-todo">To Do</span>
+                      <div className="avatar avatar-sm">
+                        {task.assignee_name ? getInitials(task.assignee_name) : 'U'}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )) : (
+                  <p className="text-muted" style={{padding: '1rem', textAlign: 'center'}}>No tasks</p>
+                )}
               </div>
             </div>
 
@@ -288,27 +317,23 @@ export default function Dashboard() {
             <div className="kanban-column">
               <div className="kanban-column-header">
                 <span className="kanban-column-title">In Progress</span>
-                <span className="kanban-column-count">2</span>
+                <span className="kanban-column-count">{stats.in_progress}</span>
               </div>
               <div className="kanban-column-body">
-                <div className="task-card priority-high animate-glow">
-                  <h4 className="task-title">Implement Slack integration</h4>
-                  <p className="task-description">Connect bot to read channel messages</p>
-                  <div className="task-meta">
-                    <span className="badge badge-progress">In Progress</span>
-                    <div className="avatar avatar-sm">
-                      {user ? getInitials(user.name) : 'U'}
+                {inProgressTasks.length > 0 ? inProgressTasks.map(task => (
+                  <div key={task.id} className={`task-card priority-${task.priority || 'medium'}`}>
+                    <h4 className="task-title">{task.title}</h4>
+                    {task.description && <p className="task-description">{task.description}</p>}
+                    <div className="task-meta">
+                      <span className="badge badge-progress">In Progress</span>
+                      <div className="avatar avatar-sm">
+                        {task.assignee_name ? getInitials(task.assignee_name) : 'U'}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="task-card priority-medium">
-                  <h4 className="task-title">Design settings page</h4>
-                  <p className="task-description">User preferences and integrations</p>
-                  <div className="task-meta">
-                    <span className="badge badge-progress">In Progress</span>
-                    <div className="avatar avatar-sm">AK</div>
-                  </div>
-                </div>
+                )) : (
+                  <p className="text-muted" style={{padding: '1rem', textAlign: 'center'}}>No tasks</p>
+                )}
               </div>
             </div>
 
@@ -316,17 +341,23 @@ export default function Dashboard() {
             <div className="kanban-column">
               <div className="kanban-column-header">
                 <span className="kanban-column-title">Review</span>
-                <span className="kanban-column-count">1</span>
+                <span className="kanban-column-count">{stats.review}</span>
               </div>
               <div className="kanban-column-body">
-                <div className="task-card priority-medium">
-                  <h4 className="task-title">Asana sync feature</h4>
-                  <p className="task-description">Two-way task synchronization</p>
-                  <div className="task-meta">
-                    <span className="badge badge-review">Review</span>
-                    <div className="avatar avatar-sm">SK</div>
+                {reviewTasks.length > 0 ? reviewTasks.map(task => (
+                  <div key={task.id} className={`task-card priority-${task.priority || 'medium'}`}>
+                    <h4 className="task-title">{task.title}</h4>
+                    {task.description && <p className="task-description">{task.description}</p>}
+                    <div className="task-meta">
+                      <span className="badge badge-review">Review</span>
+                      <div className="avatar avatar-sm">
+                        {task.assignee_name ? getInitials(task.assignee_name) : 'U'}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )) : (
+                  <p className="text-muted" style={{padding: '1rem', textAlign: 'center'}}>No tasks</p>
+                )}
               </div>
             </div>
 
@@ -334,27 +365,23 @@ export default function Dashboard() {
             <div className="kanban-column">
               <div className="kanban-column-header">
                 <span className="kanban-column-title">Done</span>
-                <span className="kanban-column-count">2</span>
+                <span className="kanban-column-count">{stats.done}</span>
               </div>
               <div className="kanban-column-body">
-                <div className="task-card priority-low">
-                  <h4 className="task-title">Setup project structure</h4>
-                  <p className="task-description">Initialize frontend and backend</p>
-                  <div className="task-meta">
-                    <span className="badge badge-done">Done</span>
-                    <div className="avatar avatar-sm">
-                      {user ? getInitials(user.name) : 'U'}
+                {doneTasks.length > 0 ? doneTasks.map(task => (
+                  <div key={task.id} className={`task-card priority-${task.priority || 'low'}`}>
+                    <h4 className="task-title">{task.title}</h4>
+                    {task.description && <p className="task-description">{task.description}</p>}
+                    <div className="task-meta">
+                      <span className="badge badge-done">Done</span>
+                      <div className="avatar avatar-sm">
+                        {task.assignee_name ? getInitials(task.assignee_name) : 'U'}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="task-card priority-low">
-                  <h4 className="task-title">Database schema design</h4>
-                  <p className="task-description">Users, tasks, projects tables</p>
-                  <div className="task-meta">
-                    <span className="badge badge-done">Done</span>
-                    <div className="avatar avatar-sm">JD</div>
-                  </div>
-                </div>
+                )) : (
+                  <p className="text-muted" style={{padding: '1rem', textAlign: 'center'}}>No tasks</p>
+                )}
               </div>
             </div>
           </div>
@@ -362,14 +389,17 @@ export default function Dashboard() {
           </>
         )}
 
-        {/* Board View Placeholder */}
-        {currentPage === 'board' && (
-          <div className="coming-soon">
-            <KanbanSquare size={48} />
-            <h2>Board View</h2>
-            <p>Full Kanban board with drag-and-drop coming soon!</p>
-          </div>
-        )}
+        {/* Board View */}
+        {currentPage === 'board' && <BoardPage />}
+
+        {/* Daily Task List */}
+        {currentPage === 'daily-tasks' && <DailyTaskListPage />}
+
+        {/* Bot Configuration */}
+        {currentPage === 'bots' && <BotConfigPage />}
+
+        {/* AI Analysis */}
+        {currentPage === 'ai-analysis' && <AIAnalysisPage />}
 
         {/* List View Placeholder */}
         {currentPage === 'list' && (

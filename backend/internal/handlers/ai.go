@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
@@ -13,7 +14,7 @@ import (
 
 // AIHandler handles AI analysis API requests
 type AIHandler struct {
-	geminiClient    *ai.GeminiClient
+	aiClient        ai.AIClient
 	slackService    *slack.Service
 	taskRepo        *database.TaskRepository
 	integrationRepo *database.IntegrationRepository
@@ -22,7 +23,7 @@ type AIHandler struct {
 // NewAIHandler creates a new AI handler
 func NewAIHandler() *AIHandler {
 	return &AIHandler{
-		geminiClient:    ai.NewGeminiClient(),
+		aiClient:        ai.NewAIClient(), // Auto-selects provider based on env
 		slackService:    slack.NewService(),
 		taskRepo:        database.NewTaskRepository(),
 		integrationRepo: database.NewIntegrationRepository(),
@@ -98,7 +99,7 @@ func (h *AIHandler) AnalyzeSlackMessages(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Run AI analysis
-	analyses, err := h.geminiClient.AnalyzeMessages(r.Context(), messagesForAnalysis, taskTitles)
+	analyses, err := h.aiClient.AnalyzeMessages(r.Context(), messagesForAnalysis, taskTitles)
 	if err != nil {
 		http.Error(w, "AI analysis failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -162,3 +163,217 @@ func (h *AIHandler) GetDiscrepancies(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AnalyzeManualInput analyzes manually pasted task assignments and updates
+func (h *AIHandler) AnalyzeManualInput(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		MorningAssignments string `json:"morning_assignments"`
+		EveningUpdates     string `json:"evening_updates"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.MorningAssignments == "" || req.EveningUpdates == "" {
+		http.Error(w, "Both morning_assignments and evening_updates are required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse the morning assignments to extract task list
+	taskTitles := parseTasksFromText(req.MorningAssignments)
+	if len(taskTitles) == 0 {
+		http.Error(w, "No tasks found in morning assignments", http.StatusBadRequest)
+		return
+	}
+
+	// Create fake messages from the manual input for analysis
+	messages := []ai.SlackMessageForAnalysis{
+		{
+			ID:        "manual-morning",
+			UserName:  "Morning Assignment",
+			Text:      req.MorningAssignments,
+			Timestamp: "09:00",
+		},
+		{
+			ID:        "manual-evening",
+			UserName:  "Evening Update",
+			Text:      req.EveningUpdates,
+			Timestamp: "18:00",
+		},
+	}
+
+	// Run AI analysis
+	analyses, err := h.aiClient.AnalyzeMessages(r.Context(), messages, taskTitles)
+	if err != nil {
+		http.Error(w, "AI analysis failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Build status map from morning (all start as "assigned")
+	morningStatuses := make(map[string]string)
+	for _, title := range taskTitles {
+		morningStatuses[title] = "todo"
+	}
+
+	// Compare with AI-detected statuses from evening update
+	discrepancies := ai.CompareStatuses(analyses, morningStatuses)
+
+	// Build per-person breakdown
+	personBreakdown := buildPersonBreakdown(req.MorningAssignments, analyses)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":          true,
+		"tasks_detected":   taskTitles,
+		"analysis":         analyses,
+		"discrepancies":    discrepancies,
+		"person_breakdown": personBreakdown,
+		"summary": map[string]interface{}{
+			"total_tasks":   len(taskTitles),
+			"completed":     countByStatus(analyses, "completed"),
+			"in_progress":   countByStatus(analyses, "in_progress"),
+			"blocked":       countByStatus(analyses, "blocked"),
+			"not_mentioned": len(taskTitles) - len(analyses),
+		},
+	})
+}
+
+// parseTasksFromText extracts task titles from formatted text
+func parseTasksFromText(text string) []string {
+	var tasks []string
+	lines := strings.Split(text, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "`") {
+			continue
+		}
+		// Look for bullet points or numbered lists
+		if strings.HasPrefix(line, "•") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") {
+			task := strings.TrimSpace(line[1:])
+			// Remove priority markers like (High)
+			task = strings.TrimSuffix(task, "(High)")
+			task = strings.TrimSuffix(task, "(Medium)")
+			task = strings.TrimSuffix(task, "(Low)")
+			task = strings.TrimSpace(task)
+			if task != "" {
+				tasks = append(tasks, task)
+			}
+		}
+	}
+
+	return tasks
+}
+
+// buildPersonBreakdown groups tasks by person
+func buildPersonBreakdown(morningText string, analyses []ai.TaskStatusAnalysis) []map[string]interface{} {
+	type PersonTasks struct {
+		Name      string
+		Assigned  []string
+		Completed []string
+		Pending   []string
+		Blocked   []string
+	}
+
+	people := make(map[string]*PersonTasks)
+	currentPerson := ""
+
+	lines := strings.Split(morningText, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		// Check if it's a person header (starts with @)
+		if strings.HasPrefix(line, "`@") && strings.HasSuffix(line, "`") {
+			currentPerson = strings.Trim(line, "`@")
+			if _, exists := people[currentPerson]; !exists {
+				people[currentPerson] = &PersonTasks{
+					Name:      currentPerson,
+					Assigned:  []string{},
+					Completed: []string{},
+					Pending:   []string{},
+					Blocked:   []string{},
+				}
+			}
+		} else if currentPerson != "" && (strings.HasPrefix(line, "•") || strings.HasPrefix(line, "-")) {
+			task := strings.TrimSpace(line[1:])
+			task = strings.TrimSuffix(task, "(High)")
+			task = strings.TrimSuffix(task, "(Medium)")
+			task = strings.TrimSuffix(task, "(Low)")
+			task = strings.TrimSpace(task)
+
+			if task != "" && people[currentPerson] != nil {
+				people[currentPerson].Assigned = append(people[currentPerson].Assigned, task)
+
+				// Find status from analysis
+				for _, analysis := range analyses {
+					if analysis.TaskTitle == task {
+						switch normalizeStatus(analysis.DetectedStatus) {
+						case "done":
+							people[currentPerson].Completed = append(people[currentPerson].Completed, task)
+						case "blocked":
+							people[currentPerson].Blocked = append(people[currentPerson].Blocked, task)
+						default:
+							people[currentPerson].Pending = append(people[currentPerson].Pending, task)
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Convert to slice
+	result := make([]map[string]interface{}, 0, len(people))
+	for _, person := range people {
+		result = append(result, map[string]interface{}{
+			"name":      person.Name,
+			"assigned":  person.Assigned,
+			"completed": person.Completed,
+			"pending":   person.Pending,
+			"blocked":   person.Blocked,
+			"stats": map[string]int{
+				"total":     len(person.Assigned),
+				"completed": len(person.Completed),
+				"pending":   len(person.Pending),
+				"blocked":   len(person.Blocked),
+			},
+		})
+	}
+
+	return result
+}
+
+// countByStatus counts tasks with a specific status
+func countByStatus(analyses []ai.TaskStatusAnalysis, status string) int {
+	count := 0
+	normalized := normalizeStatus(status)
+	for _, analysis := range analyses {
+		if normalizeStatus(analysis.DetectedStatus) == normalized {
+			count++
+		}
+	}
+	return count
+}
+
+// normalizeStatus helper function
+func normalizeStatus(status string) string {
+	status = strings.ToLower(status)
+	switch status {
+	case "completed", "done", "closed", "resolved":
+		return "done"
+	case "in_progress", "in progress", "working", "doing":
+		return "in_progress"
+	case "blocked", "stuck", "waiting":
+		return "blocked"
+	case "todo", "not_started", "new", "open":
+		return "todo"
+	default:
+		return status
+	}
+}

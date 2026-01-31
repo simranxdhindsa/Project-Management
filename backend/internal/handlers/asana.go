@@ -22,6 +22,8 @@ type AsanaHandler struct {
 	integrationRepo *database.IntegrationRepository
 	taskRepo        *database.TaskRepository
 	projectRepo     *database.ProjectRepository
+	settingsRepo    *database.SettingsRepository
+	sectionRepo     *database.SectionRepository
 	syncService     *asana.SyncService
 	webhookService  *asana.WebhookService
 }
@@ -32,6 +34,8 @@ func NewAsanaHandler() *AsanaHandler {
 		integrationRepo: database.NewIntegrationRepository(),
 		taskRepo:        database.NewTaskRepository(),
 		projectRepo:     database.NewProjectRepository(),
+		settingsRepo:    database.NewSettingsRepository(),
+		sectionRepo:     database.NewSectionRepository(),
 		syncService:     asana.NewSyncService(),
 		webhookService:  asana.NewWebhookService(),
 	}
@@ -372,8 +376,7 @@ func (h *AsanaHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ImportFromEnv imports tasks from Asana using PAT from environment variable
-// This is a simplified endpoint for quick testing without OAuth setup
+// ImportFromEnv imports tasks from Asana using credentials from database (or env fallback)
 func (h *AsanaHandler) ImportFromEnv(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
@@ -381,29 +384,71 @@ func (h *AsanaHandler) ImportFromEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get PAT and project ID from environment
-	asanaPAT := os.Getenv("ASANA_PAT")
-	asanaProjectID := os.Getenv("ASANA_PROJECT_ID")
+	// Try to get credentials from database first
+	settings, _ := h.settingsRepo.GetAsanaSettings(r.Context())
+
+	var asanaPAT, asanaProjectID string
+
+	if settings != nil && settings.Configured {
+		asanaPAT = settings.PAT
+		asanaProjectID = settings.ProjectID
+	}
+
+	// Fallback to environment variables if DB not configured
+	if asanaPAT == "" {
+		asanaPAT = os.Getenv("ASANA_PAT")
+	}
+	if asanaProjectID == "" {
+		asanaProjectID = os.Getenv("ASANA_PROJECT_ID")
+	}
 
 	if asanaPAT == "" || asanaProjectID == "" {
-		http.Error(w, "ASANA_PAT and ASANA_PROJECT_ID environment variables are required", http.StatusBadRequest)
+		http.Error(w, "Asana is not configured. Please configure Asana PAT and Project ID in Settings.", http.StatusBadRequest)
 		return
 	}
 
 	client := asana.NewClient(asanaPAT)
 	ctx := r.Context()
 
-	// Get tasks from Asana
-	asanaTasks, err := client.GetProjectTasks(ctx, asanaProjectID)
-	if err != nil {
-		http.Error(w, "Failed to fetch Asana tasks: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	// Get or create default project
 	defaultProjectID, err := h.getOrCreateDefaultProject(ctx, userID)
 	if err != nil {
 		http.Error(w, "Failed to get/create default project: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch and store sections from Asana
+	asanaSections, err := client.GetSections(ctx, asanaProjectID)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch Asana sections: %v", err)
+	} else {
+		// Save sections to database
+		var sectionsToSave []models.AsanaSection
+		for i, sec := range asanaSections {
+			sectionsToSave = append(sectionsToSave, models.AsanaSection{
+				ProjectID:       defaultProjectID,
+				AsanaSectionGID: sec.GID,
+				Name:            sec.Name,
+				Position:        i,
+			})
+		}
+		if err := h.sectionRepo.SaveSections(ctx, defaultProjectID, sectionsToSave); err != nil {
+			log.Printf("Warning: Failed to save sections: %v", err)
+		} else {
+			log.Printf("Synced %d sections from Asana", len(sectionsToSave))
+		}
+	}
+
+	// Build section GID to name map for quick lookup
+	sectionMap := make(map[string]string)
+	for _, sec := range asanaSections {
+		sectionMap[sec.GID] = sec.Name
+	}
+
+	// Get tasks from Asana
+	asanaTasks, err := client.GetProjectTasks(ctx, asanaProjectID)
+	if err != nil {
+		http.Error(w, "Failed to fetch Asana tasks: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -419,11 +464,23 @@ func (h *AsanaHandler) ImportFromEnv(w http.ResponseWriter, r *http.Request) {
 
 		status := h.mapAsanaStatusToLocal(asanaTask)
 
+		// Extract section info from task memberships
+		var sectionGID, sectionName string
+		for _, membership := range asanaTask.Memberships {
+			if membership.Section != nil {
+				sectionGID = membership.Section.GID
+				sectionName = membership.Section.Name
+				break
+			}
+		}
+
 		if existingTask != nil {
 			// Update existing
 			existingTask.Title = asanaTask.Name
 			existingTask.Description = asanaTask.Notes
 			existingTask.Status = status
+			existingTask.AsanaSectionGID = &sectionGID
+			existingTask.SectionName = &sectionName
 			if asanaTask.DueOn != nil {
 				dueDate, _ := time.Parse("2006-01-02", *asanaTask.DueOn)
 				existingTask.DueDate = &dueDate
@@ -436,14 +493,16 @@ func (h *AsanaHandler) ImportFromEnv(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// Create new task
 			newTask := &models.Task{
-				Title:       asanaTask.Name,
-				Description: asanaTask.Notes,
-				Status:      status,
-				Priority:    models.TaskPriorityMedium,
-				ProjectID:   defaultProjectID,
-				AsanaID:     &asanaTask.GID,
-				AsanaURL:    &asanaTask.PermalinkURL,
-				CreatedBy:   userID,
+				Title:           asanaTask.Name,
+				Description:     asanaTask.Notes,
+				Status:          status,
+				Priority:        models.TaskPriorityMedium,
+				ProjectID:       defaultProjectID,
+				AsanaID:         &asanaTask.GID,
+				AsanaURL:        &asanaTask.PermalinkURL,
+				AsanaSectionGID: &sectionGID,
+				SectionName:     &sectionName,
+				CreatedBy:       userID,
 			}
 			if asanaTask.DueOn != nil {
 				dueDate, _ := time.Parse("2006-01-02", *asanaTask.DueOn)
@@ -480,10 +539,17 @@ func (h *AsanaHandler) PushToAsana(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	taskID := vars["id"]
 
-	// Get PAT from environment
-	asanaPAT := os.Getenv("ASANA_PAT")
+	// Get PAT from database or environment
+	settings, _ := h.settingsRepo.GetAsanaSettings(r.Context())
+	var asanaPAT string
+	if settings != nil && settings.Configured {
+		asanaPAT = settings.PAT
+	}
 	if asanaPAT == "" {
-		http.Error(w, "ASANA_PAT environment variable is required", http.StatusBadRequest)
+		asanaPAT = os.Getenv("ASANA_PAT")
+	}
+	if asanaPAT == "" {
+		http.Error(w, "Asana is not configured", http.StatusBadRequest)
 		return
 	}
 
@@ -523,6 +589,62 @@ func (h *AsanaHandler) PushToAsana(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "Task synced to Asana",
+	})
+}
+
+// GetProjectSectionsFromDB returns sections stored in database for a project
+func (h *AsanaHandler) GetProjectSectionsFromDB(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get project ID from URL or use default project
+	vars := mux.Vars(r)
+	projectID := vars["id"]
+
+	// If no project ID specified, get the default/first project
+	if projectID == "" {
+		projects, err := h.projectRepo.GetByOwnerID(r.Context(), userID)
+		if err != nil || len(projects) == 0 {
+			// Return empty sections if no project
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"data":    []models.SectionResponse{},
+			})
+			return
+		}
+		projectID = projects[0].ID
+	}
+
+	sections, err := h.sectionRepo.GetProjectSections(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "Failed to get sections: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to response format
+	var response []models.SectionResponse
+	for _, s := range sections {
+		response = append(response, s.ToResponse())
+	}
+
+	// If no sections stored, return default fallback sections
+	if len(response) == 0 {
+		response = []models.SectionResponse{
+			{GID: "todo", Name: "To Do", Position: 0},
+			{GID: "in_progress", Name: "In Progress", Position: 1},
+			{GID: "review", Name: "Review", Position: 2},
+			{GID: "done", Name: "Done", Position: 3},
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    response,
 	})
 }
 

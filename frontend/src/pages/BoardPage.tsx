@@ -1,27 +1,37 @@
 import { useState, useEffect } from 'react'
 import { KanbanBoard } from '../components/board'
-import type { Task, TaskStatus, CreateTaskRequest } from '../types'
+import type { Task, TaskStatus, AsanaSection, CreateTaskRequest } from '../types'
 import api from '../services/api'
 
 export function BoardPage() {
   const [tasks, setTasks] = useState<Task[]>([])
+  const [sections, setSections] = useState<AsanaSection[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [syncing, setSyncing] = useState(false)
 
-  // Fetch tasks on mount
+  // Fetch tasks and sections on mount
   useEffect(() => {
-    fetchTasks()
+    fetchTasksAndSections()
   }, [])
 
-  const fetchTasks = async () => {
+  const fetchTasksAndSections = async () => {
     try {
       setLoading(true)
-      const response = await api.getTasks()
-      if (response.success && response.data) {
-        setTasks(response.data as Task[])
+      // Fetch tasks and sections in parallel
+      const [tasksResponse, sectionsResponse] = await Promise.all([
+        api.getTasks(),
+        api.getProjectSections()
+      ])
+
+      if (tasksResponse.success && tasksResponse.data) {
+        setTasks(tasksResponse.data as Task[])
+      }
+
+      if (sectionsResponse.success && sectionsResponse.data) {
+        setSections(sectionsResponse.data as AsanaSection[])
       }
     } catch (err) {
       setError('Failed to load tasks')
@@ -31,20 +41,32 @@ export function BoardPage() {
     }
   }
 
-  const handleTaskMove = async (taskId: string, newStatus: TaskStatus) => {
+  const handleTaskMove = async (taskId: string, newStatus: TaskStatus, sectionGid?: string, sectionName?: string) => {
     // Find the task to check if it has asana_id
     const task = tasks.find(t => t.id === taskId)
 
-    // Optimistic update
+    // Optimistic update - update both status and section info
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === taskId ? { ...t, status: newStatus } : t
+        t.id === taskId
+          ? {
+              ...t,
+              status: newStatus,
+              asana_section_gid: sectionGid || t.asana_section_gid,
+              section_name: sectionName || t.section_name,
+            }
+          : t
       )
     )
 
     try {
-      // Update on server
-      await api.updateTaskStatus(taskId, newStatus)
+      // Update section on server if section info provided
+      if (sectionGid && sectionName) {
+        await api.updateTaskSection(taskId, sectionGid, sectionName)
+      } else {
+        // Fallback to status update for legacy behavior
+        await api.updateTaskStatus(taskId, newStatus)
+      }
 
       // Push to Asana if task is linked
       if (task?.asana_id) {
@@ -54,8 +76,8 @@ export function BoardPage() {
       }
     } catch (err) {
       // Revert on error
-      fetchTasks()
-      console.error('Error updating task status:', err)
+      fetchTasksAndSections()
+      console.error('Error updating task:', err)
     }
   }
 
@@ -85,8 +107,8 @@ export function BoardPage() {
       setSyncing(true)
       const response = await api.importFromAsana()
       if (response.success) {
-        // Refresh tasks after sync
-        await fetchTasks()
+        // Refresh tasks and sections after sync
+        await fetchTasksAndSections()
         const data = response.data as { tasks_synced: number; tasks_created: number; tasks_updated: number }
         alert(`Sync complete! Created: ${data.tasks_created}, Updated: ${data.tasks_updated}`)
       }
@@ -115,7 +137,7 @@ export function BoardPage() {
         <div className="error-state">
           <h3>Error Loading Tasks</h3>
           <p>{error}</p>
-          <button className="btn btn-primary" onClick={fetchTasks}>
+          <button className="btn btn-primary" onClick={fetchTasksAndSections}>
             Retry
           </button>
         </div>
@@ -178,6 +200,7 @@ export function BoardPage() {
 
       <KanbanBoard
         tasks={tasks}
+        sections={sections}
         onTaskMove={handleTaskMove}
         onTaskClick={handleTaskClick}
         onTaskEdit={handleTaskEdit}

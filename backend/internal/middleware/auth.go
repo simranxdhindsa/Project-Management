@@ -36,18 +36,31 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		tokenString := parts[1]
 
-		// Validate token
-		claims, err := auth.ValidateToken(tokenString)
-		if err != nil {
-			http.Error(w, `{"success":false,"message":"Invalid or expired token"}`, http.StatusUnauthorized)
-			return
-		}
+		var user *models.User
 
-		// Create user from claims and add to context
-		user := &models.User{
-			ID:    claims.UserID,
-			Email: claims.Email,
-			Role:  claims.Role,
+		// Check for dev-mode token
+		if strings.HasPrefix(tokenString, "dev-mode-token-") {
+			// Dev mode - bypass JWT validation
+			user = &models.User{
+				ID:    "dev-user-1",
+				Email: "simranjot@apyhub.com",
+				Name:  "Simranjot Singh",
+				Role:  models.RoleAdmin,
+			}
+		} else {
+			// Validate JWT token
+			claims, err := auth.ValidateToken(tokenString)
+			if err != nil {
+				http.Error(w, `{"success":false,"message":"Invalid or expired token"}`, http.StatusUnauthorized)
+				return
+			}
+
+			// Create user from claims
+			user = &models.User{
+				ID:    claims.UserID,
+				Email: claims.Email,
+				Role:  claims.Role,
+			}
 		}
 
 		ctx := context.WithValue(r.Context(), UserContextKey, user)

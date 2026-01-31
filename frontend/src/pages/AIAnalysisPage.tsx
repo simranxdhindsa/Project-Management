@@ -1,275 +1,360 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle } from 'lucide-react'
 import api from '../services/api'
-import type { TaskStatusAnalysis, Discrepancy, AIAnalysisResponse } from '../services/api'
+
+interface AnalysisResult {
+  task_title: string
+  detected_status: string
+  confidence: number
+  evidence: string[]
+}
+
+interface PersonBreakdown {
+  name: string
+  assigned: string[]
+  completed: string[]
+  pending: string[]
+  blocked: string[]
+  stats: {
+    total: number
+    completed: number
+    pending: number
+    blocked: number
+  }
+}
+
+interface Summary {
+  total_tasks: number
+  completed: number
+  in_progress: number
+  blocked: number
+  not_mentioned: number
+}
 
 export function AIAnalysisPage() {
-  const [loading, setLoading] = useState(false)
+  const [morningAssignments, setMorningAssignments] = useState('')
+  const [eveningUpdates, setEveningUpdates] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [analysis, setAnalysis] = useState<TaskStatusAnalysis[]>([])
-  const [discrepancies, setDiscrepancies] = useState<Discrepancy[]>([])
-  const [summary, setSummary] = useState<AIAnalysisResponse['summary'] | null>(null)
-  const [projectId, setProjectId] = useState<string>('default') // Should come from context/selection
-  const [lastAnalyzed, setLastAnalyzed] = useState<Date | null>(null)
 
-  useEffect(() => {
-    fetchDiscrepancies()
-  }, [])
+  const [results, setResults] = useState<{
+    analysis: AnalysisResult[]
+    person_breakdown: PersonBreakdown[]
+    summary: Summary
+  } | null>(null)
 
-  const fetchDiscrepancies = async () => {
-    try {
-      setLoading(true)
-      const response = await api.getDiscrepancies()
-      if (response.success && response.data) {
-        setDiscrepancies(response.data.discrepancies || [])
-      }
-    } catch (err) {
-      console.error('Error fetching discrepancies:', err)
-    } finally {
-      setLoading(false)
+  const exampleMorning = `\`todays task list\`
+
+\`@Rajvir Singh\`
+• PDF page numbers deprecation (High)
+• No confirmation modal for quit course
+• Mic/audio playback conflict
+
+\`@Harpinder Singh\`
+• Report API first access issue
+• AI display mode changes
+• Skeleton loading on onboarding
+
+\`@Vishal\`
+• BE Studio: Evaluation Bot config
+• FE MC: Duplicate user error message`
+
+  const exampleEvening = `Updates for today:
+
+@Rajvir: Completed the PDF deprecation task and the quit modal. Still working on the mic conflict.
+
+@Harpinder: Fixed the Report API issue. The AI display and skeleton loading are done.
+
+@Vishal: BE Bot config is complete. The FE duplicate error is blocked - waiting for design approval.`
+
+  const handleAnalyze = async () => {
+    if (!morningAssignments.trim() || !eveningUpdates.trim()) {
+      setError('Please enter both morning assignments and evening updates')
+      return
     }
-  }
 
-  const runAnalysis = async () => {
     try {
       setAnalyzing(true)
       setError(null)
-      const response = await api.analyzeSlackMessages(projectId)
+      const response = await api.analyzeManualInput(morningAssignments, eveningUpdates)
       if (response.success && response.data) {
-        setAnalysis(response.data.analysis || [])
-        setDiscrepancies(response.data.discrepancies || [])
-        setSummary(response.data.summary || null)
-        setLastAnalyzed(new Date())
+        setResults({
+          analysis: response.data.analysis,
+          person_breakdown: response.data.person_breakdown,
+          summary: response.data.summary,
+        })
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to run AI analysis')
+      setError(err instanceof Error ? err.message : 'Analysis failed')
     } finally {
       setAnalyzing(false)
     }
   }
 
+  const loadExample = () => {
+    setMorningAssignments(exampleMorning)
+    setEveningUpdates(exampleEvening)
+    setResults(null)
+  }
+
   const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'completed':
-      case 'done':
-        return 'status-done'
-      case 'in_progress':
-      case 'in progress':
-        return 'status-in_progress'
-      case 'blocked':
-        return 'status-blocked'
-      case 'not_started':
-      case 'todo':
-        return 'status-todo'
-      default:
-        return 'status-unknown'
-    }
+    const normalized = status.toLowerCase()
+    if (normalized.includes('complete') || normalized.includes('done')) return 'var(--color-success)'
+    if (normalized.includes('progress') || normalized.includes('working')) return 'var(--color-warning)'
+    if (normalized.includes('block')) return 'var(--color-danger)'
+    return 'var(--color-secondary)'
   }
 
-  const getConfidenceClass = (confidence: number) => {
-    if (confidence >= 0.8) return 'confidence-high'
-    if (confidence >= 0.5) return 'confidence-medium'
-    return 'confidence-low'
-  }
-
-  const formatConfidence = (confidence: number) => {
-    return `${Math.round(confidence * 100)}%`
+  const getStatusIcon = (status: string) => {
+    const normalized = status.toLowerCase()
+    if (normalized.includes('complete') || normalized.includes('done')) return <CheckCircle size={16} />
+    if (normalized.includes('progress') || normalized.includes('working')) return <Clock size={16} />
+    if (normalized.includes('block')) return <XCircle size={16} />
+    return <AlertCircle size={16} />
   }
 
   return (
     <div className="ai-analysis-page">
       <div className="page-header">
-        <div className="header-left">
-          <h1 className="page-title">AI Analysis</h1>
+        <div>
+          <h1 className="page-title">
+            <Brain size={28} style={{ color: 'var(--color-primary)' }} />
+            AI Task Analysis
+          </h1>
           <p className="page-subtitle">
-            Compare Slack-reported task statuses with Asana to find discrepancies
+            Paste morning task assignments and evening updates to analyze completion status with AI
           </p>
         </div>
-        <div className="header-right">
+        <button className="btn btn-ghost btn-sm" onClick={loadExample}>
+          <Sparkles size={16} /> Load Example
+        </button>
+      </div>
+
+      {error && (
+        <div className="alert alert-error">
+          <AlertCircle size={20} />
+          {error}
+          <button className="alert-close" onClick={() => setError(null)}>
+            &times;
+          </button>
+        </div>
+      )}
+
+      <div className="ai-input-section glass-card">
+        <div className="ai-input-grid">
+          <div className="ai-input-column">
+            <label className="ai-input-label">
+              <TrendingUp size={18} />
+              Morning Task Assignments
+            </label>
+            <textarea
+              className="ai-textarea"
+              value={morningAssignments}
+              onChange={(e) => setMorningAssignments(e.target.value)}
+              placeholder="Paste your morning 'todays task list' message here..."
+              rows={15}
+            />
+            <p className="ai-input-hint">
+              Supports Slack format with <code>`@Person Name`</code> and bullet points
+            </p>
+          </div>
+
+          <div className="ai-input-column">
+            <label className="ai-input-label">
+              <CheckCircle size={18} />
+              Evening Task Updates
+            </label>
+            <textarea
+              className="ai-textarea"
+              value={eveningUpdates}
+              onChange={(e) => setEveningUpdates(e.target.value)}
+              placeholder="Paste your evening status update message here..."
+              rows={15}
+            />
+            <p className="ai-input-hint">
+              Include what was completed, what's in progress, and any blockers
+            </p>
+          </div>
+        </div>
+
+        <div className="ai-actions">
           <button
-            className="btn btn-primary"
-            onClick={runAnalysis}
-            disabled={analyzing}
+            className="btn btn-primary btn-lg"
+            onClick={handleAnalyze}
+            disabled={analyzing || !morningAssignments.trim() || !eveningUpdates.trim()}
           >
             {analyzing ? (
               <>
-                <svg className="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" opacity="0.3" />
-                  <path d="M12 2 a10 10 0 0 1 10 10" />
-                </svg>
-                Analyzing...
+                <div className="loading-spinner" style={{ width: '16px', height: '16px' }} />
+                Analyzing with AI...
               </>
             ) : (
               <>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-                Run AI Analysis
+                <Brain size={18} />
+                Analyze with AI
               </>
             )}
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="alert alert-error">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          {error}
-        </div>
-      )}
-
-      {lastAnalyzed && (
-        <div className="last-analyzed">
-          Last analyzed: {lastAnalyzed.toLocaleTimeString()}
-        </div>
-      )}
-
-      {summary && (
-        <div className="analysis-summary glass-card">
-          <h2 className="section-title">Analysis Summary</h2>
-          <div className="summary-stats">
-            <div className="stat-card">
-              <div className="stat-value">{summary.messages_read}</div>
-              <div className="stat-label">Messages Analyzed</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-value">{summary.tasks_analyzed}</div>
-              <div className="stat-label">Tasks Detected</div>
-            </div>
-            <div className="stat-card stat-warning">
-              <div className="stat-value">{summary.discrepancies}</div>
-              <div className="stat-label">Discrepancies Found</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {discrepancies.length > 0 && (
-        <div className="discrepancies-section glass-card">
-          <h2 className="section-title">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-              <line x1="12" y1="9" x2="12" y2="13" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            Status Discrepancies
-          </h2>
-          <p className="section-description">
-            These tasks have different statuses in Slack messages vs Asana
-          </p>
-          <div className="discrepancy-list">
-            {discrepancies.map((d, index) => (
-              <div key={index} className="discrepancy-item">
-                <div className="discrepancy-task">
-                  <span className="task-title">{d.task_title}</span>
-                  <span className={`confidence-badge ${getConfidenceClass(d.confidence)}`}>
-                    {formatConfidence(d.confidence)} confidence
-                  </span>
-                </div>
-                <div className="discrepancy-comparison">
-                  <div className="status-source">
-                    <span className="source-label">Slack says:</span>
-                    <span className={`status-badge ${getStatusColor(d.slack_status)}`}>
-                      {d.slack_status.replace('_', ' ')}
-                    </span>
-                  </div>
-                  <div className="status-arrow">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                      <polyline points="12 5 19 12 12 19" />
-                    </svg>
-                  </div>
-                  <div className="status-source">
-                    <span className="source-label">Asana shows:</span>
-                    <span className={`status-badge ${getStatusColor(d.asana_status)}`}>
-                      {d.asana_status.replace('_', ' ')}
-                    </span>
-                  </div>
-                </div>
-                <div className="discrepancy-actions">
-                  <button className="btn btn-sm btn-ghost">
-                    Update Asana
-                  </button>
-                  <button className="btn btn-sm btn-ghost">
-                    View Messages
-                  </button>
-                </div>
+      {results && (
+        <>
+          {/* Summary Cards */}
+          <div className="ai-summary-grid">
+            <div className="ai-summary-card glass-card">
+              <div className="ai-summary-icon" style={{ backgroundColor: 'var(--color-primary-light)' }}>
+                <TrendingUp size={24} color="var(--color-primary)" />
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {analysis.length > 0 && (
-        <div className="analysis-results glass-card">
-          <h2 className="section-title">All Task Analysis</h2>
-          <div className="analysis-table">
-            <div className="table-header">
-              <div className="col-task">Task</div>
-              <div className="col-status">Detected Status</div>
-              <div className="col-confidence">Confidence</div>
-              <div className="col-evidence">Evidence</div>
-            </div>
-            {analysis.map((item, index) => (
-              <div key={index} className="table-row">
-                <div className="col-task">{item.task_title}</div>
-                <div className="col-status">
-                  <span className={`status-badge ${getStatusColor(item.detected_status)}`}>
-                    {item.detected_status.replace('_', ' ')}
-                  </span>
-                </div>
-                <div className="col-confidence">
-                  <div className={`confidence-bar ${getConfidenceClass(item.confidence)}`}>
-                    <div
-                      className="confidence-fill"
-                      style={{ width: `${item.confidence * 100}%` }}
-                    />
-                  </div>
-                  <span className="confidence-text">{formatConfidence(item.confidence)}</span>
-                </div>
-                <div className="col-evidence">
-                  {item.evidence.length > 0 ? (
-                    <ul className="evidence-list">
-                      {item.evidence.slice(0, 2).map((e, i) => (
-                        <li key={i}>{e}</li>
-                      ))}
-                      {item.evidence.length > 2 && (
-                        <li className="more-evidence">
-                          +{item.evidence.length - 2} more
-                        </li>
-                      )}
-                    </ul>
-                  ) : (
-                    <span className="no-evidence">No direct evidence</span>
-                  )}
-                </div>
+              <div className="ai-summary-content">
+                <span className="ai-summary-value">{results.summary.total_tasks}</span>
+                <span className="ai-summary-label">Total Tasks</span>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
 
-      {!loading && !analyzing && analysis.length === 0 && discrepancies.length === 0 && (
-        <div className="empty-state glass-card">
-          <div className="empty-icon">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-            </svg>
-          </div>
-          <h3>No Analysis Data</h3>
-          <p>Click "Run AI Analysis" to analyze yesterday's Slack messages and compare task statuses with Asana.</p>
-        </div>
-      )}
+            <div className="ai-summary-card glass-card">
+              <div className="ai-summary-icon" style={{ backgroundColor: 'var(--color-success-light)' }}>
+                <CheckCircle size={24} color="var(--color-success)" />
+              </div>
+              <div className="ai-summary-content">
+                <span className="ai-summary-value">{results.summary.completed}</span>
+                <span className="ai-summary-label">Completed</span>
+              </div>
+            </div>
 
-      {loading && (
-        <div className="loading-state">
-          <div className="loading-spinner" />
-          <p>Loading previous analysis...</p>
-        </div>
+            <div className="ai-summary-card glass-card">
+              <div className="ai-summary-icon" style={{ backgroundColor: 'var(--color-warning-light)' }}>
+                <Clock size={24} color="var(--color-warning)" />
+              </div>
+              <div className="ai-summary-content">
+                <span className="ai-summary-value">{results.summary.in_progress}</span>
+                <span className="ai-summary-label">In Progress</span>
+              </div>
+            </div>
+
+            <div className="ai-summary-card glass-card">
+              <div className="ai-summary-icon" style={{ backgroundColor: 'var(--color-danger-light)' }}>
+                <XCircle size={24} color="var(--color-danger)" />
+              </div>
+              <div className="ai-summary-content">
+                <span className="ai-summary-value">{results.summary.blocked}</span>
+                <span className="ai-summary-label">Blocked</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Per-Person Breakdown */}
+          <div className="ai-person-section">
+            <h2 className="section-title">Per-Person Analysis</h2>
+            <div className="ai-person-grid">
+              {results.person_breakdown.map((person) => (
+                <div key={person.name} className="ai-person-card glass-card">
+                  <div className="ai-person-header">
+                    <h3 className="ai-person-name">@{person.name}</h3>
+                    <div className="ai-person-stats">
+                      <span className="ai-stat-badge ai-stat-success">
+                        {person.stats.completed}/{person.stats.total} ✓
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="ai-person-body">
+                    {person.completed.length > 0 && (
+                      <div className="ai-task-group">
+                        <span className="ai-task-group-label" style={{ color: 'var(--color-success)' }}>
+                          <CheckCircle size={14} /> Completed ({person.completed.length})
+                        </span>
+                        <ul className="ai-task-list">
+                          {person.completed.map((task, idx) => (
+                            <li key={idx} className="ai-task-item ai-task-completed">{task}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {person.pending.length > 0 && (
+                      <div className="ai-task-group">
+                        <span className="ai-task-group-label" style={{ color: 'var(--color-warning)' }}>
+                          <Clock size={14} /> Pending ({person.pending.length})
+                        </span>
+                        <ul className="ai-task-list">
+                          {person.pending.map((task, idx) => (
+                            <li key={idx} className="ai-task-item ai-task-pending">{task}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {person.blocked.length > 0 && (
+                      <div className="ai-task-group">
+                        <span className="ai-task-group-label" style={{ color: 'var(--color-danger)' }}>
+                          <XCircle size={14} /> Blocked ({person.blocked.length})
+                        </span>
+                        <ul className="ai-task-list">
+                          {person.blocked.map((task, idx) => (
+                            <li key={idx} className="ai-task-item ai-task-blocked">{task}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Detailed Analysis */}
+          <div className="ai-detail-section">
+            <h2 className="section-title">Detailed AI Analysis</h2>
+            <div className="ai-detail-table glass-card">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Task</th>
+                    <th>Status</th>
+                    <th>Confidence</th>
+                    <th>Evidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {results.analysis.map((item, idx) => (
+                    <tr key={idx}>
+                      <td className="ai-task-title">{item.task_title}</td>
+                      <td>
+                        <span
+                          className="ai-status-badge"
+                          style={{ backgroundColor: getStatusColor(item.detected_status) }}
+                        >
+                          {getStatusIcon(item.detected_status)}
+                          {item.detected_status.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="ai-confidence">
+                          <div
+                            className="ai-confidence-bar"
+                            style={{
+                              width: `${item.confidence * 100}%`,
+                              backgroundColor: item.confidence > 0.7 ? 'var(--color-success)' : 'var(--color-warning)',
+                            }}
+                          />
+                          <span className="ai-confidence-text">{Math.round(item.confidence * 100)}%</span>
+                        </div>
+                      </td>
+                      <td className="ai-evidence">
+                        {item.evidence.length > 0 ? (
+                          <span className="ai-evidence-text">"{item.evidence[0]}"</span>
+                        ) : (
+                          <span className="ai-no-evidence">No direct evidence</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )

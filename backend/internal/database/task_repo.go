@@ -25,11 +25,11 @@ func (r *TaskRepository) Create(ctx context.Context, task *models.Task) error {
 	task.UpdatedAt = time.Now()
 
 	err := pool.QueryRow(ctx, `
-		INSERT INTO tasks (title, description, status, priority, project_id, assignee_id, asana_id, asana_url, due_date, created_at, updated_at, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO tasks (title, description, status, priority, project_id, assignee_id, asana_id, asana_url, asana_section_gid, section_name, due_date, created_at, updated_at, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		RETURNING id
 	`, task.Title, task.Description, task.Status, task.Priority, task.ProjectID,
-		task.AssigneeID, task.AsanaID, task.AsanaURL, task.DueDate,
+		task.AssigneeID, task.AsanaID, task.AsanaURL, task.AsanaSectionGID, task.SectionName, task.DueDate,
 		task.CreatedAt, task.UpdatedAt, task.CreatedBy).Scan(&task.ID)
 
 	if err != nil {
@@ -47,11 +47,11 @@ func (r *TaskRepository) GetByID(ctx context.Context, id string) (*models.Task, 
 	var task models.Task
 	err := pool.QueryRow(ctx, `
 		SELECT id, title, description, status, priority, project_id, assignee_id,
-		       asana_id, asana_url, due_date, created_at, updated_at, created_by
+		       asana_id, asana_url, asana_section_gid, section_name, due_date, created_at, updated_at, created_by
 		FROM tasks WHERE id = $1
 	`, id).Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority,
 		&task.ProjectID, &task.AssigneeID, &task.AsanaID, &task.AsanaURL,
-		&task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy)
+		&task.AsanaSectionGID, &task.SectionName, &task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy)
 
 	if err != nil {
 		return nil, err
@@ -66,14 +66,14 @@ func (r *TaskRepository) GetByIDWithAssignee(ctx context.Context, id string) (*m
 	var task models.TaskWithAssignee
 	err := pool.QueryRow(ctx, `
 		SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id,
-		       t.assignee_id, t.asana_id, t.asana_url, t.due_date, t.created_at,
+		       t.assignee_id, t.asana_id, t.asana_url, t.asana_section_gid, t.section_name, t.due_date, t.created_at,
 		       t.updated_at, t.created_by, u.name, u.email, u.picture
 		FROM tasks t
 		LEFT JOIN users u ON t.assignee_id = u.id
 		WHERE t.id = $1
 	`, id).Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority,
 		&task.ProjectID, &task.AssigneeID, &task.AsanaID, &task.AsanaURL,
-		&task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy,
+		&task.AsanaSectionGID, &task.SectionName, &task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy,
 		&task.AssigneeName, &task.AssigneeEmail, &task.AssigneePicture)
 
 	if err != nil {
@@ -89,10 +89,10 @@ func (r *TaskRepository) Update(ctx context.Context, task *models.Task) error {
 	task.UpdatedAt = time.Now()
 	_, err := pool.Exec(ctx, `
 		UPDATE tasks SET title = $2, description = $3, status = $4, priority = $5,
-		       assignee_id = $6, due_date = $7, updated_at = $8
+		       assignee_id = $6, due_date = $7, asana_section_gid = $8, section_name = $9, updated_at = $10
 		WHERE id = $1
 	`, task.ID, task.Title, task.Description, task.Status, task.Priority,
-		task.AssigneeID, task.DueDate, task.UpdatedAt)
+		task.AssigneeID, task.DueDate, task.AsanaSectionGID, task.SectionName, task.UpdatedAt)
 
 	return err
 }
@@ -140,7 +140,7 @@ func (r *TaskRepository) List(ctx context.Context, filter *models.TaskFilter) ([
 
 	query := `
 		SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id,
-		       t.assignee_id, t.asana_id, t.asana_url, t.due_date, t.created_at,
+		       t.assignee_id, t.asana_id, t.asana_url, t.asana_section_gid, t.section_name, t.due_date, t.created_at,
 		       t.updated_at, t.created_by, u.name, u.email, u.picture
 		FROM tasks t
 		LEFT JOIN users u ON t.assignee_id = u.id
@@ -191,7 +191,7 @@ func (r *TaskRepository) List(ctx context.Context, filter *models.TaskFilter) ([
 		var task models.TaskWithAssignee
 		err := rows.Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority,
 			&task.ProjectID, &task.AssigneeID, &task.AsanaID, &task.AsanaURL,
-			&task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy,
+			&task.AsanaSectionGID, &task.SectionName, &task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy,
 			&task.AssigneeName, &task.AssigneeEmail, &task.AssigneePicture)
 		if err != nil {
 			return nil, err
@@ -254,11 +254,11 @@ func (r *TaskRepository) GetByAsanaID(ctx context.Context, asanaID string) (*mod
 	var task models.Task
 	err := pool.QueryRow(ctx, `
 		SELECT id, title, description, status, priority, project_id, assignee_id,
-		       asana_id, asana_url, due_date, created_at, updated_at, created_by
+		       asana_id, asana_url, asana_section_gid, section_name, due_date, created_at, updated_at, created_by
 		FROM tasks WHERE asana_id = $1
 	`, asanaID).Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority,
 		&task.ProjectID, &task.AssigneeID, &task.AsanaID, &task.AsanaURL,
-		&task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy)
+		&task.AsanaSectionGID, &task.SectionName, &task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy)
 
 	if err != nil {
 		return nil, err
@@ -337,6 +337,18 @@ func (r *TaskRepository) GetTasksByDateRange(ctx context.Context, projectID, fro
 	return tasks, nil
 }
 
+// UpdateSection updates only the task section
+func (r *TaskRepository) UpdateSection(ctx context.Context, taskID, sectionGID, sectionName string) error {
+	pool := GetPool()
+
+	_, err := pool.Exec(ctx, `
+		UPDATE tasks SET asana_section_gid = $2, section_name = $3, updated_at = NOW()
+		WHERE id = $1
+	`, taskID, sectionGID, sectionName)
+
+	return err
+}
+
 // BulkUpdateStatus updates status for multiple tasks
 func (r *TaskRepository) BulkUpdateStatus(ctx context.Context, taskIDs []string, status models.TaskStatus, changedBy string) error {
 	pool := GetPool()
@@ -372,4 +384,56 @@ func (r *TaskRepository) BulkUpdateStatus(ctx context.Context, taskIDs []string,
 	}
 
 	return nil
+}
+
+// GetStats returns task statistics by status
+func (r *TaskRepository) GetStats(ctx context.Context) (map[string]int, error) {
+	pool := GetPool()
+
+	stats := map[string]int{
+		"total":       0,
+		"todo":        0,
+		"in_progress": 0,
+		"review":      0,
+		"done":        0,
+		"blocked":     0,
+		"overdue":     0,
+	}
+
+	// Get counts by status
+	rows, err := pool.Query(ctx, `
+		SELECT status, COUNT(*) as count
+		FROM tasks
+		GROUP BY status
+	`)
+	if err != nil {
+		return stats, err
+	}
+	defer rows.Close()
+
+	total := 0
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return stats, err
+		}
+		stats[status] = count
+		total += count
+	}
+	stats["total"] = total
+
+	// Count overdue tasks
+	var overdueCount int
+	err = pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM tasks
+		WHERE due_date < NOW() AND status NOT IN ('done', 'review')
+	`).Scan(&overdueCount)
+	if err != nil {
+		return stats, err
+	}
+	stats["overdue"] = overdueCount
+
+	return stats, nil
 }

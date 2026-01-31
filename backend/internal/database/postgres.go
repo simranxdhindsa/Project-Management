@@ -29,8 +29,12 @@ func Connect() error {
 	config.MinConns = 2
 	config.MaxConnLifetime = time.Hour
 	config.MaxConnIdleTime = 30 * time.Minute
+	config.HealthCheckPeriod = 1 * time.Minute
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Increase timeout for Supabase connections
+	config.ConnConfig.ConnectTimeout = 30 * time.Second
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	pool, err = pgxpool.NewWithConfig(ctx, config)
@@ -38,9 +42,18 @@ func Connect() error {
 		return fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
-	// Test the connection
-	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("failed to ping database: %w", err)
+	// Test the connection with retries
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		if err := pool.Ping(ctx); err == nil {
+			return nil
+		}
+		if i < maxRetries-1 {
+			fmt.Printf("Database ping attempt %d failed, retrying in 2 seconds...\n", i+1)
+			time.Sleep(2 * time.Second)
+		} else {
+			return fmt.Errorf("failed to ping database after %d attempts: %w", maxRetries, err)
+		}
 	}
 
 	return nil

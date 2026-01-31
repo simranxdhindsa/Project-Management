@@ -13,7 +13,9 @@ import (
 )
 
 const (
-	GeminiAPIURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+	// Using gemini-1.5-flash for better free tier limits
+	// You can also use: gemini-2.0-flash (but has lower free quotas)
+	GeminiAPIURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 )
 
 // GeminiClient is the Google Gemini API client
@@ -75,22 +77,6 @@ type GeminiError struct {
 	Status  string `json:"status"`
 }
 
-// TaskStatusAnalysis represents the AI's analysis of a task's status
-type TaskStatusAnalysis struct {
-	TaskTitle      string   `json:"task_title"`
-	DetectedStatus string   `json:"detected_status"` // "completed", "in_progress", "blocked", "not_started"
-	Confidence     float64  `json:"confidence"`       // 0.0 to 1.0
-	Evidence       []string `json:"evidence"`         // Relevant message snippets
-	MessageIDs     []string `json:"message_ids"`      // IDs of messages that contributed to this analysis
-}
-
-// SlackMessageForAnalysis represents a message for AI analysis
-type SlackMessageForAnalysis struct {
-	ID        string `json:"id"`
-	UserName  string `json:"user_name"`
-	Text      string `json:"text"`
-	Timestamp string `json:"timestamp"`
-}
 
 // AnalyzeMessages analyzes Slack messages to determine task statuses
 func (c *GeminiClient) AnalyzeMessages(ctx context.Context, messages []SlackMessageForAnalysis, taskTitles []string) ([]TaskStatusAnalysis, error) {
@@ -158,73 +144,6 @@ func (c *GeminiClient) AnalyzeMessages(ctx context.Context, messages []SlackMess
 	return parseAnalysisResponse(responseText, taskTitles)
 }
 
-// buildAnalysisPrompt creates the prompt for Gemini
-func buildAnalysisPrompt(messages []SlackMessageForAnalysis, taskTitles []string) string {
-	var sb strings.Builder
-
-	sb.WriteString("You are an AI assistant that analyzes Slack messages to determine the status of tasks.\n\n")
-	sb.WriteString("## Task List:\n")
-	for i, title := range taskTitles {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, title))
-	}
-
-	sb.WriteString("\n## Slack Messages (from yesterday):\n")
-	for _, msg := range messages {
-		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", msg.Timestamp, msg.UserName, msg.Text))
-	}
-
-	sb.WriteString("\n## Instructions:\n")
-	sb.WriteString("Analyze the messages and determine the status of each task.\n")
-	sb.WriteString("Look for keywords and phrases that indicate:\n")
-	sb.WriteString("- COMPLETED: \"done\", \"finished\", \"completed\", \"merged\", \"deployed\", \"fixed\", \"resolved\", \"closed\", \"shipped\"\n")
-	sb.WriteString("- IN_PROGRESS: \"working on\", \"still doing\", \"in progress\", \"almost done\", \"halfway\", \"debugging\"\n")
-	sb.WriteString("- BLOCKED: \"blocked\", \"stuck\", \"waiting\", \"need help\", \"can't proceed\"\n")
-	sb.WriteString("- NOT_STARTED: No mentions or \"haven't started\", \"will start\"\n\n")
-
-	sb.WriteString("## Output Format (JSON array):\n")
-	sb.WriteString("```json\n")
-	sb.WriteString("[\n")
-	sb.WriteString("  {\n")
-	sb.WriteString("    \"task_title\": \"exact task title from list\",\n")
-	sb.WriteString("    \"detected_status\": \"completed|in_progress|blocked|not_started\",\n")
-	sb.WriteString("    \"confidence\": 0.85,\n")
-	sb.WriteString("    \"evidence\": [\"relevant quote from message\"]\n")
-	sb.WriteString("  }\n")
-	sb.WriteString("]\n")
-	sb.WriteString("```\n\n")
-	sb.WriteString("Only include tasks that have some evidence in the messages. Output ONLY the JSON array, no other text.")
-
-	return sb.String()
-}
-
-// parseAnalysisResponse parses the AI's response into structured data
-func parseAnalysisResponse(response string, taskTitles []string) ([]TaskStatusAnalysis, error) {
-	// Extract JSON from response (it might have markdown code blocks)
-	jsonStr := response
-	if idx := strings.Index(response, "["); idx != -1 {
-		jsonStr = response[idx:]
-	}
-	if idx := strings.LastIndex(jsonStr, "]"); idx != -1 {
-		jsonStr = jsonStr[:idx+1]
-	}
-
-	var analyses []TaskStatusAnalysis
-	if err := json.Unmarshal([]byte(jsonStr), &analyses); err != nil {
-		// If JSON parsing fails, return empty results with low confidence
-		results := make([]TaskStatusAnalysis, 0, len(taskTitles))
-		for _, title := range taskTitles {
-			results = append(results, TaskStatusAnalysis{
-				TaskTitle:      title,
-				DetectedStatus: "unknown",
-				Confidence:     0.0,
-				Evidence:       []string{"Unable to analyze"},
-			})
-		}
-		return results, nil
-	}
-
-	return analyses, nil
-}
 
 // CompareStatuses compares AI-detected statuses with actual Asana statuses
 func CompareStatuses(analyses []TaskStatusAnalysis, asanaStatuses map[string]string) []StatusDiscrepancy {

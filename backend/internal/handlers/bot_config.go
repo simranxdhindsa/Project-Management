@@ -1,0 +1,271 @@
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/dhindsa/project-management/internal/database"
+	"github.com/dhindsa/project-management/internal/middleware"
+	"github.com/dhindsa/project-management/internal/models"
+	"github.com/gorilla/mux"
+)
+
+// BotConfigHandler handles bot configuration API requests
+type BotConfigHandler struct {
+	botRepo *database.BotConfigRepository
+}
+
+// NewBotConfigHandler creates a new BotConfigHandler
+func NewBotConfigHandler() *BotConfigHandler {
+	return &BotConfigHandler{
+		botRepo: database.NewBotConfigRepository(),
+	}
+}
+
+// ListBots returns all bot configurations
+func (h *BotConfigHandler) ListBots(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	if database.GetPool() == nil {
+		sendJSON(w, http.StatusOK, Response{
+			Success: true,
+			Data:    getDefaultTemplates(),
+		})
+		return
+	}
+
+	configs, err := h.botRepo.List(r.Context())
+	if err != nil {
+		// Return default templates on error
+		sendJSON(w, http.StatusOK, Response{
+			Success: true,
+			Data:    getDefaultTemplates(),
+		})
+		return
+	}
+
+	if len(configs) == 0 {
+		sendJSON(w, http.StatusOK, Response{
+			Success: true,
+			Data:    getDefaultTemplates(),
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data:    configs,
+	})
+}
+
+// GetBot returns a single bot configuration
+func (h *BotConfigHandler) GetBot(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	vars := mux.Vars(r)
+	botID := vars["id"]
+
+	config, err := h.botRepo.GetByID(r.Context(), botID)
+	if err != nil {
+		sendJSON(w, http.StatusNotFound, Response{Success: false, Message: "Bot not found"})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data:    config,
+	})
+}
+
+// CreateBot creates a new bot configuration
+func (h *BotConfigHandler) CreateBot(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	var req models.CreateBotConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Invalid request body"})
+		return
+	}
+
+	if req.Name == "" {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Name is required"})
+		return
+	}
+
+	if req.BotType == "" {
+		req.BotType = models.BotTypeCustom
+	}
+	if req.Variables == "" {
+		req.Variables = "[]"
+	}
+
+	config := &models.BotConfig{
+		Name:        req.Name,
+		Description: req.Description,
+		BotType:     req.BotType,
+		Prompt:      req.Prompt,
+		Variables:   req.Variables,
+		IsActive:    true,
+		CreatedBy:   user.ID,
+	}
+
+	if err := h.botRepo.Create(r.Context(), config); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{
+			Success: false,
+			Message: "Failed to create bot: " + err.Error(),
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusCreated, Response{
+		Success: true,
+		Data:    config,
+		Message: "Bot created successfully",
+	})
+}
+
+// UpdateBot updates a bot configuration
+func (h *BotConfigHandler) UpdateBot(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	vars := mux.Vars(r)
+	botID := vars["id"]
+
+	config, err := h.botRepo.GetByID(r.Context(), botID)
+	if err != nil {
+		sendJSON(w, http.StatusNotFound, Response{Success: false, Message: "Bot not found"})
+		return
+	}
+
+	var req models.UpdateBotConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Invalid request body"})
+		return
+	}
+
+	if req.Name != nil {
+		config.Name = *req.Name
+	}
+	if req.Description != nil {
+		config.Description = *req.Description
+	}
+	if req.Prompt != nil {
+		config.Prompt = *req.Prompt
+	}
+	if req.Variables != nil {
+		config.Variables = *req.Variables
+	}
+	if req.IsActive != nil {
+		config.IsActive = *req.IsActive
+	}
+
+	if err := h.botRepo.Update(r.Context(), config); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{
+			Success: false,
+			Message: "Failed to update bot",
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data:    config,
+		Message: "Bot updated successfully",
+	})
+}
+
+// DeleteBot deletes a bot configuration
+func (h *BotConfigHandler) DeleteBot(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	vars := mux.Vars(r)
+	botID := vars["id"]
+
+	if err := h.botRepo.Delete(r.Context(), botID); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{
+			Success: false,
+			Message: "Failed to delete bot",
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Message: "Bot deleted successfully",
+	})
+}
+
+// GetTemplates returns available bot templates
+func (h *BotConfigHandler) GetTemplates(w http.ResponseWriter, r *http.Request) {
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data:    getDefaultTemplates(),
+	})
+}
+
+// getDefaultTemplates returns the built-in bot templates
+func getDefaultTemplates() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"id":          "template-slack-analysis",
+			"name":        "Slack Task Analysis",
+			"description": "Analyzes Slack messages to determine task completion status",
+			"bot_type":    "slack_analysis",
+			"is_active":   true,
+			"prompt": `Analyze the following Slack messages from channel {{$CHANNEL$}} for date {{$DATE$}}.
+
+Morning task assignments:
+{{$MORNING_MESSAGES$}}
+
+Evening status updates:
+{{$EVENING_MESSAGES$}}
+
+For each team member, determine:
+1. Which tasks were assigned in the morning
+2. Which tasks were reported as completed in the evening
+3. Which tasks are still pending
+4. Any new tasks that were added during the day
+
+Return a JSON response with team_members array containing name, assigned_tasks, completed_tasks, pending_tasks, new_tasks, and notes.`,
+			"variables": `[{"name":"CHANNEL","label":"Slack Channel","type":"text","default":"#ardoise-platform","required":true},{"name":"DATE","label":"Date","type":"date","default":"today","required":true},{"name":"MORNING_MESSAGES","label":"Morning Messages","type":"text","default":"","required":false,"description":"Auto-filled from Slack"},{"name":"EVENING_MESSAGES","label":"Evening Messages","type":"text","default":"","required":false,"description":"Auto-filled from Slack"}]`,
+		},
+		{
+			"id":          "template-daily-report",
+			"name":        "Daily Report Generator",
+			"description": "Generates formatted daily task reports for Slack",
+			"bot_type":    "daily_report",
+			"is_active":   true,
+			"prompt": "Generate a daily task report for {{$DATE$}} for team {{$TEAM_NAME$}}.\n\nCurrent tasks by team member:\n{{$TASK_DATA$}}\n\nFormat as a Slack message with backtick headers and bullet points.",
+			"variables": `[{"name":"DATE","label":"Date","type":"date","default":"today","required":true},{"name":"TEAM_NAME","label":"Team Name","type":"text","default":"Ardoise Platform","required":true},{"name":"TASK_DATA","label":"Task Data","type":"text","default":"","required":false,"description":"Auto-filled from task database"}]`,
+		},
+		{
+			"id":          "template-custom",
+			"name":        "Custom Bot",
+			"description": "Create your own bot with custom prompts and variables",
+			"bot_type":    "custom",
+			"is_active":   true,
+			"prompt":      "Your custom prompt here. Use {{$VARIABLE_NAME$}} for variables.",
+			"variables":   `[]`,
+		},
+	}
+}

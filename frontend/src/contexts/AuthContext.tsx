@@ -44,6 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
+      // Check for dev mode
+      const devUser = localStorage.getItem('dev-user')
+      if (token.startsWith('dev-mode-token') && devUser) {
+        setUser(JSON.parse(devUser))
+        return
+      }
+
       const response = await api.getMe()
       if (response.success && response.data) {
         setUser(response.data)
@@ -98,10 +105,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
-      await api.logout()
+      // Don't call API logout if in dev mode
+      const token = api.getToken()
+      if (!token?.startsWith('dev-mode-token')) {
+        await api.logout()
+      }
     } finally {
       api.setToken(null)
       setUser(null)
+      localStorage.removeItem('dev-user')
       // Clear refresh interval
       if (refreshIntervalRef.current) {
         clearInterval(refreshIntervalRef.current)

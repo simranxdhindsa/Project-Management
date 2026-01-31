@@ -33,6 +33,9 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 export default function Login() {
   const { login, isLoading } = useAuth()
   const [rememberMe, setRememberMe] = useState(true) // Default to checked
+  const [showDevLogin, setShowDevLogin] = useState(false)
+  const [devEmail, setDevEmail] = useState('')
+  const [devPassword, setDevPassword] = useState('')
 
   const handleGoogleCallback = useCallback(
     async (response: { credential: string }) => {
@@ -78,6 +81,26 @@ export default function Login() {
     }
   }, [handleGoogleCallback])
 
+  const handleDevLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    // Hardcoded dev credentials
+    if (devEmail === 'simranjot@apyhub.com' && devPassword === 'Testing@123') {
+      // Create a fake JWT token for dev mode
+      const fakeToken = 'dev-mode-token-' + Date.now()
+      localStorage.setItem('token', fakeToken)
+      localStorage.setItem('dev-user', JSON.stringify({
+        id: 'dev-user-1',
+        email: 'simranjot@apyhub.com',
+        name: 'Simranjot Singh',
+        role: 'admin',
+        picture: ''
+      }))
+      window.location.reload()
+    } else {
+      alert('Invalid credentials!')
+    }
+  }
+
   const features = [
     {
       icon: <KanbanSquare className="feature-icon" />,
@@ -117,13 +140,61 @@ export default function Login() {
 
         {/* Login Card */}
         <div className="login-card glass-static">
-          <h2 className="login-card-title">Welcome Back</h2>
+          <h2
+            className="login-card-title"
+            onClick={() => setShowDevLogin(!showDevLogin)}
+            style={{ cursor: 'pointer', userSelect: 'none' }}
+            title="Click for dev login"
+          >
+            Welcome Back
+          </h2>
           <p className="login-card-description">
             Sign in with your company Google account
           </p>
 
           <div className="login-button-container">
-            {isLoading ? (
+            {showDevLogin ? (
+              <form onSubmit={handleDevLogin} className="dev-login-form">
+                <div className="form-group">
+                  <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', display: 'block' }}>
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={devEmail}
+                    onChange={(e) => setDevEmail(e.target.value)}
+                    placeholder="Enter email"
+                    autoFocus
+                    style={{ marginBottom: '0.75rem' }}
+                  />
+                </div>
+                <div className="form-group">
+                  <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', display: 'block' }}>
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    value={devPassword}
+                    onChange={(e) => setDevPassword(e.target.value)}
+                    placeholder="Enter password"
+                    style={{ marginBottom: '1rem' }}
+                  />
+                </div>
+                <button type="submit" className="btn-primary" style={{ width: '100%' }}>
+                  Login
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ width: '100%', marginTop: '0.5rem' }}
+                  onClick={() => setShowDevLogin(false)}
+                >
+                  Back to Google
+                </button>
+              </form>
+            ) : isLoading ? (
               <div className="loading-container">
                 <div className="loading-spinner"></div>
                 <span className="loading-text">Signing in...</span>

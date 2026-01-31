@@ -20,6 +20,8 @@ export interface Task {
   assignee?: Assignee
   asana_id?: string
   asana_url?: string
+  asana_section_gid?: string
+  section_name?: string
   due_date?: string
   created_at?: string
   updated_at?: string
@@ -135,6 +137,14 @@ export interface AsanaProject {
   name: string
 }
 
+// Asana Section (column) type
+export interface AsanaSection {
+  gid: string
+  name: string
+  position: number
+  color?: string
+}
+
 export interface SlackChannel {
   id: string
   name: string
@@ -173,6 +183,38 @@ export interface PaginatedResponse<T> {
   total: number
   page: number
   limit: number
+}
+
+// Daily Task List Types
+export interface DailyTaskItem {
+  id: string
+  assignment_id: string
+  task_id?: string
+  title: string
+  priority: 'high' | 'medium' | 'low'
+  position: number
+  carried_over: boolean
+  created_at?: string
+}
+
+export interface UserTaskAssignment {
+  id: string
+  daily_list_id: string
+  user_id?: string
+  user_name: string
+  slack_handle: string
+  position: number
+  tasks: DailyTaskItem[]
+  created_at?: string
+}
+
+export interface DailyTaskList {
+  id: string
+  date: string
+  project_id: string
+  assignments: UserTaskAssignment[]
+  created_at?: string
+  updated_at?: string
 }
 
 // Slack Analysis Types

@@ -77,18 +77,20 @@ func (h *TaskHandler) GetTasks(w http.ResponseWriter, r *http.Request) {
 	response := make([]map[string]interface{}, len(tasks))
 	for i, task := range tasks {
 		response[i] = map[string]interface{}{
-			"id":          task.ID,
-			"title":       task.Title,
-			"description": task.Description,
-			"status":      task.Status,
-			"priority":    task.Priority,
-			"project_id":  task.ProjectID,
-			"assignee_id": task.AssigneeID,
-			"asana_id":    task.AsanaID,
-			"asana_url":   task.AsanaURL,
-			"due_date":    task.DueDate,
-			"created_at":  task.CreatedAt,
-			"updated_at":  task.UpdatedAt,
+			"id":                task.ID,
+			"title":             task.Title,
+			"description":       task.Description,
+			"status":            task.Status,
+			"priority":          task.Priority,
+			"project_id":        task.ProjectID,
+			"assignee_id":       task.AssigneeID,
+			"asana_id":          task.AsanaID,
+			"asana_url":         task.AsanaURL,
+			"asana_section_gid": task.AsanaSectionGID,
+			"section_name":      task.SectionName,
+			"due_date":          task.DueDate,
+			"created_at":        task.CreatedAt,
+			"updated_at":        task.UpdatedAt,
 		}
 		if task.AssigneeName != nil {
 			response[i]["assignee"] = map[string]interface{}{
@@ -459,5 +461,94 @@ func (h *TaskHandler) BulkUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, Response{
 		Success: true,
 		Message: "Tasks updated successfully",
+	})
+}
+
+// UpdateTaskSection updates a task's section (for Kanban column move)
+func (h *TaskHandler) UpdateTaskSection(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{
+			Success: false,
+			Message: "Unauthorized",
+		})
+		return
+	}
+
+	vars := mux.Vars(r)
+	taskID := vars["id"]
+
+	var req models.UpdateTaskSectionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{
+			Success: false,
+			Message: "Invalid request body",
+		})
+		return
+	}
+
+	if req.SectionGID == "" || req.SectionName == "" {
+		sendJSON(w, http.StatusBadRequest, Response{
+			Success: false,
+			Message: "section_gid and section_name are required",
+		})
+		return
+	}
+
+	if err := h.taskRepo.UpdateSection(r.Context(), taskID, req.SectionGID, req.SectionName); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{
+			Success: false,
+			Message: "Failed to update task section",
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Message: "Task section updated to " + req.SectionName,
+	})
+}
+
+// GetStats returns task statistics
+func (h *TaskHandler) GetStats(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{
+			Success: false,
+			Message: "Unauthorized",
+		})
+		return
+	}
+
+	// Check if database is connected
+	if database.GetPool() == nil {
+		// Return zero stats if no database
+		sendJSON(w, http.StatusOK, Response{
+			Success: true,
+			Data: map[string]int{
+				"total":       0,
+				"todo":        0,
+				"in_progress": 0,
+				"review":      0,
+				"done":        0,
+				"blocked":     0,
+				"overdue":     0,
+			},
+		})
+		return
+	}
+
+	stats, err := h.taskRepo.GetStats(r.Context())
+	if err != nil{
+		sendJSON(w, http.StatusInternalServerError, Response{
+			Success: false,
+			Message: "Failed to fetch task statistics",
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data:    stats,
 	})
 }

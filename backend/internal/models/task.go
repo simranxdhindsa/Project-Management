@@ -23,19 +23,21 @@ const (
 
 // Task represents a task in the system
 type Task struct {
-	ID          string       `json:"id" db:"id"`
-	Title       string       `json:"title" db:"title"`
-	Description string       `json:"description" db:"description"`
-	Status      TaskStatus   `json:"status" db:"status"`
-	Priority    TaskPriority `json:"priority" db:"priority"`
-	ProjectID   string       `json:"project_id" db:"project_id"`
-	AssigneeID  *string      `json:"assignee_id,omitempty" db:"assignee_id"`
-	AsanaID     *string      `json:"asana_id,omitempty" db:"asana_id"`
-	AsanaURL    *string      `json:"asana_url,omitempty" db:"asana_url"`
-	DueDate     *time.Time   `json:"due_date,omitempty" db:"due_date"`
-	CreatedAt   time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at" db:"updated_at"`
-	CreatedBy   string       `json:"created_by" db:"created_by"`
+	ID              string       `json:"id" db:"id"`
+	Title           string       `json:"title" db:"title"`
+	Description     string       `json:"description" db:"description"`
+	Status          TaskStatus   `json:"status" db:"status"`
+	Priority        TaskPriority `json:"priority" db:"priority"`
+	ProjectID       string       `json:"project_id" db:"project_id"`
+	AssigneeID      *string      `json:"assignee_id,omitempty" db:"assignee_id"`
+	AsanaID         *string      `json:"asana_id,omitempty" db:"asana_id"`
+	AsanaURL        *string      `json:"asana_url,omitempty" db:"asana_url"`
+	AsanaSectionGID *string      `json:"asana_section_gid,omitempty" db:"asana_section_gid"`
+	SectionName     *string      `json:"section_name,omitempty" db:"section_name"`
+	DueDate         *time.Time   `json:"due_date,omitempty" db:"due_date"`
+	CreatedAt       time.Time    `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time    `json:"updated_at" db:"updated_at"`
+	CreatedBy       string       `json:"created_by" db:"created_by"`
 }
 
 // TaskWithAssignee includes assignee details
@@ -70,6 +72,12 @@ type UpdateTaskRequest struct {
 // UpdateTaskStatusRequest represents the request to update task status
 type UpdateTaskStatusRequest struct {
 	Status TaskStatus `json:"status" validate:"required"`
+}
+
+// UpdateTaskSectionRequest represents the request to move a task to a different section
+type UpdateTaskSectionRequest struct {
+	SectionGID  string `json:"section_gid" validate:"required"`
+	SectionName string `json:"section_name" validate:"required"`
 }
 
 // TaskFilter represents filters for querying tasks
