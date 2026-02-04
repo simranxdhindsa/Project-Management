@@ -2,13 +2,14 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/models"
 )
 
-// DailyTaskRepository handles daily task list database operations
+// DailyTaskRepository handles daily task management database operations
 type DailyTaskRepository struct{}
 
 // NewDailyTaskRepository creates a new DailyTaskRepository
@@ -16,291 +17,414 @@ func NewDailyTaskRepository() *DailyTaskRepository {
 	return &DailyTaskRepository{}
 }
 
-// GetByDate retrieves a daily task list for a specific date and project
-func (r *DailyTaskRepository) GetByDate(ctx context.Context, date, projectID string) (*models.DailyTaskList, error) {
+// ===== DAILY ANALYSES =====
+
+// SaveAnalysis saves or updates an AI analysis for a specific date
+func (r *DailyTaskRepository) SaveAnalysis(ctx context.Context, req *models.SaveAnalysisRequest) (*models.DailyAnalysis, error) {
 	pool := GetPool()
 
-	var list models.DailyTaskList
-	err := pool.QueryRow(ctx, `
-		SELECT id, date, project_id, created_at, updated_at
-		FROM daily_task_lists
-		WHERE date = $1 AND project_id = $2
-	`, date, projectID).Scan(&list.ID, &list.Date, &list.ProjectID, &list.CreatedAt, &list.UpdatedAt)
-
+	// Convert analysis result to JSONB
+	analysisJSON, err := json.Marshal(req.AnalysisResult)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal analysis result: %w", err)
 	}
 
-	// Fetch assignments
-	assignments, err := r.getAssignments(ctx, list.ID)
-	if err != nil {
-		return nil, err
-	}
-	list.Assignments = assignments
-
-	return &list, nil
-}
-
-// Create creates a new daily task list
-func (r *DailyTaskRepository) Create(ctx context.Context, list *models.DailyTaskList) error {
-	pool := GetPool()
-
+	var analysis models.DailyAnalysis
 	now := time.Now()
-	list.CreatedAt = now
-	list.UpdatedAt = now
 
-	err := pool.QueryRow(ctx, `
-		INSERT INTO daily_task_lists (date, project_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, list.Date, list.ProjectID, list.CreatedAt, list.UpdatedAt).Scan(&list.ID)
-
-	return err
-}
-
-// DeleteByDate deletes a daily task list for a specific date (cascade deletes assignments and items)
-func (r *DailyTaskRepository) DeleteByDate(ctx context.Context, date, projectID string) error {
-	pool := GetPool()
-
-	_, err := pool.Exec(ctx, `
-		DELETE FROM daily_task_lists WHERE date = $1 AND project_id = $2
-	`, date, projectID)
-
-	return err
-}
-
-// CreateAssignment adds a user assignment to a daily task list
-func (r *DailyTaskRepository) CreateAssignment(ctx context.Context, assignment *models.UserTaskAssignment) error {
-	pool := GetPool()
-
-	assignment.CreatedAt = time.Now()
-
-	err := pool.QueryRow(ctx, `
-		INSERT INTO daily_task_assignments (daily_list_id, user_id, user_name, slack_handle, position, created_at)
+	// Upsert: Insert or update if date already exists
+	err = pool.QueryRow(ctx, `
+		INSERT INTO daily_analyses (date, morning_message, evening_message, analysis_result, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id
-	`, assignment.DailyListID, assignment.UserID, assignment.UserName, assignment.SlackHandle,
-		assignment.Position, assignment.CreatedAt).Scan(&assignment.ID)
+		ON CONFLICT (date)
+		DO UPDATE SET
+			morning_message = EXCLUDED.morning_message,
+			evening_message = EXCLUDED.evening_message,
+			analysis_result = EXCLUDED.analysis_result,
+			updated_at = EXCLUDED.updated_at
+		RETURNING id, date, morning_message, evening_message, analysis_result, created_at, updated_at
+	`, req.Date, req.MorningMessage, req.EveningMessage, analysisJSON, now, now).Scan(
+		&analysis.ID, &analysis.Date, &analysis.MorningMessage, &analysis.EveningMessage,
+		&analysisJSON, &analysis.CreatedAt, &analysis.UpdatedAt,
+	)
 
-	return err
+	if err != nil {
+		return nil, fmt.Errorf("failed to save analysis: %w", err)
+	}
+
+	// Unmarshal analysis result
+	if err := json.Unmarshal(analysisJSON, &analysis.AnalysisResult); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal analysis result: %w", err)
+	}
+
+	return &analysis, nil
 }
 
-// CreateTaskItem adds a task item to an assignment
-func (r *DailyTaskRepository) CreateTaskItem(ctx context.Context, item *models.DailyTaskItem) error {
+// GetAnalysisByDate retrieves an analysis for a specific date
+func (r *DailyTaskRepository) GetAnalysisByDate(ctx context.Context, date string) (*models.DailyAnalysis, error) {
 	pool := GetPool()
 
-	item.CreatedAt = time.Now()
+	var analysis models.DailyAnalysis
+	var analysisJSON []byte
 
 	err := pool.QueryRow(ctx, `
-		INSERT INTO daily_task_items (assignment_id, task_id, title, priority, position, carried_over, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id
-	`, item.AssignmentID, item.TaskID, item.Title, item.Priority, item.Position,
-		item.CarriedOver, item.CreatedAt).Scan(&item.ID)
+		SELECT id, date, morning_message, evening_message, analysis_result, created_at, updated_at
+		FROM daily_analyses
+		WHERE date = $1
+	`, date).Scan(
+		&analysis.ID, &analysis.Date, &analysis.MorningMessage, &analysis.EveningMessage,
+		&analysisJSON, &analysis.CreatedAt, &analysis.UpdatedAt,
+	)
 
-	return err
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal analysis result
+	if err := json.Unmarshal(analysisJSON, &analysis.AnalysisResult); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal analysis result: %w", err)
+	}
+
+	return &analysis, nil
 }
 
-// ReorderTaskItems updates positions of task items
-func (r *DailyTaskRepository) ReorderTaskItems(ctx context.Context, assignmentID string, itemIDs []string) error {
+// ===== DAILY TASKS =====
+
+// SaveDailyTasks saves individual task records from analysis
+func (r *DailyTaskRepository) SaveDailyTasks(ctx context.Context, analysisID, date string, tasks []models.DailyTask) error {
 	pool := GetPool()
 
-	for i, itemID := range itemIDs {
+	// Delete existing tasks for this analysis
+	_, err := pool.Exec(ctx, `DELETE FROM daily_tasks WHERE analysis_id = $1`, analysisID)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing tasks: %w", err)
+	}
+
+	// Insert new tasks
+	for _, task := range tasks {
 		_, err := pool.Exec(ctx, `
-			UPDATE daily_task_items SET position = $1
-			WHERE id = $2 AND assignment_id = $3
-		`, i, itemID, assignmentID)
+			INSERT INTO daily_tasks (analysis_id, date, assignee, task_title, status, original_title, confidence, evidence, carried_from_date)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`, analysisID, date, task.Assignee, task.TaskTitle, task.Status, task.OriginalTitle, task.Confidence, task.Evidence, task.CarriedFromDate)
 		if err != nil {
-			return fmt.Errorf("failed to update position for item %s: %w", itemID, err)
+			return fmt.Errorf("failed to insert task: %w", err)
 		}
 	}
 
 	return nil
 }
 
-// DeleteTaskItem removes a task item
-func (r *DailyTaskRepository) DeleteTaskItem(ctx context.Context, itemID string) error {
-	pool := GetPool()
-
-	_, err := pool.Exec(ctx, `DELETE FROM daily_task_items WHERE id = $1`, itemID)
-	return err
-}
-
-// UpdateTaskItem updates a task item's title/priority
-func (r *DailyTaskRepository) UpdateTaskItem(ctx context.Context, itemID, title, priority string) error {
-	pool := GetPool()
-
-	_, err := pool.Exec(ctx, `
-		UPDATE daily_task_items SET title = $2, priority = $3
-		WHERE id = $1
-	`, itemID, title, priority)
-	return err
-}
-
-// DeleteAssignment removes a user assignment and its task items (cascade)
-func (r *DailyTaskRepository) DeleteAssignment(ctx context.Context, assignmentID string) error {
-	pool := GetPool()
-
-	_, err := pool.Exec(ctx, `DELETE FROM daily_task_assignments WHERE id = $1`, assignmentID)
-	return err
-}
-
-// UpdateAssignment updates a user assignment's name/handle
-func (r *DailyTaskRepository) UpdateAssignment(ctx context.Context, assignmentID string, userName, slackHandle string) error {
-	pool := GetPool()
-
-	_, err := pool.Exec(ctx, `
-		UPDATE daily_task_assignments SET user_name = $2, slack_handle = $3
-		WHERE id = $1
-	`, assignmentID, userName, slackHandle)
-	return err
-}
-
-// UpdateListTimestamp updates the updated_at timestamp for a daily task list
-func (r *DailyTaskRepository) UpdateListTimestamp(ctx context.Context, listID string) error {
-	pool := GetPool()
-
-	_, err := pool.Exec(ctx, `
-		UPDATE daily_task_lists SET updated_at = NOW() WHERE id = $1
-	`, listID)
-	return err
-}
-
-// getAssignments fetches all assignments for a daily task list with their task items
-func (r *DailyTaskRepository) getAssignments(ctx context.Context, listID string) ([]models.UserTaskAssignment, error) {
+// GetTasksByDate retrieves all tasks for a specific date
+func (r *DailyTaskRepository) GetTasksByDate(ctx context.Context, date string) ([]models.DailyTask, error) {
 	pool := GetPool()
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, daily_list_id, user_id, user_name, slack_handle, position, created_at
-		FROM daily_task_assignments
-		WHERE daily_list_id = $1
-		ORDER BY position ASC
-	`, listID)
+		SELECT id, analysis_id, date, assignee, task_title, status, original_title, confidence, evidence, carried_from_date, created_at
+		FROM daily_tasks
+		WHERE date = $1
+		ORDER BY assignee ASC, created_at ASC
+	`, date)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var assignments []models.UserTaskAssignment
+	var tasks []models.DailyTask
 	for rows.Next() {
-		var a models.UserTaskAssignment
-		err := rows.Scan(&a.ID, &a.DailyListID, &a.UserID, &a.UserName, &a.SlackHandle, &a.Position, &a.CreatedAt)
+		var task models.DailyTask
+		err := rows.Scan(&task.ID, &task.AnalysisID, &task.Date, &task.Assignee, &task.TaskTitle,
+			&task.Status, &task.OriginalTitle, &task.Confidence, &task.Evidence, &task.CarriedFromDate, &task.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
-		assignments = append(assignments, a)
+		tasks = append(tasks, task)
 	}
 
-	// Fetch task items for each assignment
-	for i := range assignments {
-		items, err := r.getTaskItems(ctx, assignments[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		assignments[i].Tasks = items
-	}
-
-	return assignments, nil
+	return tasks, nil
 }
 
-// getTaskItems fetches all task items for an assignment
-func (r *DailyTaskRepository) getTaskItems(ctx context.Context, assignmentID string) ([]models.DailyTaskItem, error) {
+// GetTasksByAssignee retrieves tasks grouped by assignee for a specific date
+func (r *DailyTaskRepository) GetTasksByAssignee(ctx context.Context, date string) ([]models.TasksByAssignee, error) {
 	pool := GetPool()
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, assignment_id, task_id, title, priority, position, carried_over, created_at
-		FROM daily_task_items
-		WHERE assignment_id = $1
-		ORDER BY position ASC
-	`, assignmentID)
+		SELECT assignee, task_title, status
+		FROM daily_tasks
+		WHERE date = $1
+		ORDER BY assignee ASC
+	`, date)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var items []models.DailyTaskItem
+	// Group by assignee
+	assigneeMap := make(map[string]*models.TasksByAssignee)
 	for rows.Next() {
-		var item models.DailyTaskItem
-		err := rows.Scan(&item.ID, &item.AssignmentID, &item.TaskID, &item.Title,
-			&item.Priority, &item.Position, &item.CarriedOver, &item.CreatedAt)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-
-	return items, nil
-}
-
-// GetPendingTasksByAssignee gets yesterday's pending tasks grouped by assignee
-func (r *DailyTaskRepository) GetPendingTasksByAssignee(ctx context.Context, projectID string) (map[string][]*models.TaskWithAssignee, error) {
-	pool := GetPool()
-
-	// Get tasks that are todo or in_progress, grouped by assignee
-	rows, err := pool.Query(ctx, `
-		SELECT t.id, t.title, t.description, t.status, t.priority, t.project_id,
-		       t.assignee_id, t.asana_id, t.asana_url, t.asana_section_gid, t.section_name,
-		       t.due_date, t.created_at, t.updated_at, t.created_by,
-		       u.name as assignee_name, u.email as assignee_email, u.picture as assignee_picture
-		FROM tasks t
-		LEFT JOIN users u ON t.assignee_id = u.id
-		WHERE t.project_id = $1
-		AND t.status IN ('todo', 'in_progress')
-		ORDER BY u.name ASC,
-		         CASE t.priority
-		           WHEN 'high' THEN 1
-		           WHEN 'medium' THEN 2
-		           WHEN 'low' THEN 3
-		         END ASC,
-		         t.created_at ASC
-	`, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	result := make(map[string][]*models.TaskWithAssignee)
-	for rows.Next() {
-		var task models.TaskWithAssignee
-		err := rows.Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority,
-			&task.ProjectID, &task.AssigneeID, &task.AsanaID, &task.AsanaURL,
-			&task.AsanaSectionGID, &task.SectionName,
-			&task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy,
-			&task.AssigneeName, &task.AssigneeEmail, &task.AssigneePicture)
-		if err != nil {
+		var assignee, taskTitle, status string
+		if err := rows.Scan(&assignee, &taskTitle, &status); err != nil {
 			return nil, err
 		}
 
-		name := "Unassigned"
-		if task.AssigneeName != nil {
-			name = *task.AssigneeName
+		if assigneeMap[assignee] == nil {
+			assigneeMap[assignee] = &models.TasksByAssignee{
+				Assignee:  assignee,
+				Completed: []string{},
+				Pending:   []string{},
+				Blocked:   []string{},
+				Skipped:   []string{},
+			}
 		}
-		result[name] = append(result[name], &task)
+
+		switch status {
+		case "done":
+			assigneeMap[assignee].Completed = append(assigneeMap[assignee].Completed, taskTitle)
+		case "pending", "in_progress":
+			assigneeMap[assignee].Pending = append(assigneeMap[assignee].Pending, taskTitle)
+		case "blocked":
+			assigneeMap[assignee].Blocked = append(assigneeMap[assignee].Blocked, taskTitle)
+		case "not_mentioned", "skipped":
+			assigneeMap[assignee].Skipped = append(assigneeMap[assignee].Skipped, taskTitle)
+		}
+	}
+
+	// Convert map to slice
+	var result []models.TasksByAssignee
+	for _, v := range assigneeMap {
+		result = append(result, *v)
 	}
 
 	return result, nil
 }
 
-// GetUserSlackHandles retrieves slack handles for users
-func (r *DailyTaskRepository) GetUserSlackHandles(ctx context.Context) (map[string]string, error) {
+// ===== NEXT DAY TASKS =====
+
+// GetNextDayTasks retrieves all tasks for a specific target date
+func (r *DailyTaskRepository) GetNextDayTasks(ctx context.Context, targetDate string) ([]models.NextDayTask, error) {
 	pool := GetPool()
 
 	rows, err := pool.Query(ctx, `
-		SELECT name, COALESCE(slack_handle, '') FROM users WHERE slack_handle IS NOT NULL AND slack_handle != ''
-	`)
+		SELECT id, target_date, assignee, task_title, priority, position, is_carried_forward, source_date, source_task_id, notes, created_by, created_at, updated_at
+		FROM next_day_tasks
+		WHERE target_date = $1
+		ORDER BY assignee ASC, position ASC
+	`, targetDate)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	handles := make(map[string]string)
+	var tasks []models.NextDayTask
 	for rows.Next() {
-		var name, handle string
-		if err := rows.Scan(&name, &handle); err != nil {
+		var task models.NextDayTask
+		err := rows.Scan(&task.ID, &task.TargetDate, &task.Assignee, &task.TaskTitle, &task.Priority,
+			&task.Position, &task.IsCarriedForward, &task.SourceDate, &task.SourceTaskID, &task.Notes,
+			&task.CreatedBy, &task.CreatedAt, &task.UpdatedAt)
+		if err != nil {
 			return nil, err
 		}
-		handles[name] = handle
+		tasks = append(tasks, task)
 	}
 
-	return handles, nil
+	return tasks, nil
+}
+
+// CreateNextDayTask creates a new task for tomorrow
+func (r *DailyTaskRepository) CreateNextDayTask(ctx context.Context, req *models.CreateNextDayTaskRequest, createdBy string) (*models.NextDayTask, error) {
+	pool := GetPool()
+
+	priority := "medium"
+	if req.Priority != nil {
+		priority = *req.Priority
+	}
+
+	// Get max position for this assignee
+	var maxPosition int
+	err := pool.QueryRow(ctx, `
+		SELECT COALESCE(MAX(position), -1) FROM next_day_tasks WHERE target_date = $1 AND assignee = $2
+	`, req.TargetDate, req.Assignee).Scan(&maxPosition)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get max position: %w", err)
+	}
+
+	var task models.NextDayTask
+	now := time.Now()
+
+	err = pool.QueryRow(ctx, `
+		INSERT INTO next_day_tasks (target_date, assignee, task_title, priority, position, notes, created_by, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, target_date, assignee, task_title, priority, position, is_carried_forward, source_date, source_task_id, notes, created_by, created_at, updated_at
+	`, req.TargetDate, req.Assignee, req.TaskTitle, priority, maxPosition+1, req.Notes, createdBy, now, now).Scan(
+		&task.ID, &task.TargetDate, &task.Assignee, &task.TaskTitle, &task.Priority,
+		&task.Position, &task.IsCarriedForward, &task.SourceDate, &task.SourceTaskID, &task.Notes,
+		&task.CreatedBy, &task.CreatedAt, &task.UpdatedAt,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create task: %w", err)
+	}
+
+	return &task, nil
+}
+
+// UpdateNextDayTask updates an existing next day task
+func (r *DailyTaskRepository) UpdateNextDayTask(ctx context.Context, taskID string, req *models.UpdateNextDayTaskRequest) error {
+	pool := GetPool()
+
+	// Build dynamic update query
+	query := `UPDATE next_day_tasks SET updated_at = NOW()`
+	args := []interface{}{}
+	argCount := 1
+
+	if req.TaskTitle != nil {
+		query += fmt.Sprintf(`, task_title = $%d`, argCount)
+		args = append(args, *req.TaskTitle)
+		argCount++
+	}
+
+	if req.Priority != nil {
+		query += fmt.Sprintf(`, priority = $%d`, argCount)
+		args = append(args, *req.Priority)
+		argCount++
+	}
+
+	if req.Notes != nil {
+		query += fmt.Sprintf(`, notes = $%d`, argCount)
+		args = append(args, *req.Notes)
+		argCount++
+	}
+
+	if req.Position != nil {
+		query += fmt.Sprintf(`, position = $%d`, argCount)
+		args = append(args, *req.Position)
+		argCount++
+	}
+
+	query += fmt.Sprintf(` WHERE id = $%d`, argCount)
+	args = append(args, taskID)
+
+	_, err := pool.Exec(ctx, query, args...)
+	return err
+}
+
+// DeleteNextDayTask deletes a next day task
+func (r *DailyTaskRepository) DeleteNextDayTask(ctx context.Context, taskID string) error {
+	pool := GetPool()
+
+	_, err := pool.Exec(ctx, `DELETE FROM next_day_tasks WHERE id = $1`, taskID)
+	return err
+}
+
+// ReorderNextDayTasks updates the position of tasks for a specific assignee
+func (r *DailyTaskRepository) ReorderNextDayTasks(ctx context.Context, targetDate, assignee string, taskIDs []string) error {
+	pool := GetPool()
+
+	for i, taskID := range taskIDs {
+		_, err := pool.Exec(ctx, `
+			UPDATE next_day_tasks SET position = $1, updated_at = NOW()
+			WHERE id = $2 AND target_date = $3 AND assignee = $4
+		`, i, taskID, targetDate, assignee)
+		if err != nil {
+			return fmt.Errorf("failed to update position for task %s: %w", taskID, err)
+		}
+	}
+
+	return nil
+}
+
+// GenerateNextDayTasksFromPending creates next day tasks from pending/skipped tasks
+func (r *DailyTaskRepository) GenerateNextDayTasksFromPending(ctx context.Context, sourceDate, targetDate string) error {
+	pool := GetPool()
+
+	// Get pending and skipped tasks from source date
+	rows, err := pool.Query(ctx, `
+		SELECT assignee, task_title
+		FROM daily_tasks
+		WHERE date = $1 AND status IN ('pending', 'in_progress', 'skipped', 'not_mentioned')
+		ORDER BY assignee ASC
+	`, sourceDate)
+	if err != nil {
+		return fmt.Errorf("failed to query pending tasks: %w", err)
+	}
+	defer rows.Close()
+
+	// Delete existing tasks for target date (if regenerating)
+	_, err = pool.Exec(ctx, `DELETE FROM next_day_tasks WHERE target_date = $1`, targetDate)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing tasks: %w", err)
+	}
+
+	// Insert carried forward tasks
+	position := make(map[string]int) // Track position per assignee
+	for rows.Next() {
+		var assignee, taskTitle string
+		if err := rows.Scan(&assignee, &taskTitle); err != nil {
+			return fmt.Errorf("failed to scan task: %w", err)
+		}
+
+		_, err := pool.Exec(ctx, `
+			INSERT INTO next_day_tasks (target_date, assignee, task_title, priority, position, is_carried_forward, source_date, created_at, updated_at)
+			VALUES ($1, $2, $3, 'medium', $4, true, $5, NOW(), NOW())
+		`, targetDate, assignee, taskTitle, position[assignee], sourceDate)
+		if err != nil {
+			return fmt.Errorf("failed to insert carried forward task: %w", err)
+		}
+
+		position[assignee]++
+	}
+
+	return nil
+}
+
+// GetNextDayTasksGroupedByAssignee retrieves tasks grouped by assignee
+func (r *DailyTaskRepository) GetNextDayTasksGroupedByAssignee(ctx context.Context, targetDate string) (*models.DailyTaskList, error) {
+	tasks, err := r.GetNextDayTasks(ctx, targetDate)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group by assignee
+	assigneeMap := make(map[string][]models.NextDayTask)
+	for _, task := range tasks {
+		assigneeMap[task.Assignee] = append(assigneeMap[task.Assignee], task)
+	}
+
+	// Convert to UserTaskAssignment
+	var assignments []models.UserTaskAssignment
+	for assignee, tasks := range assigneeMap {
+		assignments = append(assignments, models.UserTaskAssignment{
+			UserName:    assignee,
+			SlackHandle: "@" + assignee,
+			Tasks:       tasks,
+		})
+	}
+
+	return &models.DailyTaskList{
+		Date:        targetDate,
+		Assignments: assignments,
+	}, nil
+}
+
+// FormatSlackMessage generates a Slack-formatted message from next day tasks
+func (r *DailyTaskRepository) FormatSlackMessage(ctx context.Context, targetDate string) (string, error) {
+	taskList, err := r.GetNextDayTasksGroupedByAssignee(ctx, targetDate)
+	if err != nil {
+		return "", err
+	}
+
+	message := "`todays task list`\n\n"
+
+	for _, assignment := range taskList.Assignments {
+		message += fmt.Sprintf("`%s`\n", assignment.SlackHandle)
+		for _, task := range assignment.Tasks {
+			priority := ""
+			if task.Priority == "high" {
+				priority = " (High)"
+			}
+			message += fmt.Sprintf("• %s%s\n", task.TaskTitle, priority)
+		}
+		message += "\n"
+	}
+
+	return message, nil
 }

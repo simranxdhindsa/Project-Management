@@ -31,14 +31,37 @@ import {
   X,
 } from 'lucide-react'
 import api from '../services/api'
-import type { DailyTaskList, UserTaskAssignment, DailyTaskItem } from '../services/api'
+
+// NextDayTask interface for new API
+interface NextDayTask {
+  id: string
+  target_date: string
+  assignee: string
+  task_title: string
+  priority: 'high' | 'medium' | 'low'
+  position: number
+  is_carried_forward: boolean
+  source_date?: string
+  notes?: string
+}
+
+interface NextDayAssignment {
+  user_name: string
+  slack_handle: string
+  tasks: NextDayTask[]
+}
+
+interface NextDayTaskList {
+  date: string
+  assignments: NextDayAssignment[]
+}
 
 // ====== Sortable Task Item Component ======
 function SortableTaskItem({
   item,
   onDelete,
 }: {
-  item: DailyTaskItem
+  item: NextDayTask
   onDelete: (id: string) => void
 }) {
   const {
@@ -76,7 +99,7 @@ function SortableTaskItem({
         <GripVertical size={14} />
       </div>
       <div className="daily-task-item-content">
-        <span className="daily-task-title">{item.title}</span>
+        <span className="daily-task-title">{item.task_title}</span>
         <div className="daily-task-badges">
           {item.priority === 'high' && (
             <span
@@ -86,10 +109,13 @@ function SortableTaskItem({
               HIGH
             </span>
           )}
-          {item.carried_over && (
+          {item.is_carried_forward && (
             <span className="carried-over-tag">carried over</span>
           )}
         </div>
+        {item.notes && (
+          <div className="task-notes">{item.notes}</div>
+        )}
       </div>
       <button
         className="daily-task-delete"
@@ -103,14 +129,14 @@ function SortableTaskItem({
 }
 
 // ====== Drag Overlay Item ======
-function DragOverlayItem({ item }: { item: DailyTaskItem }) {
+function DragOverlayItem({ item }: { item: NextDayTask }) {
   return (
     <div className="daily-task-item dragging-overlay">
       <div className="drag-handle">
         <GripVertical size={14} />
       </div>
       <div className="daily-task-item-content">
-        <span className="daily-task-title">{item.title}</span>
+        <span className="daily-task-title">{item.task_title}</span>
       </div>
     </div>
   )
@@ -122,17 +148,18 @@ export function DailyTaskListPage() {
     const today = new Date()
     return today.toISOString().split('T')[0]
   })
-  const [taskList, setTaskList] = useState<DailyTaskList | null>(null)
+  const [taskList, setTaskList] = useState<NextDayTaskList | null>(null)
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [activeItem, setActiveItem] = useState<DailyTaskItem | null>(null)
+  const [activeItem, setActiveItem] = useState<NextDayTask | null>(null)
   const [showAddPerson, setShowAddPerson] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
   const [newPersonHandle, setNewPersonHandle] = useState('')
   const [addingTaskFor, setAddingTaskFor] = useState<string | null>(null)
   const [newTaskTitle, setNewTaskTitle] = useState('')
-  const [newTaskPriority, setNewTaskPriority] = useState('medium')
+  const [newTaskPriority, setNewTaskPriority] = useState<'high' | 'medium' | 'low'>('medium')
+  const [newTaskNotes, setNewTaskNotes] = useState('')
 
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(() => new Date())
@@ -146,7 +173,7 @@ export function DailyTaskListPage() {
   const fetchTaskList = useCallback(async () => {
     setLoading(true)
     try {
-      const response = await api.getDailyTaskList(selectedDate)
+      const response = await api.getNextDayTasks(selectedDate)
       if (response.success && response.data) {
         setTaskList(response.data)
       } else {
@@ -163,11 +190,16 @@ export function DailyTaskListPage() {
     fetchTaskList()
   }, [fetchTaskList])
 
-  // Generate task list
+  // Generate task list from previous day's pending tasks
   const handleGenerate = async () => {
     setGenerating(true)
     try {
-      const response = await api.generateDailyTaskList(selectedDate)
+      // Calculate yesterday's date
+      const yesterday = new Date(selectedDate)
+      yesterday.setDate(yesterday.getDate() - 1)
+      const sourceDate = yesterday.toISOString().split('T')[0]
+
+      const response = await api.generateNextDayTasks(sourceDate, selectedDate)
       if (response.success && response.data) {
         setTaskList(response.data)
       }
@@ -181,9 +213,9 @@ export function DailyTaskListPage() {
   // Copy to clipboard with Slack formatting
   const handleCopy = async () => {
     try {
-      const response = await api.getDailyTaskListFormatted(selectedDate)
+      const response = await api.getFormattedSlackMessage(selectedDate)
       if (response.success && response.data) {
-        await navigator.clipboard.writeText(response.data.formatted_text)
+        await navigator.clipboard.writeText(response.data.formatted_message)
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
       }
@@ -199,13 +231,13 @@ export function DailyTaskListPage() {
   }
 
   // Client-side Slack text generation
-  const generateSlackText = (list: DailyTaskList): string => {
+  const generateSlackText = (list: NextDayTaskList): string => {
     let text = '`todays task list`\n'
     for (const assignment of list.assignments) {
       text += `\n\`${assignment.slack_handle}\`\n`
       for (const task of assignment.tasks) {
         const priority = task.priority === 'high' ? ' (High)' : ''
-        text += `• ${task.title}${priority}\n`
+        text += `• ${task.task_title}${priority}\n`
       }
     }
     return text
@@ -239,10 +271,10 @@ export function DailyTaskListPage() {
         // Update positions
         const reorderedTasks = newTasks.map((t, i) => ({ ...t, position: i }))
 
-        // Save to backend
-        api.reorderDailyTasks(
+        // Save to backend - use the assignee (user_name) as identifier
+        api.reorderNextDayTasks(
           selectedDate,
-          assignment.id,
+          assignment.user_name,
           reorderedTasks.map((t) => t.id)
         ).catch(console.error)
 
@@ -258,7 +290,7 @@ export function DailyTaskListPage() {
   const handleDeleteItem = async (itemId: string) => {
     if (!taskList) return
     try {
-      await api.deleteDailyTaskItem(itemId)
+      await api.deleteNextDayTask(itemId)
       const updatedAssignments = taskList.assignments.map((a) => ({
         ...a,
         tasks: a.tasks.filter((t) => t.id !== itemId),
@@ -270,23 +302,26 @@ export function DailyTaskListPage() {
   }
 
   // Add task item
-  const handleAddTaskItem = async (assignmentId: string) => {
+  const handleAddTaskItem = async (assignee: string) => {
     if (!newTaskTitle.trim() || !taskList) return
     try {
-      const response = await api.addDailyTaskItem(
-        assignmentId,
+      const response = await api.createNextDayTask(
+        selectedDate,
+        assignee,
         newTaskTitle.trim(),
-        newTaskPriority
+        newTaskPriority,
+        newTaskNotes.trim() || undefined
       )
       if (response.success && response.data) {
         const updatedAssignments = taskList.assignments.map((a) =>
-          a.id === assignmentId
-            ? { ...a, tasks: [...a.tasks, response.data as DailyTaskItem] }
+          a.user_name === assignee
+            ? { ...a, tasks: [...a.tasks, response.data as NextDayTask] }
             : a
         )
         setTaskList({ ...taskList, assignments: updatedAssignments })
         setNewTaskTitle('')
         setNewTaskPriority('medium')
+        setNewTaskNotes('')
         setAddingTaskFor(null)
       }
     } catch (err) {
@@ -296,43 +331,45 @@ export function DailyTaskListPage() {
 
   // Add person/assignment
   const handleAddPerson = async () => {
-    if (!newPersonName.trim() || !newPersonHandle.trim()) return
-    try {
-      const handle = newPersonHandle.startsWith('@')
-        ? newPersonHandle
-        : `@${newPersonHandle}`
-      const response = await api.addDailyAssignment(
-        selectedDate,
-        newPersonName.trim(),
-        handle
-      )
-      if (response.success && response.data) {
-        if (taskList) {
-          setTaskList({
-            ...taskList,
-            assignments: [
-              ...taskList.assignments,
-              response.data as UserTaskAssignment,
-            ],
-          })
-        }
-        setNewPersonName('')
-        setNewPersonHandle('')
-        setShowAddPerson(false)
-      }
-    } catch (err) {
-      console.error('Error adding assignment:', err)
+    if (!newPersonName.trim() || !newPersonHandle.trim() || !taskList) return
+
+    const handle = newPersonHandle.startsWith('@')
+      ? newPersonHandle
+      : `@${newPersonHandle}`
+
+    // Add new assignment to the list with empty tasks
+    const newAssignment: NextDayAssignment = {
+      user_name: newPersonName.trim(),
+      slack_handle: handle,
+      tasks: []
     }
+
+    setTaskList({
+      ...taskList,
+      assignments: [...taskList.assignments, newAssignment],
+    })
+
+    setNewPersonName('')
+    setNewPersonHandle('')
+    setShowAddPerson(false)
   }
 
-  // Delete assignment
-  const handleDeleteAssignment = async (assignmentId: string) => {
+  // Delete assignment - remove all tasks for this person
+  const handleDeleteAssignment = async (assignee: string) => {
     if (!taskList) return
+
+    // Get all task IDs for this assignee
+    const assignment = taskList.assignments.find((a) => a.user_name === assignee)
+    if (!assignment) return
+
     try {
-      await api.deleteDailyAssignment(assignmentId)
+      // Delete all tasks for this assignee
+      await Promise.all(assignment.tasks.map((task) => api.deleteNextDayTask(task.id)))
+
+      // Remove assignment from list
       setTaskList({
         ...taskList,
-        assignments: taskList.assignments.filter((a) => a.id !== assignmentId),
+        assignments: taskList.assignments.filter((a) => a.user_name !== assignee),
       })
     } catch (err) {
       console.error('Error deleting assignment:', err)
@@ -524,8 +561,8 @@ export function DailyTaskListPage() {
             onDragEnd={handleDragEnd}
           >
             <div className="daily-assignments">
-              {taskList.assignments.map((assignment) => (
-                <div key={assignment.id} className="daily-assignment-card glass-card">
+              {taskList.assignments.map((assignment, idx) => (
+                <div key={`${assignment.user_name}-${idx}`} className="daily-assignment-card glass-card">
                   <div className="assignment-header">
                     <div className="assignment-info">
                       <span className="assignment-handle">{assignment.slack_handle}</span>
@@ -539,10 +576,11 @@ export function DailyTaskListPage() {
                         className="btn-icon-sm"
                         onClick={() => {
                           setAddingTaskFor(
-                            addingTaskFor === assignment.id ? null : assignment.id
+                            addingTaskFor === assignment.user_name ? null : assignment.user_name
                           )
                           setNewTaskTitle('')
                           setNewTaskPriority('medium')
+                          setNewTaskNotes('')
                         }}
                         title="Add task"
                       >
@@ -550,7 +588,7 @@ export function DailyTaskListPage() {
                       </button>
                       <button
                         className="btn-icon-sm btn-danger-ghost"
-                        onClick={() => handleDeleteAssignment(assignment.id)}
+                        onClick={() => handleDeleteAssignment(assignment.user_name)}
                         title="Remove person"
                       >
                         <Trash2 size={14} />
@@ -574,7 +612,7 @@ export function DailyTaskListPage() {
                   </SortableContext>
 
                   {/* Add Task Form */}
-                  {addingTaskFor === assignment.id && (
+                  {addingTaskFor === assignment.user_name && (
                     <div className="add-task-form">
                       <input
                         type="text"
@@ -583,7 +621,7 @@ export function DailyTaskListPage() {
                         value={newTaskTitle}
                         onChange={(e) => setNewTaskTitle(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleAddTaskItem(assignment.id)
+                          if (e.key === 'Enter' && newTaskTitle.trim()) handleAddTaskItem(assignment.user_name)
                           if (e.key === 'Escape') setAddingTaskFor(null)
                         }}
                         autoFocus
@@ -591,15 +629,23 @@ export function DailyTaskListPage() {
                       <select
                         className="add-task-priority"
                         value={newTaskPriority}
-                        onChange={(e) => setNewTaskPriority(e.target.value)}
+                        onChange={(e) => setNewTaskPriority(e.target.value as 'high' | 'medium' | 'low')}
                       >
                         <option value="high">High</option>
                         <option value="medium">Medium</option>
                         <option value="low">Low</option>
                       </select>
+                      <input
+                        type="text"
+                        className="add-task-input"
+                        placeholder="Notes (optional)..."
+                        value={newTaskNotes}
+                        onChange={(e) => setNewTaskNotes(e.target.value)}
+                      />
                       <button
                         className="btn btn-primary btn-sm"
-                        onClick={() => handleAddTaskItem(assignment.id)}
+                        onClick={() => handleAddTaskItem(assignment.user_name)}
+                        disabled={!newTaskTitle.trim()}
                       >
                         Add
                       </button>

@@ -285,6 +285,120 @@ class ApiService {
     return this.request<{ discrepancies: Discrepancy[] }>('/ai/discrepancies')
   }
 
+  // Daily Tasks Management endpoints
+  async saveAnalysis(date: string, morningMessage: string, eveningMessage: string, analysisResult: any) {
+    return this.request<{
+      id: string
+      date: string
+      morning_message: string
+      evening_message: string
+      analysis_result: any
+    }>('/daily-tasks/analysis', {
+      method: 'POST',
+      body: JSON.stringify({
+        date,
+        morning_message: morningMessage,
+        evening_message: eveningMessage,
+        analysis_result: analysisResult
+      }),
+    })
+  }
+
+  async getAnalysisByDate(date: string) {
+    return this.request<{
+      id: string
+      date: string
+      morning_message: string
+      evening_message: string
+      analysis_result: any
+    }>(`/daily-tasks/analysis/${date}`)
+  }
+
+  async getTodaysTasks(date: string) {
+    return this.request<{
+      assignee: string
+      completed: string[]
+      pending: string[]
+      blocked: string[]
+      skipped: string[]
+    }[]>(`/daily-tasks/today/${date}`)
+  }
+
+  async getNextDayTasks(date: string) {
+    return this.request<{
+      date: string
+      assignments: {
+        user_name: string
+        slack_handle: string
+        tasks: {
+          id: string
+          target_date: string
+          assignee: string
+          task_title: string
+          priority: string
+          position: number
+          is_carried_forward: boolean
+          source_date?: string
+          notes?: string
+        }[]
+      }[]
+    }>(`/daily-tasks/next-day/${date}`)
+  }
+
+  async generateNextDayTasks(sourceDate: string, targetDate: string) {
+    return this.request<{
+      date: string
+      assignments: any[]
+    }>('/daily-tasks/next-day/generate', {
+      method: 'POST',
+      body: JSON.stringify({ source_date: sourceDate, target_date: targetDate }),
+    })
+  }
+
+  async createNextDayTask(targetDate: string, assignee: string, taskTitle: string, priority?: string, notes?: string) {
+    return this.request<any>('/daily-tasks/next-day/task', {
+      method: 'POST',
+      body: JSON.stringify({
+        target_date: targetDate,
+        assignee,
+        task_title: taskTitle,
+        priority,
+        notes
+      }),
+    })
+  }
+
+  async updateNextDayTask(taskId: string, updates: { task_title?: string; priority?: string; notes?: string }) {
+    return this.request<any>(`/daily-tasks/next-day/task/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    })
+  }
+
+  async deleteNextDayTask(taskId: string) {
+    return this.request<any>(`/daily-tasks/next-day/task/${taskId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async reorderNextDayTasks(targetDate: string, assignee: string, taskIds: string[]) {
+    return this.request<any>('/daily-tasks/next-day/reorder', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        target_date: targetDate,
+        assignee,
+        task_ids: taskIds
+      }),
+    })
+  }
+
+  async getFormattedSlackMessage(date: string) {
+    return this.request<{
+      formatted_message: string
+      date: string
+    }>(`/daily-tasks/next-day/${date}/slack-format`)
+  }
+
   // Calendar endpoints
   async getCalendarData(year: number, month: number) {
     return this.request<CalendarData>(`/calendar/${year}/${month}`)

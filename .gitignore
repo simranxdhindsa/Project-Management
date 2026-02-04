@@ -132,3 +132,10 @@ $RECYCLE.BIN/
 *.lnk
 
 nul
+
+# Documentation files (sensitive configs)
+*.md
+!README.md
+!CONTRIBUTING.md
+!LICENSE.md
+!docs/

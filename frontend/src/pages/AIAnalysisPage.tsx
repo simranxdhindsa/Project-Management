@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle } from 'lucide-react'
+import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Save } from 'lucide-react'
 import api from '../services/api'
 
 interface AnalysisResult {
@@ -31,11 +31,18 @@ interface Summary {
   not_mentioned: number
 }
 
-export function AIAnalysisPage() {
+interface AIAnalysisPageProps {
+  onNavigateToDailyAnalysis?: () => void
+}
+
+export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProps) {
   const [morningAssignments, setMorningAssignments] = useState('')
   const [eveningUpdates, setEveningUpdates] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [analysisDate, setAnalysisDate] = useState(new Date().toISOString().split('T')[0]) // Today's date in YYYY-MM-DD
 
   const [results, setResults] = useState<{
     analysis: AnalysisResult[]
@@ -95,6 +102,46 @@ export function AIAnalysisPage() {
     setMorningAssignments(exampleMorning)
     setEveningUpdates(exampleEvening)
     setResults(null)
+    setSuccessMessage(null)
+  }
+
+  const handleSaveAnalysis = async () => {
+    if (!results) {
+      setError('No analysis to save. Please run analysis first.')
+      return
+    }
+
+    try {
+      setSaving(true)
+      setError(null)
+      setSuccessMessage(null)
+
+      const response = await api.saveAnalysis(
+        analysisDate,
+        morningAssignments,
+        eveningUpdates,
+        {
+          analysis: results.analysis,
+          person_breakdown: results.person_breakdown,
+          summary: results.summary
+        }
+      )
+
+      if (response.success) {
+        setSuccessMessage(`Analysis saved successfully for ${analysisDate}!`)
+        // Redirect to Daily Analysis page after 1.5 seconds
+        setTimeout(() => {
+          setSuccessMessage(null)
+          if (onNavigateToDailyAnalysis) {
+            onNavigateToDailyAnalysis()
+          }
+        }, 1500)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save analysis')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const getStatusColor = (status: string) => {
@@ -125,9 +172,21 @@ export function AIAnalysisPage() {
             Paste morning task assignments and evening updates to analyze completion status with AI
           </p>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={loadExample}>
-          <Sparkles size={16} /> Load Example
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Analysis Date</label>
+            <input
+              type="date"
+              value={analysisDate}
+              onChange={(e) => setAnalysisDate(e.target.value)}
+              className="btn btn-ghost btn-sm"
+              style={{ padding: '0.5rem', minWidth: '150px' }}
+            />
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={loadExample} style={{ marginTop: '1.2rem' }}>
+            <Sparkles size={16} /> Load Example
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -135,6 +194,16 @@ export function AIAnalysisPage() {
           <AlertCircle size={20} />
           {error}
           <button className="alert-close" onClick={() => setError(null)}>
+            &times;
+          </button>
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="alert alert-success">
+          <CheckCircle size={20} />
+          {successMessage}
+          <button className="alert-close" onClick={() => setSuccessMessage(null)}>
             &times;
           </button>
         </div>
@@ -200,6 +269,27 @@ export function AIAnalysisPage() {
 
       {results && (
         <>
+          {/* Save Analysis Button */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.5rem' }}>
+            <button
+              className="btn btn-success btn-lg"
+              onClick={handleSaveAnalysis}
+              disabled={saving}
+            >
+              {saving ? (
+                <>
+                  <div className="loading-spinner" style={{ width: '16px', height: '16px' }} />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save size={18} />
+                  Save Analysis for {analysisDate}
+                </>
+              )}
+            </button>
+          </div>
+
           {/* Summary Cards */}
           <div className="ai-summary-grid">
             <div className="ai-summary-card glass-card">

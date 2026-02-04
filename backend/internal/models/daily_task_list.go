@@ -2,68 +2,116 @@ package models
 
 import "time"
 
-// DailyTaskItem represents a single task in a user's daily task list
-type DailyTaskItem struct {
-	ID          string `json:"id" db:"id"`
-	AssignmentID string `json:"assignment_id" db:"assignment_id"`
-	TaskID      *string `json:"task_id,omitempty" db:"task_id"`
-	Title       string  `json:"title" db:"title"`
-	Priority    string  `json:"priority" db:"priority"` // high, medium, low
-	Position    int     `json:"position" db:"position"`
-	CarriedOver bool    `json:"carried_over" db:"carried_over"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+// DailyAnalysis represents a stored AI analysis for a specific date
+type DailyAnalysis struct {
+	ID              string                 `json:"id" db:"id"`
+	Date            string                 `json:"date" db:"date"` // YYYY-MM-DD format
+	MorningMessage  string                 `json:"morning_message" db:"morning_message"`
+	EveningMessage  string                 `json:"evening_message" db:"evening_message"`
+	AnalysisResult  map[string]interface{} `json:"analysis_result" db:"analysis_result"` // Full AI response as JSON
+	CreatedAt       time.Time              `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at" db:"updated_at"`
 }
 
-// UserTaskAssignment represents a user's task group in the daily list
+// DailyTask represents an individual task from the analysis
+type DailyTask struct {
+	ID               string    `json:"id" db:"id"`
+	AnalysisID       string    `json:"analysis_id" db:"analysis_id"`
+	Date             string    `json:"date" db:"date"`
+	Assignee         string    `json:"assignee" db:"assignee"`
+	TaskTitle        string    `json:"task_title" db:"task_title"`
+	Status           string    `json:"status" db:"status"` // done, pending, in_progress, blocked, not_mentioned, skipped
+	OriginalTitle    *string   `json:"original_title,omitempty" db:"original_title"`
+	Confidence       float64   `json:"confidence" db:"confidence"`
+	Evidence         *string   `json:"evidence,omitempty" db:"evidence"`
+	CarriedFromDate  *string   `json:"carried_from_date,omitempty" db:"carried_from_date"`
+	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+}
+
+// NextDayTask represents an editable task for tomorrow's list
+type NextDayTask struct {
+	ID               string    `json:"id" db:"id"`
+	TargetDate       string    `json:"target_date" db:"target_date"` // YYYY-MM-DD format
+	Assignee         string    `json:"assignee" db:"assignee"`
+	TaskTitle        string    `json:"task_title" db:"task_title"`
+	Priority         string    `json:"priority" db:"priority"` // high, medium, low
+	Position         int       `json:"position" db:"position"`
+	IsCarriedForward bool      `json:"is_carried_forward" db:"is_carried_forward"`
+	SourceDate       *string   `json:"source_date,omitempty" db:"source_date"`
+	SourceTaskID     *string   `json:"source_task_id,omitempty" db:"source_task_id"`
+	Notes            *string   `json:"notes,omitempty" db:"notes"`
+	CreatedBy        *string   `json:"created_by,omitempty" db:"created_by"`
+	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// UserTaskAssignment groups tasks by assignee for display
 type UserTaskAssignment struct {
-	ID          string          `json:"id" db:"id"`
-	DailyListID string          `json:"daily_list_id" db:"daily_list_id"`
-	UserID      *string         `json:"user_id,omitempty" db:"user_id"`
-	UserName    string          `json:"user_name" db:"user_name"`
-	SlackHandle string          `json:"slack_handle" db:"slack_handle"`
-	Position    int             `json:"position" db:"position"`
-	Tasks       []DailyTaskItem `json:"tasks"`
-	CreatedAt   time.Time       `json:"created_at" db:"created_at"`
+	UserName    string        `json:"user_name"`
+	SlackHandle string        `json:"slack_handle"`
+	Tasks       []NextDayTask `json:"tasks"`
 }
 
-// DailyTaskList represents the full daily task list for a date
+// DailyTaskList represents the complete task list for a date
 type DailyTaskList struct {
-	ID          string               `json:"id" db:"id"`
-	Date        string               `json:"date" db:"date"` // YYYY-MM-DD
-	ProjectID   string               `json:"project_id" db:"project_id"`
+	Date        string               `json:"date"`
 	Assignments []UserTaskAssignment `json:"assignments"`
-	CreatedAt   time.Time            `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time            `json:"updated_at" db:"updated_at"`
 }
 
-// GenerateDailyTaskListRequest is the request to generate a daily task list
-type GenerateDailyTaskListRequest struct {
-	Date      string `json:"date"` // YYYY-MM-DD
-	ProjectID string `json:"project_id"`
+// DailyTaskSummary provides a summary of tasks for a specific date
+type DailyTaskSummary struct {
+	Date          string `json:"date"`
+	TotalTasks    int    `json:"total_tasks"`
+	DoneTasks     int    `json:"done_tasks"`
+	PendingTasks  int    `json:"pending_tasks"`
+	BlockedTasks  int    `json:"blocked_tasks"`
+	SkippedTasks  int    `json:"skipped_tasks"`
 }
 
-// ReorderTasksRequest is the request to reorder tasks within a user's assignment
+// TasksByAssignee groups daily tasks by assignee
+type TasksByAssignee struct {
+	Assignee  string      `json:"assignee"`
+	Tasks     []DailyTask `json:"tasks"`
+	Completed []string    `json:"completed"`
+	Pending   []string    `json:"pending"`
+	Blocked   []string    `json:"blocked"`
+	Skipped   []string    `json:"skipped"`
+}
+
+// SaveAnalysisRequest is the request body for saving analysis
+type SaveAnalysisRequest struct {
+	Date           string                 `json:"date"`
+	MorningMessage string                 `json:"morning_message"`
+	EveningMessage string                 `json:"evening_message"`
+	AnalysisResult map[string]interface{} `json:"analysis_result"`
+}
+
+// GenerateNextDayRequest is the request body for generating next day tasks
+type GenerateNextDayRequest struct {
+	SourceDate string `json:"source_date"` // Date to carry forward from
+	TargetDate string `json:"target_date"` // Date to generate for (usually source_date + 1)
+}
+
+// ReorderTasksRequest is the request body for reordering tasks
 type ReorderTasksRequest struct {
-	AssignmentID string   `json:"assignment_id"`
-	TaskItemIDs  []string `json:"task_item_ids"` // ordered list of daily_task_item IDs
+	TargetDate string   `json:"target_date"`
+	Assignee   string   `json:"assignee"`
+	TaskIDs    []string `json:"task_ids"` // Ordered list of task IDs
 }
 
-// AddTaskItemRequest is the request to add a task item to an assignment
-type AddTaskItemRequest struct {
-	AssignmentID string `json:"assignment_id"`
-	Title        string `json:"title"`
-	Priority     string `json:"priority"`
-	TaskID       *string `json:"task_id,omitempty"` // optional link to tasks table
+// UpdateNextDayTaskRequest is the request body for updating a single task
+type UpdateNextDayTaskRequest struct {
+	TaskTitle *string `json:"task_title,omitempty"`
+	Priority  *string `json:"priority,omitempty"`
+	Notes     *string `json:"notes,omitempty"`
+	Position  *int    `json:"position,omitempty"`
 }
 
-// UpdateAssignmentRequest is for updating a user assignment (name/handle)
-type UpdateAssignmentRequest struct {
-	UserName    *string `json:"user_name,omitempty"`
-	SlackHandle *string `json:"slack_handle,omitempty"`
-}
-
-// AddAssignmentRequest is for adding a new user section to the daily list
-type AddAssignmentRequest struct {
-	UserName    string `json:"user_name"`
-	SlackHandle string `json:"slack_handle"`
+// CreateNextDayTaskRequest is the request body for creating a new task
+type CreateNextDayTaskRequest struct {
+	TargetDate string  `json:"target_date"`
+	Assignee   string  `json:"assignee"`
+	TaskTitle  string  `json:"task_title"`
+	Priority   *string `json:"priority,omitempty"`
+	Notes      *string `json:"notes,omitempty"`
 }

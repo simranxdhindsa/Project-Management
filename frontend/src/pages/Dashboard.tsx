@@ -18,22 +18,28 @@ import {
   ChevronRight,
   LogOut,
   Link2,
-  Brain
+  Brain,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react'
 import { IntegrationsPage } from './IntegrationsPage'
 import { SettingsPage } from './SettingsPage'
 import { BoardPage } from './BoardPage'
 import { DailyTaskListPage } from './DailyTaskListPage'
+import { DailyAnalysisViewPage } from './DailyAnalysisViewPage'
 import { BotConfigPage } from './BotConfigPage'
 import { AIAnalysisPage } from './AIAnalysisPage'
+import { JellySwitch } from '../components/JellySwitch'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'calendar' | 'reports' | 'ai-analysis' | 'bots' | 'team' | 'settings' | 'integrations'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'bots' | 'team' | 'settings' | 'integrations'
 
 export default function Dashboard() {
   const { user, logout } = useAuth()
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const { stats } = useTaskStats()
   const { tasks } = useTasks()
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [darkMode, setDarkMode] = useState(false)
 
   const handleLogout = async () => {
     await logout()
@@ -114,6 +120,13 @@ export default function Dashboard() {
             >
               <Brain size={20} />
               <span>AI Analysis</span>
+            </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'daily-analysis' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('daily-analysis')}
+            >
+              <CheckCircle size={20} />
+              <span>Daily Status</span>
             </button>
             <button
               className={`sidebar-nav-item ${currentPage === 'reports' ? 'active' : ''}`}
@@ -206,11 +219,80 @@ export default function Dashboard() {
               placeholder="Search tasks..."
             />
           </div>
-          <button className="icon-button tooltip" data-tooltip="Notifications">
-            <Bell size={20} />
-            <span className="notification-badge"></span>
-          </button>
-          <button className="btn-primary btn-md">
+          <JellySwitch
+            checked={darkMode}
+            onChange={setDarkMode}
+            label="Dark Mode"
+          />
+          <div style={{ position: 'relative' }}>
+            <button
+              className="icon-button tooltip"
+              data-tooltip="Notifications"
+              onClick={() => setShowNotifications(!showNotifications)}
+            >
+              <Bell size={20} />
+              <span className="notification-badge">3</span>
+            </button>
+
+            {showNotifications && (
+              <>
+                <div
+                  style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    zIndex: 999
+                  }}
+                  onClick={() => setShowNotifications(false)}
+                />
+                <div className="notification-dropdown">
+                  <div className="notification-header">
+                    <h3>Notifications</h3>
+                    <button className="btn-ghost btn-sm" onClick={() => setShowNotifications(false)}>
+                      Mark all as read
+                    </button>
+                  </div>
+                  <div className="notification-list">
+                    <div className="notification-item unread">
+                      <div className="notification-icon" style={{ backgroundColor: 'var(--color-primary-light)' }}>
+                        <CheckCircle size={16} color="var(--color-primary)" />
+                      </div>
+                      <div className="notification-content">
+                        <p className="notification-text"><strong>Task completed:</strong> PDF page numbers fixed</p>
+                        <span className="notification-time">2 hours ago</span>
+                      </div>
+                    </div>
+                    <div className="notification-item unread">
+                      <div className="notification-icon" style={{ backgroundColor: 'var(--color-warning-light)' }}>
+                        <AlertCircle size={16} color="var(--color-warning)" />
+                      </div>
+                      <div className="notification-content">
+                        <p className="notification-text"><strong>Task overdue:</strong> Mic conflict needs attention</p>
+                        <span className="notification-time">5 hours ago</span>
+                      </div>
+                    </div>
+                    <div className="notification-item">
+                      <div className="notification-icon" style={{ backgroundColor: 'var(--color-success-light)' }}>
+                        <CheckCircle size={16} color="var(--color-success)" />
+                      </div>
+                      <div className="notification-content">
+                        <p className="notification-text"><strong>Analysis saved:</strong> Daily analysis for 2026-02-03</p>
+                        <span className="notification-time">Yesterday</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="notification-footer">
+                    <button className="btn-ghost btn-sm" style={{ width: '100%' }}>
+                      View all notifications
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          <button className="btn-primary btn-md" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}>
             <Plus size={18} />
             <span>New Task</span>
           </button>
@@ -399,7 +481,12 @@ export default function Dashboard() {
         {currentPage === 'bots' && <BotConfigPage />}
 
         {/* AI Analysis */}
-        {currentPage === 'ai-analysis' && <AIAnalysisPage />}
+        {currentPage === 'ai-analysis' && (
+          <AIAnalysisPage onNavigateToDailyAnalysis={() => setCurrentPage('daily-analysis')} />
+        )}
+
+        {/* Daily Analysis View */}
+        {currentPage === 'daily-analysis' && <DailyAnalysisViewPage />}
 
         {/* List View Placeholder */}
         {currentPage === 'list' && (

@@ -218,7 +218,8 @@ func (c *OpenAIClient) AnalyzeMessages(ctx context.Context, messages []SlackMess
 func buildAnalysisPrompt(messages []SlackMessageForAnalysis, taskTitles []string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are an AI assistant that analyzes Slack messages to determine the status of tasks.\n\n")
+	sb.WriteString("You are a TASK STATUS ANALYZER that analyzes Slack messages to determine task completion status.\n\n")
+
 	sb.WriteString("## Task List:\n")
 	for i, title := range taskTitles {
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, title))
@@ -229,26 +230,37 @@ func buildAnalysisPrompt(messages []SlackMessageForAnalysis, taskTitles []string
 		sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", msg.Timestamp, msg.UserName, msg.Text))
 	}
 
-	sb.WriteString("\n## Instructions:\n")
-	sb.WriteString("Analyze the messages and determine the status of each task.\n")
-	sb.WriteString("Look for keywords and phrases that indicate:\n")
-	sb.WriteString("- COMPLETED: \"done\", \"finished\", \"completed\", \"merged\", \"deployed\", \"fixed\", \"resolved\", \"closed\", \"shipped\"\n")
-	sb.WriteString("- IN_PROGRESS: \"working on\", \"still doing\", \"in progress\", \"almost done\", \"halfway\", \"debugging\"\n")
-	sb.WriteString("- BLOCKED: \"blocked\", \"stuck\", \"waiting\", \"need help\", \"can't proceed\"\n")
-	sb.WriteString("- NOT_STARTED: No mentions or \"haven't started\", \"will start\"\n\n")
+	sb.WriteString("\n## Analysis Instructions\n\n")
+	sb.WriteString("Analyze each task and determine its status:\n\n")
 
-	sb.WriteString("## Output Format (JSON array):\n")
-	sb.WriteString("```json\n")
+	sb.WriteString("### Status Definitions:\n")
+	sb.WriteString("- **completed** / **done**: Task explicitly marked as done, finished, fixed, resolved, closed, merged, deployed\n")
+	sb.WriteString("- **in_progress**: Task mentioned as \"working on\", \"still doing\", \"in progress\", \"almost done\", \"halfway\", \"debugging\"\n")
+	sb.WriteString("- **blocked**: Task marked as \"blocked\", \"stuck\", \"waiting\", \"need help\", \"can't proceed\"\n")
+	sb.WriteString("- **pending**: Task mentioned but not started, or in \"pending\" section\n")
+	sb.WriteString("- **not_mentioned**: Task was assigned but not mentioned in any update\n\n")
+
+	sb.WriteString("### Evidence Rules:\n")
+	sb.WriteString("- Extract exact quotes from messages that show task status\n")
+	sb.WriteString("- If task not mentioned: use \"Task not mentioned in evening updates\"\n")
+	sb.WriteString("- Match task titles using fuzzy matching (handle abbreviations and partial titles)\n\n")
+
+	sb.WriteString("## Output Format\n\n")
+	sb.WriteString("Output ONLY valid JSON in this exact format (no markdown, no code blocks):\n\n")
 	sb.WriteString("[\n")
 	sb.WriteString("  {\n")
 	sb.WriteString("    \"task_title\": \"exact task title from list\",\n")
-	sb.WriteString("    \"detected_status\": \"completed|in_progress|blocked|not_started\",\n")
-	sb.WriteString("    \"confidence\": 0.85,\n")
-	sb.WriteString("    \"evidence\": [\"relevant quote from message\"]\n")
+	sb.WriteString("    \"detected_status\": \"completed|in_progress|blocked|pending|not_mentioned\",\n")
+	sb.WriteString("    \"confidence\": 0.9,\n")
+	sb.WriteString("    \"evidence\": [\"exact quote from message\"]\n")
 	sb.WriteString("  }\n")
-	sb.WriteString("]\n")
-	sb.WriteString("```\n\n")
-	sb.WriteString("Only include tasks that have some evidence in the messages. Output ONLY the JSON array, no other text.")
+	sb.WriteString("]\n\n")
+
+	sb.WriteString("## Critical Rules:\n")
+	sb.WriteString("1. Include ALL tasks from the task list\n")
+	sb.WriteString("2. Use fuzzy matching for task titles\n")
+	sb.WriteString("3. Confidence scoring: 0.9-1.0 (explicit), 0.7-0.9 (strong), 0.5-0.7 (weak), 0.3-0.5 (not mentioned)\n")
+	sb.WriteString("4. Output ONLY the JSON array - no other text\n")
 
 	return sb.String()
 }

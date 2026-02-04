@@ -125,18 +125,26 @@ func main() {
 	aiRoutes.HandleFunc("/analyze-manual", aiHandler.AnalyzeManualInput).Methods("POST")
 	aiRoutes.HandleFunc("/discrepancies", aiHandler.GetDiscrepancies).Methods("GET")
 
-	// Daily Task List routes (protected)
+	// Daily Task Management routes (protected)
 	dailyTaskHandler := handlers.NewDailyTaskHandler()
 	dailyTaskRoutes := api.PathPrefix("/daily-tasks").Subrouter()
 	dailyTaskRoutes.Use(middleware.AuthMiddleware)
-	dailyTaskRoutes.HandleFunc("/{date}", dailyTaskHandler.GetDailyTaskList).Methods("GET")
-	dailyTaskRoutes.HandleFunc("/{date}/generate", dailyTaskHandler.GenerateDailyTaskList).Methods("POST")
-	dailyTaskRoutes.HandleFunc("/{date}/formatted", dailyTaskHandler.GetFormattedTaskList).Methods("GET")
-	dailyTaskRoutes.HandleFunc("/{date}/reorder", dailyTaskHandler.ReorderTasks).Methods("PATCH")
-	dailyTaskRoutes.HandleFunc("/{date}/assignments", dailyTaskHandler.AddAssignment).Methods("POST")
-	dailyTaskRoutes.HandleFunc("/assignments/{assignmentId}", dailyTaskHandler.DeleteAssignment).Methods("DELETE")
-	dailyTaskRoutes.HandleFunc("/items", dailyTaskHandler.AddTaskItem).Methods("POST")
-	dailyTaskRoutes.HandleFunc("/items/{itemId}", dailyTaskHandler.DeleteTaskItem).Methods("DELETE")
+
+	// Analysis endpoints
+	dailyTaskRoutes.HandleFunc("/analysis", dailyTaskHandler.SaveAnalysis).Methods("POST")
+	dailyTaskRoutes.HandleFunc("/analysis/{date}", dailyTaskHandler.GetAnalysisByDate).Methods("GET")
+
+	// Today's tasks (from analysis)
+	dailyTaskRoutes.HandleFunc("/today/{date}", dailyTaskHandler.GetTodaysTasks).Methods("GET")
+
+	// Next day tasks (editable)
+	dailyTaskRoutes.HandleFunc("/next-day/{date}", dailyTaskHandler.GetNextDayTasks).Methods("GET")
+	dailyTaskRoutes.HandleFunc("/next-day/generate", dailyTaskHandler.GenerateNextDayTasks).Methods("POST")
+	dailyTaskRoutes.HandleFunc("/next-day/task", dailyTaskHandler.CreateNextDayTask).Methods("POST")
+	dailyTaskRoutes.HandleFunc("/next-day/task/{taskId}", dailyTaskHandler.UpdateNextDayTask).Methods("PATCH")
+	dailyTaskRoutes.HandleFunc("/next-day/task/{taskId}", dailyTaskHandler.DeleteNextDayTask).Methods("DELETE")
+	dailyTaskRoutes.HandleFunc("/next-day/reorder", dailyTaskHandler.ReorderNextDayTasks).Methods("PATCH")
+	dailyTaskRoutes.HandleFunc("/next-day/{date}/slack-format", dailyTaskHandler.GetFormattedSlackMessage).Methods("GET")
 
 	// Bot Config routes (protected)
 	botConfigHandler := handlers.NewBotConfigHandler()

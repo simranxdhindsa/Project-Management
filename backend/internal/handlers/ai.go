@@ -252,9 +252,15 @@ func parseTasksFromText(text string) []string {
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "`") {
+
+		// Skip empty lines, section headers with backticks, or lines that look like person names
+		if line == "" ||
+		   strings.HasPrefix(line, "`") ||
+		   strings.HasPrefix(line, "@") ||
+		   strings.Contains(strings.ToLower(line), "task list") {
 			continue
 		}
+
 		// Look for bullet points or numbered lists
 		if strings.HasPrefix(line, "•") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") {
 			task := strings.TrimSpace(line[1:])
@@ -265,6 +271,16 @@ func parseTasksFromText(text string) []string {
 			task = strings.TrimSpace(task)
 			if task != "" {
 				tasks = append(tasks, task)
+			}
+		} else {
+			// Also accept plain text lines as tasks (for flexible format)
+			// Skip very short lines or lines with common keywords
+			if len(line) > 3 &&
+			   !strings.Contains(strings.ToLower(line), "done:") &&
+			   !strings.Contains(strings.ToLower(line), "pending:") &&
+			   !strings.Contains(strings.ToLower(line), "in progress:") &&
+			   !strings.Contains(strings.ToLower(line), "blocked:") {
+				tasks = append(tasks, line)
 			}
 		}
 	}
@@ -288,9 +304,22 @@ func buildPersonBreakdown(morningText string, analyses []ai.TaskStatusAnalysis) 
 	lines := strings.Split(morningText, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		// Check if it's a person header (starts with @)
+
+		// Check if it's a person header - flexible format
+		// Accepts: `@Name`, @Name, or just Name if line is short
 		if strings.HasPrefix(line, "`@") && strings.HasSuffix(line, "`") {
+			// Format: `@Name`
 			currentPerson = strings.Trim(line, "`@")
+		} else if strings.HasPrefix(line, "@") {
+			// Format: @Name
+			currentPerson = strings.TrimPrefix(line, "@")
+			currentPerson = strings.TrimSpace(currentPerson)
+			// Remove trailing colon if present
+			currentPerson = strings.TrimSuffix(currentPerson, ":")
+		}
+
+		// Initialize person if new
+		if currentPerson != "" {
 			if _, exists := people[currentPerson]; !exists {
 				people[currentPerson] = &PersonTasks{
 					Name:      currentPerson,
@@ -300,28 +329,47 @@ func buildPersonBreakdown(morningText string, analyses []ai.TaskStatusAnalysis) 
 					Blocked:   []string{},
 				}
 			}
-		} else if currentPerson != "" && (strings.HasPrefix(line, "•") || strings.HasPrefix(line, "-")) {
-			task := strings.TrimSpace(line[1:])
-			task = strings.TrimSuffix(task, "(High)")
-			task = strings.TrimSuffix(task, "(Medium)")
-			task = strings.TrimSuffix(task, "(Low)")
-			task = strings.TrimSpace(task)
+		}
 
-			if task != "" && people[currentPerson] != nil {
-				people[currentPerson].Assigned = append(people[currentPerson].Assigned, task)
+		// Process task lines (with or without bullets)
+		if currentPerson != "" && line != "" && !strings.HasPrefix(line, "@") && !strings.Contains(strings.ToLower(line), "task list") {
+			var task string
 
-				// Find status from analysis
-				for _, analysis := range analyses {
-					if analysis.TaskTitle == task {
-						switch normalizeStatus(analysis.DetectedStatus) {
-						case "done":
-							people[currentPerson].Completed = append(people[currentPerson].Completed, task)
-						case "blocked":
-							people[currentPerson].Blocked = append(people[currentPerson].Blocked, task)
-						default:
-							people[currentPerson].Pending = append(people[currentPerson].Pending, task)
+			// Extract task from line with bullet
+			if strings.HasPrefix(line, "•") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "*") {
+				task = strings.TrimSpace(line[1:])
+			} else if len(line) > 3 &&
+			   !strings.Contains(strings.ToLower(line), "done:") &&
+			   !strings.Contains(strings.ToLower(line), "pending:") &&
+			   !strings.Contains(strings.ToLower(line), "in progress:") {
+				// Accept plain text as task
+				task = line
+			}
+
+			if task != "" {
+				// Remove priority markers
+				task = strings.TrimSuffix(task, "(High)")
+				task = strings.TrimSuffix(task, "(Medium)")
+				task = strings.TrimSuffix(task, "(Low)")
+				task = strings.TrimSpace(task)
+
+				if people[currentPerson] != nil {
+					people[currentPerson].Assigned = append(people[currentPerson].Assigned, task)
+
+					// Find status from analysis
+					for _, analysis := range analyses {
+						if strings.Contains(strings.ToLower(analysis.TaskTitle), strings.ToLower(task)) ||
+						   strings.Contains(strings.ToLower(task), strings.ToLower(analysis.TaskTitle)) {
+							switch normalizeStatus(analysis.DetectedStatus) {
+							case "done":
+								people[currentPerson].Completed = append(people[currentPerson].Completed, task)
+							case "blocked":
+								people[currentPerson].Blocked = append(people[currentPerson].Blocked, task)
+							default:
+								people[currentPerson].Pending = append(people[currentPerson].Pending, task)
+							}
+							break
 						}
-						break
 					}
 				}
 			}
