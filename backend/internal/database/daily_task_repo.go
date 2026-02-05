@@ -42,7 +42,7 @@ func (r *DailyTaskRepository) SaveAnalysis(ctx context.Context, req *models.Save
 			evening_message = EXCLUDED.evening_message,
 			analysis_result = EXCLUDED.analysis_result,
 			updated_at = EXCLUDED.updated_at
-		RETURNING id, date, morning_message, evening_message, analysis_result, created_at, updated_at
+		RETURNING id, date::text, morning_message, evening_message, analysis_result, created_at, updated_at
 	`, req.Date, req.MorningMessage, req.EveningMessage, analysisJSON, now, now).Scan(
 		&analysis.ID, &analysis.Date, &analysis.MorningMessage, &analysis.EveningMessage,
 		&analysisJSON, &analysis.CreatedAt, &analysis.UpdatedAt,
@@ -68,7 +68,7 @@ func (r *DailyTaskRepository) GetAnalysisByDate(ctx context.Context, date string
 	var analysisJSON []byte
 
 	err := pool.QueryRow(ctx, `
-		SELECT id, date, morning_message, evening_message, analysis_result, created_at, updated_at
+		SELECT id, date::text, morning_message, evening_message, analysis_result, created_at, updated_at
 		FROM daily_analyses
 		WHERE date = $1
 	`, date).Scan(
@@ -119,7 +119,7 @@ func (r *DailyTaskRepository) GetTasksByDate(ctx context.Context, date string) (
 	pool := GetPool()
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, analysis_id, date, assignee, task_title, status, original_title, confidence, evidence, carried_from_date, created_at
+		SELECT id, analysis_id, date::text, assignee, task_title, status, original_title, confidence, evidence, carried_from_date::text, created_at
 		FROM daily_tasks
 		WHERE date = $1
 		ORDER BY assignee ASC, created_at ASC

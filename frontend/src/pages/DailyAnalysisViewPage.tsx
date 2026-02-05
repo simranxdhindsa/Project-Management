@@ -1,5 +1,21 @@
-import { useState, useEffect } from 'react'
-import { Calendar, CheckCircle, Clock, XCircle, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Calendar, CheckCircle, Clock, XCircle, AlertTriangle, ChevronLeft, ChevronRight, X, User } from 'lucide-react'
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDroppable,
+} from '@dnd-kit/core'
+import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import api from '../services/api'
 
 interface TasksByAssignee {
@@ -10,6 +26,211 @@ interface TasksByAssignee {
   skipped: string[]
 }
 
+interface DailyTaskItem {
+  id: string
+  title: string
+  assignee: string
+  status: 'completed' | 'pending' | 'blocked' | 'skipped'
+}
+
+type FilterStatus = 'all' | 'completed' | 'pending' | 'blocked' | 'skipped'
+
+// Task List Modal Component
+function TaskListModal({
+  isOpen,
+  onClose,
+  title,
+  tasks,
+  statusColor,
+  statusIcon,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  title: string
+  tasks: DailyTaskItem[]
+  statusColor: string
+  statusIcon: React.ReactNode
+}) {
+  if (!isOpen) return null
+
+  // Group tasks by assignee
+  const tasksByAssignee = tasks.reduce((acc, task) => {
+    if (!acc[task.assignee]) {
+      acc[task.assignee] = []
+    }
+    acc[task.assignee].push(task)
+    return acc
+  }, {} as Record<string, DailyTaskItem[]>)
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content task-list-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header" style={{ borderBottomColor: statusColor }}>
+          <div className="modal-title-group">
+            {statusIcon}
+            <h2>{title}</h2>
+            <span className="modal-count">{tasks.length} tasks</span>
+          </div>
+          <button className="modal-close" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+        <div className="modal-body">
+          {tasks.length === 0 ? (
+            <div className="empty-list">
+              <p>No tasks in this category</p>
+            </div>
+          ) : (
+            Object.entries(tasksByAssignee).map(([assignee, assigneeTasks]) => (
+              <div key={assignee} className="task-list-group">
+                <div className="task-list-assignee">
+                  <User size={16} />
+                  <span>@{assignee}</span>
+                  <span className="assignee-task-count">{assigneeTasks.length}</span>
+                </div>
+                <ul className="task-list-items">
+                  {assigneeTasks.map((task) => (
+                    <li key={task.id} className="task-list-item">
+                      <span className="task-bullet" style={{ backgroundColor: statusColor }} />
+                      <span className="task-text">{task.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Sortable Task Card - uses same styling as Dashboard TaskCard
+function SortableTaskCard({ task }: { task: DailyTaskItem }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <TaskCard task={task} isDragging={isDragging} />
+    </div>
+  )
+}
+
+// Task Card Component - styled exactly like Dashboard TaskCard
+function TaskCard({ task, isDragging }: { task: DailyTaskItem; isDragging?: boolean }) {
+  const getStatusBadgeClass = () => {
+    switch (task.status) {
+      case 'completed':
+        return 'priority-low' // Green
+      case 'pending':
+        return 'priority-medium' // Yellow/Orange
+      case 'blocked':
+        return 'priority-high' // Red
+      default:
+        return 'priority-medium'
+    }
+  }
+
+  const getStatusLabel = () => {
+    switch (task.status) {
+      case 'completed':
+        return 'Done'
+      case 'pending':
+        return 'Pending'
+      case 'blocked':
+        return 'Blocked'
+      case 'skipped':
+        return 'Not Mentioned'
+      default:
+        return task.status
+    }
+  }
+
+  return (
+    <div className={`task-card ${isDragging ? 'task-card-dragging' : ''} ${getStatusBadgeClass()}`}>
+      <div className="task-card-header">
+        <span className={`task-priority-badge ${getStatusBadgeClass()}`}>
+          {getStatusLabel()}
+        </span>
+      </div>
+
+      <h4 className="task-card-title">{task.title}</h4>
+
+      <div className="task-card-footer">
+        <div className="task-card-meta"></div>
+        <div className="task-assignee" title={task.assignee}>
+          <div className="task-assignee-placeholder">
+            {task.assignee?.charAt(0).toUpperCase() || '?'}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Kanban Column Component - styled exactly like Dashboard KanbanColumn
+function KanbanColumn({
+  id,
+  title,
+  icon,
+  color,
+  tasks,
+}: {
+  id: string
+  title: string
+  icon: React.ReactNode
+  color: string
+  tasks: DailyTaskItem[]
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id })
+  const taskIds = tasks.map((t) => t.id)
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`kanban-column ${isOver ? 'column-drag-over' : ''}`}
+      data-status={id}
+    >
+      <div className="kanban-column-header">
+        <div className="column-header-title">
+          <span
+            className="column-status-dot"
+            style={{ backgroundColor: color }}
+          />
+          <h3 className="column-title">{title}</h3>
+          <span className="column-task-count">{tasks.length}</span>
+        </div>
+      </div>
+
+      <div className="kanban-column-content">
+        <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+          {tasks.length === 0 ? (
+            <div className="column-empty-state">
+              <p>No tasks</p>
+            </div>
+          ) : (
+            tasks.map((task) => (
+              <SortableTaskCard key={task.id} task={task} />
+            ))
+          )}
+        </SortableContext>
+      </div>
+    </div>
+  )
+}
+
 export function DailyAnalysisViewPage() {
   const [selectedDate, setSelectedDate] = useState(() => {
     const today = new Date()
@@ -18,6 +239,62 @@ export function DailyAnalysisViewPage() {
   const [tasksByAssignee, setTasksByAssignee] = useState<TasksByAssignee[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [activeTask, setActiveTask] = useState<DailyTaskItem | null>(null)
+  const [modalFilter, setModalFilter] = useState<FilterStatus | null>(null)
+
+  // Configure sensors with distance constraint to prevent accidental drags
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  )
+
+  // Convert tasksByAssignee to flat list of DailyTaskItem
+  const getAllTasks = useCallback((): DailyTaskItem[] => {
+    const tasks: DailyTaskItem[] = []
+    let idCounter = 0
+
+    tasksByAssignee.forEach((assignee) => {
+      assignee.completed.forEach((title) => {
+        tasks.push({
+          id: `task-${idCounter++}`,
+          title,
+          assignee: assignee.assignee,
+          status: 'completed',
+        })
+      })
+      assignee.pending.forEach((title) => {
+        tasks.push({
+          id: `task-${idCounter++}`,
+          title,
+          assignee: assignee.assignee,
+          status: 'pending',
+        })
+      })
+      assignee.blocked.forEach((title) => {
+        tasks.push({
+          id: `task-${idCounter++}`,
+          title,
+          assignee: assignee.assignee,
+          status: 'blocked',
+        })
+      })
+      assignee.skipped.forEach((title) => {
+        tasks.push({
+          id: `task-${idCounter++}`,
+          title,
+          assignee: assignee.assignee,
+          status: 'skipped',
+        })
+      })
+    })
+
+    return tasks
+  }, [tasksByAssignee])
+
+  const allTasks = getAllTasks()
 
   // Fetch today's tasks
   useEffect(() => {
@@ -61,6 +338,90 @@ export function DailyAnalysisViewPage() {
   const totalBlocked = tasksByAssignee.reduce((sum, a) => sum + a.blocked.length, 0)
   const totalSkipped = tasksByAssignee.reduce((sum, a) => sum + a.skipped.length, 0)
   const totalTasks = totalCompleted + totalPending + totalBlocked + totalSkipped
+
+  // Drag handlers
+  const handleDragStart = (event: DragStartEvent) => {
+    const task = allTasks.find((t) => t.id === event.active.id)
+    if (task) {
+      setActiveTask(task)
+    }
+  }
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    setActiveTask(null)
+
+    if (!over) return
+
+    const taskId = active.id as string
+    const newStatus = over.id as 'completed' | 'pending' | 'blocked' | 'skipped'
+    const task = allTasks.find((t) => t.id === taskId)
+
+    if (!task || task.status === newStatus) return
+
+    // Update local state optimistically
+    setTasksByAssignee((prev) => {
+      return prev.map((assignee) => {
+        if (assignee.assignee !== task.assignee) return assignee
+
+        // Remove from old status
+        const updated = { ...assignee }
+        updated[task.status] = updated[task.status].filter((t) => t !== task.title)
+        // Add to new status
+        updated[newStatus] = [...updated[newStatus], task.title]
+
+        return updated
+      })
+    })
+  }
+
+  // Get tasks by status
+  const getTasksByStatus = (status: 'completed' | 'pending' | 'blocked' | 'skipped') => {
+    return allTasks.filter((t) => t.status === status)
+  }
+
+  // Get modal title and styling based on filter
+  const getModalConfig = (filter: FilterStatus) => {
+    switch (filter) {
+      case 'completed':
+        return {
+          title: 'Completed Tasks',
+          color: 'var(--color-success)',
+          icon: <CheckCircle size={24} color="var(--color-success)" />,
+          tasks: getTasksByStatus('completed'),
+        }
+      case 'pending':
+        return {
+          title: 'Pending Tasks',
+          color: 'var(--color-warning)',
+          icon: <Clock size={24} color="var(--color-warning)" />,
+          tasks: getTasksByStatus('pending'),
+        }
+      case 'blocked':
+        return {
+          title: 'Blocked Tasks',
+          color: 'var(--color-danger)',
+          icon: <XCircle size={24} color="var(--color-danger)" />,
+          tasks: getTasksByStatus('blocked'),
+        }
+      case 'skipped':
+        return {
+          title: 'Not Mentioned Tasks',
+          color: 'var(--color-secondary)',
+          icon: <AlertTriangle size={24} color="var(--color-secondary)" />,
+          tasks: getTasksByStatus('skipped'),
+        }
+      default:
+        return {
+          title: 'All Tasks',
+          color: 'var(--color-primary)',
+          icon: <CheckCircle size={24} color="var(--color-primary)" />,
+          tasks: allTasks,
+        }
+    }
+  }
+
+  const modalConfig = modalFilter ? getModalConfig(modalFilter) : null
 
   return (
     <div className="daily-analysis-view-page">
@@ -131,10 +492,13 @@ export function DailyAnalysisViewPage() {
 
       {!loading && tasksByAssignee.length > 0 && (
         <>
-          {/* Summary Cards */}
+          {/* Summary Cards - Clickable */}
           <div className="ai-summary-grid">
-            <div className="ai-summary-card glass-card">
-              <div className="ai-summary-icon" style={{ backgroundColor: 'var(--color-primary-light)' }}>
+            <div
+              className="ai-summary-card glass-card clickable"
+              onClick={() => setModalFilter('all')}
+            >
+              <div className="ai-summary-icon" style={{ backgroundColor: 'rgba(99, 102, 241, 0.2)' }}>
                 <CheckCircle size={24} color="var(--color-primary)" />
               </div>
               <div className="ai-summary-content">
@@ -143,8 +507,11 @@ export function DailyAnalysisViewPage() {
               </div>
             </div>
 
-            <div className="ai-summary-card glass-card">
-              <div className="ai-summary-icon" style={{ backgroundColor: 'var(--color-success-light)' }}>
+            <div
+              className="ai-summary-card glass-card clickable"
+              onClick={() => setModalFilter('completed')}
+            >
+              <div className="ai-summary-icon" style={{ backgroundColor: 'rgba(16, 185, 129, 0.2)' }}>
                 <CheckCircle size={24} color="var(--color-success)" />
               </div>
               <div className="ai-summary-content">
@@ -153,8 +520,11 @@ export function DailyAnalysisViewPage() {
               </div>
             </div>
 
-            <div className="ai-summary-card glass-card">
-              <div className="ai-summary-icon" style={{ backgroundColor: 'var(--color-warning-light)' }}>
+            <div
+              className="ai-summary-card glass-card clickable"
+              onClick={() => setModalFilter('pending')}
+            >
+              <div className="ai-summary-icon" style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)' }}>
                 <Clock size={24} color="var(--color-warning)" />
               </div>
               <div className="ai-summary-content">
@@ -163,8 +533,11 @@ export function DailyAnalysisViewPage() {
               </div>
             </div>
 
-            <div className="ai-summary-card glass-card">
-              <div className="ai-summary-icon" style={{ backgroundColor: 'var(--color-danger-light)' }}>
+            <div
+              className="ai-summary-card glass-card clickable"
+              onClick={() => setModalFilter('blocked')}
+            >
+              <div className="ai-summary-icon" style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)' }}>
                 <XCircle size={24} color="var(--color-danger)" />
               </div>
               <div className="ai-summary-content">
@@ -174,136 +547,68 @@ export function DailyAnalysisViewPage() {
             </div>
           </div>
 
-          {/* Task Columns by Status */}
-          <div className="analysis-columns">
-            {/* Completed Column */}
-            <div className="analysis-column glass-card">
-              <div className="analysis-column-header" style={{ borderColor: 'var(--color-success)' }}>
-                <CheckCircle size={20} color="var(--color-success)" />
-                <h3>Completed</h3>
-                <span className="column-count">{totalCompleted}</span>
-              </div>
-              <div className="analysis-column-body">
-                {tasksByAssignee.map((assignee, idx) => (
-                  assignee.completed.length > 0 && (
-                    <div key={`completed-${idx}`} className="assignee-group">
-                      <div className="assignee-header">
-                        <span className="assignee-name">@{assignee.assignee}</span>
-                        <span className="task-count">{assignee.completed.length}</span>
-                      </div>
-                      <ul className="task-list">
-                        {assignee.completed.map((task, taskIdx) => (
-                          <li key={taskIdx} className="task-item task-completed">
-                            <CheckCircle size={14} />
-                            {task}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )
-                ))}
-                {totalCompleted === 0 && (
-                  <p className="empty-column-text">No completed tasks</p>
+          {/* Kanban Board with Drag & Drop - Same styling as Dashboard */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="kanban-board">
+              <div className="kanban-columns">
+                <KanbanColumn
+                  id="completed"
+                  title="Completed"
+                  icon={<CheckCircle size={20} />}
+                  color="var(--status-done)"
+                  tasks={getTasksByStatus('completed')}
+                />
+                <KanbanColumn
+                  id="pending"
+                  title="Pending"
+                  icon={<Clock size={20} />}
+                  color="var(--status-in-progress)"
+                  tasks={getTasksByStatus('pending')}
+                />
+                <KanbanColumn
+                  id="blocked"
+                  title="Blocked"
+                  icon={<XCircle size={20} />}
+                  color="var(--color-danger)"
+                  tasks={getTasksByStatus('blocked')}
+                />
+                {totalSkipped > 0 && (
+                  <KanbanColumn
+                    id="skipped"
+                    title="Not Mentioned"
+                    icon={<AlertTriangle size={20} />}
+                    color="var(--color-secondary)"
+                    tasks={getTasksByStatus('skipped')}
+                  />
                 )}
               </div>
             </div>
 
-            {/* Pending Column */}
-            <div className="analysis-column glass-card">
-              <div className="analysis-column-header" style={{ borderColor: 'var(--color-warning)' }}>
-                <Clock size={20} color="var(--color-warning)" />
-                <h3>Pending</h3>
-                <span className="column-count">{totalPending}</span>
-              </div>
-              <div className="analysis-column-body">
-                {tasksByAssignee.map((assignee, idx) => (
-                  assignee.pending.length > 0 && (
-                    <div key={`pending-${idx}`} className="assignee-group">
-                      <div className="assignee-header">
-                        <span className="assignee-name">@{assignee.assignee}</span>
-                        <span className="task-count">{assignee.pending.length}</span>
-                      </div>
-                      <ul className="task-list">
-                        {assignee.pending.map((task, taskIdx) => (
-                          <li key={taskIdx} className="task-item task-pending">
-                            <Clock size={14} />
-                            {task}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )
-                ))}
-                {totalPending === 0 && (
-                  <p className="empty-column-text">No pending tasks</p>
-                )}
-              </div>
-            </div>
-
-            {/* Blocked Column */}
-            <div className="analysis-column glass-card">
-              <div className="analysis-column-header" style={{ borderColor: 'var(--color-danger)' }}>
-                <XCircle size={20} color="var(--color-danger)" />
-                <h3>Blocked</h3>
-                <span className="column-count">{totalBlocked}</span>
-              </div>
-              <div className="analysis-column-body">
-                {tasksByAssignee.map((assignee, idx) => (
-                  assignee.blocked.length > 0 && (
-                    <div key={`blocked-${idx}`} className="assignee-group">
-                      <div className="assignee-header">
-                        <span className="assignee-name">@{assignee.assignee}</span>
-                        <span className="task-count">{assignee.blocked.length}</span>
-                      </div>
-                      <ul className="task-list">
-                        {assignee.blocked.map((task, taskIdx) => (
-                          <li key={taskIdx} className="task-item task-blocked">
-                            <XCircle size={14} />
-                            {task}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )
-                ))}
-                {totalBlocked === 0 && (
-                  <p className="empty-column-text">No blocked tasks</p>
-                )}
-              </div>
-            </div>
-
-            {/* Skipped Column */}
-            {totalSkipped > 0 && (
-              <div className="analysis-column glass-card">
-                <div className="analysis-column-header" style={{ borderColor: 'var(--color-secondary)' }}>
-                  <AlertTriangle size={20} color="var(--color-secondary)" />
-                  <h3>Not Mentioned</h3>
-                  <span className="column-count">{totalSkipped}</span>
-                </div>
-                <div className="analysis-column-body">
-                  {tasksByAssignee.map((assignee, idx) => (
-                    assignee.skipped.length > 0 && (
-                      <div key={`skipped-${idx}`} className="assignee-group">
-                        <div className="assignee-header">
-                          <span className="assignee-name">@{assignee.assignee}</span>
-                          <span className="task-count">{assignee.skipped.length}</span>
-                        </div>
-                        <ul className="task-list">
-                          {assignee.skipped.map((task, taskIdx) => (
-                            <li key={taskIdx} className="task-item task-skipped">
-                              <AlertTriangle size={14} />
-                              {task}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+            {/* Drag Overlay - shows the dragged card */}
+            <DragOverlay>
+              {activeTask ? (
+                <TaskCard task={activeTask} isDragging />
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         </>
+      )}
+
+      {/* Task List Modal */}
+      {modalConfig && (
+        <TaskListModal
+          isOpen={!!modalFilter}
+          onClose={() => setModalFilter(null)}
+          title={modalConfig.title}
+          tasks={modalConfig.tasks}
+          statusColor={modalConfig.color}
+          statusIcon={modalConfig.icon}
+        />
       )}
     </div>
   )
