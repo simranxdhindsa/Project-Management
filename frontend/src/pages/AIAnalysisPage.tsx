@@ -83,15 +83,25 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     try {
       setAnalyzing(true)
       setError(null)
-      const response = await api.analyzeManualInput(morningAssignments, eveningUpdates)
-      if (response.success && response.data) {
+      console.log('Starting analysis...')
+      const response = await api.analyzeManualInput(morningAssignments, eveningUpdates) as any
+      console.log('API Response:', response)
+      // Check both response shapes - wrapped in data or at root level
+      const analysis = response.data?.analysis || response.analysis
+      const person_breakdown = response.data?.person_breakdown || response.person_breakdown
+      const summary = response.data?.summary || response.summary
+
+      if (response.success && analysis) {
         setResults({
-          analysis: response.data.analysis,
-          person_breakdown: response.data.person_breakdown,
-          summary: response.data.summary,
+          analysis,
+          person_breakdown,
+          summary,
         })
+      } else {
+        console.error('No analysis in response:', response)
       }
     } catch (err) {
+      console.error('Analysis error:', err)
       setError(err instanceof Error ? err.message : 'Analysis failed')
     } finally {
       setAnalyzing(false)

@@ -145,6 +145,68 @@ func (c *GeminiClient) AnalyzeMessages(ctx context.Context, messages []SlackMess
 }
 
 
+// AnalyzeFullInput implements AIClient interface for Gemini
+func (c *GeminiClient) AnalyzeFullInput(ctx context.Context, morningText, eveningText string) (*FullAnalysisResponse, error) {
+	if c.apiKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY environment variable not set")
+	}
+
+	prompt := buildFullAnalysisPrompt(morningText, eveningText)
+
+	req := GeminiRequest{
+		Contents: []Content{
+			{
+				Parts: []Part{
+					{Text: prompt},
+				},
+			},
+		},
+		GenerationConfig: &GenerationConfig{
+			Temperature:     0.2,
+			MaxOutputTokens: 4096,
+		},
+	}
+
+	jsonBody, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s?key=%s", GeminiAPIURL, c.apiKey)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var geminiResp GeminiResponse
+	if err := json.Unmarshal(body, &geminiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if geminiResp.Error != nil {
+		return nil, fmt.Errorf("API error: %s", geminiResp.Error.Message)
+	}
+
+	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("no response from Gemini")
+	}
+
+	responseText := geminiResp.Candidates[0].Content.Parts[0].Text
+	return parseFullAnalysisResponse(responseText)
+}
+
 // CompareStatuses compares AI-detected statuses with actual Asana statuses
 func CompareStatuses(analyses []TaskStatusAnalysis, asanaStatuses map[string]string) []StatusDiscrepancy {
 	var discrepancies []StatusDiscrepancy
