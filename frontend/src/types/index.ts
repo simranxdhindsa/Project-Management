@@ -21,6 +21,8 @@ export interface Task {
   asana_id?: string
   asana_url?: string
   asana_section_gid?: string
+  youtrack_id?: string
+  youtrack_url?: string
   section_name?: string
   due_date?: string
   created_at?: string

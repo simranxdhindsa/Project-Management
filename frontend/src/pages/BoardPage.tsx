@@ -2,6 +2,44 @@ import { useState, useEffect } from 'react'
 import { KanbanBoard } from '../components/board'
 import type { Task, TaskStatus, AsanaSection, CreateTaskRequest } from '../types'
 import api from '../services/api'
+import type { YouTrackIssue } from '../services/api'
+
+// Map YouTrack status to local TaskStatus
+function mapYouTrackStatus(status: string): TaskStatus {
+  const s = status.toLowerCase()
+  if (s.includes('done') || s.includes('fixed') || s.includes('complete') || s.includes('verified')) return 'done'
+  if (s.includes('progress') || s.includes('doing') || s.includes('dev') || s.includes('active')) return 'in_progress'
+  if (s.includes('review') || s.includes('verify') || s.includes('stage') || s.includes('ready for stage')) return 'review'
+  return 'todo'
+}
+
+// Map YouTrack priority to local priority
+function mapYouTrackPriority(priority: string): 'low' | 'medium' | 'high' {
+  const p = priority.toLowerCase()
+  if (p.includes('critical') || p.includes('major') || p.includes('show-stopper')) return 'high'
+  if (p.includes('minor') || p.includes('cosmetic')) return 'low'
+  return 'medium'
+}
+
+// Convert YouTrack issue to local Task format
+function youtrackToTask(issue: YouTrackIssue): Task {
+  return {
+    id: issue.id,
+    title: issue.summary,
+    description: issue.description || '',
+    status: mapYouTrackStatus(issue.status),
+    priority: mapYouTrackPriority(issue.priority),
+    youtrack_id: issue.id,
+    section_name: issue.status,
+    assignee: issue.assignee ? {
+      id: issue.assignee.id,
+      name: issue.assignee.fullName || issue.assignee.login,
+      email: issue.assignee.email || '',
+    } : undefined,
+    created_at: issue.created ? new Date(issue.created).toISOString() : undefined,
+    updated_at: issue.updated ? new Date(issue.updated).toISOString() : undefined,
+  }
+}
 
 export function BoardPage() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -11,6 +49,7 @@ export function BoardPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [youtrackConnected, setYoutrackConnected] = useState(false)
 
   // Fetch tasks and sections on mount
   useEffect(() => {
@@ -20,18 +59,53 @@ export function BoardPage() {
   const fetchTasksAndSections = async () => {
     try {
       setLoading(true)
-      // Fetch tasks and sections in parallel
-      const [tasksResponse, sectionsResponse] = await Promise.all([
-        api.getTasks(),
-        api.getProjectSections()
-      ])
+      setError(null)
 
-      if (tasksResponse.success && tasksResponse.data) {
-        setTasks(tasksResponse.data as Task[])
+      // Check YouTrack status first
+      let ytConnected = false
+      try {
+        const ytStatus = await api.getYouTrackStatus()
+        ytConnected = ytStatus.configured === true
+        setYoutrackConnected(ytConnected)
+      } catch {
+        ytConnected = false
       }
 
-      if (sectionsResponse.success && sectionsResponse.data) {
-        setSections(sectionsResponse.data as AsanaSection[])
+      if (ytConnected) {
+        // Fetch from YouTrack directly
+        const [issuesResponse, statesResponse] = await Promise.all([
+          api.getYouTrackIssues(),
+          api.getYouTrackStates(),
+        ])
+
+        if (issuesResponse.success && issuesResponse.data) {
+          const ytIssues = issuesResponse.data as YouTrackIssue[]
+          setTasks(ytIssues.map(youtrackToTask))
+        }
+
+        if (statesResponse.success && statesResponse.data) {
+          const states = statesResponse.data as { name: string }[]
+          const mappedSections: AsanaSection[] = states.map((state, i) => ({
+            gid: state.name,
+            name: state.name,
+            position: i,
+          }))
+          setSections(mappedSections)
+        }
+      } else {
+        // Fallback: fetch from local DB (Asana tasks)
+        const [tasksResponse, sectionsResponse] = await Promise.all([
+          api.getTasks(),
+          api.getProjectSections()
+        ])
+
+        if (tasksResponse.success && tasksResponse.data) {
+          setTasks(tasksResponse.data as Task[])
+        }
+
+        if (sectionsResponse.success && sectionsResponse.data) {
+          setSections(sectionsResponse.data as AsanaSection[])
+        }
       }
     } catch (err) {
       setError('Failed to load tasks')
@@ -42,17 +116,15 @@ export function BoardPage() {
   }
 
   const handleTaskMove = async (taskId: string, newStatus: TaskStatus, sectionGid?: string, sectionName?: string) => {
-    // Find the task to check if it has asana_id
     const task = tasks.find(t => t.id === taskId)
 
-    // Optimistic update - update both status and section info
+    // Optimistic update
     setTasks((prev) =>
       prev.map((t) =>
         t.id === taskId
           ? {
               ...t,
               status: newStatus,
-              asana_section_gid: sectionGid || t.asana_section_gid,
               section_name: sectionName || t.section_name,
             }
           : t
@@ -60,15 +132,17 @@ export function BoardPage() {
     )
 
     try {
-      // Update section on server if section info provided
-      if (sectionGid && sectionName) {
+      if (youtrackConnected && task?.youtrack_id) {
+        // Update state in YouTrack directly
+        const ytState = sectionName || mapLocalStatusToYouTrack(newStatus)
+        await api.updateYouTrackIssueState(task.youtrack_id, ytState)
+      } else if (sectionGid && sectionName) {
         await api.updateTaskSection(taskId, sectionGid, sectionName)
       } else {
-        // Fallback to status update for legacy behavior
         await api.updateTaskStatus(taskId, newStatus)
       }
 
-      // Push to Asana if task is linked
+      // Push to Asana if task is linked (legacy)
       if (task?.asana_id) {
         await api.pushTaskToAsana(taskId).catch((err) => {
           console.log('Asana sync skipped:', err)
@@ -87,34 +161,51 @@ export function BoardPage() {
 
   const handleTaskEdit = (task: Task) => {
     setSelectedTask(task)
-    // Open edit modal
   }
 
   const handleCreateTask = async (taskData: CreateTaskRequest) => {
     try {
-      const response = await api.createTask(taskData)
-      if (response.success && response.data) {
-        setTasks((prev) => [...prev, response.data as Task])
-        setShowCreateModal(false)
+      if (youtrackConnected) {
+        // Create in YouTrack
+        const response = await api.createYouTrackIssue(
+          taskData.title,
+          taskData.description || '',
+          mapLocalStatusToYouTrack(taskData.status || 'todo')
+        )
+        if (response.success) {
+          await fetchTasksAndSections()
+          setShowCreateModal(false)
+        }
+      } else {
+        const response = await api.createTask(taskData)
+        if (response.success && response.data) {
+          setTasks((prev) => [...prev, response.data as Task])
+          setShowCreateModal(false)
+        }
       }
     } catch (err) {
       console.error('Error creating task:', err)
     }
   }
 
-  const handleAsanaSync = async () => {
+  const handleSync = async () => {
     try {
       setSyncing(true)
-      const response = await api.importFromAsana()
-      if (response.success) {
-        // Refresh tasks and sections after sync
+      if (youtrackConnected) {
+        // Just refresh from YouTrack
         await fetchTasksAndSections()
-        const data = response.data as { tasks_synced: number; tasks_created: number; tasks_updated: number }
-        alert(`Sync complete! Created: ${data.tasks_created}, Updated: ${data.tasks_updated}`)
+        alert('Synced from YouTrack!')
+      } else {
+        const response = await api.importFromAsana()
+        if (response.success) {
+          await fetchTasksAndSections()
+          const data = response.data as { tasks_synced: number; tasks_created: number; tasks_updated: number }
+          alert(`Sync complete! Created: ${data.tasks_created}, Updated: ${data.tasks_updated}`)
+        }
       }
     } catch (err) {
-      console.error('Error syncing with Asana:', err)
-      alert('Failed to sync with Asana')
+      console.error('Error syncing:', err)
+      alert('Failed to sync')
     } finally {
       setSyncing(false)
     }
@@ -145,24 +236,45 @@ export function BoardPage() {
     )
   }
 
+  // Build YouTrack issue URL
+  const getYouTrackURL = (task: Task) => {
+    if (task.youtrack_id) {
+      return `https://simran.youtrack.cloud/issue/${task.youtrack_id}`
+    }
+    return null
+  }
+
   return (
     <div className="board-page">
       <div className="board-header">
         <div className="board-header-left">
           <h1 className="board-title">Project Board</h1>
           <span className="board-task-count">{tasks.length} tasks</span>
+          {youtrackConnected && (
+            <span className="board-source-badge" style={{
+              background: 'rgba(130, 80, 223, 0.15)',
+              color: '#8250df',
+              padding: '2px 8px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 500,
+              marginLeft: '8px',
+            }}>
+              YouTrack
+            </span>
+          )}
         </div>
         <div className="board-header-right">
           <div className="board-filters">
             <button
               className="btn btn-ghost btn-sm"
-              onClick={handleAsanaSync}
+              onClick={handleSync}
               disabled={syncing}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={syncing ? 'animate-spin' : ''}>
                 <path d="M21 12a9 9 0 11-6.219-8.56" />
               </svg>
-              {syncing ? 'Syncing...' : 'Sync Asana'}
+              {syncing ? 'Syncing...' : youtrackConnected ? 'Sync YouTrack' : 'Sync Asana'}
             </button>
             <button className="btn btn-ghost btn-sm">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -211,7 +323,7 @@ export function BoardPage() {
         <div className="modal-overlay" onClick={() => setSelectedTask(null)}>
           <div className="modal glass-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>{selectedTask.title}</h2>
+              <h2>{selectedTask.youtrack_id && <span style={{ color: '#8250df', marginRight: '8px', fontSize: '14px' }}>{selectedTask.youtrack_id}</span>}{selectedTask.title}</h2>
               <button
                 className="modal-close"
                 onClick={() => setSelectedTask(null)}
@@ -227,7 +339,7 @@ export function BoardPage() {
                 <div className="task-detail-item">
                   <label>Status</label>
                   <span className={`status-badge status-${selectedTask.status}`}>
-                    {selectedTask.status.replace('_', ' ')}
+                    {selectedTask.section_name || selectedTask.status.replace('_', ' ')}
                   </span>
                 </div>
                 <div className="task-detail-item">
@@ -260,7 +372,25 @@ export function BoardPage() {
                   <p>{selectedTask.description}</p>
                 </div>
               )}
-              {selectedTask.asana_url && (
+              {/* YouTrack link */}
+              {getYouTrackURL(selectedTask) && (
+                <a
+                  href={getYouTrackURL(selectedTask)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-ghost btn-sm"
+                  style={{ color: '#8250df', marginTop: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                  View in YouTrack
+                </a>
+              )}
+              {/* Asana link (legacy) */}
+              {selectedTask.asana_url && !selectedTask.youtrack_id && (
                 <a
                   href={selectedTask.asana_url}
                   target="_blank"
@@ -291,6 +421,16 @@ export function BoardPage() {
   )
 }
 
+// Map local status to YouTrack state name
+function mapLocalStatusToYouTrack(status: TaskStatus | string): string {
+  switch (status) {
+    case 'done': return 'Fixed'
+    case 'in_progress': return 'In Progress'
+    case 'review': return 'To be discussed'
+    default: return 'Open'
+  }
+}
+
 // Create Task Modal Component
 interface CreateTaskModalProps {
   onClose: () => void
@@ -303,7 +443,7 @@ function CreateTaskModal({ onClose, onCreate }: CreateTaskModalProps) {
     description: '',
     status: 'todo',
     priority: 'medium',
-    project_id: 'default', // TODO: Get from context
+    project_id: 'default',
   })
 
   const handleSubmit = (e: React.FormEvent) => {

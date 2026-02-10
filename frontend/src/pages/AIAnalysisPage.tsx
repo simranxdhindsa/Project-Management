@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Save } from 'lucide-react'
+import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Save, Link2 } from 'lucide-react'
 import api from '../services/api'
+import { MatchConfirmationModal } from '../components/MatchConfirmationModal'
 
 interface AnalysisResult {
   task_title: string
@@ -48,6 +49,14 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     analysis: AnalysisResult[]
     person_breakdown: PersonBreakdown[]
     summary: Summary
+  } | null>(null)
+
+  // YouTrack matching state
+  const [matching, setMatching] = useState(false)
+  const [matchResults, setMatchResults] = useState<{
+    matches: any[]
+    unmatched_tasks: any[]
+    unmatched_issues: any[]
   } | null>(null)
 
   const exampleMorning = `\`todays task list\`
@@ -151,6 +160,28 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
       setError(err instanceof Error ? err.message : 'Failed to save analysis')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleMatchWithYouTrack = async () => {
+    if (!results) return
+    try {
+      setMatching(true)
+      setError(null)
+      const response = await api.matchAnalysisWithYouTrack(
+        results.person_breakdown,
+        results.analysis
+      ) as any
+      const data = response.data || response
+      setMatchResults({
+        matches: data.matches || [],
+        unmatched_tasks: data.unmatched_tasks || [],
+        unmatched_issues: data.unmatched_issues || [],
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to match with YouTrack')
+    } finally {
+      setMatching(false)
     }
   }
 
@@ -279,8 +310,33 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
 
       {results && (
         <>
-          {/* Save Analysis Button */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.5rem' }}>
+          {/* Save Analysis & Match Buttons */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginBottom: '1.5rem' }}>
+            <button
+              className="btn btn-lg"
+              onClick={handleMatchWithYouTrack}
+              disabled={matching}
+              style={{
+                background: '#8250df',
+                color: 'white',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              {matching ? (
+                <>
+                  <div className="loading-spinner" style={{ width: '16px', height: '16px' }} />
+                  Matching...
+                </>
+              ) : (
+                <>
+                  <Link2 size={18} />
+                  Match with YouTrack
+                </>
+              )}
+            </button>
             <button
               className="btn btn-success btn-lg"
               onClick={handleSaveAnalysis}
@@ -455,6 +511,20 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
             </div>
           </div>
         </>
+      )}
+      {/* YouTrack Match Confirmation Modal */}
+      {matchResults && (
+        <MatchConfirmationModal
+          matches={matchResults.matches}
+          unmatchedTasks={matchResults.unmatched_tasks}
+          unmatchedIssues={matchResults.unmatched_issues}
+          onClose={() => setMatchResults(null)}
+          onSuccess={() => {
+            setMatchResults(null)
+            setSuccessMessage('YouTrack tickets updated successfully!')
+            setTimeout(() => setSuccessMessage(null), 3000)
+          }}
+        />
       )}
     </div>
   )

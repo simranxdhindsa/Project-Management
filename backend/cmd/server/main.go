@@ -105,6 +105,33 @@ func main() {
 	// Asana webhook endpoint (public - called by Asana)
 	api.HandleFunc("/webhooks/asana", asanaHandler.HandleWebhook).Methods("POST")
 
+	// YouTrack routes (protected)
+	youtrackHandler := handlers.NewYouTrackHandler()
+	youtrackRoutes := api.PathPrefix("/youtrack").Subrouter()
+	youtrackRoutes.Use(middleware.AuthMiddleware)
+	youtrackRoutes.HandleFunc("/status", youtrackHandler.GetStatus).Methods("GET")
+	youtrackRoutes.HandleFunc("/test", youtrackHandler.TestConnection).Methods("POST")
+	youtrackRoutes.HandleFunc("/projects", youtrackHandler.GetProjects).Methods("GET")
+	youtrackRoutes.HandleFunc("/boards", youtrackHandler.GetBoards).Methods("GET")
+	youtrackRoutes.HandleFunc("/boards/{board_id}/columns", youtrackHandler.GetBoardColumns).Methods("GET")
+	youtrackRoutes.HandleFunc("/states", youtrackHandler.GetStates).Methods("GET")
+	youtrackRoutes.HandleFunc("/users", youtrackHandler.GetUsers).Methods("GET")
+	youtrackRoutes.HandleFunc("/issues", youtrackHandler.GetIssues).Methods("GET")
+	youtrackRoutes.HandleFunc("/issues", youtrackHandler.CreateIssue).Methods("POST")
+	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.GetIssue).Methods("GET")
+	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.UpdateIssue).Methods("PUT", "PATCH")
+	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.DeleteIssue).Methods("DELETE")
+	youtrackRoutes.HandleFunc("/issues/{issue_id}/state", youtrackHandler.UpdateIssueState).Methods("PATCH")
+	youtrackRoutes.HandleFunc("/sections", youtrackHandler.GetProjectSectionsFromDB).Methods("GET") // Get synced sections from DB
+	youtrackRoutes.HandleFunc("/import", youtrackHandler.ImportFromYouTrack).Methods("POST")       // Import issues from YouTrack
+	youtrackRoutes.HandleFunc("/match-analysis", youtrackHandler.MatchAnalysis).Methods("POST")           // Match AI analysis with YouTrack issues
+	youtrackRoutes.HandleFunc("/bulk-update-states", youtrackHandler.BulkUpdateStates).Methods("POST")    // Bulk update issue states
+
+	// Task-specific YouTrack routes (protected)
+	taskYouTrackRoutes := api.PathPrefix("/tasks/{id}/youtrack").Subrouter()
+	taskYouTrackRoutes.Use(middleware.AuthMiddleware)
+	taskYouTrackRoutes.HandleFunc("/sync", youtrackHandler.SyncTaskToYouTrack).Methods("POST")
+
 	// Slack routes (protected)
 	slackHandler := handlers.NewSlackHandler()
 	slackRoutes := api.PathPrefix("/slack").Subrouter()

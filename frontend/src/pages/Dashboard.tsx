@@ -1,7 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDroppable,
+  useDraggable,
+} from '@dnd-kit/core'
+import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/contexts/AuthContext'
-import { useTaskStats } from '@/hooks/useTaskStats'
-import { useTasks } from '@/hooks/useTasks'
+import api from '@/services/api'
 import {
   LayoutDashboard,
   KanbanSquare,
@@ -20,7 +30,12 @@ import {
   Link2,
   Brain,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Clock,
+  Code2,
+  Archive,
+  RefreshCw,
+  User
 } from 'lucide-react'
 import { IntegrationsPage } from './IntegrationsPage'
 import { SettingsPage } from './SettingsPage'
@@ -33,13 +48,152 @@ import { JellySwitch } from '../components/JellySwitch'
 
 type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'bots' | 'team' | 'settings' | 'integrations'
 
+// YouTrack issue with extracted fields
+interface YTIssue {
+  id: string
+  summary: string
+  description: string
+  status: string
+  priority: string
+  assignee?: { id: string; login: string; fullName: string; email?: string }
+}
+
+// Column config for the 3 dashboard columns
+const DASHBOARD_COLUMNS = [
+  { id: 'backlog', label: 'Backlog', ytState: 'Open' },
+  { id: 'in_progress', label: 'In Progress', ytState: 'In Progress' },
+  { id: 'dev', label: 'DEV', ytState: 'DEV' },
+] as const
+
+// Droppable column wrapper
+function DroppableColumn({ id, children }: { id: string; children: React.ReactNode }) {
+  const { isOver, setNodeRef } = useDroppable({ id })
+  return (
+    <div
+      ref={setNodeRef}
+      className="kanban-column"
+      style={{
+        outline: isOver ? '2px solid #8250df' : 'none',
+        outlineOffset: '-2px',
+        borderRadius: '12px',
+        transition: 'outline 0.15s ease',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+// Draggable card wrapper
+function DraggableCard({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id })
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      style={{
+        opacity: isDragging ? 0.4 : 1,
+        cursor: 'grab',
+        touchAction: 'none',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const { user, logout } = useAuth()
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
-  const { stats } = useTaskStats()
-  const { tasks } = useTasks()
   const [showNotifications, setShowNotifications] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
+
+  // YouTrack state
+  const [ytIssues, setYtIssues] = useState<YTIssue[]>([])
+  const [ytLoading, setYtLoading] = useState(true)
+  const [ytConnected, setYtConnected] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [activeIssue, setActiveIssue] = useState<YTIssue | null>(null)
+  const [dashboardView, setDashboardView] = useState<'board' | 'assignees'>('board')
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  )
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const issue = ytIssues.find(i => i.id === event.active.id)
+    if (issue) setActiveIssue(issue)
+  }
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    setActiveIssue(null)
+    const { active, over } = event
+    if (!over) return
+
+    const issueId = active.id as string
+    const targetColumnId = over.id as string
+
+    // Find which column the issue currently belongs to
+    const issue = ytIssues.find(i => i.id === issueId)
+    if (!issue) return
+
+    const currentCol = getColumnForIssue(issue)
+    if (currentCol === targetColumnId) return
+
+    // Find the target YouTrack state
+    const targetCol = DASHBOARD_COLUMNS.find(c => c.id === targetColumnId)
+    if (!targetCol) return
+
+    // Optimistic update: move the issue locally
+    setYtIssues(prev => prev.map(i =>
+      i.id === issueId ? { ...i, status: targetCol.ytState } : i
+    ))
+
+    // Call YouTrack API to update state
+    try {
+      await api.bulkUpdateYouTrackStates([{ issue_id: issueId, new_state: targetCol.ytState }])
+    } catch (err) {
+      console.error('Failed to update issue state:', err)
+      // Revert on failure
+      fetchYouTrackIssues()
+    }
+  }
+
+  const getColumnForIssue = (issue: YTIssue): string => {
+    const s = issue.status?.toLowerCase() || ''
+    if (s === 'in progress') return 'in_progress'
+    if (s === 'dev') return 'dev'
+    return 'backlog'
+  }
+
+  useEffect(() => {
+    fetchYouTrackIssues()
+  }, [])
+
+  const fetchYouTrackIssues = async () => {
+    try {
+      setYtLoading(true)
+      const status = await api.getYouTrackStatus()
+      if (status.configured) {
+        setYtConnected(true)
+        const response = await api.getYouTrackIssues() as any
+        if (response.success && response.data) {
+          setYtIssues(response.data as YTIssue[])
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch YouTrack issues:', err)
+    } finally {
+      setYtLoading(false)
+    }
+  }
+
+  const handleSync = async () => {
+    setSyncing(true)
+    await fetchYouTrackIssues()
+    setSyncing(false)
+  }
 
   const handleLogout = async () => {
     await logout()
@@ -55,11 +209,66 @@ export default function Dashboard() {
       .slice(0, 2)
   }
 
-  // Group tasks by status for kanban preview
-  const todoTasks = tasks.filter(t => t.status === 'todo').slice(0, 3)
-  const inProgressTasks = tasks.filter(t => t.status === 'in_progress').slice(0, 3)
-  const reviewTasks = tasks.filter(t => t.status === 'review').slice(0, 3)
-  const doneTasks = tasks.filter(t => t.status === 'done').slice(0, 3)
+  // Group YouTrack issues by the 3 columns + Backlog
+  const inProgressIssues = ytIssues.filter(i => i.status?.toLowerCase() === 'in progress')
+  const devIssues = ytIssues.filter(i => i.status?.toLowerCase() === 'dev')
+  const backlogIssues = ytIssues.filter(i => {
+    const s = i.status?.toLowerCase() || ''
+    return s !== 'in progress' && s !== 'dev' && s !== 'done' && s !== 'fixed'
+  })
+  const doneIssues = ytIssues.filter(i => {
+    const s = i.status?.toLowerCase() || ''
+    return s === 'done' || s === 'fixed'
+  })
+
+  // Group issues by assignee for Assignee View
+  const assigneeGroups = useMemo(() => {
+    const groups: Record<string, YTIssue[]> = {}
+    const unassigned: YTIssue[] = []
+
+    const activeIssues = ytIssues.filter(i => {
+      const s = i.status?.toLowerCase() || ''
+      return s !== 'done' && s !== 'fixed'
+    })
+
+    for (const issue of activeIssues) {
+      if (issue.assignee?.fullName) {
+        const name = issue.assignee.fullName
+        if (!groups[name]) groups[name] = []
+        groups[name].push(issue)
+      } else {
+        unassigned.push(issue)
+      }
+    }
+
+    const statusOrder = (s: string) => {
+      const lower = s?.toLowerCase() || ''
+      if (lower === 'in progress') return 0
+      if (lower === 'dev') return 2
+      return 1
+    }
+
+    for (const name of Object.keys(groups)) {
+      groups[name].sort((a, b) => statusOrder(a.status) - statusOrder(b.status))
+    }
+    unassigned.sort((a, b) => statusOrder(a.status) - statusOrder(b.status))
+
+    return { groups, unassigned }
+  }, [ytIssues])
+
+  const getStatusBadge = (status: string) => {
+    const s = status?.toLowerCase() || ''
+    if (s === 'in progress') return { label: 'In Progress', bg: 'rgba(234, 179, 8, 0.15)', color: '#eab308' }
+    if (s === 'dev') return { label: 'DEV', bg: 'rgba(130, 80, 223, 0.15)', color: '#8250df' }
+    return { label: status || 'Backlog', bg: 'rgba(128, 128, 128, 0.15)', color: '#888' }
+  }
+
+  const getBadgeClass = (status: string) => {
+    const s = status?.toLowerCase() || ''
+    if (s === 'in progress') return 'badge-progress'
+    if (s === 'dev') return 'badge-review'
+    return 'badge-todo'
+  }
 
   return (
     <div className="app-container">
@@ -315,10 +524,26 @@ export default function Dashboard() {
               Welcome back, {user?.name?.split(' ')[0] || 'there'}!
             </h2>
             <p className="welcome-subtitle">
-              You have <strong>{stats.todo + stats.in_progress} pending tasks</strong> and <strong>{stats.overdue} overdue</strong>.
+              {ytConnected ? (
+                <>
+                  You have <strong>{inProgressIssues.length} in progress</strong>, <strong>{devIssues.length} in DEV</strong>, and <strong>{backlogIssues.length} in backlog</strong>.
+                </>
+              ) : (
+                <>YouTrack not connected. Configure it in Integrations.</>
+              )}
             </p>
           </div>
-          <button className="btn-secondary btn-md">View Pending Tasks</button>
+          {ytConnected && (
+            <button
+              className="btn-secondary btn-md"
+              onClick={handleSync}
+              disabled={syncing}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? 'Syncing...' : 'Sync YouTrack'}
+            </button>
+          )}
         </div>
 
         {/* Stats Cards */}
@@ -328,146 +553,293 @@ export default function Dashboard() {
               <KanbanSquare size={24} />
             </div>
             <div className="stat-info">
-              <span className="stat-value">{stats.total}</span>
-              <span className="stat-label">Total Tasks</span>
+              <span className="stat-value">{ytIssues.length}</span>
+              <span className="stat-label">Total Tickets</span>
             </div>
           </div>
           <div className="stat-card glass">
             <div className="stat-icon stat-icon-yellow">
-              <ChevronRight size={24} />
+              <Clock size={24} />
             </div>
             <div className="stat-info">
-              <span className="stat-value">{stats.in_progress}</span>
+              <span className="stat-value">{inProgressIssues.length}</span>
               <span className="stat-label">In Progress</span>
             </div>
           </div>
           <div className="stat-card glass">
-            <div className="stat-icon stat-icon-green">
-              <BarChart3 size={24} />
+            <div className="stat-icon" style={{ backgroundColor: 'rgba(130, 80, 223, 0.15)' }}>
+              <Code2 size={24} style={{ color: '#8250df' }} />
             </div>
             <div className="stat-info">
-              <span className="stat-value">{stats.done}</span>
-              <span className="stat-label">Completed</span>
+              <span className="stat-value">{devIssues.length}</span>
+              <span className="stat-label">DEV</span>
             </div>
           </div>
           <div className="stat-card glass">
-            <div className="stat-icon stat-icon-red">
-              <Bell size={24} />
+            <div className="stat-icon" style={{ backgroundColor: 'rgba(128, 128, 128, 0.15)' }}>
+              <Archive size={24} style={{ color: '#888' }} />
             </div>
             <div className="stat-info">
-              <span className="stat-value">{stats.overdue}</span>
-              <span className="stat-label">Overdue</span>
+              <span className="stat-value">{backlogIssues.length}</span>
+              <span className="stat-label">Backlog</span>
             </div>
           </div>
         </div>
 
-        {/* Kanban Preview */}
+        {/* YouTrack Board - 3 Active Columns */}
+        {ytLoading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '3rem' }}>
+            <div className="loading-spinner" />
+          </div>
+        ) : (
         <section className="section animate-fade-in-up stagger-2">
           <div className="section-header">
-            <h2 className="section-title">Today's Tasks</h2>
-            <a href="#" className="section-link">
-              View All <ChevronRight size={16} />
-            </a>
-          </div>
-
-          <div className="kanban-board">
-            {/* To Do Column */}
-            <div className="kanban-column">
-              <div className="kanban-column-header">
-                <span className="kanban-column-title">To Do</span>
-                <span className="kanban-column-count">{stats.todo}</span>
-              </div>
-              <div className="kanban-column-body">
-                {todoTasks.length > 0 ? todoTasks.map(task => (
-                  <div key={task.id} className={`task-card priority-${task.priority || 'medium'}`}>
-                    <h4 className="task-title">{task.title}</h4>
-                    {task.description && <p className="task-description">{task.description}</p>}
-                    <div className="task-meta">
-                      <span className="badge badge-todo">To Do</span>
-                      <div className="avatar avatar-sm">
-                        {task.assignee_name ? getInitials(task.assignee_name) : 'U'}
-                      </div>
-                    </div>
-                  </div>
-                )) : (
-                  <p className="text-muted" style={{padding: '1rem', textAlign: 'center'}}>No tasks</p>
-                )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                YouTrack Board
+                <span className="badge" style={{ background: 'rgba(130, 80, 223, 0.15)', color: '#8250df' }}>
+                  {ytIssues.length} tickets
+                </span>
+              </h2>
+              {/* View Toggle */}
+              <div className="tabs" style={{ padding: '0.15rem' }}>
+                <button
+                  className={`tab ${dashboardView === 'board' ? 'active' : ''}`}
+                  onClick={() => setDashboardView('board')}
+                  style={{ padding: '0.4rem 0.75rem', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem' }}
+                >
+                  <KanbanSquare size={14} />
+                  Board
+                </button>
+                <button
+                  className={`tab ${dashboardView === 'assignees' ? 'active' : ''}`}
+                  onClick={() => setDashboardView('assignees')}
+                  style={{ padding: '0.4rem 0.75rem', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem' }}
+                >
+                  <Users size={14} />
+                  Assignees
+                </button>
               </div>
             </div>
+            <button
+              className="section-link"
+              onClick={() => setCurrentPage('board')}
+              style={{ cursor: 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              View Full Board <ChevronRight size={16} />
+            </button>
+          </div>
+
+          {/* Board View */}
+          {dashboardView === 'board' && (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+          <div className="kanban-board" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+            {/* Backlog Column */}
+            <DroppableColumn id="backlog">
+              <div className="kanban-column-header">
+                <span className="kanban-column-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Archive size={16} style={{ color: '#888' }} />
+                  Backlog
+                </span>
+                <span className="kanban-column-count">{backlogIssues.length}</span>
+              </div>
+              <div className="kanban-column-body">
+                {backlogIssues.length > 0 ? backlogIssues.map(issue => (
+                  <DraggableCard key={issue.id} id={issue.id}>
+                    <div className="task-card priority-medium">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{issue.id}</span>
+                      </div>
+                      <h4 className="task-title">{issue.summary}</h4>
+                      <div className="task-meta">
+                        <span className="badge" style={{ background: 'rgba(128, 128, 128, 0.15)', color: '#888' }}>{issue.status || 'Backlog'}</span>
+                        {issue.assignee && (
+                          <div className="avatar avatar-sm" title={issue.assignee.fullName}>
+                            {getInitials(issue.assignee.fullName)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </DraggableCard>
+                )) : (
+                  <p className="text-muted" style={{ padding: '1rem', textAlign: 'center' }}>No tickets</p>
+                )}
+              </div>
+            </DroppableColumn>
 
             {/* In Progress Column */}
-            <div className="kanban-column">
+            <DroppableColumn id="in_progress">
               <div className="kanban-column-header">
-                <span className="kanban-column-title">In Progress</span>
-                <span className="kanban-column-count">{stats.in_progress}</span>
+                <span className="kanban-column-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Clock size={16} style={{ color: 'var(--color-warning)' }} />
+                  In Progress
+                </span>
+                <span className="kanban-column-count">{inProgressIssues.length}</span>
               </div>
               <div className="kanban-column-body">
-                {inProgressTasks.length > 0 ? inProgressTasks.map(task => (
-                  <div key={task.id} className={`task-card priority-${task.priority || 'medium'}`}>
-                    <h4 className="task-title">{task.title}</h4>
-                    {task.description && <p className="task-description">{task.description}</p>}
-                    <div className="task-meta">
-                      <span className="badge badge-progress">In Progress</span>
-                      <div className="avatar avatar-sm">
-                        {task.assignee_name ? getInitials(task.assignee_name) : 'U'}
+                {inProgressIssues.length > 0 ? inProgressIssues.map(issue => (
+                  <DraggableCard key={issue.id} id={issue.id}>
+                    <div className="task-card priority-medium">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{issue.id}</span>
+                      </div>
+                      <h4 className="task-title">{issue.summary}</h4>
+                      <div className="task-meta">
+                        <span className="badge badge-progress">In Progress</span>
+                        {issue.assignee && (
+                          <div className="avatar avatar-sm" title={issue.assignee.fullName}>
+                            {getInitials(issue.assignee.fullName)}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  </DraggableCard>
                 )) : (
-                  <p className="text-muted" style={{padding: '1rem', textAlign: 'center'}}>No tasks</p>
+                  <p className="text-muted" style={{ padding: '1rem', textAlign: 'center' }}>No tickets</p>
                 )}
               </div>
-            </div>
+            </DroppableColumn>
 
-            {/* Review Column */}
-            <div className="kanban-column">
+            {/* DEV Column */}
+            <DroppableColumn id="dev">
               <div className="kanban-column-header">
-                <span className="kanban-column-title">Review</span>
-                <span className="kanban-column-count">{stats.review}</span>
+                <span className="kanban-column-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Code2 size={16} style={{ color: '#8250df' }} />
+                  DEV
+                </span>
+                <span className="kanban-column-count">{devIssues.length}</span>
               </div>
               <div className="kanban-column-body">
-                {reviewTasks.length > 0 ? reviewTasks.map(task => (
-                  <div key={task.id} className={`task-card priority-${task.priority || 'medium'}`}>
-                    <h4 className="task-title">{task.title}</h4>
-                    {task.description && <p className="task-description">{task.description}</p>}
-                    <div className="task-meta">
-                      <span className="badge badge-review">Review</span>
-                      <div className="avatar avatar-sm">
-                        {task.assignee_name ? getInitials(task.assignee_name) : 'U'}
+                {devIssues.length > 0 ? devIssues.map(issue => (
+                  <DraggableCard key={issue.id} id={issue.id}>
+                    <div className="task-card priority-medium">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{issue.id}</span>
+                      </div>
+                      <h4 className="task-title">{issue.summary}</h4>
+                      <div className="task-meta">
+                        <span className="badge" style={{ background: 'rgba(130, 80, 223, 0.15)', color: '#8250df' }}>DEV</span>
+                        {issue.assignee && (
+                          <div className="avatar avatar-sm" title={issue.assignee.fullName}>
+                            {getInitials(issue.assignee.fullName)}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
+                  </DraggableCard>
                 )) : (
-                  <p className="text-muted" style={{padding: '1rem', textAlign: 'center'}}>No tasks</p>
+                  <p className="text-muted" style={{ padding: '1rem', textAlign: 'center' }}>No tickets</p>
                 )}
               </div>
-            </div>
+            </DroppableColumn>
 
-            {/* Done Column */}
-            <div className="kanban-column">
-              <div className="kanban-column-header">
-                <span className="kanban-column-title">Done</span>
-                <span className="kanban-column-count">{stats.done}</span>
+          </div>
+
+          <DragOverlay>
+            {activeIssue ? (
+              <div className="task-card priority-medium" style={{ opacity: 0.9, boxShadow: '0 8px 25px rgba(0,0,0,0.3)', transform: 'rotate(3deg)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                  <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{activeIssue.id}</span>
+                </div>
+                <h4 className="task-title">{activeIssue.summary}</h4>
+                <div className="task-meta">
+                  <span className="badge" style={{ background: 'rgba(130, 80, 223, 0.15)', color: '#8250df' }}>{activeIssue.status}</span>
+                </div>
               </div>
-              <div className="kanban-column-body">
-                {doneTasks.length > 0 ? doneTasks.map(task => (
-                  <div key={task.id} className={`task-card priority-${task.priority || 'low'}`}>
-                    <h4 className="task-title">{task.title}</h4>
-                    {task.description && <p className="task-description">{task.description}</p>}
-                    <div className="task-meta">
-                      <span className="badge badge-done">Done</span>
-                      <div className="avatar avatar-sm">
-                        {task.assignee_name ? getInitials(task.assignee_name) : 'U'}
+            ) : null}
+          </DragOverlay>
+          </DndContext>
+          )}
+
+          {/* Assignee View */}
+          {dashboardView === 'assignees' && (
+          <div className="kanban-board">
+            <div className="kanban-columns">
+              {Object.entries(assigneeGroups.groups).map(([name, issues]) => {
+                const ipCount = issues.filter(i => i.status?.toLowerCase() === 'in progress').length
+                const devCount = issues.filter(i => i.status?.toLowerCase() === 'dev').length
+                const blCount = issues.length - ipCount - devCount
+                return (
+                  <div key={name} className="kanban-column">
+                    <div className="kanban-column-header">
+                      <div className="column-header-title">
+                        <div className="avatar avatar-sm">
+                          {getInitials(name)}
+                        </div>
+                        <div>
+                          <h3 className="column-title">{name}</h3>
+                          <div className="text-muted" style={{ fontSize: '0.7rem', marginTop: '2px' }}>
+                            {ipCount > 0 && <span className="badge badge-progress" style={{ padding: '1px 6px', fontSize: '0.65rem' }}>{ipCount} active</span>}
+                            {' '}
+                            {blCount > 0 && <span className="badge badge-todo" style={{ padding: '1px 6px', fontSize: '0.65rem' }}>{blCount} backlog</span>}
+                            {' '}
+                            {devCount > 0 && <span className="badge badge-review" style={{ padding: '1px 6px', fontSize: '0.65rem' }}>{devCount} done</span>}
+                          </div>
+                        </div>
                       </div>
+                      <span className="column-task-count">{issues.length}</span>
+                    </div>
+                    <div className="kanban-column-content">
+                      {issues.map(issue => {
+                        const badgeClass = getBadgeClass(issue.status)
+                        return (
+                          <div key={issue.id} className="task-card">
+                            <div className="task-card-header">
+                              <span className="task-priority-badge priority-medium">{issue.id}</span>
+                            </div>
+                            <h4 className="task-card-title">{issue.summary}</h4>
+                            <div className="task-card-footer">
+                              <span className={`badge ${badgeClass}`}>{getStatusBadge(issue.status).label}</span>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
-                )) : (
-                  <p className="text-muted" style={{padding: '1rem', textAlign: 'center'}}>No tasks</p>
-                )}
-              </div>
+                )
+              })}
+
+              {/* Unassigned Column */}
+              {assigneeGroups.unassigned.length > 0 && (
+                <div className="kanban-column" style={{ opacity: 0.7 }}>
+                  <div className="kanban-column-header">
+                    <div className="column-header-title">
+                      <div className="task-assignee-placeholder">
+                        <User size={12} />
+                      </div>
+                      <h3 className="column-title">Unassigned</h3>
+                    </div>
+                    <span className="column-task-count">{assigneeGroups.unassigned.length}</span>
+                  </div>
+                  <div className="kanban-column-content">
+                    {assigneeGroups.unassigned.map(issue => {
+                      const badgeClass = getBadgeClass(issue.status)
+                      return (
+                        <div key={issue.id} className="task-card">
+                          <div className="task-card-header">
+                            <span className="task-priority-badge priority-medium">{issue.id}</span>
+                          </div>
+                          <h4 className="task-card-title">{issue.summary}</h4>
+                          <div className="task-card-footer">
+                            <span className={`badge ${badgeClass}`}>{getStatusBadge(issue.status).label}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
+          )}
+
         </section>
+        )}
           </>
         )}
 

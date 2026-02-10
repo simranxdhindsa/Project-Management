@@ -188,6 +188,122 @@ class ApiService {
     })
   }
 
+  // YouTrack endpoints
+  async getYouTrackStatus() {
+    return this.request<{
+      connected: boolean
+      configured: boolean
+      error?: string
+    }>('/youtrack/status')
+  }
+
+  async testYouTrackConnection(baseUrl: string, token: string, projectId: string) {
+    return this.request<{ success: boolean; error?: string }>('/youtrack/test', {
+      method: 'POST',
+      body: JSON.stringify({ base_url: baseUrl, token, project_id: projectId }),
+    })
+  }
+
+  async getYouTrackProjects() {
+    return this.request<YouTrackProject[]>('/youtrack/projects')
+  }
+
+  async getYouTrackBoards() {
+    return this.request<YouTrackBoard[]>('/youtrack/boards')
+  }
+
+  async getYouTrackBoardColumns(boardId: string) {
+    return this.request<YouTrackColumn[]>(`/youtrack/boards/${boardId}/columns`)
+  }
+
+  async getYouTrackStates() {
+    return this.request<YouTrackState[]>('/youtrack/states')
+  }
+
+  async getYouTrackUsers() {
+    return this.request<YouTrackUser[]>('/youtrack/users')
+  }
+
+  async getYouTrackIssues() {
+    return this.request<YouTrackIssue[]>('/youtrack/issues')
+  }
+
+  async getYouTrackIssue(issueId: string) {
+    return this.request<YouTrackIssue>(`/youtrack/issues/${issueId}`)
+  }
+
+  async createYouTrackIssue(summary: string, description: string, state?: string) {
+    return this.request<YouTrackIssue>('/youtrack/issues', {
+      method: 'POST',
+      body: JSON.stringify({ summary, description, state }),
+    })
+  }
+
+  async updateYouTrackIssue(issueId: string, summary?: string, description?: string, state?: string) {
+    return this.request<YouTrackIssue>(`/youtrack/issues/${issueId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ summary, description, state }),
+    })
+  }
+
+  async updateYouTrackIssueState(issueId: string, state: string) {
+    return this.request(`/youtrack/issues/${issueId}/state`, {
+      method: 'PATCH',
+      body: JSON.stringify({ state }),
+    })
+  }
+
+  async deleteYouTrackIssue(issueId: string) {
+    return this.request(`/youtrack/issues/${issueId}`, { method: 'DELETE' })
+  }
+
+  async importFromYouTrack() {
+    return this.request<{
+      tasks_synced: number
+      tasks_created: number
+      tasks_updated: number
+      errors?: string[]
+    }>('/youtrack/import', { method: 'POST' })
+  }
+
+  async syncTaskToYouTrack(taskId: string) {
+    return this.request(`/tasks/${taskId}/youtrack/sync`, { method: 'POST' })
+  }
+
+  async getYouTrackSections() {
+    return this.request<YouTrackState[]>('/youtrack/sections')
+  }
+
+  async matchAnalysisWithYouTrack(personBreakdown: any[], analysis: any[]) {
+    return this.request<{
+      matches: {
+        task_title: string
+        person: string
+        status: string
+        youtrack_issue: { id: string; summary: string; current_state: string }
+        proposed_state: string
+        confidence: number
+      }[]
+      unmatched_tasks: { task_title: string; person: string; status: string }[]
+      unmatched_issues: { id: string; summary: string; current_state: string }[]
+    }>('/youtrack/match-analysis', {
+      method: 'POST',
+      body: JSON.stringify({ person_breakdown: personBreakdown, analysis }),
+    })
+  }
+
+  async bulkUpdateYouTrackStates(updates: { issue_id: string; new_state: string }[]) {
+    return this.request<{
+      succeeded: number
+      failed: number
+      errors: string[]
+      message: string
+    }>('/youtrack/bulk-update-states', {
+      method: 'POST',
+      body: JSON.stringify({ updates }),
+    })
+  }
+
   // Slack endpoints
   async connectSlack(botToken: string, channelId?: string) {
     return this.request('/slack/connect', {
@@ -643,6 +759,8 @@ export interface Task {
   asana_id?: string
   asana_url?: string
   asana_section_gid?: string
+  youtrack_id?: string
+  youtrack_url?: string
   section_name?: string
   due_date?: string
   created_at?: string
@@ -660,6 +778,72 @@ export interface AsanaSection {
   name: string
   position: number
   color?: string
+}
+
+// YouTrack Types
+export interface YouTrackProject {
+  id: string
+  name: string
+  shortName: string
+  archived?: boolean
+}
+
+export interface YouTrackBoard {
+  id: string
+  name: string
+}
+
+export interface YouTrackColumn {
+  name: string
+  fieldValues: string[]
+}
+
+export interface YouTrackState {
+  name: string
+}
+
+export interface YouTrackUser {
+  id: string
+  login: string
+  fullName: string
+  email?: string
+}
+
+export interface YouTrackIssue {
+  id: string
+  summary: string
+  description: string
+  status: string
+  subsystem?: string
+  priority: string
+  assignee?: YouTrackUser
+  created: number
+  updated: number
+  attachments?: YouTrackAttachment[]
+}
+
+export interface YouTrackAttachment {
+  id: string
+  name: string
+  size: number
+  mimeType: string
+  url: string
+  extension: string
+}
+
+export interface YouTrackSettings {
+  base_url: string
+  token?: string
+  project_id: string
+  board_id?: string
+  configured: boolean
+}
+
+export interface UpdateYouTrackSettingsRequest {
+  base_url?: string
+  token?: string
+  project_id?: string
+  board_id?: string
 }
 
 export interface SlackMessage {

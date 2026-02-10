@@ -1,0 +1,1135 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/dhindsa/project-management/internal/database"
+	"github.com/dhindsa/project-management/internal/middleware"
+	"github.com/dhindsa/project-management/internal/models"
+	"github.com/dhindsa/project-management/internal/services/youtrack"
+	"github.com/gorilla/mux"
+)
+
+// YouTrackHandler handles YouTrack integration API requests
+type YouTrackHandler struct {
+	taskRepo     *database.TaskRepository
+	projectRepo  *database.ProjectRepository
+	settingsRepo *database.SettingsRepository
+	sectionRepo  *database.SectionRepository
+}
+
+// NewYouTrackHandler creates a new YouTrack handler
+func NewYouTrackHandler() *YouTrackHandler {
+	return &YouTrackHandler{
+		taskRepo:     database.NewTaskRepository(),
+		projectRepo:  database.NewProjectRepository(),
+		settingsRepo: database.NewSettingsRepository(),
+		sectionRepo:  database.NewSectionRepository(),
+	}
+}
+
+// getYouTrackClient creates a YouTrack client from settings or environment
+func (h *YouTrackHandler) getYouTrackClient(ctx context.Context) (*youtrack.Client, error) {
+	// Try to get credentials from database first
+	settings, _ := h.settingsRepo.GetYouTrackSettings(ctx)
+
+	var baseURL, token, projectID, boardID string
+
+	if settings != nil && settings.Configured {
+		baseURL = settings.BaseURL
+		token = settings.Token
+		projectID = settings.ProjectID
+		boardID = settings.BoardID
+	}
+
+	// Fallback to environment variables if DB not configured
+	if baseURL == "" {
+		baseURL = os.Getenv("YOUTRACK_BASE_URL")
+	}
+	if token == "" {
+		token = os.Getenv("YOUTRACK_TOKEN")
+	}
+	if projectID == "" {
+		projectID = os.Getenv("YOUTRACK_PROJECT_ID")
+	}
+	if boardID == "" {
+		boardID = os.Getenv("YOUTRACK_BOARD_ID")
+	}
+
+	if baseURL == "" || token == "" || projectID == "" {
+		return nil, nil // Not configured
+	}
+
+	client := youtrack.NewClient(baseURL, token, projectID)
+	if boardID != "" {
+		client.SetBoardID(boardID)
+	}
+
+	return client, nil
+}
+
+// GetStatus returns the current YouTrack connection status
+func (h *YouTrackHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"connected":  false,
+			"configured": false,
+		})
+		return
+	}
+
+	// Test connection
+	err = client.TestConnection(r.Context())
+	connected := err == nil
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"connected":  connected,
+		"configured": true,
+		"error":      func() string { if err != nil { return err.Error() }; return "" }(),
+	})
+}
+
+// TestConnection tests the YouTrack connection with provided credentials
+func (h *YouTrackHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		BaseURL   string `json:"base_url"`
+		Token     string `json:"token"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	client := youtrack.NewClient(req.BaseURL, req.Token, req.ProjectID)
+	err := client.TestConnection(r.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Connection successful",
+	})
+}
+
+// GetProjects returns available YouTrack projects
+func (h *YouTrackHandler) GetProjects(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	projects, err := client.GetProjects(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get projects: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    projects,
+	})
+}
+
+// GetBoards returns available YouTrack agile boards
+func (h *YouTrackHandler) GetBoards(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	boards, err := client.GetBoards(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get boards: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    boards,
+	})
+}
+
+// GetStates returns workflow states for the configured project
+func (h *YouTrackHandler) GetStates(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	states, err := client.GetStates(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get states: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    states,
+	})
+}
+
+// GetBoardColumns returns columns from a specific agile board
+func (h *YouTrackHandler) GetBoardColumns(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	boardID := vars["board_id"]
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	columns, err := client.GetBoardColumns(r.Context(), boardID)
+	if err != nil {
+		http.Error(w, "Failed to get columns: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    columns,
+	})
+}
+
+// GetUsers returns all YouTrack users
+func (h *YouTrackHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	users, err := client.GetUsers(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get users: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    users,
+	})
+}
+
+// GetIssues returns all issues from the configured project
+func (h *YouTrackHandler) GetIssues(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	issues, err := client.GetIssues(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Transform issues to include extracted fields
+	var response []map[string]interface{}
+	for _, issue := range issues {
+		response = append(response, map[string]interface{}{
+			"id":          issue.ID,
+			"summary":     issue.Summary,
+			"description": issue.Description,
+			"status":      youtrack.GetStatus(issue),
+			"subsystem":   youtrack.GetSubsystem(issue),
+			"priority":    youtrack.GetPriority(issue),
+			"assignee":    youtrack.GetAssignee(issue),
+			"created":     issue.Created,
+			"updated":     issue.Updated,
+			"attachments": issue.Attachments,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// GetIssue returns a single issue by ID
+func (h *YouTrackHandler) GetIssue(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	issueID := vars["issue_id"]
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	issue, err := client.GetIssue(r.Context(), issueID)
+	if err != nil {
+		http.Error(w, "Failed to get issue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"id":          issue.ID,
+			"summary":     issue.Summary,
+			"description": issue.Description,
+			"status":      youtrack.GetStatus(*issue),
+			"subsystem":   youtrack.GetSubsystem(*issue),
+			"priority":    youtrack.GetPriority(*issue),
+			"assignee":    youtrack.GetAssignee(*issue),
+			"created":     issue.Created,
+			"updated":     issue.Updated,
+			"attachments": issue.Attachments,
+		},
+	})
+}
+
+// CreateIssue creates a new issue in YouTrack
+func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Summary     string `json:"summary"`
+		Description string `json:"description"`
+		State       string `json:"state,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	createReq := youtrack.CreateIssueRequest{
+		Summary:     req.Summary,
+		Description: req.Description,
+	}
+
+	if req.State != "" {
+		createReq.CustomFields = []youtrack.CustomField{
+			{
+				Name:  "State",
+				Value: map[string]string{"name": req.State},
+			},
+		}
+	}
+
+	issue, err := client.CreateIssue(r.Context(), createReq)
+	if err != nil {
+		http.Error(w, "Failed to create issue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    issue,
+	})
+}
+
+// UpdateIssue updates an existing issue
+func (h *YouTrackHandler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	issueID := vars["issue_id"]
+
+	var req struct {
+		Summary     string `json:"summary,omitempty"`
+		Description string `json:"description,omitempty"`
+		State       string `json:"state,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	updateReq := youtrack.UpdateIssueRequest{
+		Summary:     req.Summary,
+		Description: req.Description,
+	}
+
+	if req.State != "" {
+		updateReq.CustomFields = []youtrack.CustomField{
+			{
+				Name:  "State",
+				Value: map[string]string{"name": req.State},
+			},
+		}
+	}
+
+	issue, err := client.UpdateIssue(r.Context(), issueID, updateReq)
+	if err != nil {
+		http.Error(w, "Failed to update issue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    issue,
+	})
+}
+
+// UpdateIssueState updates just the state of an issue
+func (h *YouTrackHandler) UpdateIssueState(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	issueID := vars["issue_id"]
+
+	var req struct {
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	if err := client.UpdateIssueState(r.Context(), issueID, req.State); err != nil {
+		http.Error(w, "Failed to update state: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "State updated successfully",
+	})
+}
+
+// DeleteIssue deletes an issue from YouTrack
+func (h *YouTrackHandler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	issueID := vars["issue_id"]
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	if err := client.DeleteIssue(r.Context(), issueID); err != nil {
+		http.Error(w, "Failed to delete issue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Issue deleted successfully",
+	})
+}
+
+// ImportFromYouTrack imports issues from YouTrack to local database
+func (h *YouTrackHandler) ImportFromYouTrack(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured. Please configure YouTrack in Settings.", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get or create default project
+	defaultProjectID, err := h.getOrCreateDefaultProject(ctx, userID)
+	if err != nil {
+		http.Error(w, "Failed to get/create default project: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Fetch states and save as sections
+	states, err := client.GetStates(ctx)
+	if err != nil {
+		log.Printf("Warning: Failed to fetch YouTrack states: %v", err)
+	} else {
+		var sectionsToSave []models.AsanaSection
+		for i, state := range states {
+			sectionsToSave = append(sectionsToSave, models.AsanaSection{
+				ProjectID:       defaultProjectID,
+				AsanaSectionGID: state.Name, // Use state name as ID
+				Name:            state.Name,
+				Position:        i,
+			})
+		}
+		if err := h.sectionRepo.SaveSections(ctx, defaultProjectID, sectionsToSave); err != nil {
+			log.Printf("Warning: Failed to save sections: %v", err)
+		} else {
+			log.Printf("Synced %d states from YouTrack", len(sectionsToSave))
+		}
+	}
+
+	// Get issues from YouTrack
+	issues, err := client.GetIssues(ctx)
+	if err != nil {
+		http.Error(w, "Failed to fetch YouTrack issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var tasksCreated, tasksUpdated, tasksSynced int
+	var errors []string
+
+	for _, issue := range issues {
+		// Check if task exists by YouTrack ID
+		existingTask, err := h.taskRepo.GetByYouTrackID(ctx, issue.ID)
+		if err != nil && !strings.Contains(err.Error(), "no rows") {
+			errors = append(errors, "Error checking issue "+issue.ID+": "+err.Error())
+			continue
+		}
+
+		status := h.mapYouTrackStatusToLocal(youtrack.GetStatus(issue))
+		priority := h.mapYouTrackPriorityToLocal(youtrack.GetPriority(issue))
+		stateName := youtrack.GetStatus(issue)
+
+		if existingTask != nil {
+			// Update existing
+			existingTask.Title = issue.Summary
+			existingTask.Description = issue.Description
+			existingTask.Status = status
+			existingTask.Priority = priority
+			existingTask.SectionName = &stateName
+			if err := h.taskRepo.Update(ctx, existingTask); err != nil {
+				errors = append(errors, "Error updating task: "+err.Error())
+				continue
+			}
+			tasksUpdated++
+		} else {
+			// Create new task
+			createdTime := time.Unix(issue.Created/1000, 0)
+			newTask := &models.Task{
+				Title:        issue.Summary,
+				Description:  issue.Description,
+				Status:       status,
+				Priority:     priority,
+				ProjectID:    defaultProjectID,
+				YouTrackID:   &issue.ID,
+				SectionName:  &stateName,
+				CreatedBy:    userID,
+				CreatedAt:    createdTime,
+			}
+
+			// Set assignee if available
+			if assignee := youtrack.GetAssignee(issue); assignee != nil {
+				newTask.Assignee = &models.Assignee{
+					ID:   assignee.ID,
+					Name: assignee.FullName,
+				}
+			}
+
+			if err := h.taskRepo.Create(ctx, newTask); err != nil {
+				errors = append(errors, "Error creating task: "+err.Error())
+				continue
+			}
+			tasksCreated++
+		}
+		tasksSynced++
+	}
+
+	log.Printf("Imported %d issues from YouTrack (created: %d, updated: %d)", tasksSynced, tasksCreated, tasksUpdated)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Import completed",
+		"data": map[string]interface{}{
+			"tasks_synced":  tasksSynced,
+			"tasks_created": tasksCreated,
+			"tasks_updated": tasksUpdated,
+			"errors":        errors,
+		},
+	})
+}
+
+// SyncTaskToYouTrack syncs a local task to YouTrack
+func (h *YouTrackHandler) SyncTaskToYouTrack(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	taskID := vars["id"]
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	// Get local task
+	task, err := h.taskRepo.GetByID(r.Context(), taskID)
+	if err != nil {
+		http.Error(w, "Task not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if task.YouTrackID == nil || *task.YouTrackID == "" {
+		http.Error(w, "Task is not linked to YouTrack", http.StatusBadRequest)
+		return
+	}
+
+	// Map local status to YouTrack state
+	state := h.mapLocalStatusToYouTrack(task.Status)
+
+	updateReq := youtrack.UpdateIssueRequest{
+		Summary:     task.Title,
+		Description: task.Description,
+		CustomFields: []youtrack.CustomField{
+			{
+				Name:  "State",
+				Value: map[string]string{"name": state},
+			},
+		},
+	}
+
+	_, err = client.UpdateIssue(r.Context(), *task.YouTrackID, updateReq)
+	if err != nil {
+		http.Error(w, "Failed to update YouTrack issue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Task synced to YouTrack",
+	})
+}
+
+// GetProjectSectionsFromDB returns sections stored in database for a project
+func (h *YouTrackHandler) GetProjectSectionsFromDB(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get project ID from URL or use default project
+	vars := mux.Vars(r)
+	projectID := vars["id"]
+
+	// If no project ID specified, get the default/first project
+	if projectID == "" {
+		projects, err := h.projectRepo.GetByOwnerID(r.Context(), userID)
+		if err != nil || len(projects) == 0 {
+			// Return empty sections if no project
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"data":    []models.SectionResponse{},
+			})
+			return
+		}
+		projectID = projects[0].ID
+	}
+
+	sections, err := h.sectionRepo.GetProjectSections(r.Context(), projectID)
+	if err != nil {
+		http.Error(w, "Failed to get sections: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to response format
+	var response []models.SectionResponse
+	for _, s := range sections {
+		response = append(response, s.ToResponse())
+	}
+
+	// If no sections stored, return default fallback sections
+	if len(response) == 0 {
+		response = []models.SectionResponse{
+			{GID: "Open", Name: "Open", Position: 0},
+			{GID: "In Progress", Name: "In Progress", Position: 1},
+			{GID: "Fixed", Name: "Fixed", Position: 2},
+			{GID: "Done", Name: "Done", Position: 3},
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    response,
+	})
+}
+
+// Helper methods
+
+func (h *YouTrackHandler) getOrCreateDefaultProject(ctx context.Context, userID string) (string, error) {
+	projects, err := h.projectRepo.GetByOwnerID(ctx, userID)
+	if err == nil && len(projects) > 0 {
+		return projects[0].ID, nil
+	}
+
+	project := &models.Project{
+		Name:        "Default Project",
+		Description: "Auto-created project for imported tasks",
+		OwnerID:     userID,
+	}
+
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		return "", err
+	}
+
+	return project.ID, nil
+}
+
+func (h *YouTrackHandler) mapYouTrackStatusToLocal(status string) models.TaskStatus {
+	statusLower := strings.ToLower(status)
+	switch {
+	case strings.Contains(statusLower, "done") || strings.Contains(statusLower, "fixed") || strings.Contains(statusLower, "complete"):
+		return models.TaskStatusDone
+	case strings.Contains(statusLower, "progress") || strings.Contains(statusLower, "doing"):
+		return models.TaskStatusInProgress
+	case strings.Contains(statusLower, "review") || strings.Contains(statusLower, "verify"):
+		return models.TaskStatusReview
+	case strings.Contains(statusLower, "open") || strings.Contains(statusLower, "submitted"):
+		return models.TaskStatusTodo
+	default:
+		return models.TaskStatusTodo
+	}
+}
+
+func (h *YouTrackHandler) mapYouTrackPriorityToLocal(priority string) models.TaskPriority {
+	priorityLower := strings.ToLower(priority)
+	switch {
+	case strings.Contains(priorityLower, "critical") || strings.Contains(priorityLower, "show-stopper"):
+		return models.TaskPriorityHigh
+	case strings.Contains(priorityLower, "major"):
+		return models.TaskPriorityHigh
+	case strings.Contains(priorityLower, "minor"):
+		return models.TaskPriorityLow
+	default:
+		return models.TaskPriorityMedium
+	}
+}
+
+func (h *YouTrackHandler) mapLocalStatusToYouTrack(status models.TaskStatus) string {
+	switch status {
+	case models.TaskStatusDone:
+		return "Fixed"
+	case models.TaskStatusInProgress:
+		return "In Progress"
+	case models.TaskStatusReview:
+		return "To be discussed"
+	default:
+		return "Open"
+	}
+}
+
+// ============================================================
+// AI Analysis → YouTrack Matching & Bulk Move
+// ============================================================
+
+// MatchAnalysis matches AI analysis results against YouTrack issues using fuzzy matching
+func (h *YouTrackHandler) MatchAnalysis(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		PersonBreakdown []struct {
+			Name      string   `json:"name"`
+			Assigned  []string `json:"assigned"`
+			Completed []string `json:"completed"`
+			Pending   []string `json:"pending"`
+			Blocked   []string `json:"blocked"`
+		} `json:"person_breakdown"`
+		Analysis []struct {
+			TaskTitle      string   `json:"task_title"`
+			DetectedStatus string   `json:"detected_status"`
+			Confidence     float64  `json:"confidence"`
+			Evidence       []string `json:"evidence"`
+			Assignee       string   `json:"assignee"`
+		} `json:"analysis"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch all YouTrack issues
+	issues, err := client.GetIssues(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to fetch YouTrack issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Build a list of all tasks from person_breakdown with their status and person
+	type taskEntry struct {
+		Title  string
+		Person string
+		Status string // completed, pending, blocked
+	}
+	var allTasks []taskEntry
+
+	for _, person := range req.PersonBreakdown {
+		for _, t := range person.Completed {
+			allTasks = append(allTasks, taskEntry{Title: t, Person: person.Name, Status: "completed"})
+		}
+		for _, t := range person.Pending {
+			allTasks = append(allTasks, taskEntry{Title: t, Person: person.Name, Status: "in_progress"})
+		}
+		for _, t := range person.Blocked {
+			allTasks = append(allTasks, taskEntry{Title: t, Person: person.Name, Status: "blocked"})
+		}
+	}
+
+	// Match each task against YouTrack issues
+	type matchResult struct {
+		TaskTitle     string                 `json:"task_title"`
+		Person        string                 `json:"person"`
+		Status        string                 `json:"status"`
+		YouTrackIssue map[string]interface{} `json:"youtrack_issue"`
+		ProposedState string                 `json:"proposed_state"`
+		Confidence    float64                `json:"confidence"`
+	}
+
+	var matches []matchResult
+	var unmatchedTasks []map[string]string
+	matchedIssueIDs := make(map[string]bool)
+
+	for _, task := range allTasks {
+		bestMatch := -1
+		bestScore := 0.0
+
+		for i, issue := range issues {
+			score := fuzzyMatchScore(task.Title, issue.Summary)
+			if score > bestScore && score >= 0.4 {
+				bestScore = score
+				bestMatch = i
+			}
+		}
+
+		if bestMatch >= 0 {
+			issue := issues[bestMatch]
+			currentState := youtrack.GetStatus(issue)
+
+			// Determine proposed state based on AI status
+			proposedState := ""
+			switch task.Status {
+			case "completed":
+				proposedState = "DEV"
+			case "in_progress":
+				proposedState = "In Progress"
+			case "blocked":
+				proposedState = "In Progress" // blocked stays in progress
+			}
+
+			matches = append(matches, matchResult{
+				TaskTitle: task.Title,
+				Person:    task.Person,
+				Status:    task.Status,
+				YouTrackIssue: map[string]interface{}{
+					"id":            issue.ID,
+					"summary":       issue.Summary,
+					"current_state": currentState,
+				},
+				ProposedState: proposedState,
+				Confidence:    bestScore,
+			})
+			matchedIssueIDs[issue.ID] = true
+		} else {
+			unmatchedTasks = append(unmatchedTasks, map[string]string{
+				"task_title": task.Title,
+				"person":     task.Person,
+				"status":     task.Status,
+			})
+		}
+	}
+
+	// Collect unmatched YouTrack issues
+	var unmatchedIssues []map[string]interface{}
+	for _, issue := range issues {
+		if !matchedIssueIDs[issue.ID] {
+			unmatchedIssues = append(unmatchedIssues, map[string]interface{}{
+				"id":            issue.ID,
+				"summary":       issue.Summary,
+				"current_state": youtrack.GetStatus(issue),
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":          true,
+		"matches":          matches,
+		"unmatched_tasks":  unmatchedTasks,
+		"unmatched_issues": unmatchedIssues,
+	})
+}
+
+// BulkUpdateStates updates the state of multiple YouTrack issues at once
+func (h *YouTrackHandler) BulkUpdateStates(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Updates []struct {
+			IssueID  string `json:"issue_id"`
+			NewState string `json:"new_state"`
+		} `json:"updates"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	var succeeded, failed int
+	var errors []string
+
+	for _, update := range req.Updates {
+		if err := client.UpdateIssueState(r.Context(), update.IssueID, update.NewState); err != nil {
+			failed++
+			errors = append(errors, update.IssueID+": "+err.Error())
+			log.Printf("Failed to update %s to %s: %v", update.IssueID, update.NewState, err)
+		} else {
+			succeeded++
+			log.Printf("Updated %s → %s", update.IssueID, update.NewState)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   failed == 0,
+		"succeeded": succeeded,
+		"failed":    failed,
+		"errors":    errors,
+		"message":   fmt.Sprintf("Updated %d/%d issues", succeeded, len(req.Updates)),
+	})
+}
+
+// ============================================================
+// Fuzzy Matching Helpers
+// ============================================================
+
+// fuzzyMatchScore returns a similarity score between 0 and 1 for two strings
+func fuzzyMatchScore(a, b string) float64 {
+	a = normalizeFuzzy(a)
+	b = normalizeFuzzy(b)
+
+	if a == "" || b == "" {
+		return 0
+	}
+
+	// Exact match
+	if a == b {
+		return 1.0
+	}
+
+	// One contains the other (substring match)
+	if strings.Contains(a, b) || strings.Contains(b, a) {
+		shorter := len(a)
+		longer := len(b)
+		if shorter > longer {
+			shorter, longer = longer, shorter
+		}
+		return 0.7 + 0.3*float64(shorter)/float64(longer)
+	}
+
+	// Levenshtein distance ratio
+	dist := levenshtein(a, b)
+	maxLen := len(a)
+	if len(b) > maxLen {
+		maxLen = len(b)
+	}
+	if maxLen == 0 {
+		return 0
+	}
+	return 1.0 - float64(dist)/float64(maxLen)
+}
+
+// normalizeFuzzy normalizes a string for fuzzy matching
+func normalizeFuzzy(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	// Remove common punctuation
+	replacer := strings.NewReplacer(
+		".", "", ",", "", "!", "", "?", "", ":", "", ";", "",
+		"(", "", ")", "", "[", "", "]", "", "'", "", "\"", "",
+		"-", " ", "_", " ",
+	)
+	s = replacer.Replace(s)
+	// Collapse multiple spaces
+	parts := strings.Fields(s)
+	return strings.Join(parts, " ")
+}
+
+// levenshtein calculates the Levenshtein distance between two strings
+func levenshtein(a, b string) int {
+	la := len(a)
+	lb := len(b)
+
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+
+	// Use two rows instead of full matrix for memory efficiency
+	prev := make([]int, lb+1)
+	curr := make([]int, lb+1)
+
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+
+	for i := 1; i <= la; i++ {
+		curr[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			curr[j] = min(curr[j-1]+1, min(prev[j]+1, prev[j-1]+cost))
+		}
+		prev, curr = curr, prev
+	}
+
+	return prev[lb]
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

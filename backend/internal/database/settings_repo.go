@@ -121,3 +121,74 @@ func (r *SettingsRepository) GetValue(ctx context.Context, key string) string {
 	}
 	return setting.Value
 }
+
+// GetYouTrackSettings retrieves all YouTrack-related settings
+func (r *SettingsRepository) GetYouTrackSettings(ctx context.Context) (*models.YouTrackSettings, error) {
+	pool := GetPool()
+	if pool == nil {
+		return &models.YouTrackSettings{Configured: false}, nil
+	}
+
+	settings := &models.YouTrackSettings{}
+
+	// Get Base URL
+	baseURL, err := r.Get(ctx, "youtrack_base_url")
+	if err == nil && baseURL != nil {
+		settings.BaseURL = baseURL.Value
+	}
+
+	// Get Token
+	token, err := r.Get(ctx, "youtrack_token")
+	if err == nil && token != nil {
+		settings.Token = token.Value
+		settings.Configured = token.Value != "" && settings.BaseURL != ""
+	}
+
+	// Get Project ID
+	projectID, err := r.Get(ctx, "youtrack_project_id")
+	if err == nil && projectID != nil {
+		settings.ProjectID = projectID.Value
+	}
+
+	// Get Board ID
+	boardID, err := r.Get(ctx, "youtrack_board_id")
+	if err == nil && boardID != nil {
+		settings.BoardID = boardID.Value
+	}
+
+	return settings, nil
+}
+
+// UpdateYouTrackSettings updates YouTrack-related settings
+func (r *SettingsRepository) UpdateYouTrackSettings(ctx context.Context, settings *models.UpdateYouTrackSettingsRequest, updatedBy string) error {
+	pool := GetPool()
+	if pool == nil {
+		return nil
+	}
+
+	if settings.BaseURL != "" {
+		if err := r.Set(ctx, "youtrack_base_url", settings.BaseURL, updatedBy); err != nil {
+			return err
+		}
+	}
+
+	if settings.Token != "" {
+		if err := r.Set(ctx, "youtrack_token", settings.Token, updatedBy); err != nil {
+			return err
+		}
+	}
+
+	if settings.ProjectID != "" {
+		if err := r.Set(ctx, "youtrack_project_id", settings.ProjectID, updatedBy); err != nil {
+			return err
+		}
+	}
+
+	if settings.BoardID != "" {
+		if err := r.Set(ctx, "youtrack_board_id", settings.BoardID, updatedBy); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

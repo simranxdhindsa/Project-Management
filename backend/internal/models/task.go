@@ -30,14 +30,25 @@ type Task struct {
 	Priority        TaskPriority `json:"priority" db:"priority"`
 	ProjectID       string       `json:"project_id" db:"project_id"`
 	AssigneeID      *string      `json:"assignee_id,omitempty" db:"assignee_id"`
+	Assignee        *Assignee    `json:"assignee,omitempty" db:"-"` // Populated from join
 	AsanaID         *string      `json:"asana_id,omitempty" db:"asana_id"`
 	AsanaURL        *string      `json:"asana_url,omitempty" db:"asana_url"`
 	AsanaSectionGID *string      `json:"asana_section_gid,omitempty" db:"asana_section_gid"`
+	YouTrackID      *string      `json:"youtrack_id,omitempty" db:"youtrack_id"`
+	YouTrackURL     *string      `json:"youtrack_url,omitempty" db:"youtrack_url"`
 	SectionName     *string      `json:"section_name,omitempty" db:"section_name"`
 	DueDate         *time.Time   `json:"due_date,omitempty" db:"due_date"`
 	CreatedAt       time.Time    `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time    `json:"updated_at" db:"updated_at"`
 	CreatedBy       string       `json:"created_by" db:"created_by"`
+}
+
+// Assignee represents a task assignee
+type Assignee struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Email   string `json:"email,omitempty"`
+	Picture string `json:"picture,omitempty"`
 }
 
 // TaskWithAssignee includes assignee details

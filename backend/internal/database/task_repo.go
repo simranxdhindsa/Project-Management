@@ -278,6 +278,37 @@ func (r *TaskRepository) UpdateAsanaID(ctx context.Context, taskID, asanaID, asa
 	return err
 }
 
+// GetByYouTrackID retrieves a task by its YouTrack ID
+func (r *TaskRepository) GetByYouTrackID(ctx context.Context, youtrackID string) (*models.Task, error) {
+	pool := GetPool()
+
+	var task models.Task
+	err := pool.QueryRow(ctx, `
+		SELECT id, title, description, status, priority, project_id, assignee_id,
+		       asana_id, asana_url, asana_section_gid, youtrack_id, youtrack_url, section_name, due_date, created_at, updated_at, created_by
+		FROM tasks WHERE youtrack_id = $1
+	`, youtrackID).Scan(&task.ID, &task.Title, &task.Description, &task.Status, &task.Priority,
+		&task.ProjectID, &task.AssigneeID, &task.AsanaID, &task.AsanaURL,
+		&task.AsanaSectionGID, &task.YouTrackID, &task.YouTrackURL, &task.SectionName, &task.DueDate, &task.CreatedAt, &task.UpdatedAt, &task.CreatedBy)
+
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+// UpdateYouTrackID links a task to a YouTrack issue
+func (r *TaskRepository) UpdateYouTrackID(ctx context.Context, taskID, youtrackID, youtrackURL string) error {
+	pool := GetPool()
+
+	_, err := pool.Exec(ctx, `
+		UPDATE tasks SET youtrack_id = $2, youtrack_url = $3, updated_at = NOW()
+		WHERE id = $1
+	`, taskID, youtrackID, youtrackURL)
+
+	return err
+}
+
 // GetTaskCountByStatus returns task counts grouped by status for a project
 func (r *TaskRepository) GetTaskCountByStatus(ctx context.Context, projectID string) (map[string]int, error) {
 	pool := GetPool()

@@ -28,3 +28,20 @@ type UpdateAsanaSettingsRequest struct {
 	ProjectID   string `json:"project_id,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 }
+
+// YouTrackSettings represents YouTrack configuration
+type YouTrackSettings struct {
+	BaseURL    string `json:"base_url"`
+	Token      string `json:"token,omitempty"` // Only shown if user is admin
+	ProjectID  string `json:"project_id"`
+	BoardID    string `json:"board_id,omitempty"`
+	Configured bool   `json:"configured"` // True if credentials are set
+}
+
+// UpdateYouTrackSettingsRequest represents request to update YouTrack settings
+type UpdateYouTrackSettingsRequest struct {
+	BaseURL   string `json:"base_url,omitempty"`
+	Token     string `json:"token,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+	BoardID   string `json:"board_id,omitempty"`
+}
