@@ -351,6 +351,56 @@ func (h *DailyTaskHandler) ReorderNextDayTasks(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// BulkCreateNextDayTasks creates multiple tasks at once from YouTrack pull
+func (h *DailyTaskHandler) BulkCreateNextDayTasks(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	var req models.BulkCreateNextDayTasksRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{
+			Success: false,
+			Message: "Invalid request body: " + err.Error(),
+		})
+		return
+	}
+
+	if req.TargetDate == "" || len(req.Tasks) == 0 {
+		sendJSON(w, http.StatusBadRequest, Response{
+			Success: false,
+			Message: "target_date and tasks are required",
+		})
+		return
+	}
+
+	if err := h.dailyRepo.BulkCreateNextDayTasks(r.Context(), req.TargetDate, req.Tasks, user.ID); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{
+			Success: false,
+			Message: "Failed to create tasks: " + err.Error(),
+		})
+		return
+	}
+
+	// Return updated task list
+	taskList, err := h.dailyRepo.GetNextDayTasksGroupedByAssignee(r.Context(), req.TargetDate)
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{
+			Success: false,
+			Message: "Tasks created but failed to fetch them: " + err.Error(),
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusCreated, Response{
+		Success: true,
+		Data:    taskList,
+		Message: fmt.Sprintf("Created %d tasks successfully", len(req.Tasks)),
+	})
+}
+
 // GetFormattedSlackMessage returns Slack-formatted text for copy/paste
 func (h *DailyTaskHandler) GetFormattedSlackMessage(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUserFromContext(r)

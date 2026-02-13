@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Save, Link2 } from 'lucide-react'
+import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Save, Link2, RefreshCw, ArrowRight, AlertTriangle } from 'lucide-react'
 import api from '../services/api'
 import { MatchConfirmationModal } from '../components/MatchConfirmationModal'
 
@@ -58,6 +58,21 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     unmatched_tasks: any[]
     unmatched_issues: any[]
   } | null>(null)
+
+  // Sync recommendations state
+  const [syncing, setSyncing] = useState(false)
+  const [syncRecommendations, setSyncRecommendations] = useState<{
+    issue_id: string
+    summary: string
+    person: string
+    current_state: string
+    proposed_state: string
+    reason: string
+    backward: boolean
+    confidence: number
+  }[] | null>(null)
+  const [syncSelections, setSyncSelections] = useState<Record<string, boolean>>({})
+  const [applyingSync, setApplyingSync] = useState(false)
 
   const exampleMorning = `\`todays task list\`
 
@@ -182,6 +197,60 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
       setError(err instanceof Error ? err.message : 'Failed to match with YouTrack')
     } finally {
       setMatching(false)
+    }
+  }
+
+  const handleSyncWithYouTrack = async () => {
+    if (!results) return
+    try {
+      setSyncing(true)
+      setError(null)
+      const response = await api.getSyncRecommendations(
+        results.person_breakdown,
+        results.analysis
+      ) as any
+      const data = response.data || response
+      const recs = data.recommendations || []
+      setSyncRecommendations(recs)
+      // Pre-select all non-backward recommendations
+      const selections: Record<string, boolean> = {}
+      for (const rec of recs) {
+        selections[rec.issue_id] = !rec.backward
+      }
+      setSyncSelections(selections)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to get sync recommendations')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const handleApplySync = async () => {
+    if (!syncRecommendations) return
+    const updates = syncRecommendations
+      .filter(rec => syncSelections[rec.issue_id])
+      .map(rec => ({ issue_id: rec.issue_id, new_state: rec.proposed_state }))
+
+    if (updates.length === 0) {
+      setSyncRecommendations(null)
+      return
+    }
+
+    try {
+      setApplyingSync(true)
+      setError(null)
+      const response = await api.bulkUpdateYouTrackStates(updates) as any
+      const data = response.data || response
+      if (data.succeeded > 0) {
+        setSuccessMessage(`Synced ${data.succeeded} issue(s) with YouTrack!${data.failed > 0 ? ` (${data.failed} failed)` : ''}`)
+        setTimeout(() => setSuccessMessage(null), 3000)
+      }
+      setSyncRecommendations(null)
+      setSyncSelections({})
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to apply sync')
+    } finally {
+      setApplyingSync(false)
     }
   }
 
@@ -310,8 +379,8 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
 
       {results && (
         <>
-          {/* Save Analysis & Match Buttons */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginBottom: '1.5rem' }}>
+          {/* Save Analysis & Match & Sync Buttons */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
             <button
               className="btn btn-lg"
               onClick={handleMatchWithYouTrack}
@@ -334,6 +403,23 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
                 <>
                   <Link2 size={18} />
                   Match with YouTrack
+                </>
+              )}
+            </button>
+            <button
+              className="btn btn-lg btn-sync-yt"
+              onClick={handleSyncWithYouTrack}
+              disabled={syncing}
+            >
+              {syncing ? (
+                <>
+                  <div className="loading-spinner" style={{ width: '16px', height: '16px' }} />
+                  Checking...
+                </>
+              ) : (
+                <>
+                  <RefreshCw size={18} />
+                  Sync with YouTrack
                 </>
               )}
             </button>
@@ -525,6 +611,85 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
             setTimeout(() => setSuccessMessage(null), 3000)
           }}
         />
+      )}
+
+      {/* Sync Recommendations Modal */}
+      {syncRecommendations && (
+        <div className="modal-overlay" onClick={() => setSyncRecommendations(null)}>
+          <div className="sync-modal glass-card" onClick={(e) => e.stopPropagation()}>
+            <div className="sync-modal-header">
+              <h3><RefreshCw size={18} /> Sync Recommendations</h3>
+              <span className="sync-modal-subtitle">
+                {syncRecommendations.length} recommendation(s) based on AI analysis
+              </span>
+            </div>
+
+            {syncRecommendations.length === 0 ? (
+              <div className="sync-modal-empty">
+                <CheckCircle size={32} className="sync-empty-icon" />
+                <p>Everything is in sync! No state changes needed.</p>
+              </div>
+            ) : (
+              <div className="sync-modal-body">
+                {syncRecommendations.map((rec) => (
+                  <div
+                    key={rec.issue_id}
+                    className={`sync-rec-item ${rec.backward ? 'sync-backward' : ''} ${syncSelections[rec.issue_id] ? 'sync-selected' : ''}`}
+                    onClick={() => setSyncSelections(prev => ({ ...prev, [rec.issue_id]: !prev[rec.issue_id] }))}
+                  >
+                    <div className="sync-rec-checkbox">
+                      {syncSelections[rec.issue_id]
+                        ? <CheckCircle size={18} className="sync-checkbox-checked" />
+                        : <div className="sync-checkbox-unchecked" />
+                      }
+                    </div>
+                    <div className="sync-rec-content">
+                      <div className="sync-rec-title">
+                        <span className="sync-rec-summary">{rec.summary}</span>
+                        {rec.backward && (
+                          <span className="sync-backward-badge">
+                            <AlertTriangle size={12} /> Backward
+                          </span>
+                        )}
+                      </div>
+                      <div className="sync-rec-person">
+                        {rec.person} &middot; {rec.issue_id}
+                      </div>
+                      <div className="sync-rec-states">
+                        <span className="badge sync-rec-badge-sm">{rec.current_state}</span>
+                        <ArrowRight size={14} className="sync-arrow" />
+                        <span className={`badge ${rec.backward ? 'sync-rec-badge-backward' : 'sync-rec-badge-forward'}`}>
+                          {rec.proposed_state}
+                        </span>
+                      </div>
+                      <div className="sync-rec-reason">
+                        {rec.reason}
+                      </div>
+                      <div className="sync-rec-confidence">
+                        Confidence: {Math.round(rec.confidence * 100)}%
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setSyncRecommendations(null)}>
+                Cancel
+              </button>
+              {syncRecommendations.length > 0 && (
+                <button
+                  className="btn btn-primary"
+                  onClick={handleApplySync}
+                  disabled={applyingSync || Object.values(syncSelections).every(v => !v)}
+                >
+                  {applyingSync ? 'Applying...' : `Apply Selected (${Object.values(syncSelections).filter(Boolean).length})`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

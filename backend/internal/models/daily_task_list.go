@@ -40,6 +40,7 @@ type NextDayTask struct {
 	SourceDate       *string   `json:"source_date,omitempty" db:"source_date"`
 	SourceTaskID     *string   `json:"source_task_id,omitempty" db:"source_task_id"`
 	Notes            *string   `json:"notes,omitempty" db:"notes"`
+	YouTrackID       *string   `json:"youtrack_id,omitempty" db:"youtrack_id"`
 	CreatedBy        *string   `json:"created_by,omitempty" db:"created_by"`
 	CreatedAt        time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
@@ -114,4 +115,18 @@ type CreateNextDayTaskRequest struct {
 	TaskTitle  string  `json:"task_title"`
 	Priority   *string `json:"priority,omitempty"`
 	Notes      *string `json:"notes,omitempty"`
+}
+
+// BulkCreateNextDayTasksRequest is the request body for bulk creating tasks from YouTrack
+type BulkCreateNextDayTasksRequest struct {
+	TargetDate string              `json:"target_date"`
+	Tasks      []BulkTaskInput     `json:"tasks"`
+}
+
+// BulkTaskInput represents a single task in a bulk create request
+type BulkTaskInput struct {
+	Assignee   string  `json:"assignee"`
+	TaskTitle  string  `json:"task_title"`
+	Priority   string  `json:"priority,omitempty"`
+	YouTrackID string  `json:"youtrack_id,omitempty"`
 }

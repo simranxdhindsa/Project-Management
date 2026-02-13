@@ -304,6 +304,59 @@ class ApiService {
     })
   }
 
+  async getYouTrackIssuesGroupedByAssignee() {
+    return this.request<{
+      assignments: {
+        user_name: string
+        slack_handle: string
+        issues: {
+          id: string
+          summary: string
+          priority_tag: string
+          clean_title: string
+          status: string
+          selected: boolean
+        }[]
+      }[]
+    }>('/youtrack/issues/grouped-by-assignee')
+  }
+
+  async getSyncRecommendations(personBreakdown: any[], analysis: any[]) {
+    return this.request<{
+      recommendations: {
+        issue_id: string
+        summary: string
+        person: string
+        current_state: string
+        proposed_state: string
+        reason: string
+        backward: boolean
+        confidence: number
+      }[]
+    }>('/youtrack/sync-recommendations', {
+      method: 'POST',
+      body: JSON.stringify({ person_breakdown: personBreakdown, analysis }),
+    })
+  }
+
+  async bulkCreateNextDayTasks(targetDate: string, tasks: { assignee: string; task_title: string; priority?: string; youtrack_id?: string }[]) {
+    return this.request<{
+      date: string
+      assignments: any[]
+    }>('/daily-tasks/next-day/bulk-create', {
+      method: 'POST',
+      body: JSON.stringify({ target_date: targetDate, tasks }),
+    })
+  }
+
+  // PM Assistant
+  async pmAssistantQuery(query: string) {
+    return this.request<{ response: string }>('/youtrack/pm-query', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    })
+  }
+
   // Slack endpoints
   async connectSlack(botToken: string, channelId?: string) {
     return this.request('/slack/connect', {

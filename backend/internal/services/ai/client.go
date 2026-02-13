@@ -555,3 +555,81 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// QueryWithContext sends a system prompt + user query to the AI and returns the raw response text.
+// Used for free-form PM assistant queries.
+func QueryWithContext(ctx context.Context, systemPrompt, userQuery string) (string, error) {
+	provider := os.Getenv("AI_PROVIDER")
+	if provider == "" {
+		provider = "groq"
+	}
+
+	var apiURL, apiKey, model string
+	switch provider {
+	case "openai":
+		apiURL = "https://api.openai.com/v1/chat/completions"
+		apiKey = os.Getenv("OPENAI_API_KEY")
+		model = "gpt-4o-mini"
+	case "gemini":
+		apiURL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+		apiKey = os.Getenv("GEMINI_API_KEY")
+		model = "gemini-2.0-flash"
+	default:
+		apiURL = "https://api.groq.com/openai/v1/chat/completions"
+		apiKey = os.Getenv("GROQ_API_KEY")
+		model = "llama-3.3-70b-versatile"
+	}
+
+	if apiKey == "" {
+		return "", fmt.Errorf("AI API key not configured for provider %s", provider)
+	}
+
+	req := OpenAIRequest{
+		Model: model,
+		Messages: []OpenAIMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userQuery},
+		},
+		Stream: false,
+	}
+
+	jsonBody, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var openaiResp OpenAIResponse
+	if err := json.Unmarshal(body, &openaiResp); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if openaiResp.Error != nil {
+		return "", fmt.Errorf("API error: %s", openaiResp.Error.Message)
+	}
+
+	if len(openaiResp.Choices) == 0 {
+		return "", fmt.Errorf("no response from AI")
+	}
+
+	return openaiResp.Choices[0].Message.Content, nil
+}

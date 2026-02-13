@@ -204,7 +204,7 @@ func (r *DailyTaskRepository) GetNextDayTasks(ctx context.Context, targetDate st
 	pool := GetPool()
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, target_date, assignee, task_title, priority, position, is_carried_forward, source_date, source_task_id, notes, created_by, created_at, updated_at
+		SELECT id, target_date, assignee, task_title, priority, position, is_carried_forward, source_date, source_task_id, notes, youtrack_id, created_by, created_at, updated_at
 		FROM next_day_tasks
 		WHERE target_date = $1
 		ORDER BY assignee ASC, position ASC
@@ -219,7 +219,7 @@ func (r *DailyTaskRepository) GetNextDayTasks(ctx context.Context, targetDate st
 		var task models.NextDayTask
 		err := rows.Scan(&task.ID, &task.TargetDate, &task.Assignee, &task.TaskTitle, &task.Priority,
 			&task.Position, &task.IsCarriedForward, &task.SourceDate, &task.SourceTaskID, &task.Notes,
-			&task.CreatedBy, &task.CreatedAt, &task.UpdatedAt)
+			&task.YouTrackID, &task.CreatedBy, &task.CreatedAt, &task.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -253,11 +253,11 @@ func (r *DailyTaskRepository) CreateNextDayTask(ctx context.Context, req *models
 	err = pool.QueryRow(ctx, `
 		INSERT INTO next_day_tasks (target_date, assignee, task_title, priority, position, notes, created_by, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, target_date, assignee, task_title, priority, position, is_carried_forward, source_date, source_task_id, notes, created_by, created_at, updated_at
+		RETURNING id, target_date, assignee, task_title, priority, position, is_carried_forward, source_date, source_task_id, notes, youtrack_id, created_by, created_at, updated_at
 	`, req.TargetDate, req.Assignee, req.TaskTitle, priority, maxPosition+1, req.Notes, createdBy, now, now).Scan(
 		&task.ID, &task.TargetDate, &task.Assignee, &task.TaskTitle, &task.Priority,
 		&task.Position, &task.IsCarriedForward, &task.SourceDate, &task.SourceTaskID, &task.Notes,
-		&task.CreatedBy, &task.CreatedAt, &task.UpdatedAt,
+		&task.YouTrackID, &task.CreatedBy, &task.CreatedAt, &task.UpdatedAt,
 	)
 
 	if err != nil {
@@ -405,6 +405,56 @@ func (r *DailyTaskRepository) GetNextDayTasksGroupedByAssignee(ctx context.Conte
 	}, nil
 }
 
+// BulkCreateNextDayTasks creates multiple tasks at once from YouTrack pull
+func (r *DailyTaskRepository) BulkCreateNextDayTasks(ctx context.Context, targetDate string, tasks []models.BulkTaskInput, createdBy string) error {
+	pool := GetPool()
+
+	// Track position per assignee
+	positions := make(map[string]int)
+
+	// Get current max positions per assignee
+	rows, err := pool.Query(ctx, `
+		SELECT assignee, COALESCE(MAX(position), -1) FROM next_day_tasks
+		WHERE target_date = $1 GROUP BY assignee
+	`, targetDate)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var assignee string
+			var maxPos int
+			if err := rows.Scan(&assignee, &maxPos); err == nil {
+				positions[assignee] = maxPos + 1
+			}
+		}
+	}
+
+	now := time.Now()
+	for _, task := range tasks {
+		priority := task.Priority
+		if priority == "" {
+			priority = "medium"
+		}
+
+		pos := positions[task.Assignee]
+		positions[task.Assignee] = pos + 1
+
+		var ytID *string
+		if task.YouTrackID != "" {
+			ytID = &task.YouTrackID
+		}
+
+		_, err := pool.Exec(ctx, `
+			INSERT INTO next_day_tasks (target_date, assignee, task_title, priority, position, youtrack_id, created_by, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`, targetDate, task.Assignee, task.TaskTitle, priority, pos, ytID, createdBy, now, now)
+		if err != nil {
+			return fmt.Errorf("failed to create task for %s: %w", task.Assignee, err)
+		}
+	}
+
+	return nil
+}
+
 // FormatSlackMessage generates a Slack-formatted message from next day tasks
 func (r *DailyTaskRepository) FormatSlackMessage(ctx context.Context, targetDate string) (string, error) {
 	taskList, err := r.GetNextDayTasksGroupedByAssignee(ctx, targetDate)
@@ -412,18 +462,13 @@ func (r *DailyTaskRepository) FormatSlackMessage(ctx context.Context, targetDate
 		return "", err
 	}
 
-	message := "`todays task list`\n\n"
+	message := "todays task list\n"
 
 	for _, assignment := range taskList.Assignments {
-		message += fmt.Sprintf("`%s`\n", assignment.SlackHandle)
+		message += fmt.Sprintf("\n%s \n", assignment.SlackHandle)
 		for _, task := range assignment.Tasks {
-			priority := ""
-			if task.Priority == "high" {
-				priority = " (High)"
-			}
-			message += fmt.Sprintf("• %s%s\n", task.TaskTitle, priority)
+			message += fmt.Sprintf("%s\n", task.TaskTitle)
 		}
-		message += "\n"
 	}
 
 	return message, nil

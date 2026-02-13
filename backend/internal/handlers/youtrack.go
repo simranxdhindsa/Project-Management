@@ -7,12 +7,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
 	"github.com/dhindsa/project-management/internal/models"
+	"github.com/dhindsa/project-management/internal/services/ai"
 	"github.com/dhindsa/project-management/internal/services/youtrack"
 	"github.com/gorilla/mux"
 )
@@ -1132,4 +1134,354 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ============================================================
+// YouTrack Issues Grouped by Assignee (for Daily Task List)
+// ============================================================
+
+var priorityRegex = regexp.MustCompile(`^(P[0-3])\s+(.*)`)
+
+// extractPriorityFromSummary parses "P2 FE UI: Avatar Bug" -> ("P2", "P2 FE UI: Avatar Bug")
+// The clean_title keeps the priority prefix since it's part of the Slack message format
+func extractPriorityFromSummary(summary string) (string, string) {
+	matches := priorityRegex.FindStringSubmatch(summary)
+	if len(matches) == 3 {
+		return matches[1], summary // Keep full summary as title
+	}
+	return "", summary
+}
+
+// GetIssuesGroupedByAssignee returns active YouTrack issues grouped by assignee
+func (h *YouTrackHandler) GetIssuesGroupedByAssignee(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	issues, err := client.GetIssues(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Group by assignee, filter out Done/Fixed
+	type issueItem struct {
+		ID          string `json:"id"`
+		Summary     string `json:"summary"`
+		PriorityTag string `json:"priority_tag"`
+		CleanTitle  string `json:"clean_title"`
+		Status      string `json:"status"`
+		Selected    bool   `json:"selected"`
+	}
+
+	type assigneeGroup struct {
+		UserName    string      `json:"user_name"`
+		SlackHandle string      `json:"slack_handle"`
+		Issues      []issueItem `json:"issues"`
+	}
+
+	groups := make(map[string]*assigneeGroup)
+	var unassignedIssues []issueItem
+
+	for _, issue := range issues {
+		status := youtrack.GetStatus(issue)
+		statusLower := strings.ToLower(status)
+
+		// Skip done/fixed issues
+		if statusLower == "done" || statusLower == "fixed" {
+			continue
+		}
+
+		priorityTag, cleanTitle := extractPriorityFromSummary(issue.Summary)
+
+		item := issueItem{
+			ID:          issue.ID,
+			Summary:     issue.Summary,
+			PriorityTag: priorityTag,
+			CleanTitle:  cleanTitle,
+			Status:      status,
+			Selected:    true,
+		}
+
+		assignee := youtrack.GetAssignee(issue)
+		if assignee != nil && assignee.FullName != "" {
+			name := assignee.FullName
+			if groups[name] == nil {
+				groups[name] = &assigneeGroup{
+					UserName:    name,
+					SlackHandle: "@" + name,
+					Issues:      []issueItem{},
+				}
+			}
+			groups[name].Issues = append(groups[name].Issues, item)
+		} else {
+			unassignedIssues = append(unassignedIssues, item)
+		}
+	}
+
+	// Convert map to slice
+	var assignments []assigneeGroup
+	for _, group := range groups {
+		assignments = append(assignments, *group)
+	}
+
+	// Add unassigned group if any
+	if len(unassignedIssues) > 0 {
+		assignments = append(assignments, assigneeGroup{
+			UserName:    "Unassigned",
+			SlackHandle: "@Unassigned",
+			Issues:      unassignedIssues,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"assignments": assignments,
+		},
+	})
+}
+
+// ============================================================
+// Workflow State Order & Backward Movement Detection
+// ============================================================
+
+var stateOrder = map[string]int{
+	"open":        0,
+	"backlog":     0,
+	"submitted":   0,
+	"in progress": 1,
+	"dev":         2,
+	"blocked":     1,
+	"done":        3,
+	"fixed":       3,
+}
+
+func getStateIndex(state string) int {
+	if idx, ok := stateOrder[strings.ToLower(state)]; ok {
+		return idx
+	}
+	return 0
+}
+
+func isBackwardMove(currentState, proposedState string) bool {
+	return getStateIndex(proposedState) < getStateIndex(currentState)
+}
+
+// GetSyncRecommendations compares AI analysis against YouTrack states and returns recommendations
+func (h *YouTrackHandler) GetSyncRecommendations(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		PersonBreakdown []struct {
+			Name      string   `json:"name"`
+			Assigned  []string `json:"assigned"`
+			Completed []string `json:"completed"`
+			Pending   []string `json:"pending"`
+			Blocked   []string `json:"blocked"`
+		} `json:"person_breakdown"`
+		Analysis []struct {
+			TaskTitle      string   `json:"task_title"`
+			DetectedStatus string   `json:"detected_status"`
+			Confidence     float64  `json:"confidence"`
+			Evidence       []string `json:"evidence"`
+			Assignee       string   `json:"assignee"`
+		} `json:"analysis"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	issues, err := client.GetIssues(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to fetch YouTrack issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Build task list from person_breakdown
+	type taskEntry struct {
+		Title  string
+		Person string
+		Status string
+	}
+	var allTasks []taskEntry
+
+	for _, person := range req.PersonBreakdown {
+		for _, t := range person.Completed {
+			allTasks = append(allTasks, taskEntry{Title: t, Person: person.Name, Status: "completed"})
+		}
+		for _, t := range person.Pending {
+			allTasks = append(allTasks, taskEntry{Title: t, Person: person.Name, Status: "in_progress"})
+		}
+		for _, t := range person.Blocked {
+			allTasks = append(allTasks, taskEntry{Title: t, Person: person.Name, Status: "blocked"})
+		}
+	}
+
+	// Match and generate recommendations
+	type recommendation struct {
+		IssueID       string  `json:"issue_id"`
+		Summary       string  `json:"summary"`
+		Person        string  `json:"person"`
+		CurrentState  string  `json:"current_state"`
+		ProposedState string  `json:"proposed_state"`
+		Reason        string  `json:"reason"`
+		Backward      bool    `json:"backward"`
+		Confidence    float64 `json:"confidence"`
+	}
+
+	var recommendations []recommendation
+
+	for _, task := range allTasks {
+		bestMatch := -1
+		bestScore := 0.0
+
+		for i, issue := range issues {
+			score := fuzzyMatchScore(task.Title, issue.Summary)
+			if score > bestScore && score >= 0.4 {
+				bestScore = score
+				bestMatch = i
+			}
+		}
+
+		if bestMatch < 0 {
+			continue
+		}
+
+		issue := issues[bestMatch]
+		currentState := youtrack.GetStatus(issue)
+
+		// Determine proposed state
+		var proposedState string
+		switch task.Status {
+		case "completed":
+			proposedState = "DEV"
+		case "in_progress":
+			proposedState = "In Progress"
+		case "blocked":
+			proposedState = "In Progress"
+		}
+
+		if proposedState == "" {
+			continue
+		}
+
+		// Skip if already in the proposed state
+		if strings.EqualFold(currentState, proposedState) {
+			continue
+		}
+
+		backward := isBackwardMove(currentState, proposedState)
+		reason := fmt.Sprintf("AI analysis detected status '%s' but YouTrack shows '%s'", task.Status, currentState)
+
+		recommendations = append(recommendations, recommendation{
+			IssueID:       issue.ID,
+			Summary:       issue.Summary,
+			Person:        task.Person,
+			CurrentState:  currentState,
+			ProposedState: proposedState,
+			Reason:        reason,
+			Backward:      backward,
+			Confidence:    bestScore,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":         true,
+		"recommendations": recommendations,
+	})
+}
+
+// ============================================================
+// PM Assistant Query (AI Chat with YouTrack Context)
+// ============================================================
+
+// PMAssistantQuery handles natural language queries against YouTrack data
+func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Query string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Query == "" {
+		http.Error(w, "Invalid request: query is required", http.StatusBadRequest)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	issues, err := client.GetIssues(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to fetch YouTrack issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Build context from YouTrack issues
+	var sb strings.Builder
+	sb.WriteString("Here are the current YouTrack issues:\n\n")
+	for _, issue := range issues {
+		status := youtrack.GetStatus(issue)
+		assignee := youtrack.GetAssignee(issue)
+		assigneeName := "Unassigned"
+		if assignee != nil && assignee.FullName != "" {
+			assigneeName = assignee.FullName
+		}
+		sb.WriteString(fmt.Sprintf("- %s | %s | Status: %s | Assignee: %s\n", issue.ID, issue.Summary, status, assigneeName))
+	}
+
+	systemPrompt := `You are a PM Assistant for a software development team. You have access to the team's YouTrack issue tracker data provided below.
+
+Answer the user's questions about the project using this data. Format your responses in clean markdown:
+- Use tables for structured data
+- Use bullet points for lists
+- Use bold for emphasis
+- Be concise but thorough
+- If asked for reports, group and summarize data clearly
+- If the query is ambiguous, make reasonable assumptions and note them
+
+` + sb.String()
+
+	response, err := ai.QueryWithContext(r.Context(), systemPrompt, req.Query)
+	if err != nil {
+		http.Error(w, "AI query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"response": response,
+		},
+	})
 }

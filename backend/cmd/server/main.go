@@ -124,8 +124,11 @@ func main() {
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/state", youtrackHandler.UpdateIssueState).Methods("PATCH")
 	youtrackRoutes.HandleFunc("/sections", youtrackHandler.GetProjectSectionsFromDB).Methods("GET") // Get synced sections from DB
 	youtrackRoutes.HandleFunc("/import", youtrackHandler.ImportFromYouTrack).Methods("POST")       // Import issues from YouTrack
-	youtrackRoutes.HandleFunc("/match-analysis", youtrackHandler.MatchAnalysis).Methods("POST")           // Match AI analysis with YouTrack issues
-	youtrackRoutes.HandleFunc("/bulk-update-states", youtrackHandler.BulkUpdateStates).Methods("POST")    // Bulk update issue states
+	youtrackRoutes.HandleFunc("/issues/grouped-by-assignee", youtrackHandler.GetIssuesGroupedByAssignee).Methods("GET")
+	youtrackRoutes.HandleFunc("/match-analysis", youtrackHandler.MatchAnalysis).Methods("POST")
+	youtrackRoutes.HandleFunc("/bulk-update-states", youtrackHandler.BulkUpdateStates).Methods("POST")
+	youtrackRoutes.HandleFunc("/sync-recommendations", youtrackHandler.GetSyncRecommendations).Methods("POST")
+	youtrackRoutes.HandleFunc("/pm-query", youtrackHandler.PMAssistantQuery).Methods("POST")
 
 	// Task-specific YouTrack routes (protected)
 	taskYouTrackRoutes := api.PathPrefix("/tasks/{id}/youtrack").Subrouter()
@@ -168,6 +171,7 @@ func main() {
 	dailyTaskRoutes.HandleFunc("/next-day/{date}", dailyTaskHandler.GetNextDayTasks).Methods("GET")
 	dailyTaskRoutes.HandleFunc("/next-day/generate", dailyTaskHandler.GenerateNextDayTasks).Methods("POST")
 	dailyTaskRoutes.HandleFunc("/next-day/task", dailyTaskHandler.CreateNextDayTask).Methods("POST")
+	dailyTaskRoutes.HandleFunc("/next-day/bulk-create", dailyTaskHandler.BulkCreateNextDayTasks).Methods("POST")
 	dailyTaskRoutes.HandleFunc("/next-day/task/{taskId}", dailyTaskHandler.UpdateNextDayTask).Methods("PATCH")
 	dailyTaskRoutes.HandleFunc("/next-day/task/{taskId}", dailyTaskHandler.DeleteNextDayTask).Methods("DELETE")
 	dailyTaskRoutes.HandleFunc("/next-day/reorder", dailyTaskHandler.ReorderNextDayTasks).Methods("PATCH")

@@ -29,6 +29,9 @@ import {
   GripVertical,
   UserPlus,
   X,
+  Link2,
+  CheckSquare,
+  Square,
 } from 'lucide-react'
 import api from '../services/api'
 
@@ -54,6 +57,22 @@ interface NextDayAssignment {
 interface NextDayTaskList {
   date: string
   assignments: NextDayAssignment[]
+}
+
+// YouTrack Pull interfaces
+interface YTPullIssue {
+  id: string
+  summary: string
+  priority_tag: string
+  clean_title: string
+  status: string
+  selected: boolean
+}
+
+interface YTPullAssignment {
+  user_name: string
+  slack_handle: string
+  issues: YTPullIssue[]
 }
 
 // ====== Sortable Task Item Component ======
@@ -103,8 +122,7 @@ function SortableTaskItem({
         <div className="daily-task-badges">
           {item.priority === 'high' && (
             <span
-              className="priority-tag"
-              style={{ backgroundColor: priorityColors.high }}
+              className="priority-tag priority-high"
             >
               HIGH
             </span>
@@ -160,6 +178,12 @@ export function DailyTaskListPage() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState<'high' | 'medium' | 'low'>('medium')
   const [newTaskNotes, setNewTaskNotes] = useState('')
+
+  // YouTrack pull state
+  const [pullingFromYT, setPullingFromYT] = useState(false)
+  const [ytPullData, setYtPullData] = useState<YTPullAssignment[] | null>(null)
+  const [ytSelections, setYtSelections] = useState<Record<string, Record<string, boolean>>>({})
+  const [addingFromYT, setAddingFromYT] = useState(false)
 
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(() => new Date())
@@ -232,15 +256,118 @@ export function DailyTaskListPage() {
 
   // Client-side Slack text generation
   const generateSlackText = (list: NextDayTaskList): string => {
-    let text = '`todays task list`\n'
+    let text = 'todays task list\n'
     for (const assignment of list.assignments) {
-      text += `\n\`${assignment.slack_handle}\`\n`
+      text += `\n${assignment.slack_handle} \n`
       for (const task of assignment.tasks) {
-        const priority = task.priority === 'high' ? ' (High)' : ''
-        text += `• ${task.task_title}${priority}\n`
+        text += `${task.task_title}\n`
       }
     }
     return text
+  }
+
+  // Pull from YouTrack
+  const handlePullFromYouTrack = async () => {
+    setPullingFromYT(true)
+    try {
+      const response = await api.getYouTrackIssuesGroupedByAssignee()
+      if (response.success && response.data?.assignments) {
+        const assignments = response.data.assignments
+        setYtPullData(assignments)
+        // Pre-select all issues
+        const selections: Record<string, Record<string, boolean>> = {}
+        for (const group of assignments) {
+          selections[group.user_name] = {}
+          for (const issue of group.issues) {
+            selections[group.user_name][issue.id] = true
+          }
+        }
+        setYtSelections(selections)
+      }
+    } catch (err) {
+      console.error('Error pulling from YouTrack:', err)
+    } finally {
+      setPullingFromYT(false)
+    }
+  }
+
+  // Toggle issue selection
+  const toggleIssueSelection = (assignee: string, issueId: string) => {
+    setYtSelections(prev => ({
+      ...prev,
+      [assignee]: {
+        ...prev[assignee],
+        [issueId]: !prev[assignee]?.[issueId],
+      },
+    }))
+  }
+
+  // Toggle all issues for an assignee
+  const toggleAssigneeSelection = (assignee: string, issues: YTPullIssue[]) => {
+    const allSelected = issues.every(i => ytSelections[assignee]?.[i.id])
+    setYtSelections(prev => ({
+      ...prev,
+      [assignee]: Object.fromEntries(issues.map(i => [i.id, !allSelected])),
+    }))
+  }
+
+  // Get count of selected issues
+  const getSelectedCount = () => {
+    let count = 0
+    for (const assignee of Object.keys(ytSelections)) {
+      for (const selected of Object.values(ytSelections[assignee])) {
+        if (selected) count++
+      }
+    }
+    return count
+  }
+
+  // Accept selected YT issues and add to task list
+  const handleAcceptYTPull = async () => {
+    if (!ytPullData) return
+    setAddingFromYT(true)
+    try {
+      const tasks: { assignee: string; task_title: string; priority?: string; youtrack_id?: string }[] = []
+      for (const group of ytPullData) {
+        for (const issue of group.issues) {
+          if (ytSelections[group.user_name]?.[issue.id]) {
+            tasks.push({
+              assignee: group.user_name,
+              task_title: issue.clean_title,
+              priority: issue.priority_tag === 'P0' || issue.priority_tag === 'P1' ? 'high' : 'medium',
+              youtrack_id: issue.id,
+            })
+          }
+        }
+      }
+
+      if (tasks.length > 0) {
+        const response = await api.bulkCreateNextDayTasks(selectedDate, tasks)
+        if (response.success && response.data) {
+          setTaskList(response.data as NextDayTaskList)
+        } else {
+          await fetchTaskList()
+        }
+      }
+
+      setYtPullData(null)
+      setYtSelections({})
+    } catch (err) {
+      console.error('Error adding YT tasks:', err)
+    } finally {
+      setAddingFromYT(false)
+    }
+  }
+
+  // Priority tag color helper
+  const getPriorityColor = (tag: string) => {
+    switch (tag) {
+      case 'P0': return 'var(--color-danger)'
+      case 'P1': return '#f97316'
+      case 'P2': return 'var(--color-warning)'
+      case 'P3': return '#888'
+      default: return 'transparent'
+    }
   }
 
   // Drag handlers
@@ -486,6 +613,14 @@ export function DailyTaskListPage() {
             {copied ? <Check size={16} /> : <Copy size={16} />}
             {copied ? 'Copied!' : 'Copy for Slack'}
           </button>
+          <button
+            className="btn btn-secondary daily-action-btn yt-pull-btn"
+            onClick={handlePullFromYouTrack}
+            disabled={pullingFromYT}
+          >
+            <Link2 size={16} className={pullingFromYT ? 'animate-spin' : ''} />
+            {pullingFromYT ? 'Pulling...' : 'Pull from YouTrack'}
+          </button>
         </div>
 
         {/* Slack Preview */}
@@ -705,6 +840,76 @@ export function DailyTaskListPage() {
                 </button>
                 <button className="btn btn-primary" onClick={handleAddPerson}>
                   Add Person
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* YouTrack Pull Modal */}
+        {ytPullData && (
+          <div className="modal-overlay" onClick={() => { setYtPullData(null); setYtSelections({}) }}>
+            <div className="yt-pull-modal glass-card" onClick={(e) => e.stopPropagation()}>
+              <div className="yt-pull-modal-header">
+                <h3>Pull from YouTrack</h3>
+                <span className="yt-pull-count">{getSelectedCount()} selected</span>
+              </div>
+
+              <div className="yt-pull-modal-body">
+                {ytPullData.map((group) => {
+                  const allSelected = group.issues.every(i => ytSelections[group.user_name]?.[i.id])
+                  return (
+                    <div key={group.user_name} className="yt-pull-group">
+                      <div
+                        className="yt-pull-group-header"
+                        onClick={() => toggleAssigneeSelection(group.user_name, group.issues)}
+                      >
+                        {allSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                        <span className="yt-pull-assignee">{group.slack_handle}</span>
+                        <span className="yt-pull-group-count">{group.issues.length} issues</span>
+                      </div>
+                      <div className="yt-pull-issues">
+                        {group.issues.map((issue) => (
+                          <div
+                            key={issue.id}
+                            className={`yt-pull-issue ${ytSelections[group.user_name]?.[issue.id] ? 'selected' : ''}`}
+                            onClick={() => toggleIssueSelection(group.user_name, issue.id)}
+                          >
+                            {ytSelections[group.user_name]?.[issue.id]
+                              ? <CheckSquare size={14} />
+                              : <Square size={14} />
+                            }
+                            {issue.priority_tag && (
+                              <span
+                                className={`yt-priority-tag yt-priority-${issue.priority_tag.toLowerCase()}`}
+                              >
+                                {issue.priority_tag}
+                              </span>
+                            )}
+                            <span className="yt-issue-title">{issue.summary}</span>
+                            <span className="yt-issue-id">{issue.id}</span>
+                            <span className="yt-issue-status badge">{issue.status}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => { setYtPullData(null); setYtSelections({}) }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleAcceptYTPull}
+                  disabled={addingFromYT || getSelectedCount() === 0}
+                >
+                  {addingFromYT ? 'Adding...' : `Add Selected (${getSelectedCount()})`}
                 </button>
               </div>
             </div>

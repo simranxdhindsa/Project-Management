@@ -35,7 +35,10 @@ import {
   Code2,
   Archive,
   RefreshCw,
-  User
+  User,
+  AlertTriangle,
+  X,
+  MessageSquare,
 } from 'lucide-react'
 import { IntegrationsPage } from './IntegrationsPage'
 import { SettingsPage } from './SettingsPage'
@@ -44,9 +47,10 @@ import { DailyTaskListPage } from './DailyTaskListPage'
 import { DailyAnalysisViewPage } from './DailyAnalysisViewPage'
 import { BotConfigPage } from './BotConfigPage'
 import { AIAnalysisPage } from './AIAnalysisPage'
+import { PMReportsPage } from './PMReportsPage'
 import { JellySwitch } from '../components/JellySwitch'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'bots' | 'team' | 'settings' | 'integrations'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations'
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -64,6 +68,23 @@ const DASHBOARD_COLUMNS = [
   { id: 'in_progress', label: 'In Progress', ytState: 'In Progress' },
   { id: 'dev', label: 'DEV', ytState: 'DEV' },
 ] as const
+
+const COLUMN_ORDER: Record<string, number> = {
+  backlog: 0,
+  in_progress: 1,
+  dev: 2,
+}
+
+interface DashboardNotification {
+  id: string
+  type: 'backward_move' | 'sync_issue'
+  issueId: string
+  summary: string
+  fromState: string
+  toState: string
+  timestamp: Date
+  read: boolean
+}
 
 // Droppable column wrapper
 function DroppableColumn({ id, children }: { id: string; children: React.ReactNode }) {
@@ -117,6 +138,44 @@ export default function Dashboard() {
   const [activeIssue, setActiveIssue] = useState<YTIssue | null>(null)
   const [dashboardView, setDashboardView] = useState<'board' | 'assignees'>('board')
 
+  // Notification state
+  const [notifications, setNotifications] = useState<DashboardNotification[]>([])
+  const [toast, setToast] = useState<{ message: string; type: 'warning' | 'info' } | null>(null)
+
+  const unreadCount = notifications.filter(n => !n.read).length
+
+  const addNotification = (notif: Omit<DashboardNotification, 'id' | 'timestamp' | 'read'>) => {
+    setNotifications(prev => [{
+      ...notif,
+      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: new Date(),
+      read: false,
+    }, ...prev])
+  }
+
+  const dismissNotification = (id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id))
+  }
+
+  const handleMoveToBlocked = async (notif: DashboardNotification) => {
+    try {
+      await api.bulkUpdateYouTrackStates([{ issue_id: notif.issueId, new_state: 'Blocked' }])
+      setYtIssues(prev => prev.map(i =>
+        i.id === notif.issueId ? { ...i, status: 'Blocked' } : i
+      ))
+      dismissNotification(notif.id)
+      setToast({ message: `${notif.issueId} moved to Blocked`, type: 'info' })
+      setTimeout(() => setToast(null), 3000)
+    } catch {
+      setToast({ message: `Failed to move ${notif.issueId} to Blocked`, type: 'warning' })
+      setTimeout(() => setToast(null), 3000)
+    }
+  }
+
+  const markAllRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+  }
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
@@ -145,7 +204,26 @@ export default function Dashboard() {
     const targetCol = DASHBOARD_COLUMNS.find(c => c.id === targetColumnId)
     if (!targetCol) return
 
-    // Optimistic update: move the issue locally
+    // Detect backward movement
+    const currentOrder = COLUMN_ORDER[currentCol] ?? 0
+    const targetOrder = COLUMN_ORDER[targetColumnId] ?? 0
+    const isBackward = targetOrder < currentOrder
+
+    if (isBackward) {
+      const fromLabel = DASHBOARD_COLUMNS.find(c => c.id === currentCol)?.label || currentCol
+      const toLabel = targetCol.label
+      addNotification({
+        type: 'backward_move',
+        issueId,
+        summary: issue.summary,
+        fromState: fromLabel,
+        toState: toLabel,
+      })
+      setToast({ message: `${issueId} moved backward: ${fromLabel} → ${toLabel}`, type: 'warning' })
+      setTimeout(() => setToast(null), 4000)
+    }
+
+    // Optimistic update: move the issue locally (even if backward)
     setYtIssues(prev => prev.map(i =>
       i.id === issueId ? { ...i, status: targetCol.ytState } : i
     ))
@@ -344,6 +422,13 @@ export default function Dashboard() {
               <BarChart3 size={20} />
               <span>Reports</span>
             </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'pm-reports' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('pm-reports')}
+            >
+              <MessageSquare size={20} />
+              <span>PM Reports</span>
+            </button>
           </div>
 
           <div className="nav-section">
@@ -413,6 +498,7 @@ export default function Dashboard() {
             {currentPage === 'calendar' && 'Calendar'}
             {currentPage === 'ai-analysis' && 'AI Task Analysis'}
             {currentPage === 'reports' && 'Reports'}
+            {currentPage === 'pm-reports' && 'PM Reports'}
             {currentPage === 'team' && 'Team Management'}
             {currentPage === 'bots' && 'Bot Configuration'}
             {currentPage === 'settings' && 'Access Control'}
@@ -440,7 +526,9 @@ export default function Dashboard() {
               onClick={() => setShowNotifications(!showNotifications)}
             >
               <Bell size={20} />
-              <span className="notification-badge">3</span>
+              {unreadCount > 0 && (
+                <span className="notification-badge">{unreadCount}</span>
+              )}
             </button>
 
             {showNotifications && (
@@ -459,44 +547,60 @@ export default function Dashboard() {
                 <div className="notification-dropdown">
                   <div className="notification-header">
                     <h3>Notifications</h3>
-                    <button className="btn-ghost btn-sm" onClick={() => setShowNotifications(false)}>
+                    <button className="btn-ghost btn-sm" onClick={markAllRead}>
                       Mark all as read
                     </button>
                   </div>
                   <div className="notification-list">
-                    <div className="notification-item unread">
-                      <div className="notification-icon" style={{ backgroundColor: 'var(--color-primary-light)' }}>
-                        <CheckCircle size={16} color="var(--color-primary)" />
+                    {notifications.length === 0 ? (
+                      <div className="notification-empty-state">
+                        No notifications
                       </div>
-                      <div className="notification-content">
-                        <p className="notification-text"><strong>Task completed:</strong> PDF page numbers fixed</p>
-                        <span className="notification-time">2 hours ago</span>
-                      </div>
-                    </div>
-                    <div className="notification-item unread">
-                      <div className="notification-icon" style={{ backgroundColor: 'var(--color-warning-light)' }}>
-                        <AlertCircle size={16} color="var(--color-warning)" />
-                      </div>
-                      <div className="notification-content">
-                        <p className="notification-text"><strong>Task overdue:</strong> Mic conflict needs attention</p>
-                        <span className="notification-time">5 hours ago</span>
-                      </div>
-                    </div>
-                    <div className="notification-item">
-                      <div className="notification-icon" style={{ backgroundColor: 'var(--color-success-light)' }}>
-                        <CheckCircle size={16} color="var(--color-success)" />
-                      </div>
-                      <div className="notification-content">
-                        <p className="notification-text"><strong>Analysis saved:</strong> Daily analysis for 2026-02-03</p>
-                        <span className="notification-time">Yesterday</span>
-                      </div>
-                    </div>
+                    ) : (
+                      notifications.map(notif => (
+                        <div key={notif.id} className={`notification-item ${!notif.read ? 'unread' : ''}`}>
+                          <div className="notification-icon notification-icon-backward">
+                            <AlertTriangle size={16} color="var(--color-danger)" />
+                          </div>
+                          <div className="notification-content">
+                            <p className="notification-text">
+                              <strong>{notif.issueId}</strong> moved backward: {notif.fromState} → {notif.toState}
+                            </p>
+                            <p className="notification-summary">
+                              {notif.summary}
+                            </p>
+                            <div className="notification-actions">
+                              <button
+                                className="btn btn-sm btn-notification-danger"
+                                onClick={(e) => { e.stopPropagation(); handleMoveToBlocked(notif) }}
+                              >
+                                Move to Blocked
+                              </button>
+                              <button
+                                className="btn btn-ghost btn-sm btn-notification-sm"
+                                onClick={(e) => { e.stopPropagation(); dismissNotification(notif.id) }}
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                            <span className="notification-time">
+                              {notif.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
-                  <div className="notification-footer">
-                    <button className="btn-ghost btn-sm" style={{ width: '100%' }}>
-                      View all notifications
-                    </button>
-                  </div>
+                  {notifications.length > 0 && (
+                    <div className="notification-footer">
+                      <button
+                        className="btn-ghost btn-sm notification-clear-btn"
+                        onClick={() => setNotifications([])}
+                      >
+                        Clear all notifications
+                      </button>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -887,6 +991,9 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* PM Reports */}
+        {currentPage === 'pm-reports' && <PMReportsPage />}
+
         {/* Team Placeholder */}
         {currentPage === 'team' && (
           <div className="coming-soon">
@@ -896,6 +1003,17 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`dashboard-toast ${toast.type === 'warning' ? 'toast-warning' : 'toast-info'}`}>
+          {toast.type === 'warning' ? <AlertTriangle size={16} /> : <CheckCircle size={16} />}
+          <span>{toast.message}</span>
+          <button className="toast-close" onClick={() => setToast(null)}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
