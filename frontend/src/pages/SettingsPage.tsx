@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
+import { Download, Loader2 } from 'lucide-react'
 import api from '../services/api'
-import type { AllowedEmail, AllowedDomain, AccessSettings } from '../services/api'
+import type { AllowedEmail, AllowedDomain, AccessSettings, YouTrackUser } from '../services/api'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 type UserRole = 'admin' | 'project_manager' | 'member' | 'viewer'
 
@@ -24,6 +26,20 @@ export function SettingsPage() {
   const [newDomainRole, setNewDomainRole] = useState<UserRole>('member')
   const [addingEmail, setAddingEmail] = useState(false)
   const [addingDomain, setAddingDomain] = useState(false)
+
+  // Confirm modal state
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string
+    message: string
+    onConfirm: () => void
+  } | null>(null)
+
+  // Import from YouTrack state
+  const [showYtImport, setShowYtImport] = useState(false)
+  const [ytUsers, setYtUsers] = useState<YouTrackUser[]>([])
+  const [ytLoadingUsers, setYtLoadingUsers] = useState(false)
+  const [ytSelectedEmails, setYtSelectedEmails] = useState<Set<string>>(new Set())
+  const [ytImporting, setYtImporting] = useState(false)
 
   useEffect(() => {
     fetchSettings()
@@ -67,17 +83,22 @@ export function SettingsPage() {
   }
 
   const handleRemoveEmail = async (email: string) => {
-    if (!confirm(`Remove ${email} from the allowed list?`)) return
-
-    try {
-      setError(null)
-      await api.removeAllowedEmail(email)
-      setSuccess('Email removed successfully')
-      fetchSettings()
-      setTimeout(() => setSuccess(null), 3000)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove email')
-    }
+    setConfirmAction({
+      title: 'Remove Email',
+      message: `Remove ${email} from the allowed list?`,
+      onConfirm: async () => {
+        setConfirmAction(null)
+        try {
+          setError(null)
+          await api.removeAllowedEmail(email)
+          setSuccess('Email removed successfully')
+          fetchSettings()
+          setTimeout(() => setSuccess(null), 3000)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to remove email')
+        }
+      },
+    })
   }
 
   const handleAddDomain = async (e: React.FormEvent) => {
@@ -104,16 +125,75 @@ export function SettingsPage() {
   }
 
   const handleRemoveDomain = async (domain: string) => {
-    if (!confirm(`Remove @${domain} from the allowed list?`)) return
+    setConfirmAction({
+      title: 'Remove Domain',
+      message: `Remove @${domain} from the allowed list?`,
+      onConfirm: async () => {
+        setConfirmAction(null)
+        try {
+          setError(null)
+          await api.removeAllowedDomain(domain)
+          setSuccess('Domain removed successfully')
+          fetchSettings()
+          setTimeout(() => setSuccess(null), 3000)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to remove domain')
+        }
+      },
+    })
+  }
 
+  // Import from YouTrack
+  const handleOpenYtImport = async () => {
+    setShowYtImport(true)
+    setYtLoadingUsers(true)
+    setYtSelectedEmails(new Set())
     try {
-      setError(null)
-      await api.removeAllowedDomain(domain)
-      setSuccess('Domain removed successfully')
-      fetchSettings()
+      const response = await api.getYouTrackUsers()
+      if (response.success && response.data) {
+        setYtUsers(response.data as YouTrackUser[])
+      }
+    } catch {
+      setError('Failed to fetch YouTrack users')
+      setShowYtImport(false)
+    } finally {
+      setYtLoadingUsers(false)
+    }
+  }
+
+  const isEmailAlreadyAllowed = (email: string) => {
+    if (!settings?.allowed_emails) return false
+    return settings.allowed_emails.some(
+      (e: AllowedEmail) => e.email.toLowerCase() === email.toLowerCase()
+    )
+  }
+
+  const handleYtToggle = (email: string) => {
+    setYtSelectedEmails(prev => {
+      const next = new Set(prev)
+      if (next.has(email)) next.delete(email)
+      else next.add(email)
+      return next
+    })
+  }
+
+  const handleYtImport = async () => {
+    if (ytSelectedEmails.size === 0) return
+    setYtImporting(true)
+    try {
+      let added = 0
+      for (const email of ytSelectedEmails) {
+        const response = await api.addAllowedEmail(email, 'member')
+        if (response.success) added++
+      }
+      setSuccess(`Imported ${added} user${added !== 1 ? 's' : ''} from YouTrack`)
       setTimeout(() => setSuccess(null), 3000)
+      setShowYtImport(false)
+      fetchSettings()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove domain')
+      setError(err instanceof Error ? err.message : 'Failed to import users')
+    } finally {
+      setYtImporting(false)
     }
   }
 
@@ -199,11 +279,19 @@ export function SettingsPage() {
 
       {/* Allowed Emails Section */}
       <div className="settings-section glass-card">
-        <div className="section-header">
+        <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h2>Allowed Email Addresses</h2>
             <p>Specific email addresses that can access the application</p>
           </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleOpenYtImport}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap' }}
+          >
+            <Download size={16} />
+            Import from YouTrack
+          </button>
         </div>
 
         <form className="add-form" onSubmit={handleAddEmail}>
@@ -416,6 +504,76 @@ export function SettingsPage() {
           </ol>
         </div>
       </div>
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        open={!!confirmAction}
+        title={confirmAction?.title || ''}
+        message={confirmAction?.message || ''}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => confirmAction?.onConfirm()}
+        onCancel={() => setConfirmAction(null)}
+      />
+
+      {/* Import from YouTrack Modal */}
+      {showYtImport && (
+        <div className="modal-overlay" onClick={() => setShowYtImport(false)}>
+          <div className="glass-card yt-import-modal" onClick={e => e.stopPropagation()}>
+            <div className="yt-import-header">
+              <h3>Import Users from YouTrack</h3>
+              <p className="yt-import-subtitle">Select users to add as members</p>
+            </div>
+
+            {ytLoadingUsers ? (
+              <div className="yt-import-loading">
+                <Loader2 size={24} className="animate-spin" />
+                <span>Loading YouTrack users...</span>
+              </div>
+            ) : (
+              <>
+                <div className="yt-import-list">
+                  {ytUsers.filter(u => u.email).map(user => {
+                    const alreadyAllowed = isEmailAlreadyAllowed(user.email!)
+                    return (
+                      <label
+                        key={user.id}
+                        className={`yt-import-item ${alreadyAllowed ? 'yt-import-disabled' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={alreadyAllowed || ytSelectedEmails.has(user.email!)}
+                          disabled={alreadyAllowed}
+                          onChange={() => handleYtToggle(user.email!)}
+                        />
+                        <div className="yt-import-user-info">
+                          <span className="yt-import-name">{user.fullName || user.login}</span>
+                          <span className="yt-import-email">{user.email}</span>
+                        </div>
+                        {alreadyAllowed && <span className="yt-import-badge">Already added</span>}
+                      </label>
+                    )
+                  })}
+                  {ytUsers.filter(u => u.email).length === 0 && (
+                    <div className="yt-import-empty">No users with email addresses found in YouTrack</div>
+                  )}
+                </div>
+
+                <div className="yt-import-actions">
+                  <button className="btn btn-ghost" onClick={() => setShowYtImport(false)}>Cancel</button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleYtImport}
+                    disabled={ytImporting || ytSelectedEmails.size === 0}
+                  >
+                    {ytImporting ? 'Importing...' : `Add Selected (${ytSelectedEmails.size})`}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -32,8 +32,10 @@ import {
   Link2,
   CheckSquare,
   Square,
+  AlertCircle,
 } from 'lucide-react'
 import api from '../services/api'
+import { ConfirmModal } from '../components/ConfirmModal'
 
 // NextDayTask interface for new API
 interface NextDayTask {
@@ -41,7 +43,7 @@ interface NextDayTask {
   target_date: string
   assignee: string
   task_title: string
-  priority: 'high' | 'medium' | 'low'
+  priority: string
   position: number
   is_carried_forward: boolean
   source_date?: string
@@ -96,12 +98,6 @@ function SortableTaskItem({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-  }
-
-  const priorityColors: Record<string, string> = {
-    high: 'var(--color-danger)',
-    medium: 'var(--color-warning)',
-    low: 'var(--color-success)',
   }
 
   return (
@@ -174,6 +170,8 @@ export function DailyTaskListPage() {
   const [showAddPerson, setShowAddPerson] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
   const [newPersonHandle, setNewPersonHandle] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [addingTaskFor, setAddingTaskFor] = useState<string | null>(null)
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState<'high' | 'medium' | 'low'>('medium')
@@ -196,6 +194,7 @@ export function DailyTaskListPage() {
   // Fetch task list for selected date
   const fetchTaskList = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const response = await api.getNextDayTasks(selectedDate)
       if (response.success && response.data) {
@@ -203,8 +202,9 @@ export function DailyTaskListPage() {
       } else {
         setTaskList(null)
       }
-    } catch {
+    } catch (err) {
       setTaskList(null)
+      setError(err instanceof Error ? err.message : 'Failed to load task list')
     } finally {
       setLoading(false)
     }
@@ -217,6 +217,7 @@ export function DailyTaskListPage() {
   // Generate task list from previous day's pending tasks
   const handleGenerate = async () => {
     setGenerating(true)
+    setError(null)
     try {
       // Calculate yesterday's date
       const yesterday = new Date(selectedDate)
@@ -228,7 +229,7 @@ export function DailyTaskListPage() {
         setTaskList(response.data)
       }
     } catch (err) {
-      console.error('Error generating task list:', err)
+      setError(err instanceof Error ? err.message : 'Failed to generate task list')
     } finally {
       setGenerating(false)
     }
@@ -285,7 +286,7 @@ export function DailyTaskListPage() {
         setYtSelections(selections)
       }
     } catch (err) {
-      console.error('Error pulling from YouTrack:', err)
+      setError(err instanceof Error ? err.message : 'Failed to pull from YouTrack')
     } finally {
       setPullingFromYT(false)
     }
@@ -344,7 +345,7 @@ export function DailyTaskListPage() {
       if (tasks.length > 0) {
         const response = await api.bulkCreateNextDayTasks(selectedDate, tasks)
         if (response.success && response.data) {
-          setTaskList(response.data as NextDayTaskList)
+          setTaskList(response.data)
         } else {
           await fetchTaskList()
         }
@@ -353,20 +354,9 @@ export function DailyTaskListPage() {
       setYtPullData(null)
       setYtSelections({})
     } catch (err) {
-      console.error('Error adding YT tasks:', err)
+      setError(err instanceof Error ? err.message : 'Failed to add YouTrack tasks')
     } finally {
       setAddingFromYT(false)
-    }
-  }
-
-  // Priority tag color helper
-  const getPriorityColor = (tag: string) => {
-    switch (tag) {
-      case 'P0': return 'var(--color-danger)'
-      case 'P1': return '#f97316'
-      case 'P2': return 'var(--color-warning)'
-      case 'P3': return '#888'
-      default: return 'transparent'
     }
   }
 
@@ -424,7 +414,7 @@ export function DailyTaskListPage() {
       }))
       setTaskList({ ...taskList, assignments: updatedAssignments })
     } catch (err) {
-      console.error('Error deleting item:', err)
+      setError(err instanceof Error ? err.message : 'Failed to delete task')
     }
   }
 
@@ -452,7 +442,7 @@ export function DailyTaskListPage() {
         setAddingTaskFor(null)
       }
     } catch (err) {
-      console.error('Error adding task item:', err)
+      setError(err instanceof Error ? err.message : 'Failed to add task')
     }
   }
 
@@ -499,7 +489,7 @@ export function DailyTaskListPage() {
         assignments: taskList.assignments.filter((a) => a.user_name !== assignee),
       })
     } catch (err) {
-      console.error('Error deleting assignment:', err)
+      setError(err instanceof Error ? err.message : 'Failed to remove person')
     }
   }
 
@@ -636,6 +626,14 @@ export function DailyTaskListPage() {
 
       {/* Right Side - Task List */}
       <div className="daily-task-main">
+        {error && (
+          <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+            <AlertCircle size={18} />
+            <span>{error}</span>
+            <button className="alert-close" onClick={() => setError(null)}>&times;</button>
+          </div>
+        )}
+
         <div className="daily-task-header">
           <h2 className="daily-task-date-title">
             {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', {
@@ -723,7 +721,7 @@ export function DailyTaskListPage() {
                       </button>
                       <button
                         className="btn-icon-sm btn-danger-ghost"
-                        onClick={() => handleDeleteAssignment(assignment.user_name)}
+                        onClick={() => setConfirmDelete(assignment.user_name)}
                         title="Remove person"
                       >
                         <Trash2 size={14} />
@@ -916,6 +914,19 @@ export function DailyTaskListPage() {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        open={!!confirmDelete}
+        title="Remove Person"
+        message={`Remove ${confirmDelete} and all their tasks?`}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (confirmDelete) handleDeleteAssignment(confirmDelete)
+          setConfirmDelete(null)
+        }}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </div>
   )
 }

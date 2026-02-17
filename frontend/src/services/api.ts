@@ -50,7 +50,16 @@ class ApiService {
       headers,
     })
 
-    const data = await response.json()
+    const text = await response.text()
+    let data: any
+    try {
+      data = JSON.parse(text)
+    } catch {
+      if (!response.ok) {
+        throw new Error(text || `Request failed with status ${response.status}`)
+      }
+      throw new Error('Invalid JSON response from server')
+    }
 
     if (!response.ok) {
       throw new Error(data.message || 'An error occurred')

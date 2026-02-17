@@ -48,12 +48,11 @@ export function PMReportsPage() {
     setLoading(true)
 
     try {
-      const response = await api.pmAssistantQuery(text) as any
-      const data = response.data || response
+      const response = await api.pmAssistantQuery(text)
       const assistantMsg: ChatMessage = {
         id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
-        content: data.response || 'No response received.',
+        content: response.data?.response || 'No response received.',
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, assistantMsg])
@@ -71,70 +70,115 @@ export function PMReportsPage() {
     }
   }
 
+  const escapeHtml = (str: string) =>
+    str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
   const renderMarkdown = (text: string) => {
-    // Simple markdown rendering: bold, tables, bullet points, code
-    let html = text
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/`(.*?)`/g, '<code>$1</code>')
-      .replace(/^### (.*$)/gm, '<h4>$1</h4>')
-      .replace(/^## (.*$)/gm, '<h3>$1</h3>')
-      .replace(/^# (.*$)/gm, '<h2>$1</h2>')
-      .replace(/^- (.*$)/gm, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>')
-      .replace(/\n\n/g, '<br/><br/>')
-      .replace(/\n/g, '<br/>')
+    const lines = text.split('\n')
+    const htmlParts: string[] = []
+    let i = 0
 
-    // Simple table rendering
-    if (html.includes('|')) {
-      const lines = text.split('\n')
-      let inTable = false
-      let tableHtml = ''
-      let result = ''
+    while (i < lines.length) {
+      const line = lines[i]
 
-      for (const line of lines) {
-        if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
-          if (line.includes('---')) continue // separator row
-          if (!inTable) {
-            inTable = true
-            tableHtml = '<table class="pm-report-table"><thead><tr>'
-            const cells = line.split('|').filter(c => c.trim())
-            for (const cell of cells) {
-              tableHtml += `<th>${cell.trim()}</th>`
-            }
-            tableHtml += '</tr></thead><tbody>'
-          } else {
+      // Code blocks (triple backtick)
+      if (line.trim().startsWith('```')) {
+        const codeLines: string[] = []
+        i++ // skip opening ```
+        while (i < lines.length && !lines[i].trim().startsWith('```')) {
+          codeLines.push(escapeHtml(lines[i]))
+          i++
+        }
+        i++ // skip closing ```
+        htmlParts.push(`<pre class="pm-code-block"><code>${codeLines.join('\n')}</code></pre>`)
+        continue
+      }
+
+      // Table detection: line starts and ends with |
+      if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+        const tableRows: string[][] = []
+        while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+          const row = lines[i].trim()
+          // Skip separator rows (|---|---|)
+          if (/^\|[\s\-:|]+\|$/.test(row)) {
+            i++
+            continue
+          }
+          // Split cells: remove first/last empty from leading/trailing |
+          const cells = row.slice(1, -1).split('|').map(c => c.trim())
+          tableRows.push(cells)
+          i++
+        }
+        if (tableRows.length > 0) {
+          let tableHtml = '<table class="pm-report-table"><thead><tr>'
+          for (const cell of tableRows[0]) {
+            tableHtml += `<th>${escapeHtml(cell)}</th>`
+          }
+          tableHtml += '</tr></thead><tbody>'
+          for (let r = 1; r < tableRows.length; r++) {
             tableHtml += '<tr>'
-            const cells = line.split('|').filter(c => c.trim())
-            for (const cell of cells) {
-              tableHtml += `<td>${cell.trim()}</td>`
+            for (const cell of tableRows[r]) {
+              tableHtml += `<td>${renderInline(cell)}</td>`
             }
             tableHtml += '</tr>'
           }
-        } else {
-          if (inTable) {
-            tableHtml += '</tbody></table>'
-            result += tableHtml
-            inTable = false
-            tableHtml = ''
-          }
-          result += line + '\n'
+          tableHtml += '</tbody></table>'
+          htmlParts.push(tableHtml)
         }
-      }
-      if (inTable) {
-        tableHtml += '</tbody></table>'
-        result += tableHtml
+        continue
       }
 
-      html = result
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/`(.*?)`/g, '<code>$1</code>')
-        .replace(/^- (.*$)/gm, '<li>$1</li>')
-        .replace(/\n\n/g, '<br/><br/>')
-        .replace(/\n/g, '<br/>')
+      // Headings
+      const headingMatch = line.match(/^(#{1,4})\s+(.*)$/)
+      if (headingMatch) {
+        const level = headingMatch[1].length + 1 // h2, h3, h4, h5
+        htmlParts.push(`<h${level}>${renderInline(headingMatch[2])}</h${level}>`)
+        i++
+        continue
+      }
+
+      // Bullet list items
+      if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+        const listItems: string[] = []
+        while (i < lines.length && (lines[i].trim().startsWith('- ') || lines[i].trim().startsWith('* '))) {
+          listItems.push(`<li>${renderInline(lines[i].trim().slice(2))}</li>`)
+          i++
+        }
+        htmlParts.push(`<ul>${listItems.join('')}</ul>`)
+        continue
+      }
+
+      // Numbered list items
+      if (/^\d+\.\s/.test(line.trim())) {
+        const listItems: string[] = []
+        while (i < lines.length && /^\d+\.\s/.test(lines[i].trim())) {
+          listItems.push(`<li>${renderInline(lines[i].trim().replace(/^\d+\.\s/, ''))}</li>`)
+          i++
+        }
+        htmlParts.push(`<ol>${listItems.join('')}</ol>`)
+        continue
+      }
+
+      // Empty line = paragraph break
+      if (line.trim() === '') {
+        htmlParts.push('<br/>')
+        i++
+        continue
+      }
+
+      // Regular paragraph
+      htmlParts.push(`<p>${renderInline(line)}</p>`)
+      i++
     }
 
-    return html
+    return htmlParts.join('')
+  }
+
+  const renderInline = (text: string) => {
+    return escapeHtml(text)
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/`(.*?)`/g, '<code>$1</code>')
   }
 
   return (
@@ -220,7 +264,8 @@ export function PMReportsPage() {
               className="pm-chat-input"
               placeholder="Ask about your issues..."
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => setInput(e.target.value.slice(0, 500))}
+              maxLength={500}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()

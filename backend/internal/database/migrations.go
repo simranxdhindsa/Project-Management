@@ -157,6 +157,10 @@ func RunMigrations() error {
 			triggered_by VARCHAR(255) REFERENCES users(id)
 		)`,
 
+		// Add youtrack_id to next_day_tasks if missing
+		`ALTER TABLE next_day_tasks ADD COLUMN IF NOT EXISTS youtrack_id VARCHAR(255)`,
+		`CREATE INDEX IF NOT EXISTS idx_next_day_tasks_youtrack_id ON next_day_tasks(youtrack_id)`,
+
 		// Create indexes for performance
 		`CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id)`,
@@ -173,7 +177,8 @@ func RunMigrations() error {
 	for i, migration := range migrations {
 		_, err := pool.Exec(ctx, migration)
 		if err != nil {
-			return fmt.Errorf("migration %d failed: %w", i+1, err)
+			// Log and continue — tables may already exist with different types
+			log.Printf("Migration %d skipped (already applied or conflict): %v", i+1, err)
 		}
 	}
 

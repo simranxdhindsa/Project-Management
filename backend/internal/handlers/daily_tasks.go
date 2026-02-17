@@ -376,7 +376,8 @@ func (h *DailyTaskHandler) BulkCreateNextDayTasks(w http.ResponseWriter, r *http
 		return
 	}
 
-	if err := h.dailyRepo.BulkCreateNextDayTasks(r.Context(), req.TargetDate, req.Tasks, user.ID); err != nil {
+	skipped, err := h.dailyRepo.BulkCreateNextDayTasks(r.Context(), req.TargetDate, req.Tasks, user.ID)
+	if err != nil {
 		sendJSON(w, http.StatusInternalServerError, Response{
 			Success: false,
 			Message: "Failed to create tasks: " + err.Error(),
@@ -394,10 +395,16 @@ func (h *DailyTaskHandler) BulkCreateNextDayTasks(w http.ResponseWriter, r *http
 		return
 	}
 
+	created := len(req.Tasks) - skipped
+	msg := fmt.Sprintf("Created %d tasks successfully", created)
+	if skipped > 0 {
+		msg += fmt.Sprintf(" (%d duplicates skipped)", skipped)
+	}
+
 	sendJSON(w, http.StatusCreated, Response{
 		Success: true,
 		Data:    taskList,
-		Message: fmt.Sprintf("Created %d tasks successfully", len(req.Tasks)),
+		Message: msg,
 	})
 }
 

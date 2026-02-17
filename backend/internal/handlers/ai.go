@@ -33,21 +33,27 @@ func NewAIHandler() *AIHandler {
 func (h *AIHandler) AnalyzeSlackMessages(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Unauthorized"})
 		return
 	}
 
 	// Get project ID from query params
 	projectID := r.URL.Query().Get("project_id")
 	if projectID == "" {
-		http.Error(w, "project_id is required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "project_id is required"})
 		return
 	}
 
 	// Get yesterday's Slack messages
 	messages, err := h.slackService.GetYesterdayMessages(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "Failed to get Slack messages: "+err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to get Slack messages: " + err.Error()})
 		return
 	}
 
@@ -64,7 +70,9 @@ func (h *AIHandler) AnalyzeSlackMessages(w http.ResponseWriter, r *http.Request)
 	// Get tasks for the project that are in progress or todo
 	tasks, err := h.taskRepo.GetYesterdayPending(r.Context(), projectID)
 	if err != nil {
-		http.Error(w, "Failed to get tasks: "+err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to get tasks: " + err.Error()})
 		return
 	}
 
@@ -100,7 +108,9 @@ func (h *AIHandler) AnalyzeSlackMessages(w http.ResponseWriter, r *http.Request)
 	// Run AI analysis
 	analyses, err := h.aiClient.AnalyzeMessages(r.Context(), messagesForAnalysis, taskTitles)
 	if err != nil {
-		http.Error(w, "AI analysis failed: "+err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "AI analysis failed: " + err.Error()})
 		return
 	}
 
@@ -145,13 +155,17 @@ func (h *AIHandler) AnalyzeSlackMessages(w http.ResponseWriter, r *http.Request)
 func (h *AIHandler) GetDiscrepancies(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Unauthorized"})
 		return
 	}
 
 	discrepancies, err := h.integrationRepo.GetDiscrepancies(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to get discrepancies: "+err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to get discrepancies: " + err.Error()})
 		return
 	}
 
@@ -168,7 +182,9 @@ func (h *AIHandler) GetDiscrepancies(w http.ResponseWriter, r *http.Request) {
 func (h *AIHandler) AnalyzeManualInput(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Unauthorized"})
 		return
 	}
 
@@ -178,19 +194,25 @@ func (h *AIHandler) AnalyzeManualInput(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid request body"})
 		return
 	}
 
 	if req.MorningAssignments == "" || req.EveningUpdates == "" {
-		http.Error(w, "Both morning_assignments and evening_updates are required", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Both morning_assignments and evening_updates are required"})
 		return
 	}
 
 	// Send both texts to AI and let it do all the parsing
 	fullResponse, err := h.aiClient.AnalyzeFullInput(r.Context(), req.MorningAssignments, req.EveningUpdates)
 	if err != nil {
-		http.Error(w, "AI analysis failed: "+err.Error(), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "AI analysis failed: " + err.Error()})
 		return
 	}
 

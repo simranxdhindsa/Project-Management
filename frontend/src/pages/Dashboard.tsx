@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -12,6 +12,8 @@ import {
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/services/api'
+import { ConfirmModal } from '@/components/ConfirmModal'
+import { useYouTrackEvents } from '@/services/useYouTrackEvents'
 import {
   LayoutDashboard,
   KanbanSquare,
@@ -48,9 +50,13 @@ import { DailyAnalysisViewPage } from './DailyAnalysisViewPage'
 import { BotConfigPage } from './BotConfigPage'
 import { AIAnalysisPage } from './AIAnalysisPage'
 import { PMReportsPage } from './PMReportsPage'
+import { ListViewPage } from './ListViewPage'
 import { JellySwitch } from '../components/JellySwitch'
 
 type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations'
+
+// Pages accessible by members/viewers (limited access)
+const MEMBER_PAGES: Page[] = ['dashboard', 'list', 'daily-tasks']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -138,9 +144,44 @@ export default function Dashboard() {
   const [activeIssue, setActiveIssue] = useState<YTIssue | null>(null)
   const [dashboardView, setDashboardView] = useState<'board' | 'assignees'>('board')
 
-  // Notification state
-  const [notifications, setNotifications] = useState<DashboardNotification[]>([])
+  // New task modal state
+  const [showNewTask, setShowNewTask] = useState(false)
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [newTaskDesc, setNewTaskDesc] = useState('')
+  const [creatingTask, setCreatingTask] = useState(false)
+
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+
+  // Role-based access
+  const isFullAccess = user?.role === 'admin' || user?.role === 'project_manager'
+  const [showMyTasks, setShowMyTasks] = useState(!isFullAccess)
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Notification state — persist to sessionStorage
+  const [notifications, setNotifications] = useState<DashboardNotification[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('pm_notifications')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        return parsed.map((n: DashboardNotification) => ({ ...n, timestamp: new Date(n.timestamp) }))
+      }
+    } catch { /* ignore */ }
+    return []
+  })
   const [toast, setToast] = useState<{ message: string; type: 'warning' | 'info' } | null>(null)
+
+  useEffect(() => {
+    sessionStorage.setItem('pm_notifications', JSON.stringify(notifications))
+  }, [notifications])
+
+  // Guard: redirect members to allowed pages
+  useEffect(() => {
+    if (!isFullAccess && !MEMBER_PAGES.includes(currentPage)) {
+      setCurrentPage('dashboard')
+    }
+  }, [currentPage, isFullAccess])
 
   const unreadCount = notifications.filter(n => !n.read).length
 
@@ -255,7 +296,7 @@ export default function Dashboard() {
       const status = await api.getYouTrackStatus()
       if (status.configured) {
         setYtConnected(true)
-        const response = await api.getYouTrackIssues() as any
+        const response = await api.getYouTrackIssues()
         if (response.success && response.data) {
           setYtIssues(response.data as YTIssue[])
         }
@@ -267,10 +308,39 @@ export default function Dashboard() {
     }
   }
 
+  // SSE: auto-refresh when YouTrack changes arrive via webhook
+  useYouTrackEvents(useCallback((event) => {
+    fetchYouTrackIssues()
+    setToast({
+      message: `YouTrack: ${event.issue_id} ${event.field} → ${event.new_value}`,
+      type: 'info',
+    })
+    setTimeout(() => setToast(null), 4000)
+  }, []))
+
   const handleSync = async () => {
     setSyncing(true)
     await fetchYouTrackIssues()
     setSyncing(false)
+  }
+
+  const handleCreateTask = async () => {
+    if (!newTaskTitle.trim()) return
+    setCreatingTask(true)
+    try {
+      await api.createYouTrackIssue(newTaskTitle.trim(), newTaskDesc.trim())
+      setShowNewTask(false)
+      setNewTaskTitle('')
+      setNewTaskDesc('')
+      setToast({ message: 'Task created in YouTrack', type: 'info' })
+      setTimeout(() => setToast(null), 3000)
+      fetchYouTrackIssues()
+    } catch {
+      setToast({ message: 'Failed to create task', type: 'warning' })
+      setTimeout(() => setToast(null), 3000)
+    } finally {
+      setCreatingTask(false)
+    }
   }
 
   const handleLogout = async () => {
@@ -287,14 +357,35 @@ export default function Dashboard() {
       .slice(0, 2)
   }
 
+  // Filter issues by search query
+  // Filter by "My Tasks" if enabled — match user name/email against assignee
+  const myTasksFiltered = showMyTasks
+    ? ytIssues.filter(i => {
+        const assigneeName = i.assignee?.fullName?.toLowerCase() || ''
+        const assigneeEmail = i.assignee?.email?.toLowerCase() || ''
+        const userName = user?.name?.toLowerCase() || ''
+        const userEmail = user?.email?.toLowerCase() || ''
+        return assigneeName === userName || assigneeEmail === userEmail ||
+               assigneeName.includes(userName) || userName.includes(assigneeName)
+      })
+    : ytIssues
+
+  const filteredIssues = searchQuery.trim()
+    ? myTasksFiltered.filter(i =>
+        i.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        i.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        i.assignee?.fullName?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : myTasksFiltered
+
   // Group YouTrack issues by the 3 columns + Backlog
-  const inProgressIssues = ytIssues.filter(i => i.status?.toLowerCase() === 'in progress')
-  const devIssues = ytIssues.filter(i => i.status?.toLowerCase() === 'dev')
-  const backlogIssues = ytIssues.filter(i => {
+  const inProgressIssues = filteredIssues.filter(i => i.status?.toLowerCase() === 'in progress')
+  const devIssues = filteredIssues.filter(i => i.status?.toLowerCase() === 'dev')
+  const backlogIssues = filteredIssues.filter(i => {
     const s = i.status?.toLowerCase() || ''
     return s !== 'in progress' && s !== 'dev' && s !== 'done' && s !== 'fixed'
   })
-  const doneIssues = ytIssues.filter(i => {
+  const doneIssues = filteredIssues.filter(i => {
     const s = i.status?.toLowerCase() || ''
     return s === 'done' || s === 'fixed'
   })
@@ -304,7 +395,7 @@ export default function Dashboard() {
     const groups: Record<string, YTIssue[]> = {}
     const unassigned: YTIssue[] = []
 
-    const activeIssues = ytIssues.filter(i => {
+    const activeIssues = filteredIssues.filter(i => {
       const s = i.status?.toLowerCase() || ''
       return s !== 'done' && s !== 'fixed'
     })
@@ -332,7 +423,7 @@ export default function Dashboard() {
     unassigned.sort((a, b) => statusOrder(a.status) - statusOrder(b.status))
 
     return { groups, unassigned }
-  }, [ytIssues])
+  }, [filteredIssues])
 
   const getStatusBadge = (status: string) => {
     const s = status?.toLowerCase() || ''
@@ -369,13 +460,15 @@ export default function Dashboard() {
               <LayoutDashboard size={20} />
               <span>Dashboard</span>
             </button>
-            <button
-              className={`sidebar-nav-item ${currentPage === 'board' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('board')}
-            >
-              <KanbanSquare size={20} />
-              <span>Board View</span>
-            </button>
+            {isFullAccess && (
+              <button
+                className={`sidebar-nav-item ${currentPage === 'board' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('board')}
+              >
+                <KanbanSquare size={20} />
+                <span>Board View</span>
+              </button>
+            )}
             <button
               className={`sidebar-nav-item ${currentPage === 'list' ? 'active' : ''}`}
               onClick={() => setCurrentPage('list')}
@@ -390,49 +483,53 @@ export default function Dashboard() {
               <ClipboardList size={20} />
               <span>Daily Tasks</span>
             </button>
-            <button
-              className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('calendar')}
-            >
-              <Calendar size={20} />
-              <span>Calendar</span>
-            </button>
+            {isFullAccess && (
+              <button
+                className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('calendar')}
+              >
+                <Calendar size={20} />
+                <span>Calendar</span>
+              </button>
+            )}
           </div>
 
-          <div className="nav-section">
-            <span className="nav-section-title">Analytics</span>
-            <button
-              className={`sidebar-nav-item ${currentPage === 'ai-analysis' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('ai-analysis')}
-            >
-              <Brain size={20} />
-              <span>AI Analysis</span>
-            </button>
-            <button
-              className={`sidebar-nav-item ${currentPage === 'daily-analysis' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('daily-analysis')}
-            >
-              <CheckCircle size={20} />
-              <span>Daily Status</span>
-            </button>
-            <button
-              className={`sidebar-nav-item ${currentPage === 'reports' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('reports')}
-            >
-              <BarChart3 size={20} />
-              <span>Reports</span>
-            </button>
-            <button
-              className={`sidebar-nav-item ${currentPage === 'pm-reports' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('pm-reports')}
-            >
-              <MessageSquare size={20} />
-              <span>PM Reports</span>
-            </button>
-          </div>
+          {isFullAccess && (
+            <div className="nav-section">
+              <span className="nav-section-title">Analytics</span>
+              <button
+                className={`sidebar-nav-item ${currentPage === 'ai-analysis' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('ai-analysis')}
+              >
+                <Brain size={20} />
+                <span>AI Analysis</span>
+              </button>
+              <button
+                className={`sidebar-nav-item ${currentPage === 'daily-analysis' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('daily-analysis')}
+              >
+                <CheckCircle size={20} />
+                <span>Daily Status</span>
+              </button>
+              <button
+                className={`sidebar-nav-item ${currentPage === 'reports' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('reports')}
+              >
+                <BarChart3 size={20} />
+                <span>Reports</span>
+              </button>
+              <button
+                className={`sidebar-nav-item ${currentPage === 'pm-reports' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('pm-reports')}
+              >
+                <MessageSquare size={20} />
+                <span>PM Reports</span>
+              </button>
+            </div>
+          )}
 
           <div className="nav-section">
-            <span className="nav-section-title">Settings</span>
+            {isFullAccess && <span className="nav-section-title">Settings</span>}
             {user?.role === 'admin' && (
               <button
                 className={`sidebar-nav-item ${currentPage === 'team' ? 'active' : ''}`}
@@ -442,20 +539,24 @@ export default function Dashboard() {
                 <span>Team</span>
               </button>
             )}
-            <button
-              className={`sidebar-nav-item ${currentPage === 'bots' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('bots')}
-            >
-              <Bot size={20} />
-              <span>Bot Config</span>
-            </button>
-            <button
-              className={`sidebar-nav-item ${currentPage === 'integrations' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('integrations')}
-            >
-              <Link2 size={20} />
-              <span>Integrations</span>
-            </button>
+            {isFullAccess && (
+              <>
+                <button
+                  className={`sidebar-nav-item ${currentPage === 'bots' ? 'active' : ''}`}
+                  onClick={() => setCurrentPage('bots')}
+                >
+                  <Bot size={20} />
+                  <span>Bot Config</span>
+                </button>
+                <button
+                  className={`sidebar-nav-item ${currentPage === 'integrations' ? 'active' : ''}`}
+                  onClick={() => setCurrentPage('integrations')}
+                >
+                  <Link2 size={20} />
+                  <span>Integrations</span>
+                </button>
+              </>
+            )}
             {user?.role === 'admin' && (
               <button
                 className={`sidebar-nav-item ${currentPage === 'settings' ? 'active' : ''}`}
@@ -512,8 +613,26 @@ export default function Dashboard() {
               type="text"
               className="search-bar-input"
               placeholder="Search tasks..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
             />
           </div>
+          {(currentPage === 'dashboard' || currentPage === 'list') && (
+            <div className="my-tasks-toggle">
+              <button
+                className={`toggle-btn ${showMyTasks ? 'active' : ''}`}
+                onClick={() => setShowMyTasks(true)}
+              >
+                My Tasks
+              </button>
+              <button
+                className={`toggle-btn ${!showMyTasks ? 'active' : ''}`}
+                onClick={() => setShowMyTasks(false)}
+              >
+                All Tasks
+              </button>
+            </div>
+          )}
           <JellySwitch
             checked={darkMode}
             onChange={setDarkMode}
@@ -595,7 +714,7 @@ export default function Dashboard() {
                     <div className="notification-footer">
                       <button
                         className="btn-ghost btn-sm notification-clear-btn"
-                        onClick={() => setNotifications([])}
+                        onClick={() => setShowClearConfirm(true)}
                       >
                         Clear all notifications
                       </button>
@@ -605,7 +724,11 @@ export default function Dashboard() {
               </>
             )}
           </div>
-          <button className="btn-primary btn-md" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}>
+          <button
+            className="btn-primary btn-md"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}
+            onClick={() => setShowNewTask(true)}
+          >
             <Plus size={18} />
             <span>New Task</span>
           </button>
@@ -964,14 +1087,8 @@ export default function Dashboard() {
         {/* Daily Analysis View */}
         {currentPage === 'daily-analysis' && <DailyAnalysisViewPage />}
 
-        {/* List View Placeholder */}
-        {currentPage === 'list' && (
-          <div className="coming-soon">
-            <List size={48} />
-            <h2>List View</h2>
-            <p>Task list view with sorting and filtering coming soon!</p>
-          </div>
-        )}
+        {/* List View */}
+        {currentPage === 'list' && <ListViewPage showMyTasks={showMyTasks} />}
 
         {/* Calendar Placeholder */}
         {currentPage === 'calendar' && (
@@ -1003,6 +1120,64 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* New Task Modal */}
+      {showNewTask && (
+        <div className="modal-overlay" onClick={() => setShowNewTask(false)}>
+          <div className="glass-card" onClick={e => e.stopPropagation()} style={{ width: '480px', padding: '1.5rem' }}>
+            <h3 style={{ marginBottom: '1rem' }}>Create New Task</h3>
+            <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Title</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Task title..."
+                value={newTaskTitle}
+                onChange={e => setNewTaskTitle(e.target.value.slice(0, 200))}
+                maxLength={200}
+                autoFocus
+                onKeyDown={e => { if (e.key === 'Enter' && newTaskTitle.trim()) handleCreateTask() }}
+                style={{ width: '100%', padding: '0.5rem 0.75rem' }}
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Description (optional)</label>
+              <textarea
+                className="form-input"
+                placeholder="Task description..."
+                value={newTaskDesc}
+                onChange={e => setNewTaskDesc(e.target.value.slice(0, 2000))}
+                maxLength={2000}
+                rows={4}
+                style={{ width: '100%', padding: '0.5rem 0.75rem', resize: 'vertical' }}
+              />
+            </div>
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button className="btn btn-ghost" onClick={() => setShowNewTask(false)}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                onClick={handleCreateTask}
+                disabled={creatingTask || !newTaskTitle.trim()}
+              >
+                {creatingTask ? 'Creating...' : 'Create Task'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmModal
+        open={showClearConfirm}
+        title="Clear Notifications"
+        message="Clear all notifications? This action cannot be undone."
+        confirmLabel="Clear All"
+        variant="warning"
+        onConfirm={() => {
+          setNotifications([])
+          setShowClearConfirm(false)
+        }}
+        onCancel={() => setShowClearConfirm(false)}
+      />
 
       {/* Toast Notification */}
       {toast && (

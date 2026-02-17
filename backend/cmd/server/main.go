@@ -38,6 +38,11 @@ func main() {
 	} else {
 		log.Println("✅ Database connected successfully")
 		defer database.Close()
+
+		// Run auto-migrations (creates tables, adds missing columns)
+		if err := database.RunMigrations(); err != nil {
+			log.Printf("⚠️  Migration warning: %v", err)
+		}
 	}
 
 	// Initialize router
@@ -105,8 +110,15 @@ func main() {
 	// Asana webhook endpoint (public - called by Asana)
 	api.HandleFunc("/webhooks/asana", asanaHandler.HandleWebhook).Methods("POST")
 
+	// SSE hub for real-time updates
+	sseHub := handlers.NewSSEHub()
+	api.HandleFunc("/events", sseHub.HandleEvents).Methods("GET")
+
 	// YouTrack routes (protected)
-	youtrackHandler := handlers.NewYouTrackHandler()
+	youtrackHandler := handlers.NewYouTrackHandler(sseHub)
+
+	// YouTrack webhook endpoint (public - called by YouTrack server)
+	api.HandleFunc("/webhooks/youtrack", youtrackHandler.HandleWebhook).Methods("POST")
 	youtrackRoutes := api.PathPrefix("/youtrack").Subrouter()
 	youtrackRoutes.Use(middleware.AuthMiddleware)
 	youtrackRoutes.HandleFunc("/status", youtrackHandler.GetStatus).Methods("GET")
@@ -118,13 +130,13 @@ func main() {
 	youtrackRoutes.HandleFunc("/users", youtrackHandler.GetUsers).Methods("GET")
 	youtrackRoutes.HandleFunc("/issues", youtrackHandler.GetIssues).Methods("GET")
 	youtrackRoutes.HandleFunc("/issues", youtrackHandler.CreateIssue).Methods("POST")
+	youtrackRoutes.HandleFunc("/issues/grouped-by-assignee", youtrackHandler.GetIssuesGroupedByAssignee).Methods("GET") // Must be before {issue_id} wildcard
 	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.GetIssue).Methods("GET")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.UpdateIssue).Methods("PUT", "PATCH")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.DeleteIssue).Methods("DELETE")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/state", youtrackHandler.UpdateIssueState).Methods("PATCH")
 	youtrackRoutes.HandleFunc("/sections", youtrackHandler.GetProjectSectionsFromDB).Methods("GET") // Get synced sections from DB
 	youtrackRoutes.HandleFunc("/import", youtrackHandler.ImportFromYouTrack).Methods("POST")       // Import issues from YouTrack
-	youtrackRoutes.HandleFunc("/issues/grouped-by-assignee", youtrackHandler.GetIssuesGroupedByAssignee).Methods("GET")
 	youtrackRoutes.HandleFunc("/match-analysis", youtrackHandler.MatchAnalysis).Methods("POST")
 	youtrackRoutes.HandleFunc("/bulk-update-states", youtrackHandler.BulkUpdateStates).Methods("POST")
 	youtrackRoutes.HandleFunc("/sync-recommendations", youtrackHandler.GetSyncRecommendations).Methods("POST")

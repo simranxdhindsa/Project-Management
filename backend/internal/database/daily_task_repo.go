@@ -204,7 +204,7 @@ func (r *DailyTaskRepository) GetNextDayTasks(ctx context.Context, targetDate st
 	pool := GetPool()
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, target_date, assignee, task_title, priority, position, is_carried_forward, source_date, source_task_id, notes, youtrack_id, created_by, created_at, updated_at
+		SELECT id, target_date::text, assignee, task_title, priority, position, is_carried_forward, source_date::text, source_task_id, notes, youtrack_id, created_by, created_at, updated_at
 		FROM next_day_tasks
 		WHERE target_date = $1
 		ORDER BY assignee ASC, position ASC
@@ -253,7 +253,7 @@ func (r *DailyTaskRepository) CreateNextDayTask(ctx context.Context, req *models
 	err = pool.QueryRow(ctx, `
 		INSERT INTO next_day_tasks (target_date, assignee, task_title, priority, position, notes, created_by, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, target_date, assignee, task_title, priority, position, is_carried_forward, source_date, source_task_id, notes, youtrack_id, created_by, created_at, updated_at
+		RETURNING id, target_date::text, assignee, task_title, priority, position, is_carried_forward, source_date::text, source_task_id, notes, youtrack_id, created_by, created_at, updated_at
 	`, req.TargetDate, req.Assignee, req.TaskTitle, priority, maxPosition+1, req.Notes, createdBy, now, now).Scan(
 		&task.ID, &task.TargetDate, &task.Assignee, &task.TaskTitle, &task.Priority,
 		&task.Position, &task.IsCarriedForward, &task.SourceDate, &task.SourceTaskID, &task.Notes,
@@ -340,7 +340,7 @@ func (r *DailyTaskRepository) GenerateNextDayTasksFromPending(ctx context.Contex
 	rows, err := pool.Query(ctx, `
 		SELECT assignee, task_title
 		FROM daily_tasks
-		WHERE date = $1 AND status IN ('pending', 'in_progress', 'skipped', 'not_mentioned')
+		WHERE date = $1 AND status IN ('pending', 'in_progress', 'blocked', 'skipped', 'not_mentioned')
 		ORDER BY assignee ASC
 	`, sourceDate)
 	if err != nil {
@@ -406,7 +406,7 @@ func (r *DailyTaskRepository) GetNextDayTasksGroupedByAssignee(ctx context.Conte
 }
 
 // BulkCreateNextDayTasks creates multiple tasks at once from YouTrack pull
-func (r *DailyTaskRepository) BulkCreateNextDayTasks(ctx context.Context, targetDate string, tasks []models.BulkTaskInput, createdBy string) error {
+func (r *DailyTaskRepository) BulkCreateNextDayTasks(ctx context.Context, targetDate string, tasks []models.BulkTaskInput, createdBy string) (int, error) {
 	pool := GetPool()
 
 	// Track position per assignee
@@ -428,8 +428,31 @@ func (r *DailyTaskRepository) BulkCreateNextDayTasks(ctx context.Context, target
 		}
 	}
 
+	// Get existing youtrack_ids for this date to prevent duplicates
+	existingYTIDs := make(map[string]bool)
+	ytRows, err := pool.Query(ctx, `
+		SELECT youtrack_id FROM next_day_tasks
+		WHERE target_date = $1 AND youtrack_id IS NOT NULL
+	`, targetDate)
+	if err == nil {
+		defer ytRows.Close()
+		for ytRows.Next() {
+			var ytID string
+			if err := ytRows.Scan(&ytID); err == nil {
+				existingYTIDs[ytID] = true
+			}
+		}
+	}
+
 	now := time.Now()
+	skipped := 0
 	for _, task := range tasks {
+		// Skip duplicate YouTrack issues
+		if task.YouTrackID != "" && existingYTIDs[task.YouTrackID] {
+			skipped++
+			continue
+		}
+
 		priority := task.Priority
 		if priority == "" {
 			priority = "medium"
@@ -448,11 +471,11 @@ func (r *DailyTaskRepository) BulkCreateNextDayTasks(ctx context.Context, target
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		`, targetDate, task.Assignee, task.TaskTitle, priority, pos, ytID, createdBy, now, now)
 		if err != nil {
-			return fmt.Errorf("failed to create task for %s: %w", task.Assignee, err)
+			return skipped, fmt.Errorf("failed to create task for %s: %w", task.Assignee, err)
 		}
 	}
 
-	return nil
+	return skipped, nil
 }
 
 // FormatSlackMessage generates a Slack-formatted message from next day tasks

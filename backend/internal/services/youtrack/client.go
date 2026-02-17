@@ -536,6 +536,44 @@ func (c *Client) TestConnection(ctx context.Context) error {
 	return err
 }
 
+// WebhookEvent represents a YouTrack webhook event payload
+type WebhookEvent struct {
+	Type      string                 `json:"type"`      // "IssueEvent"
+	Timestamp int64                  `json:"timestamp"`
+	Issue     *Issue                 `json:"issue"`
+	Updater   *User                  `json:"updater"`
+	FieldChanges []FieldChange       `json:"fieldChanges"`
+}
+
+// FieldChange represents a changed field in a webhook event
+type FieldChange struct {
+	Name     string      `json:"name"`     // "State", "Assignee", etc.
+	OldValue interface{} `json:"oldValue"` // previous value
+	NewValue interface{} `json:"newValue"` // new value
+}
+
+// ExtractFieldChangeValue extracts a string value from a webhook field change value
+func ExtractFieldChangeValue(val interface{}) string {
+	if val == nil {
+		return ""
+	}
+	// Could be a string directly
+	if s, ok := val.(string); ok {
+		return s
+	}
+	// Could be an object with "name" field
+	if m, ok := val.(map[string]interface{}); ok {
+		if name, ok := m["name"].(string); ok {
+			return name
+		}
+	}
+	// Could be an array (e.g., multi-value fields) — take first element
+	if arr, ok := val.([]interface{}); ok && len(arr) > 0 {
+		return ExtractFieldChangeValue(arr[0])
+	}
+	return fmt.Sprintf("%v", val)
+}
+
 // IsDuplicateIssue checks if an issue with the same summary already exists
 func (c *Client) IsDuplicateIssue(ctx context.Context, summary string) (bool, error) {
 	issues, err := c.GetIssues(ctx)

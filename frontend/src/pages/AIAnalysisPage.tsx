@@ -107,22 +107,15 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     try {
       setAnalyzing(true)
       setError(null)
-      console.log('Starting analysis...')
-      const response = await api.analyzeManualInput(morningAssignments, eveningUpdates) as any
-      console.log('API Response:', response)
-      // Check both response shapes - wrapped in data or at root level
-      const analysis = response.data?.analysis || response.analysis
-      const person_breakdown = response.data?.person_breakdown || response.person_breakdown
-      const summary = response.data?.summary || response.summary
-
-      if (response.success && analysis) {
+      const response = await api.analyzeManualInput(morningAssignments, eveningUpdates)
+      if (response.success && response.data) {
         setResults({
-          analysis,
-          person_breakdown,
-          summary,
+          analysis: response.data.analysis || [],
+          person_breakdown: response.data.person_breakdown || [],
+          summary: response.data.summary || { total_tasks: 0, completed: 0, in_progress: 0, blocked: 0, not_mentioned: 0 },
         })
       } else {
-        console.error('No analysis in response:', response)
+        setError('No analysis results received')
       }
     } catch (err) {
       console.error('Analysis error:', err)
@@ -186,12 +179,11 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
       const response = await api.matchAnalysisWithYouTrack(
         results.person_breakdown,
         results.analysis
-      ) as any
-      const data = response.data || response
+      )
       setMatchResults({
-        matches: data.matches || [],
-        unmatched_tasks: data.unmatched_tasks || [],
-        unmatched_issues: data.unmatched_issues || [],
+        matches: response.data?.matches || [],
+        unmatched_tasks: response.data?.unmatched_tasks || [],
+        unmatched_issues: response.data?.unmatched_issues || [],
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to match with YouTrack')
@@ -208,9 +200,8 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
       const response = await api.getSyncRecommendations(
         results.person_breakdown,
         results.analysis
-      ) as any
-      const data = response.data || response
-      const recs = data.recommendations || []
+      )
+      const recs = response.data?.recommendations || []
       setSyncRecommendations(recs)
       // Pre-select all non-backward recommendations
       const selections: Record<string, boolean> = {}
@@ -239,10 +230,9 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     try {
       setApplyingSync(true)
       setError(null)
-      const response = await api.bulkUpdateYouTrackStates(updates) as any
-      const data = response.data || response
-      if (data.succeeded > 0) {
-        setSuccessMessage(`Synced ${data.succeeded} issue(s) with YouTrack!${data.failed > 0 ? ` (${data.failed} failed)` : ''}`)
+      const response = await api.bulkUpdateYouTrackStates(updates)
+      if (response.data && response.data.succeeded > 0) {
+        setSuccessMessage(`Synced ${response.data.succeeded} issue(s) with YouTrack!${response.data.failed > 0 ? ` (${response.data.failed} failed)` : ''}`)
         setTimeout(() => setSuccessMessage(null), 3000)
       }
       setSyncRecommendations(null)
@@ -329,7 +319,8 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
             <textarea
               className="ai-textarea"
               value={morningAssignments}
-              onChange={(e) => setMorningAssignments(e.target.value)}
+              onChange={(e) => setMorningAssignments(e.target.value.slice(0, 5000))}
+              maxLength={5000}
               placeholder="Paste your morning 'todays task list' message here..."
               rows={15}
             />
@@ -346,7 +337,8 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
             <textarea
               className="ai-textarea"
               value={eveningUpdates}
-              onChange={(e) => setEveningUpdates(e.target.value)}
+              onChange={(e) => setEveningUpdates(e.target.value.slice(0, 5000))}
+              maxLength={5000}
               placeholder="Paste your evening status update message here..."
               rows={15}
             />

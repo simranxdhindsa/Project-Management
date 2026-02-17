@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -25,16 +26,21 @@ type YouTrackHandler struct {
 	projectRepo  *database.ProjectRepository
 	settingsRepo *database.SettingsRepository
 	sectionRepo  *database.SectionRepository
+	sseHub       *SSEHub
 }
 
 // NewYouTrackHandler creates a new YouTrack handler
-func NewYouTrackHandler() *YouTrackHandler {
-	return &YouTrackHandler{
+func NewYouTrackHandler(sseHub ...*SSEHub) *YouTrackHandler {
+	h := &YouTrackHandler{
 		taskRepo:     database.NewTaskRepository(),
 		projectRepo:  database.NewProjectRepository(),
 		settingsRepo: database.NewSettingsRepository(),
 		sectionRepo:  database.NewSectionRepository(),
 	}
+	if len(sseHub) > 0 {
+		h.sseHub = sseHub[0]
+	}
+	return h
 }
 
 // getYouTrackClient creates a YouTrack client from settings or environment
@@ -1484,4 +1490,114 @@ Answer the user's questions about the project using this data. Format your respo
 			"response": response,
 		},
 	})
+}
+
+// ============================================================
+// YouTrack Webhook (Real-time State Updates)
+// ============================================================
+
+// HandleWebhook receives and processes YouTrack webhook events
+// This endpoint does NOT require authentication — called by YouTrack server
+func (h *YouTrackHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("[YouTrack Webhook] Failed to read body: %v", err)
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	log.Printf("[YouTrack Webhook] Received payload (%d bytes)", len(body))
+
+	// YouTrack sends an array of events or a single event object
+	// Try to parse as a single event first, then as an array
+	var events []youtrack.WebhookEvent
+
+	var singleEvent youtrack.WebhookEvent
+	if err := json.Unmarshal(body, &singleEvent); err == nil && singleEvent.Issue != nil {
+		events = append(events, singleEvent)
+	} else {
+		// Try as array
+		if err := json.Unmarshal(body, &events); err != nil {
+			log.Printf("[YouTrack Webhook] Failed to parse payload: %v", err)
+			// Still respond 200 so YouTrack doesn't retry
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}
+
+	// Process events asynchronously so we respond quickly
+	go h.processWebhookEvents(events)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// processWebhookEvents handles YouTrack webhook events in the background
+func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	for _, event := range events {
+		if event.Issue == nil {
+			continue
+		}
+
+		issueID := event.Issue.ID
+		summary := event.Issue.Summary
+
+		for _, change := range event.FieldChanges {
+			oldValue := youtrack.ExtractFieldChangeValue(change.OldValue)
+			newValue := youtrack.ExtractFieldChangeValue(change.NewValue)
+
+			if oldValue == "" || newValue == "" || oldValue == newValue {
+				continue
+			}
+
+			log.Printf("[YouTrack Webhook] Issue %s (%s): %s %s → %s", issueID, summary, change.Name, oldValue, newValue)
+
+			// Broadcast SSE event for ALL field changes so frontend can react
+			if h.sseHub != nil {
+				h.sseHub.Broadcast(SSEEvent{
+					Type: "youtrack_update",
+					Data: map[string]interface{}{
+						"issue_id":  issueID,
+						"field":     change.Name,
+						"old_value": oldValue,
+						"new_value": newValue,
+						"summary":   summary,
+					},
+				})
+			}
+
+			// Only process State changes for local task sync
+			if change.Name != "State" {
+				continue
+			}
+
+			// Check for backward movement
+			backward := isBackwardMove(oldValue, newValue)
+			if backward {
+				log.Printf("[YouTrack Webhook] ⚠ BACKWARD MOVE detected: %s → %s for %s", oldValue, newValue, issueID)
+			}
+
+			// Update the matching local task if it exists
+			task, err := h.taskRepo.GetByYouTrackID(ctx, issueID)
+			if err != nil {
+				log.Printf("[YouTrack Webhook] No local task for %s: %v", issueID, err)
+				continue
+			}
+
+			newLocalStatus := h.mapYouTrackStatusToLocal(newValue)
+			task.Status = newLocalStatus
+			sectionName := newValue
+			task.SectionName = &sectionName
+
+			if err := h.taskRepo.Update(ctx, task); err != nil {
+				log.Printf("[YouTrack Webhook] Failed to update local task for %s: %v", issueID, err)
+			} else {
+				log.Printf("[YouTrack Webhook] Updated local task %s → %s", issueID, newLocalStatus)
+			}
+		}
+	}
 }
