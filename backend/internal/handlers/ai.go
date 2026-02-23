@@ -216,46 +216,82 @@ func (h *AIHandler) AnalyzeManualInput(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Post-process: merge in_progress into pending and add stats for frontend compatibility
+	// Post-process: dedup tasks within each person and build frontend response
 	personBreakdown := make([]map[string]interface{}, 0, len(fullResponse.PersonBreakdown))
 	for _, person := range fullResponse.PersonBreakdown {
-		// Merge in_progress into pending (frontend only has completed/pending/blocked)
-		allPending := append(person.Pending, person.InProgress...)
+		// Dedup: ensure each task appears in only one status category
+		seen := make(map[string]bool)
+		dedup := func(tasks []string) []string {
+			var result []string
+			for _, t := range tasks {
+				if !seen[t] {
+					seen[t] = true
+					result = append(result, t)
+				}
+			}
+			return result
+		}
 
-		personBreakdown = append(personBreakdown, map[string]interface{}{
-			"name":      person.Name,
-			"assigned":  person.Assigned,
-			"completed": person.Completed,
-			"pending":   allPending,
-			"blocked":   person.Blocked,
+		// Priority: completed > in_progress > blocked > pending > not_mentioned
+		completed := dedup(person.Completed)
+		inProgress := dedup(person.InProgress)
+		blocked := dedup(person.Blocked)
+		pending := dedup(person.Pending)
+		notMentioned := dedup(person.NotMentioned)
+
+		// Merge in_progress into pending for frontend (frontend shows completed/pending/blocked/not_mentioned)
+		allPending := append(inProgress, pending...)
+
+		entry := map[string]interface{}{
+			"name":               person.Name,
+			"assigned":           person.Assigned,
+			"completed":          completed,
+			"pending":            allPending,
+			"blocked":            blocked,
+			"not_mentioned":      notMentioned,
+			"no_update_received": person.NoUpdateReceived,
 			"stats": map[string]int{
-				"total":     len(person.Assigned),
-				"completed": len(person.Completed),
-				"pending":   len(allPending),
-				"blocked":   len(person.Blocked),
+				"total":         len(person.Assigned),
+				"completed":     len(completed),
+				"pending":       len(allPending),
+				"blocked":       len(blocked),
+				"not_mentioned": len(notMentioned),
 			},
-		})
+		}
+		personBreakdown = append(personBreakdown, entry)
+	}
+
+	// Dedup analysis array — keep first occurrence of each task title
+	seenTasks := make(map[string]bool)
+	dedupedAnalysis := make([]ai.TaskStatusAnalysis, 0, len(fullResponse.Analysis))
+	for _, a := range fullResponse.Analysis {
+		if !seenTasks[a.TaskTitle] {
+			seenTasks[a.TaskTitle] = true
+			dedupedAnalysis = append(dedupedAnalysis, a)
+		}
 	}
 
 	// Collect all task titles for the response
 	var taskTitles []string
-	for _, a := range fullResponse.Analysis {
+	for _, a := range dedupedAnalysis {
 		taskTitles = append(taskTitles, a.TaskTitle)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":          true,
-		"tasks_detected":   taskTitles,
-		"analysis":         fullResponse.Analysis,
-		"person_breakdown": personBreakdown,
-		"summary": map[string]interface{}{
-			"total_tasks":   fullResponse.Summary.TotalTasks,
-			"completed":     fullResponse.Summary.Completed,
-			"in_progress":   fullResponse.Summary.InProgress,
-			"pending":       fullResponse.Summary.Pending,
-			"blocked":       fullResponse.Summary.Blocked,
-			"not_mentioned": fullResponse.Summary.NotMentioned,
+		"success": true,
+		"data": map[string]interface{}{
+			"tasks_detected":   taskTitles,
+			"analysis":         dedupedAnalysis,
+			"person_breakdown": personBreakdown,
+			"summary": map[string]interface{}{
+				"total_tasks":   fullResponse.Summary.TotalTasks,
+				"completed":     fullResponse.Summary.Completed,
+				"in_progress":   fullResponse.Summary.InProgress,
+				"pending":       fullResponse.Summary.Pending,
+				"blocked":       fullResponse.Summary.Blocked,
+				"not_mentioned": fullResponse.Summary.NotMentioned,
+			},
 		},
 	})
 }

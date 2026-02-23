@@ -381,12 +381,14 @@ type FullAnalysisResponse struct {
 
 // PersonBreakdownItem represents one person's task breakdown
 type PersonBreakdownItem struct {
-	Name       string   `json:"name"`
-	Assigned   []string `json:"assigned"`
-	Completed  []string `json:"completed"`
-	Pending    []string `json:"pending"`
-	Blocked    []string `json:"blocked"`
-	InProgress []string `json:"in_progress"`
+	Name             string   `json:"name"`
+	Assigned         []string `json:"assigned"`
+	Completed        []string `json:"completed"`
+	Pending          []string `json:"pending"`
+	Blocked          []string `json:"blocked"`
+	InProgress       []string `json:"in_progress"`
+	NotMentioned     []string `json:"not_mentioned"`
+	NoUpdateReceived bool     `json:"no_update_received"`
 }
 
 // AnalysisSummary represents the summary counts
@@ -472,16 +474,22 @@ func buildFullAnalysisPrompt(morningText, eveningText string) string {
 	sb.WriteString(eveningText)
 
 	sb.WriteString("\n\n## Instructions\n\n")
-	sb.WriteString("1. From the EVENING updates, identify each person who posted an update\n")
-	sb.WriteString("2. Each person's update typically follows this pattern:\n")
+	sb.WriteString("1. First, parse the MORNING TASK ASSIGNMENTS to build a list of ALL persons and their assigned tasks\n")
+	sb.WriteString("2. Then, parse the EVENING STATUS UPDATES to identify which persons posted updates\n")
+	sb.WriteString("3. Each evening update typically follows this pattern:\n")
 	sb.WriteString("   - A header like \"Task update @PersonName\"\n")
 	sb.WriteString("   - A \"Done:\" or \"Done\" section listing completed tasks\n")
 	sb.WriteString("   - An \"In Progress:\" or \"In progress\" section listing ongoing tasks\n")
 	sb.WriteString("   - A \"Pending:\" section listing not-started tasks\n")
 	sb.WriteString("   - A \"Blocked:\" section listing stuck tasks\n")
-	sb.WriteString("3. Extract each INDIVIDUAL task (one task per line in the original update)\n")
-	sb.WriteString("4. Determine status from which section each task appears under\n")
-	sb.WriteString("5. Cross-reference with the MORNING assignments to find tasks not mentioned in evening\n\n")
+	sb.WriteString("4. Extract each INDIVIDUAL task (one task per line in the original update)\n")
+	sb.WriteString("5. Determine status from which section each task appears under\n")
+	sb.WriteString("6. If a person appears in MORNING assignments but did NOT post any evening update, they MUST still be included with:\n")
+	sb.WriteString("   - \"no_update_received\": true\n")
+	sb.WriteString("   - All their morning-assigned tasks listed in \"assigned\" and \"not_mentioned\" arrays\n")
+	sb.WriteString("   - \"completed\", \"in_progress\", \"pending\", \"blocked\" all empty\n")
+	sb.WriteString("7. For persons WHO DID post evening updates: cross-reference with morning assignments to find tasks they were assigned but did NOT mention in their evening update — add those to \"not_mentioned\" array\n")
+	sb.WriteString("8. If a person posts an update about a task NOT in the morning list (extra work), still include it\n\n")
 
 	sb.WriteString("## Output Format\n\n")
 	sb.WriteString("Return ONLY valid JSON (no markdown, no code blocks, no extra text):\n\n")
@@ -493,12 +501,14 @@ func buildFullAnalysisPrompt(morningText, eveningText string) string {
 	sb.WriteString("      \"completed\": [\"task1\"],\n")
 	sb.WriteString("      \"pending\": [\"task2\"],\n")
 	sb.WriteString("      \"blocked\": [],\n")
-	sb.WriteString("      \"in_progress\": []\n")
+	sb.WriteString("      \"in_progress\": [],\n")
+	sb.WriteString("      \"not_mentioned\": [\"task3\"],\n")
+	sb.WriteString("      \"no_update_received\": false\n")
 	sb.WriteString("    }\n")
 	sb.WriteString("  ],\n")
 	sb.WriteString("  \"analysis\": [\n")
 	sb.WriteString("    {\n")
-	sb.WriteString("      \"task_title\": \"exact task text from the update\",\n")
+	sb.WriteString("      \"task_title\": \"exact task text\",\n")
 	sb.WriteString("      \"detected_status\": \"completed|in_progress|pending|blocked|not_mentioned\",\n")
 	sb.WriteString("      \"confidence\": 0.9,\n")
 	sb.WriteString("      \"evidence\": [\"exact quote showing this status\"]\n")
@@ -516,14 +526,18 @@ func buildFullAnalysisPrompt(morningText, eveningText string) string {
 
 	sb.WriteString("## Critical Rules\n\n")
 	sb.WriteString("1. Each task MUST be a SEPARATE string in the arrays - NEVER concatenate multiple tasks into one string\n")
-	sb.WriteString("2. Include ALL people who posted evening updates\n")
-	sb.WriteString("3. If a person appears multiple times in evening updates, MERGE their tasks into one entry\n")
+	sb.WriteString("2. EVERY person from the MORNING list MUST appear in person_breakdown — even if they posted NO evening update\n")
+	sb.WriteString("3. If a person appears multiple times in evening updates, MERGE their tasks into one entry (take the LATEST status for each task)\n")
 	sb.WriteString("4. Status headers like \"Done:\", \"In Progress:\", \"Inprogress:\" are NOT tasks - skip them\n")
 	sb.WriteString("5. Timestamps like \"4:54 PM\", \"7:09 PM\" are NOT tasks - skip them\n")
 	sb.WriteString("6. Slack display names that appear alone on a line (like \"Vishal\", \"Parv\") before timestamps are NOT tasks\n")
-	sb.WriteString("7. The \"assigned\" array should contain ALL tasks for that person (union of completed + pending + blocked + in_progress)\n")
+	sb.WriteString("7. The \"assigned\" array should contain ALL tasks for that person (union of morning assigned + any extra evening tasks)\n")
 	sb.WriteString("8. Messages like \"just following up\" or \"please share an update\" are NOT task updates - skip them\n")
 	sb.WriteString("9. Output ONLY the JSON object - no other text before or after\n")
+	sb.WriteString("10. A task must appear in EXACTLY ONE status category per person (completed OR in_progress OR pending OR blocked OR not_mentioned) — NEVER in multiple categories\n")
+	sb.WriteString("11. The \"analysis\" array must include EVERY task from EVERY person (including not_mentioned ones) — each task appears EXACTLY ONCE\n")
+	sb.WriteString("12. If the same task is assigned to multiple persons, track it separately per person but in the analysis array include it once with the most advanced status\n")
+	sb.WriteString("13. If a morning task text and evening task text refer to the same work but have slightly different wording, treat them as the SAME task and use the morning wording\n")
 
 	return sb.String()
 }

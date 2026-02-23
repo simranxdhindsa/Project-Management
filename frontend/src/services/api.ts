@@ -791,6 +791,87 @@ class ApiService {
   async getBotTemplates() {
     return this.request<BotConfig[]>('/bots/templates')
   }
+
+  // Notification endpoints
+  async getNotifications(limit?: number) {
+    const query = limit ? `?limit=${limit}` : ''
+    return this.request<NotificationItem[]>(`/notifications${query}`)
+  }
+
+  async getUnreadNotificationCount() {
+    return this.request<{ count: number }>('/notifications/unread-count')
+  }
+
+  async markNotificationAsRead(notifId: string) {
+    return this.request(`/notifications/${notifId}/read`, { method: 'PATCH' })
+  }
+
+  async markAllNotificationsAsRead() {
+    return this.request('/notifications/read-all', { method: 'PATCH' })
+  }
+
+  async deleteNotification(notifId: string) {
+    return this.request(`/notifications/${notifId}`, { method: 'DELETE' })
+  }
+
+  // Reminder endpoints
+  async getReminders() {
+    return this.request<ReminderItem[]>('/reminders')
+  }
+
+  async createReminder(reminder: CreateReminderRequest) {
+    return this.request<ReminderItem>('/reminders', {
+      method: 'POST',
+      body: JSON.stringify(reminder),
+    })
+  }
+
+  async dismissReminder(reminderId: string) {
+    return this.request(`/reminders/${reminderId}/dismiss`, { method: 'PATCH' })
+  }
+
+  async deleteReminder(reminderId: string) {
+    return this.request(`/reminders/${reminderId}`, { method: 'DELETE' })
+  }
+
+  // PM Report endpoints
+  async generatePMReport(date: string) {
+    return this.request<PMReport>(`/reports/pm-report/${date}`)
+  }
+
+  async getSavedPMReport(date: string) {
+    return this.request<PMReport>(`/reports/pm-report/${date}/saved`)
+  }
+
+  async listPMReports() {
+    return this.request<PMReportSummary[]>('/reports/pm-reports')
+  }
+
+  async getAssigneeStats() {
+    return this.request<AssigneeStat[]>('/reports/assignee-stats')
+  }
+
+  async getTimeTracking() {
+    return this.request<TimeTrackingRow[]>('/reports/time-tracking')
+  }
+
+  async backfillStateLog() {
+    return this.request<{ inserted: number; skipped: number; total: number }>('/reports/backfill', {
+      method: 'POST',
+    })
+  }
+
+  async resetStateLog() {
+    return this.request<{ deleted: number }>('/reports/reset-state-log', {
+      method: 'DELETE',
+    })
+  }
+
+  async reconcileStateLog() {
+    return this.request<{ reconciled: number; skipped: number; checked: number }>('/reports/reconcile', {
+      method: 'POST',
+    })
+  }
 }
 
 // Types
@@ -993,6 +1074,43 @@ export interface Notification {
   time: string
 }
 
+export interface NotificationItem {
+  id: string
+  user_id: string
+  type: string
+  title: string
+  message: string
+  task_id?: string
+  read: boolean
+  created_at: string
+}
+
+export interface ReminderItem {
+  id: string
+  user_id: string
+  type: string
+  title: string
+  message?: string
+  target_date: string
+  target_time?: string
+  related_task_id?: string
+  related_issue_id?: string
+  recurring: string
+  status: string
+  created_at: string
+}
+
+export interface CreateReminderRequest {
+  type?: string
+  title: string
+  message?: string
+  target_date: string
+  target_time?: string
+  related_task_id?: string
+  related_issue_id?: string
+  recurring?: string
+}
+
 export interface TeamProductivityReport {
   period: string
   tasks_completed: number
@@ -1085,6 +1203,53 @@ export interface UpdateBotConfigRequest {
   prompt?: string
   variables?: string
   is_active?: boolean
+}
+
+export interface PMReport {
+  id: string
+  date: string
+  report_text: string
+  done_count: number
+  open_count: number
+  blocked_count: number
+  generated_at: string
+  updated_at: string
+  saved?: boolean
+}
+
+export interface PMReportSummary {
+  id: string
+  date: string
+  done_count: number
+  open_count: number
+  blocked_count: number
+  generated_at: string
+}
+
+export interface AssigneeStat {
+  assignee: string
+  open: number
+  in_progress: number
+  done: number
+  blocked: number
+  avg_hours_in_progress: number | null
+  issues?: string[]
+}
+
+export interface TimeTrackingRow {
+  id: string
+  issue_id: string
+  issue_summary: string
+  assignee: string
+  moved_by: string
+  moved_by_mismatch: boolean
+  from_state: string
+  to_state: string
+  priority: string
+  transitioned_at: string
+  duration_in_prev_state_hours: number | null
+  overdue: boolean
+  threshold_hours: number
 }
 
 // Export singleton instance

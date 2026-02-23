@@ -2,7 +2,16 @@ import { useState, useEffect } from 'react'
 import api from '../services/api'
 import type { AsanaProject, AsanaSettings } from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Link2, Unlink, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Settings, Save, MessageSquare } from 'lucide-react'
+import { Link2, Unlink, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Settings, Save, MessageSquare, Download, Clock, User } from 'lucide-react'
+
+interface SlackMessage {
+  id: string
+  channel_id: string
+  user_id: string
+  user_name: string
+  text: string
+  timestamp: string
+}
 
 interface SyncResult {
   tasks_synced: number
@@ -53,6 +62,14 @@ export function IntegrationsPage() {
   const [selectedChannel, setSelectedChannel] = useState('')
   const [connectingSlack, setConnectingSlack] = useState(false)
   const [loadingChannels, setLoadingChannels] = useState(false)
+  const [slackMessages, setSlackMessages] = useState<SlackMessage[]>([])
+  const [fetchingMessages, setFetchingMessages] = useState(false)
+  const [msgDateFrom, setMsgDateFrom] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() - 1)
+    return d.toISOString().split('T')[0]
+  })
+  const [msgDateTo, setMsgDateTo] = useState(() => new Date().toISOString().split('T')[0])
 
   useEffect(() => {
     fetchAsanaSettings()
@@ -255,6 +272,23 @@ export function IntegrationsPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set channel')
+    }
+  }
+
+  const handleFetchMessages = async () => {
+    try {
+      setFetchingMessages(true)
+      setError(null)
+      const response = await api.getSlackMessages({ from: msgDateFrom, to: msgDateTo })
+      if (response.success && response.data) {
+        setSlackMessages(response.data.messages || [])
+        setSuccess(`Fetched ${response.data.count || 0} messages`)
+        setTimeout(() => setSuccess(null), 3000)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch messages')
+    } finally {
+      setFetchingMessages(false)
     }
   }
 
@@ -577,6 +611,66 @@ export function IntegrationsPage() {
                 {loadingChannels && <p className="form-help">Loading channels...</p>}
               </div>
 
+              {/* Fetch Messages Section */}
+              {slackStatus?.channel_name && (
+                <div className="slack-fetch-section">
+                  <h3><Download size={18} /> Fetch Messages</h3>
+                  <p className="form-help">
+                    Manually pull messages from #{slackStatus.channel_name} for a date range
+                  </p>
+                  <div className="slack-date-range">
+                    <div className="form-group">
+                      <label>From</label>
+                      <input
+                        type="date"
+                        value={msgDateFrom}
+                        onChange={(e) => setMsgDateFrom(e.target.value)}
+                        className="form-input"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>To</label>
+                      <input
+                        type="date"
+                        value={msgDateTo}
+                        onChange={(e) => setMsgDateTo(e.target.value)}
+                        className="form-input"
+                      />
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleFetchMessages}
+                      disabled={fetchingMessages}
+                    >
+                      {fetchingMessages ? (
+                        <><RefreshCw size={16} className="spin" /> Fetching...</>
+                      ) : (
+                        <><Download size={16} /> Fetch</>
+                      )}
+                    </button>
+                  </div>
+
+                  {slackMessages.length > 0 && (
+                    <div className="slack-messages-list">
+                      <div className="slack-messages-header">
+                        <span className="slack-msg-count">{slackMessages.length} messages</span>
+                      </div>
+                      <div className="slack-messages-scroll">
+                        {slackMessages.map((msg) => (
+                          <div key={msg.id} className="slack-msg-item">
+                            <div className="slack-msg-meta">
+                              <span className="slack-msg-user"><User size={12} /> {msg.user_name}</span>
+                              <span className="slack-msg-time"><Clock size={12} /> {new Date(msg.timestamp).toLocaleString()}</span>
+                            </div>
+                            <div className="slack-msg-text">{msg.text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="integration-actions">
                 <button
                   className="btn btn-ghost"
@@ -669,7 +763,6 @@ export function IntegrationsPage() {
                   <li><code>channels:history</code> - Read channel messages</li>
                   <li><code>channels:read</code> - View channel list</li>
                   <li><code>users:read</code> - View user info</li>
-                  <li><code>channels:join</code> - Join channels (optional)</li>
                 </ul>
               </li>
               <li>Scroll up and click "Install to Workspace"</li>

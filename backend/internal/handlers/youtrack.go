@@ -26,6 +26,8 @@ type YouTrackHandler struct {
 	projectRepo  *database.ProjectRepository
 	settingsRepo *database.SettingsRepository
 	sectionRepo  *database.SectionRepository
+	reportRepo   *database.ReportRepository
+	notifHandler *NotificationHandler
 	sseHub       *SSEHub
 }
 
@@ -36,11 +38,17 @@ func NewYouTrackHandler(sseHub ...*SSEHub) *YouTrackHandler {
 		projectRepo:  database.NewProjectRepository(),
 		settingsRepo: database.NewSettingsRepository(),
 		sectionRepo:  database.NewSectionRepository(),
+		reportRepo:   database.NewReportRepository(),
 	}
 	if len(sseHub) > 0 {
 		h.sseHub = sseHub[0]
 	}
 	return h
+}
+
+// SetNotificationHandler wires the notification handler for overdue alerts
+func (h *YouTrackHandler) SetNotificationHandler(notifHandler *NotificationHandler) {
+	h.notifHandler = notifHandler
 }
 
 // getYouTrackClient creates a YouTrack client from settings or environment
@@ -1261,15 +1269,27 @@ func (h *YouTrackHandler) GetIssuesGroupedByAssignee(w http.ResponseWriter, r *h
 // Workflow State Order & Backward Movement Detection
 // ============================================================
 
+// stateOrder maps lowercase state names to their workflow position.
+// Based on actual YouTrack project states confirmed via /api/youtrack/states:
+// Backlog(0) → In Progress(1) → DEV(2) → Ready for Stage(3) → STAGE(4) → Ready for PROD(5) → PROD(6) → Closed/Done(7)
+// Blocked and Findings are treated as lateral states at In Progress level.
 var stateOrder = map[string]int{
-	"open":        0,
-	"backlog":     0,
-	"submitted":   0,
-	"in progress": 1,
-	"dev":         2,
-	"blocked":     1,
-	"done":        3,
-	"fixed":       3,
+	"backlog":         0,
+	"open":            0,
+	"submitted":       0,
+	"in progress":     1,
+	"blocked":         1,  // lateral — not forward, not backward relative to In Progress
+	"findings":        1,  // lateral
+	"dev":             2,
+	"ready for stage": 3,
+	"stage":           4,
+	"ready for prod":  5,
+	"ready for prd":   5,
+	"prod":            6,
+	"mobile done":     6,
+	"done":            7,
+	"fixed":           7,
+	"closed":          7,
 }
 
 func getStateIndex(state string) int {
@@ -1546,15 +1566,37 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 		issueID := event.Issue.ID
 		summary := event.Issue.Summary
 
+		// Extract assignee, priority and the person who made the change
+		assignee := ""
+		priority := ""
+		movedBy := ""
+		if event.Issue != nil {
+			if u := youtrack.GetAssignee(*event.Issue); u != nil {
+				if u.FullName != "" {
+					assignee = u.FullName
+				} else {
+					assignee = u.Login
+				}
+			}
+			priority = youtrack.GetPriority(*event.Issue)
+		}
+		if event.Updater != nil {
+			if event.Updater.FullName != "" {
+				movedBy = event.Updater.FullName
+			} else {
+				movedBy = event.Updater.Login
+			}
+		}
+
 		for _, change := range event.FieldChanges {
 			oldValue := youtrack.ExtractFieldChangeValue(change.OldValue)
 			newValue := youtrack.ExtractFieldChangeValue(change.NewValue)
 
+			log.Printf("[YouTrack Webhook] Issue %s field change: name=%q old=%q new=%q", issueID, change.Name, oldValue, newValue)
+
 			if oldValue == "" || newValue == "" || oldValue == newValue {
 				continue
 			}
-
-			log.Printf("[YouTrack Webhook] Issue %s (%s): %s %s → %s", issueID, summary, change.Name, oldValue, newValue)
 
 			// Broadcast SSE event for ALL field changes so frontend can react
 			if h.sseHub != nil {
@@ -1570,15 +1612,101 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 				})
 			}
 
-			// Only process State changes for local task sync
-			if change.Name != "State" {
+			// Only process State changes for task sync + time tracking
+			// Use case-insensitive match — YouTrack may send "state" or "State"
+			if !strings.EqualFold(change.Name, "State") {
 				continue
 			}
 
-			// Check for backward movement
+			log.Printf("[YouTrack Webhook] State change confirmed: %s → %s for %s", oldValue, newValue, issueID)
+
 			backward := isBackwardMove(oldValue, newValue)
+
+			// --- Fetch latest comment for backward moves and blocked transitions ---
+			// We do this synchronously (before inserting state log) so we can store the comment.
+			latestComment := ""
+			if backward || strings.EqualFold(newValue, "blocked") {
+				if ytClient, err := h.getYouTrackClient(ctx); err == nil && ytClient != nil {
+					if comments, err := ytClient.GetIssueComments(ctx, issueID); err == nil && len(comments) > 0 {
+						latestComment = comments[len(comments)-1]
+					}
+				}
+			}
+
+			// --- Time Tracking: record state transition (with comment for backward/blocked moves) ---
+			if h.reportRepo != nil {
+				stateLog := &database.IssueStateLog{
+					IssueID:        issueID,
+					IssueSummary:   summary,
+					Assignee:       assignee,
+					MovedBy:        movedBy,
+					FromState:      oldValue,
+					ToState:        newValue,
+					Priority:       priority,
+					TransitionedAt: time.Now(),
+					Comment:        latestComment,
+				}
+				if err := h.reportRepo.InsertStateLog(ctx, stateLog); err != nil {
+					log.Printf("[YouTrack Webhook] Failed to insert state log for %s: %v", issueID, err)
+				} else {
+					log.Printf("[YouTrack Webhook] State log recorded: %s → %s for %s (moved by: %s)", oldValue, newValue, issueID, movedBy)
+				}
+			}
+
+			// --- Moved-by mismatch: notify when someone else moves a ticket ---
+			if h.notifHandler != nil && assignee != "" && movedBy != "" && assignee != movedBy {
+				notif := &models.Notification{
+					Type:    "warning",
+					Title:   "Ticket Moved by Non-Assignee: " + issueID,
+					Message: fmt.Sprintf("%s (%s) was moved %s → %s by %s, but is assigned to %s", issueID, summary, oldValue, newValue, movedBy, assignee),
+				}
+				if err := h.notifHandler.CreateAndBroadcast(ctx, notif); err != nil {
+					log.Printf("[YouTrack Webhook] Failed to send mismatch notification: %v", err)
+				}
+			}
+
+			// --- Blocked notification: use already-fetched comment ---
+			if strings.EqualFold(newValue, "blocked") && h.notifHandler != nil {
+				h.notifyBlocked(ctx, issueID, summary, assignee, latestComment)
+			}
+
+			// --- Moved to DEV: "done" notification ---
+			if strings.EqualFold(newValue, "dev") && h.notifHandler != nil {
+				mover := movedBy
+				if mover == "" {
+					mover = assignee
+				}
+				notif := &models.Notification{
+					Type:    "success",
+					Title:   "Ticket Done: " + issueID,
+					Message: fmt.Sprintf("%s (%s) moved to DEV by %s", issueID, summary, mover),
+				}
+				if err := h.notifHandler.CreateAndBroadcast(ctx, notif); err != nil {
+					log.Printf("[YouTrack Webhook] Failed to send done notification: %v", err)
+				}
+			}
+
+			// --- Backward movement: critical notification with comment check ---
 			if backward {
-				log.Printf("[YouTrack Webhook] ⚠ BACKWARD MOVE detected: %s → %s for %s", oldValue, newValue, issueID)
+				log.Printf("[YouTrack Webhook] ⚠ BACKWARD MOVE: %s → %s for %s (comment: %q)", oldValue, newValue, issueID, latestComment)
+				if h.notifHandler != nil {
+					mover := movedBy
+					if mover == "" {
+						mover = assignee
+					}
+					var msg string
+					if latestComment != "" {
+						msg = fmt.Sprintf("%s (%s) moved backward: %s → %s by %s. Reason: %s", issueID, summary, oldValue, newValue, mover, latestComment)
+					} else {
+						msg = fmt.Sprintf("%s (%s) moved backward: %s → %s by %s. ⚠ NO REASON COMMENT FOUND — developer must explain why.", issueID, summary, oldValue, newValue, mover)
+					}
+					notif := &models.Notification{
+						Type:    "danger",
+						Title:   fmt.Sprintf("⚠ Backward Move: %s (%s → %s)", issueID, oldValue, newValue),
+						Message: msg,
+					}
+					_ = h.notifHandler.CreateAndBroadcast(ctx, notif)
+				}
 			}
 
 			// Update the matching local task if it exists
@@ -1599,5 +1727,42 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 				log.Printf("[YouTrack Webhook] Updated local task %s → %s", issueID, newLocalStatus)
 			}
 		}
+	}
+}
+
+// notifyBlocked fires a notification when a ticket moves to Blocked state.
+// latestComment is the already-fetched YouTrack comment (may be empty).
+func (h *YouTrackHandler) notifyBlocked(ctx context.Context, issueID, summary, assignee, latestComment string) {
+	msg := fmt.Sprintf("%s (%s) is BLOCKED", issueID, summary)
+	if latestComment != "" {
+		msg += " — Reason: " + latestComment
+	} else {
+		msg += " — ⚠ No reason comment found. Developer must add a comment explaining the blocker."
+	}
+	if assignee != "" {
+		msg += " | Assignee: " + assignee
+	}
+
+	notif := &models.Notification{
+		Type:    "danger",
+		Title:   "Blocked: " + issueID,
+		Message: msg,
+	}
+	if err := h.notifHandler.CreateAndBroadcast(ctx, notif); err != nil {
+		log.Printf("[YouTrack Webhook] Failed to send blocked notification: %v", err)
+	}
+}
+
+// overdueThresholdHours returns hours before a ticket is considered overdue by priority
+func overdueThresholdHours(priority string) float64 {
+	switch strings.ToUpper(priority) {
+	case "P0", "CRITICAL":
+		return 4
+	case "P1":
+		return 24
+	case "P2":
+		return 48
+	default: // P3, Normal, Other
+		return 72
 	}
 }

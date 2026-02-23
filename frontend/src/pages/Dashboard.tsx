@@ -14,6 +14,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import api from '@/services/api'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import { useYouTrackEvents } from '@/services/useYouTrackEvents'
+import { useNotifications } from '@/services/useNotifications'
+import type { NotificationItem } from '@/services/api'
 import {
   LayoutDashboard,
   KanbanSquare,
@@ -51,9 +53,10 @@ import { BotConfigPage } from './BotConfigPage'
 import { AIAnalysisPage } from './AIAnalysisPage'
 import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
+import { RemindersPage } from './RemindersPage'
 import { JellySwitch } from '../components/JellySwitch'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'reminders'
 
 // Pages accessible by members/viewers (limited access)
 const MEMBER_PAGES: Page[] = ['dashboard', 'list', 'daily-tasks']
@@ -152,6 +155,15 @@ export default function Dashboard() {
 
   const [showClearConfirm, setShowClearConfirm] = useState(false)
 
+  // Real server-side notifications
+  const {
+    notifications: serverNotifs,
+    unreadCount: serverUnreadCount,
+    markAsRead: markServerNotifRead,
+    markAllAsRead: markAllServerNotifsRead,
+    deleteNotification: deleteServerNotif,
+  } = useNotifications()
+
   // Role-based access
   const isFullAccess = user?.role === 'admin' || user?.role === 'project_manager'
   const [showMyTasks, setShowMyTasks] = useState(!isFullAccess)
@@ -183,7 +195,8 @@ export default function Dashboard() {
     }
   }, [currentPage, isFullAccess])
 
-  const unreadCount = notifications.filter(n => !n.read).length
+  const localUnreadCount = notifications.filter(n => !n.read).length
+  const unreadCount = localUnreadCount + serverUnreadCount
 
   const addNotification = (notif: Omit<DashboardNotification, 'id' | 'timestamp' | 'read'>) => {
     setNotifications(prev => [{
@@ -215,6 +228,7 @@ export default function Dashboard() {
 
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    markAllServerNotifsRead()
   }
 
   const sensors = useSensors(
@@ -484,13 +498,22 @@ export default function Dashboard() {
               <span>Daily Tasks</span>
             </button>
             {isFullAccess && (
-              <button
-                className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
-                onClick={() => setCurrentPage('calendar')}
-              >
-                <Calendar size={20} />
-                <span>Calendar</span>
-              </button>
+              <>
+                <button
+                  className={`sidebar-nav-item ${currentPage === 'reminders' ? 'active' : ''}`}
+                  onClick={() => setCurrentPage('reminders')}
+                >
+                  <Bell size={20} />
+                  <span>Reminders</span>
+                </button>
+                <button
+                  className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
+                  onClick={() => setCurrentPage('calendar')}
+                >
+                  <Calendar size={20} />
+                  <span>Calendar</span>
+                </button>
+              </>
             )}
           </div>
 
@@ -604,6 +627,7 @@ export default function Dashboard() {
             {currentPage === 'bots' && 'Bot Configuration'}
             {currentPage === 'settings' && 'Access Control'}
             {currentPage === 'integrations' && 'Integrations'}
+            {currentPage === 'reminders' && 'Reminders'}
           </h1>
         </div>
         <div className="header-actions">
@@ -671,46 +695,93 @@ export default function Dashboard() {
                     </button>
                   </div>
                   <div className="notification-list">
-                    {notifications.length === 0 ? (
+                    {notifications.length === 0 && serverNotifs.length === 0 ? (
                       <div className="notification-empty-state">
                         No notifications
                       </div>
                     ) : (
-                      notifications.map(notif => (
-                        <div key={notif.id} className={`notification-item ${!notif.read ? 'unread' : ''}`}>
-                          <div className="notification-icon notification-icon-backward">
-                            <AlertTriangle size={16} color="var(--color-danger)" />
-                          </div>
-                          <div className="notification-content">
-                            <p className="notification-text">
-                              <strong>{notif.issueId}</strong> moved backward: {notif.fromState} → {notif.toState}
-                            </p>
-                            <p className="notification-summary">
-                              {notif.summary}
-                            </p>
-                            <div className="notification-actions">
-                              <button
-                                className="btn btn-sm btn-notification-danger"
-                                onClick={(e) => { e.stopPropagation(); handleMoveToBlocked(notif) }}
-                              >
-                                Move to Blocked
-                              </button>
-                              <button
-                                className="btn btn-ghost btn-sm btn-notification-sm"
-                                onClick={(e) => { e.stopPropagation(); dismissNotification(notif.id) }}
-                              >
-                                Dismiss
-                              </button>
+                      <>
+                        {/* Server-side notifications (reminders, follow-ups, blockers) */}
+                        {serverNotifs.map((notif: NotificationItem) => (
+                          <div
+                            key={`server-${notif.id}`}
+                            className={`notification-item ${!notif.read ? 'unread' : ''}`}
+                            onClick={() => !notif.read && markServerNotifRead(notif.id)}
+                          >
+                            <div className={`notification-icon ${
+                              notif.type === 'task_overdue' ? 'notification-icon-backward' :
+                              notif.type === 'task_completed' ? 'notification-icon-success' :
+                              'notification-icon-info'
+                            }`}>
+                              {notif.type === 'task_overdue' ? (
+                                <AlertTriangle size={16} color="var(--color-danger)" />
+                              ) : notif.type === 'task_completed' ? (
+                                <CheckCircle size={16} color="var(--color-success)" />
+                              ) : notif.type === 'mentioned' ? (
+                                <MessageSquare size={16} color="var(--color-primary)" />
+                              ) : (
+                                <Bell size={16} color="var(--color-warning)" />
+                              )}
                             </div>
-                            <span className="notification-time">
-                              {notif.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                            <div className="notification-content">
+                              <p className="notification-text">
+                                <strong>{notif.title}</strong>
+                              </p>
+                              <p className="notification-summary">
+                                {notif.message}
+                              </p>
+                              <div className="notification-actions">
+                                <button
+                                  className="btn btn-ghost btn-sm btn-notification-sm"
+                                  onClick={(e) => { e.stopPropagation(); deleteServerNotif(notif.id) }}
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
+                              <span className="notification-time">
+                                {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        ))}
+
+                        {/* Local YouTrack backward-move notifications */}
+                        {notifications.map(notif => (
+                          <div key={notif.id} className={`notification-item ${!notif.read ? 'unread' : ''}`}>
+                            <div className="notification-icon notification-icon-backward">
+                              <AlertTriangle size={16} color="var(--color-danger)" />
+                            </div>
+                            <div className="notification-content">
+                              <p className="notification-text">
+                                <strong>{notif.issueId}</strong> moved backward: {notif.fromState} → {notif.toState}
+                              </p>
+                              <p className="notification-summary">
+                                {notif.summary}
+                              </p>
+                              <div className="notification-actions">
+                                <button
+                                  className="btn btn-sm btn-notification-danger"
+                                  onClick={(e) => { e.stopPropagation(); handleMoveToBlocked(notif) }}
+                                >
+                                  Move to Blocked
+                                </button>
+                                <button
+                                  className="btn btn-ghost btn-sm btn-notification-sm"
+                                  onClick={(e) => { e.stopPropagation(); dismissNotification(notif.id) }}
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
+                              <span className="notification-time">
+                                {notif.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </>
                     )}
                   </div>
-                  {notifications.length > 0 && (
+                  {(notifications.length > 0 || serverNotifs.length > 0) && (
                     <div className="notification-footer">
                       <button
                         className="btn-ghost btn-sm notification-clear-btn"
@@ -740,6 +811,7 @@ export default function Dashboard() {
         {/* Render page based on currentPage */}
         {currentPage === 'integrations' && <IntegrationsPage />}
         {currentPage === 'settings' && <SettingsPage />}
+        {currentPage === 'reminders' && <RemindersPage />}
 
         {/* Dashboard Content */}
         {currentPage === 'dashboard' && (

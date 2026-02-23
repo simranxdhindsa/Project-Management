@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Save, Link2, RefreshCw, ArrowRight, AlertTriangle } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Save, Link2, RefreshCw, ArrowRight, AlertTriangle, FilePlus, MessageSquare } from 'lucide-react'
 import api from '../services/api'
 import { MatchConfirmationModal } from '../components/MatchConfirmationModal'
 
@@ -16,11 +16,14 @@ interface PersonBreakdown {
   completed: string[]
   pending: string[]
   blocked: string[]
+  not_mentioned?: string[]
+  no_update_received?: boolean
   stats: {
     total: number
     completed: number
     pending: number
     blocked: number
+    not_mentioned?: number
   }
 }
 
@@ -50,6 +53,64 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     person_breakdown: PersonBreakdown[]
     summary: Summary
   } | null>(null)
+  const [loadingSaved, setLoadingSaved] = useState(false)
+  const [loadedFromSaved, setLoadedFromSaved] = useState(false)
+  const justAnalyzed = useRef(false)
+  const [slackConnected, setSlackConnected] = useState(false)
+  const [importingSlack, setImportingSlack] = useState(false)
+
+  // Check Slack connectivity on mount
+  useEffect(() => {
+    const checkSlack = async () => {
+      try {
+        const response = await api.getSlackStatus()
+        if (response.success && response.data?.connected && response.data?.channel_id) {
+          setSlackConnected(true)
+        }
+      } catch {
+        // Slack not configured — that's fine
+      }
+    }
+    checkSlack()
+  }, [])
+
+  // Auto-load saved analysis when date changes
+  useEffect(() => {
+    if (justAnalyzed.current) {
+      justAnalyzed.current = false
+      return
+    }
+    const loadSaved = async () => {
+      try {
+        setLoadingSaved(true)
+        const response = await api.getAnalysisByDate(analysisDate)
+        if (response.success && response.data) {
+          setMorningAssignments(response.data.morning_message || '')
+          setEveningUpdates(response.data.evening_message || '')
+          const ar = response.data.analysis_result
+          if (ar && ar.analysis && ar.person_breakdown && ar.summary) {
+            setResults({
+              analysis: ar.analysis,
+              person_breakdown: ar.person_breakdown,
+              summary: ar.summary,
+            })
+            setLoadedFromSaved(true)
+          } else {
+            setResults(null)
+            setLoadedFromSaved(false)
+          }
+        } else {
+          setLoadedFromSaved(false)
+        }
+      } catch {
+        // No saved analysis for this date — that's fine
+        setLoadedFromSaved(false)
+      } finally {
+        setLoadingSaved(false)
+      }
+    }
+    loadSaved()
+  }, [analysisDate])
 
   // YouTrack matching state
   const [matching, setMatching] = useState(false)
@@ -109,6 +170,8 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
       setError(null)
       const response = await api.analyzeManualInput(morningAssignments, eveningUpdates)
       if (response.success && response.data) {
+        justAnalyzed.current = true
+        setLoadedFromSaved(false)
         setResults({
           analysis: response.data.analysis || [],
           person_breakdown: response.data.person_breakdown || [],
@@ -130,6 +193,40 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     setEveningUpdates(exampleEvening)
     setResults(null)
     setSuccessMessage(null)
+    setLoadedFromSaved(false)
+  }
+
+  const handleNewAnalysis = () => {
+    setMorningAssignments('')
+    setEveningUpdates('')
+    setResults(null)
+    setError(null)
+    setSuccessMessage(null)
+    setLoadedFromSaved(false)
+    setMatchResults(null)
+    setSyncRecommendations(null)
+  }
+
+  const handleImportFromSlack = async () => {
+    try {
+      setImportingSlack(true)
+      setError(null)
+      const response = await api.getSlackMessages({ from: analysisDate, to: analysisDate })
+      if (response.success && response.data?.messages?.length > 0) {
+        const formatted = response.data.messages
+          .map((msg: any) => `[${new Date(msg.timestamp).toLocaleTimeString()}] @${msg.user_name}: ${msg.text}`)
+          .join('\n\n')
+        setMorningAssignments(formatted)
+        setSuccessMessage(`Imported ${response.data.messages.length} messages from Slack`)
+        setTimeout(() => setSuccessMessage(null), 3000)
+      } else {
+        setError(`No messages found in Slack for ${analysisDate}`)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import from Slack')
+    } finally {
+      setImportingSlack(false)
+    }
   }
 
   const handleSaveAnalysis = async () => {
@@ -249,6 +346,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     if (normalized.includes('complete') || normalized.includes('done')) return 'var(--color-success)'
     if (normalized.includes('progress') || normalized.includes('working')) return 'var(--color-warning)'
     if (normalized.includes('block')) return 'var(--color-danger)'
+    if (normalized.includes('not_mentioned') || normalized.includes('not mentioned')) return 'var(--text-secondary)'
     return 'var(--color-secondary)'
   }
 
@@ -257,6 +355,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     if (normalized.includes('complete') || normalized.includes('done')) return <CheckCircle size={16} />
     if (normalized.includes('progress') || normalized.includes('working')) return <Clock size={16} />
     if (normalized.includes('block')) return <XCircle size={16} />
+    if (normalized.includes('not_mentioned') || normalized.includes('not mentioned')) return <AlertTriangle size={16} />
     return <AlertCircle size={16} />
   }
 
@@ -282,10 +381,21 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
               className="btn btn-ghost btn-sm"
               style={{ padding: '0.5rem', minWidth: '150px' }}
             />
+            {loadingSaved && (
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Loading saved...</span>
+            )}
+            {loadedFromSaved && !loadingSaved && (
+              <span style={{ fontSize: '0.65rem', color: 'var(--color-success)' }}>Loaded from saved</span>
+            )}
           </div>
           <button className="btn btn-ghost btn-sm" onClick={loadExample} style={{ marginTop: '1.2rem' }}>
             <Sparkles size={16} /> Load Example
           </button>
+          {(results || morningAssignments || eveningUpdates) && (
+            <button className="btn btn-ghost btn-sm" onClick={handleNewAnalysis} style={{ marginTop: '1.2rem' }}>
+              <FilePlus size={16} /> New Analysis
+            </button>
+          )}
         </div>
       </div>
 
@@ -312,10 +422,25 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
       <div className="ai-input-section glass-card">
         <div className="ai-input-grid">
           <div className="ai-input-column">
-            <label className="ai-input-label">
-              <TrendingUp size={18} />
-              Morning Task Assignments
-            </label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label className="ai-input-label">
+                <TrendingUp size={18} />
+                Morning Task Assignments
+              </label>
+              {slackConnected && (
+                <button
+                  className="btn btn-ghost btn-sm slack-import-btn"
+                  onClick={handleImportFromSlack}
+                  disabled={importingSlack}
+                >
+                  {importingSlack ? (
+                    <><RefreshCw size={14} className="spin" /> Importing...</>
+                  ) : (
+                    <><MessageSquare size={14} /> Import from Slack</>
+                  )}
+                </button>
+              )}
+            </div>
             <textarea
               className="ai-textarea"
               value={morningAssignments}
@@ -326,6 +451,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
             />
             <p className="ai-input-hint">
               Supports Slack format with <code>`@Person Name`</code> and bullet points
+              {slackConnected && ' — or use "Import from Slack" to pull messages automatically'}
             </p>
           </div>
 
@@ -475,6 +601,18 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
                 <span className="ai-summary-label">Blocked</span>
               </div>
             </div>
+
+            {(results.summary.not_mentioned || 0) > 0 && (
+              <div className="ai-summary-card glass-card">
+                <div className="ai-summary-icon" style={{ backgroundColor: 'rgba(128,128,128,0.15)' }}>
+                  <AlertTriangle size={24} color="var(--text-secondary)" />
+                </div>
+                <div className="ai-summary-content">
+                  <span className="ai-summary-value">{results.summary.not_mentioned}</span>
+                  <span className="ai-summary-label">Not Mentioned</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Per-Person Breakdown */}
@@ -482,18 +620,37 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
             <h2 className="section-title">Per-Person Analysis</h2>
             <div className="ai-person-grid">
               {results.person_breakdown.map((person) => (
-                <div key={person.name} className="ai-person-card glass-card">
+                <div key={person.name} className={`ai-person-card glass-card ${person.no_update_received ? 'ai-person-no-update' : ''}`}>
                   <div className="ai-person-header">
                     <h3 className="ai-person-name">@{person.name}</h3>
                     <div className="ai-person-stats">
-                      <span className="ai-stat-badge ai-stat-success">
-                        {person.stats.completed}/{person.stats.total} ✓
-                      </span>
+                      {person.no_update_received ? (
+                        <span className="ai-stat-badge ai-stat-danger">
+                          No Update Received
+                        </span>
+                      ) : (
+                        <span className="ai-stat-badge ai-stat-success">
+                          {person.stats.completed}/{person.stats.total} done
+                        </span>
+                      )}
                     </div>
                   </div>
 
                   <div className="ai-person-body">
-                    {person.completed.length > 0 && (
+                    {person.no_update_received && (
+                      <div className="ai-task-group">
+                        <span className="ai-task-group-label" style={{ color: 'var(--color-danger)' }}>
+                          <AlertTriangle size={14} /> Assigned but no update shared ({person.assigned?.length || 0})
+                        </span>
+                        <ul className="ai-task-list">
+                          {(person.assigned || []).map((task, idx) => (
+                            <li key={idx} className="ai-task-item ai-task-not-mentioned">{task}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {!person.no_update_received && person.completed.length > 0 && (
                       <div className="ai-task-group">
                         <span className="ai-task-group-label" style={{ color: 'var(--color-success)' }}>
                           <CheckCircle size={14} /> Completed ({person.completed.length})
@@ -506,10 +663,10 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
                       </div>
                     )}
 
-                    {person.pending.length > 0 && (
+                    {!person.no_update_received && person.pending.length > 0 && (
                       <div className="ai-task-group">
                         <span className="ai-task-group-label" style={{ color: 'var(--color-warning)' }}>
-                          <Clock size={14} /> Pending ({person.pending.length})
+                          <Clock size={14} /> In Progress / Pending ({person.pending.length})
                         </span>
                         <ul className="ai-task-list">
                           {person.pending.map((task, idx) => (
@@ -519,7 +676,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
                       </div>
                     )}
 
-                    {person.blocked.length > 0 && (
+                    {!person.no_update_received && person.blocked.length > 0 && (
                       <div className="ai-task-group">
                         <span className="ai-task-group-label" style={{ color: 'var(--color-danger)' }}>
                           <XCircle size={14} /> Blocked ({person.blocked.length})
@@ -527,6 +684,19 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
                         <ul className="ai-task-list">
                           {person.blocked.map((task, idx) => (
                             <li key={idx} className="ai-task-item ai-task-blocked">{task}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {!person.no_update_received && (person.not_mentioned?.length || 0) > 0 && (
+                      <div className="ai-task-group">
+                        <span className="ai-task-group-label" style={{ color: 'var(--text-secondary)' }}>
+                          <AlertCircle size={14} /> Not Mentioned ({person.not_mentioned!.length})
+                        </span>
+                        <ul className="ai-task-list">
+                          {person.not_mentioned!.map((task, idx) => (
+                            <li key={idx} className="ai-task-item ai-task-not-mentioned">{task}</li>
                           ))}
                         </ul>
                       </div>

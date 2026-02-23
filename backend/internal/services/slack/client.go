@@ -267,23 +267,3 @@ func (c *Client) GetYesterdayMessages(ctx context.Context, channelID string) ([]
 	return c.GetChannelHistory(ctx, channelID, startOfYesterday.Unix(), endOfYesterday.Unix(), 1000)
 }
 
-// JoinChannel joins a channel
-func (c *Client) JoinChannel(ctx context.Context, channelID string) error {
-	body, err := c.doRequest(ctx, http.MethodPost, "/conversations.join", map[string]string{
-		"channel": channelID,
-	})
-	if err != nil {
-		return err
-	}
-
-	var resp Response
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	if !resp.OK && resp.Error != "already_in_channel" {
-		return fmt.Errorf("slack API error: %s", resp.Error)
-	}
-
-	return nil
-}

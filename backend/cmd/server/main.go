@@ -10,6 +10,7 @@ import (
 	"github.com/dhindsa/project-management/internal/handlers"
 	"github.com/dhindsa/project-management/internal/middleware"
 	"github.com/dhindsa/project-management/internal/models"
+	"github.com/dhindsa/project-management/internal/services/scheduler"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
@@ -206,21 +207,46 @@ func main() {
 	calendarRoutes.HandleFunc("/{year}/{month}", calendarHandler).Methods("GET")
 
 	// Notification routes (protected)
+	notifHandler := handlers.NewNotificationHandler(sseHub)
 	notifRoutes := api.PathPrefix("/notifications").Subrouter()
 	notifRoutes.Use(middleware.AuthMiddleware)
-	notifRoutes.HandleFunc("", getNotificationsHandler).Methods("GET")
-	notifRoutes.HandleFunc("/unread-count", getUnreadCountHandler).Methods("GET")
-	notifRoutes.HandleFunc("/{id}/read", markNotificationReadHandler).Methods("PATCH")
-	notifRoutes.HandleFunc("/read-all", markAllNotificationsReadHandler).Methods("PATCH")
+	notifRoutes.HandleFunc("", notifHandler.GetNotifications).Methods("GET")
+	notifRoutes.HandleFunc("/unread-count", notifHandler.GetUnreadCount).Methods("GET")
+	notifRoutes.HandleFunc("/{id}/read", notifHandler.MarkAsRead).Methods("PATCH")
+	notifRoutes.HandleFunc("/{id}", notifHandler.Delete).Methods("DELETE")
+	notifRoutes.HandleFunc("/read-all", notifHandler.MarkAllAsRead).Methods("PATCH")
 
-	// Reports routes (protected - manager or above)
+	// Reminder routes (protected)
+	reminderHandler := handlers.NewReminderHandler()
+	reminderRoutes := api.PathPrefix("/reminders").Subrouter()
+	reminderRoutes.Use(middleware.AuthMiddleware)
+	reminderRoutes.HandleFunc("", reminderHandler.GetReminders).Methods("GET")
+	reminderRoutes.HandleFunc("", reminderHandler.CreateReminder).Methods("POST")
+	reminderRoutes.HandleFunc("/{id}/dismiss", reminderHandler.DismissReminder).Methods("PATCH")
+	reminderRoutes.HandleFunc("/{id}", reminderHandler.DeleteReminder).Methods("DELETE")
+
+	// Start the PM scheduler (background goroutine)
+	pmScheduler := scheduler.NewService(notifHandler)
+	pmScheduler.Start()
+	defer pmScheduler.Stop()
+
+	// Wire notification handler into YouTrack handler for overdue/blocked notifications
+	youtrackHandler.SetNotificationHandler(notifHandler)
+
+	// Report handler (PM reports, time tracking, assignee stats)
+	reportHandler := handlers.NewReportHandler(notifHandler)
+
+	// Reports routes (protected)
 	reportRoutes := api.PathPrefix("/reports").Subrouter()
 	reportRoutes.Use(middleware.AuthMiddleware)
-	reportRoutes.HandleFunc("/team-productivity", teamProductivityHandler).Methods("GET")
-	reportRoutes.HandleFunc("/individual/{userId}", individualReportHandler).Methods("GET")
-	reportRoutes.HandleFunc("/project-health", projectHealthHandler).Methods("GET")
-	reportRoutes.HandleFunc("/slack-accuracy", slackAccuracyHandler).Methods("GET")
-	reportRoutes.HandleFunc("/export", exportReportHandler).Methods("GET")
+	reportRoutes.HandleFunc("/pm-report/{date}/saved", reportHandler.GetSavedReport).Methods("GET")
+	reportRoutes.HandleFunc("/pm-report/{date}", reportHandler.GeneratePMReport).Methods("GET")
+	reportRoutes.HandleFunc("/pm-reports", reportHandler.ListReports).Methods("GET")
+	reportRoutes.HandleFunc("/assignee-stats", reportHandler.GetAssigneeStats).Methods("GET")
+	reportRoutes.HandleFunc("/time-tracking", reportHandler.GetTimeTracking).Methods("GET")
+	reportRoutes.HandleFunc("/backfill", reportHandler.BackfillStateLog).Methods("POST")
+	reportRoutes.HandleFunc("/reconcile", reportHandler.ReconcileStateLog).Methods("POST")
+	reportRoutes.HandleFunc("/reset-state-log", reportHandler.ResetStateLog).Methods("DELETE")
 
 	// User management routes (protected - admin only)
 	userRoutes := api.PathPrefix("/users").Subrouter()
@@ -322,120 +348,8 @@ func calendarHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Notification handlers
-
-func getNotificationsHandler(w http.ResponseWriter, r *http.Request) {
-	notifications := []map[string]interface{}{
-		{
-			"id":      "n1",
-			"type":    "task_assigned",
-			"message": "New task assigned: Update API docs",
-			"read":    false,
-			"time":    "2024-01-26T10:00:00Z",
-		},
-		{
-			"id":      "n2",
-			"type":    "task_completed",
-			"message": "Sarah completed: Database schema",
-			"read":    true,
-			"time":    "2024-01-25T16:30:00Z",
-		},
-	}
-
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data:    notifications,
-	})
-}
-
-func getUnreadCountHandler(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data:    map[string]int{"count": 3},
-	})
-}
-
-func markNotificationReadHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "Notification " + vars["id"] + " marked as read",
-	})
-}
-
-func markAllNotificationsReadHandler(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "All notifications marked as read",
-	})
-}
-
-// Report handlers
-
-func teamProductivityHandler(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data: map[string]interface{}{
-			"period":          "last_7_days",
-			"tasks_completed": 24,
-			"tasks_created":   30,
-			"completion_rate": 80,
-			"daily_data": []map[string]interface{}{
-				{"date": "2024-01-20", "completed": 3},
-				{"date": "2024-01-21", "completed": 5},
-				{"date": "2024-01-22", "completed": 4},
-			},
-		},
-	})
-}
-
-func individualReportHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data: map[string]interface{}{
-			"user_id":         vars["userId"],
-			"tasks_completed": 12,
-			"tasks_assigned":  15,
-			"completion_rate": 80,
-		},
-	})
-}
-
-func projectHealthHandler(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data: map[string]interface{}{
-			"overdue_tasks":  4,
-			"blocked_tasks":  2,
-			"on_track_tasks": 18,
-			"health_score":   75,
-		},
-	})
-}
-
-func slackAccuracyHandler(w http.ResponseWriter, r *http.Request) {
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data: map[string]interface{}{
-			"match_rate":       85,
-			"discrepancies":    3,
-			"total_comparisons": 20,
-		},
-	})
-}
-
-func exportReportHandler(w http.ResponseWriter, r *http.Request) {
-	format := r.URL.Query().Get("format")
-	if format == "" {
-		format = "pdf"
-	}
-
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Message: "Export report as " + format + " - to be implemented",
-	})
-}
+// (Notification handlers moved to handlers/notification.go)
+// (Report handlers moved to handlers/report.go)
 
 // User management handlers
 

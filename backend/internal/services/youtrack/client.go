@@ -536,6 +536,59 @@ func (c *Client) TestConnection(ctx context.Context) error {
 	return err
 }
 
+// GetIssueComments returns the text of all comments on an issue (newest last)
+func (c *Client) GetIssueComments(ctx context.Context, issueID string) ([]string, error) {
+	path := fmt.Sprintf("/api/issues/%s/comments?fields=id,text,created&$top=10", issueID)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var comments []struct {
+		ID      string `json:"id"`
+		Text    string `json:"text"`
+		Created int64  `json:"created"`
+	}
+	if err := json.Unmarshal(body, &comments); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal comments: %w", err)
+	}
+
+	var texts []string
+	for _, c := range comments {
+		if c.Text != "" {
+			texts = append(texts, c.Text)
+		}
+	}
+	return texts, nil
+}
+
+// GetIssuesByState returns issues filtered by one or more states (live from YouTrack)
+func (c *Client) GetIssuesByState(ctx context.Context, states []string) ([]Issue, error) {
+	if len(states) == 0 {
+		return nil, nil
+	}
+
+	// Build query: project: ARD State: {In Progress, Backlog}
+	stateFilters := make([]string, len(states))
+	for i, s := range states {
+		stateFilters[i] = "{" + s + "}"
+	}
+	query := fmt.Sprintf("project: %s State: %s", c.projectID, strings.Join(stateFilters, ", "))
+	fields := "id,summary,created,updated,customFields(name,value(name,presentation)),project(shortName)"
+	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=200", fields, url.QueryEscape(query))
+
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []Issue
+	if err := json.Unmarshal(body, &issues); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal issues: %w", err)
+	}
+	return issues, nil
+}
+
 // WebhookEvent represents a YouTrack webhook event payload
 type WebhookEvent struct {
 	Type      string                 `json:"type"`      // "IssueEvent"

@@ -54,8 +54,7 @@ func (s *Service) Connect(ctx context.Context, userID, botToken, channelID strin
 				}
 			}
 		}
-		// Try to join the channel
-		client.JoinChannel(ctx, channelID)
+		// Note: bot should be manually invited to the channel via /invite
 	}
 
 	// Save the integration
@@ -112,12 +111,7 @@ func (s *Service) SetChannel(ctx context.Context, userID, channelID, channelName
 		return fmt.Errorf("slack not connected")
 	}
 
-	// Join the channel
-	client := NewClient(integration.BotToken)
-	if err := client.JoinChannel(ctx, channelID); err != nil {
-		return fmt.Errorf("failed to join channel: %w", err)
-	}
-
+	// Note: bot should be manually invited to the channel via /invite
 	return s.integrationRepo.UpdateSlackChannel(ctx, userID, channelID, channelName)
 }
 

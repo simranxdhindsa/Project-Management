@@ -1,0 +1,595 @@
+package handlers
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/dhindsa/project-management/internal/database"
+	"github.com/dhindsa/project-management/internal/middleware"
+	"github.com/dhindsa/project-management/internal/services/youtrack"
+	"github.com/gorilla/mux"
+)
+
+// ReportHandler handles PM reporting endpoints
+type ReportHandler struct {
+	reportRepo   *database.ReportRepository
+	notifHandler *NotificationHandler
+}
+
+// NewReportHandler creates a new ReportHandler
+func NewReportHandler(notifHandler *NotificationHandler) *ReportHandler {
+	return &ReportHandler{
+		reportRepo:   database.NewReportRepository(),
+		notifHandler: notifHandler,
+	}
+}
+
+// getYouTrackClient builds a YouTrack client from env settings
+func (h *ReportHandler) getYouTrackClient(ctx context.Context) (*youtrack.Client, error) {
+	baseURL := os.Getenv("YOUTRACK_BASE_URL")
+	token := os.Getenv("YOUTRACK_TOKEN")
+	projectID := os.Getenv("YOUTRACK_PROJECT_ID")
+	if baseURL == "" || token == "" || projectID == "" {
+		return nil, fmt.Errorf("YouTrack not configured (YOUTRACK_BASE_URL, YOUTRACK_TOKEN, YOUTRACK_PROJECT_ID)")
+	}
+	return youtrack.NewClient(baseURL, token, projectID), nil
+}
+
+// extractPriority extracts P0/P1/P2/P3 from a ticket summary prefix
+func extractPriority(summary string) string {
+	for _, p := range []string{"P0 ", "P1 ", "P2 ", "P3 "} {
+		if strings.HasPrefix(summary, p) {
+			return strings.TrimSuffix(p, " ")
+		}
+	}
+	return "Other"
+}
+
+// GeneratePMReport generates a Slack-style PM report for a given date and saves it
+// GET /api/reports/pm-report/{date}
+func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	vars := mux.Vars(r)
+	date := vars["date"] // YYYY-MM-DD
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+
+	// Parse date for display
+	parsedDate, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Invalid date format (use YYYY-MM-DD)"})
+		return
+	}
+
+	// Yesterday for "done" tickets
+	yesterday := parsedDate.AddDate(0, 0, -1).Format("2006-01-02")
+
+	// --- 1. Done tickets (moved to DEV yesterday) ---
+	doneIssues, err := h.reportRepo.GetDoneIssues(r.Context(), yesterday)
+	if err != nil {
+		doneIssues = nil // non-fatal
+	}
+
+	// --- 2. Open + Blocked tickets from YouTrack live ---
+	var openIssues []youtrack.Issue
+	var blockedIssues []youtrack.Issue
+
+	ytClient, ytErr := h.getYouTrackClient(r.Context())
+	if ytErr == nil {
+		open, err := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
+		if err == nil {
+			openIssues = open
+		}
+		blocked, err := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
+		if err == nil {
+			blockedIssues = blocked
+		}
+	}
+
+	// --- 3. Build Slack-style message ---
+	var sb strings.Builder
+
+	// Done section
+	sb.WriteString(fmt.Sprintf("*Tickets Done %s:*\n", parsedDate.AddDate(0, 0, -1).Format("Mon, Jan 2")))
+	sb.WriteString("\n")
+	if len(doneIssues) == 0 {
+		sb.WriteString("_No tickets moved to DEV yesterday_\n")
+	} else {
+		for _, issue := range doneIssues {
+			sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+		}
+	}
+	sb.WriteString("\n\n")
+
+	// Open items grouped by priority
+	sb.WriteString("*These are the open items today:*\n")
+	sb.WriteString("\n")
+
+	if ytErr != nil {
+		sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
+	} else if len(openIssues) == 0 {
+		sb.WriteString("_No open items_\n")
+	} else {
+		// Group by priority
+		priorityGroups := map[string][]youtrack.Issue{
+			"P0":    {},
+			"P1":    {},
+			"P2":    {},
+			"P3":    {},
+			"Other": {},
+		}
+		priorityOrder := []string{"P0", "P1", "P2", "P3", "Other"}
+
+		for _, issue := range openIssues {
+			p := extractPriority(issue.Summary)
+			priorityGroups[p] = append(priorityGroups[p], issue)
+		}
+
+		for _, p := range priorityOrder {
+			issues := priorityGroups[p]
+			if len(issues) == 0 {
+				continue
+			}
+			label := p
+			if p == "Other" {
+				label = "Other Issues"
+			}
+			sb.WriteString(fmt.Sprintf("*%s:*\n", label))
+			for _, issue := range issues {
+				sb.WriteString(fmt.Sprintf("• %s %s\n", issue.ID, issue.Summary))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Blocked section
+	sb.WriteString("*Blocked:*\n")
+	sb.WriteString("\n")
+	if len(blockedIssues) == 0 {
+		sb.WriteString("_No blocked tickets_\n")
+	} else {
+		for _, issue := range blockedIssues {
+			assignee := ""
+			if u := youtrack.GetAssignee(issue); u != nil {
+				assignee = u.FullName
+				if assignee == "" {
+					assignee = u.Login
+				}
+			}
+			line := fmt.Sprintf("• %s %s", issue.ID, issue.Summary)
+			if assignee != "" {
+				line += fmt.Sprintf(" (Assignee: %s)", assignee)
+			}
+			sb.WriteString(line + "\n")
+		}
+	}
+
+	reportText := sb.String()
+
+	// --- 4. Save report ---
+	savedReport, err := h.reportRepo.SavePMReport(
+		r.Context(), date, reportText,
+		len(doneIssues), len(openIssues), len(blockedIssues),
+	)
+	if err != nil {
+		// Still return the generated text even if save fails
+		sendJSON(w, http.StatusOK, Response{
+			Success: true,
+			Data: map[string]interface{}{
+				"report_text":   reportText,
+				"done_count":    len(doneIssues),
+				"open_count":    len(openIssues),
+				"blocked_count": len(blockedIssues),
+				"date":          date,
+				"saved":         false,
+			},
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data: map[string]interface{}{
+			"id":            savedReport.ID,
+			"report_text":   savedReport.ReportText,
+			"done_count":    savedReport.DoneCount,
+			"open_count":    savedReport.OpenCount,
+			"blocked_count": savedReport.BlockedCount,
+			"date":          savedReport.Date,
+			"generated_at":  savedReport.GeneratedAt,
+			"saved":         true,
+		},
+	})
+}
+
+// GetSavedReport fetches a previously saved PM report
+// GET /api/reports/pm-report/{date}/saved
+func (h *ReportHandler) GetSavedReport(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	vars := mux.Vars(r)
+	date := vars["date"]
+
+	report, err := h.reportRepo.GetPMReport(r.Context(), date)
+	if err != nil {
+		sendJSON(w, http.StatusNotFound, Response{Success: false, Message: "No saved report for " + date})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: report})
+}
+
+// ListReports returns all saved PM reports (history)
+// GET /api/reports/pm-reports
+func (h *ReportHandler) ListReports(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	reports, err := h.reportRepo.ListPMReports(r.Context())
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to list reports: " + err.Error()})
+		return
+	}
+
+	if reports == nil {
+		reports = []database.PMReport{}
+	}
+
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: reports})
+}
+
+// GetAssigneeStats returns per-assignee open/done/blocked counts from YouTrack + state log
+// GET /api/reports/assignee-stats
+func (h *ReportHandler) GetAssigneeStats(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	// DB stats (done counts + avg time from state log)
+	dbStats, _ := h.reportRepo.GetAssigneeStats(r.Context())
+	dbStatMap := make(map[string]*database.AssigneeStat)
+	for i := range dbStats {
+		dbStatMap[dbStats[i].Assignee] = &dbStats[i]
+	}
+
+	// Live YouTrack stats (open/blocked per assignee)
+	type AssigneeReport struct {
+		Assignee           string   `json:"assignee"`
+		Open               int      `json:"open"`
+		InProgress         int      `json:"in_progress"`
+		Done               int      `json:"done"`
+		Blocked            int      `json:"blocked"`
+		AvgHoursInProgress *float64 `json:"avg_hours_in_progress"`
+		Issues             []string `json:"issues"`
+	}
+
+	reportMap := make(map[string]*AssigneeReport)
+	ensureAssignee := func(name string) *AssigneeReport {
+		if _, ok := reportMap[name]; !ok {
+			reportMap[name] = &AssigneeReport{Assignee: name}
+		}
+		return reportMap[name]
+	}
+
+	ytClient, ytErr := h.getYouTrackClient(r.Context())
+	if ytErr == nil {
+		// Open issues — use actual project state names (same set as Daily Report)
+		openIssues, _ := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
+		for _, issue := range openIssues {
+			u := youtrack.GetAssignee(issue)
+			name := "Unassigned"
+			if u != nil {
+				name = u.FullName
+				if name == "" {
+					name = u.Login
+				}
+			}
+			ar := ensureAssignee(name)
+			state := strings.ToLower(youtrack.GetStatus(issue))
+			if strings.Contains(state, "progress") {
+				ar.InProgress++
+			} else {
+				ar.Open++
+			}
+			ar.Issues = append(ar.Issues, issue.ID+" "+issue.Summary)
+		}
+
+		// Blocked issues
+		blockedIssues, _ := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
+		for _, issue := range blockedIssues {
+			u := youtrack.GetAssignee(issue)
+			name := "Unassigned"
+			if u != nil {
+				name = u.FullName
+				if name == "" {
+					name = u.Login
+				}
+			}
+			ensureAssignee(name).Blocked++
+		}
+	}
+
+	// Merge DB done stats
+	for assignee, dbStat := range dbStatMap {
+		ar := ensureAssignee(assignee)
+		ar.Done = dbStat.Done
+		ar.AvgHoursInProgress = dbStat.AvgHoursInProgress
+	}
+
+	// Convert map to sorted slice
+	var result []AssigneeReport
+	for _, ar := range reportMap {
+		result = append(result, *ar)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Assignee < result[j].Assignee
+	})
+
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: result})
+}
+
+// GetTimeTracking returns the time tracking table (In Progress durations per ticket)
+// GET /api/reports/time-tracking
+func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	logs, err := h.reportRepo.GetTimeTracking(r.Context())
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to get time tracking: " + err.Error()})
+		return
+	}
+
+	if logs == nil {
+		logs = []database.IssueStateLog{}
+	}
+
+	// Enrich with overdue flag
+	type TimeTrackingRow struct {
+		database.IssueStateLog
+		Overdue          bool    `json:"overdue"`
+		ThresholdHours   float64 `json:"threshold_hours"`
+	}
+
+	var rows []TimeTrackingRow
+	for _, l := range logs {
+		threshold := overdueThresholdHoursForPriority(l.Priority)
+		overdue := l.DurationInPrevStateHours != nil && *l.DurationInPrevStateHours > threshold
+		rows = append(rows, TimeTrackingRow{
+			IssueStateLog:  l,
+			Overdue:        overdue,
+			ThresholdHours: threshold,
+		})
+	}
+
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: rows})
+}
+
+// overdueThresholdHoursForPriority returns overdue threshold in hours based on priority
+func overdueThresholdHoursForPriority(priority string) float64 {
+	switch strings.ToUpper(priority) {
+	case "P0", "CRITICAL":
+		return 4
+	case "P1":
+		return 24
+	case "P2":
+		return 48
+	default:
+		return 72
+	}
+}
+
+// BackfillStateLog seeds issue_state_log for tickets currently In Progress.
+//
+// Rationale for only seeding In Progress tickets:
+//   - Backfill is meant to establish a baseline for time tracking.
+//   - Only In Progress tickets have an ongoing elapsed time that matters.
+//   - Seeding DEV/Done/STAGE tickets with today's timestamp would produce false
+//     "done yesterday" entries in the Daily Report — we must never do that.
+//   - Idempotency: if a row already exists for this issue in 'In Progress' state
+//     (from a previous backfill or webhook), we skip it so we don't double-count.
+//
+// POST /api/reports/backfill
+func (h *ReportHandler) BackfillStateLog(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	ytClient, err := h.getYouTrackClient(r.Context())
+	if err != nil || ytClient == nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "YouTrack not configured"})
+		return
+	}
+
+	// Fetch only In Progress tickets — this avoids the accuracy problem of stamping
+	// DEV/Done tickets with today's timestamp.
+	issues, err := ytClient.GetIssuesByState(r.Context(), []string{"In Progress"})
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to fetch In Progress issues: " + err.Error()})
+		return
+	}
+
+	inserted := 0
+	skipped := 0
+	now := time.Now()
+
+	for _, issue := range issues {
+		state := youtrack.GetStatus(issue)
+		assignee := ""
+		if u := youtrack.GetAssignee(issue); u != nil {
+			if u.FullName != "" {
+				assignee = u.FullName
+			} else {
+				assignee = u.Login
+			}
+		}
+		priority := youtrack.GetPriority(issue)
+
+		// Extract priority prefix from summary if the priority field is empty/generic
+		if priority == "" || strings.EqualFold(priority, "normal") || strings.EqualFold(priority, "medium") {
+			priority = extractPriority(issue.Summary)
+		}
+
+		// Idempotency: skip if a currently-active In Progress row already exists
+		// (to_state = 'in progress' with no exit row yet).
+		// Prevents double-counting elapsed time if backfill is run multiple times.
+		alreadyTracked, _ := h.reportRepo.IsCurrentlyInProgress(r.Context(), issue.ID)
+		if alreadyTracked {
+			skipped++
+			continue
+		}
+
+		logEntry := &database.IssueStateLog{
+			IssueID:        issue.ID,
+			IssueSummary:   issue.Summary,
+			Assignee:       assignee,
+			MovedBy:        assignee, // backfilled entries: assume self-moved (no webhook data)
+			FromState:      "Backlog", // assumed prior state for In Progress tickets
+			ToState:        state,
+			Priority:       priority,
+			TransitionedAt: now,
+		}
+
+		if err := h.reportRepo.InsertStateLog(r.Context(), logEntry); err != nil {
+			skipped++
+		} else {
+			inserted++
+		}
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Message: fmt.Sprintf("Backfill complete: %d inserted, %d skipped (already tracked)", inserted, skipped),
+		Data: map[string]interface{}{
+			"inserted": inserted,
+			"skipped":  skipped,
+			"total":    len(issues),
+		},
+	})
+}
+
+// ReconcileStateLog checks every ticket that is currently "In Progress" in the state log
+// against the live YouTrack state. If a ticket has since moved to a different state but the
+// exit webhook was never received (e.g., server was down), this inserts the missing exit row
+// so the time tracking table reflects reality.
+//
+// POST /api/reports/reconcile
+func (h *ReportHandler) ReconcileStateLog(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	ytClient, err := h.getYouTrackClient(r.Context())
+	if err != nil || ytClient == nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "YouTrack not configured"})
+		return
+	}
+
+	// Find all tickets that are still recorded as In Progress (no exit row)
+	// by querying for InProgressOlderThan 0 hours (returns everything active)
+	activeLogs, err := h.reportRepo.GetInProgressOlderThan(r.Context(), 0)
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to query active tickets: " + err.Error()})
+		return
+	}
+
+	reconciled := 0
+	skipped := 0
+	now := time.Now()
+
+	for _, log := range activeLogs {
+		// Fetch the current live state from YouTrack
+		issue, err := ytClient.GetIssue(r.Context(), log.IssueID)
+		if err != nil {
+			skipped++
+			continue
+		}
+
+		liveState := youtrack.GetStatus(*issue)
+
+		// If live state is still In Progress, no reconciliation needed
+		if strings.EqualFold(liveState, "in progress") {
+			skipped++
+			continue
+		}
+
+		// The ticket has moved — insert the missing exit row
+		exitLog := &database.IssueStateLog{
+			IssueID:        log.IssueID,
+			IssueSummary:   log.IssueSummary,
+			Assignee:       log.Assignee,
+			MovedBy:        log.Assignee, // unknown who moved it — attribute to assignee
+			FromState:      "In Progress",
+			ToState:        liveState,
+			Priority:       log.Priority,
+			TransitionedAt: now,
+			Comment:        "(reconciled — webhook missed)",
+		}
+
+		if err := h.reportRepo.InsertStateLog(r.Context(), exitLog); err != nil {
+			skipped++
+		} else {
+			reconciled++
+		}
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Message: fmt.Sprintf("Reconcile complete: %d exit rows inserted, %d skipped", reconciled, skipped),
+		Data: map[string]interface{}{
+			"reconciled": reconciled,
+			"skipped":    skipped,
+			"checked":    len(activeLogs),
+		},
+	})
+}
+
+// ResetStateLog deletes all rows from issue_state_log so tracking starts fresh.
+// After this, only real webhook events will populate the table.
+// DELETE /api/reports/reset-state-log
+func (h *ReportHandler) ResetStateLog(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	deleted, err := h.reportRepo.ResetStateLog(r.Context())
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to reset: " + err.Error()})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Message: fmt.Sprintf("State log cleared: %d rows deleted. Table is now empty — webhooks will populate it as tickets move.", deleted),
+		Data:    map[string]interface{}{"deleted": deleted},
+	})
+}
