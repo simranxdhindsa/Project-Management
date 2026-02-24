@@ -11166,3 +11166,338 @@ select.form-input {
 .priority-p2 { background: rgba(234, 179, 8, 0.15); color: #fde047; }
 .priority-p3 { background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.45); }
 .priority-default { background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.45); }
+
+/* ============================================================
+   Time Tracking — compact card rows (replaces wide table)
+   ============================================================ */
+
+.tt-card-list {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.tt-list-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Column header row — mirrors .tt-row-main layout exactly */
+.tt-col-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.9rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.tt-col-header span {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+
+.tt-col-pin      { flex-shrink: 0; width: 20px; }
+.tt-col-issue    { flex: 1; min-width: 0; }
+.tt-col-priority { flex-shrink: 0; width: 44px;  text-align: center; }
+.tt-col-status   { flex-shrink: 0; width: 80px;  text-align: center; }
+.tt-col-time     { flex-shrink: 0; width: 150px; }
+.tt-col-assignee { flex-shrink: 0; width: 102px; } /* avatar(24) + gap(4) + name(72) + gap */
+.tt-col-chevron  { flex-shrink: 0; width: 13px; }
+
+.tt-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-left: 3px solid transparent;
+  transition: border-left-color 0.15s ease;
+}
+
+.tt-row:last-child {
+  border-bottom: none;
+}
+
+.tt-row.tt-overdue {
+  border-left-color: rgba(239, 68, 68, 0.6);
+}
+
+.tt-row.tt-moved-back:not(.tt-overdue) {
+  border-left-color: rgba(234, 179, 8, 0.5);
+}
+
+.tt-row.tt-pinned {
+  background: rgba(139, 92, 246, 0.04);
+}
+
+/* Collapsed row */
+.tt-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.52rem 0.9rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tt-row-main:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+/* Pin button */
+.tt-pin-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.25);
+  padding: 0.15rem;
+  border-radius: 4px;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+
+.tt-pin-btn:hover {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.tt-pin-btn.pinned {
+  color: #a78bfa;
+}
+
+/* Issue ID + summary */
+.tt-issue {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  overflow: hidden;
+}
+
+.tt-pin-indicator {
+  color: #a78bfa;
+  flex-shrink: 0;
+}
+
+.tt-issue-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #a78bfa;
+  flex-shrink: 0;
+}
+
+.tt-issue-summary {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Priority — inherits priority-badge styles */
+.tt-priority {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  width: 44px;        /* fixed so header col aligns */
+  text-align: center;
+}
+
+/* Status badges — fixed width so header col aligns */
+.tt-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.48rem;
+  border-radius: 20px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  white-space: nowrap;
+  width: 80px;
+}
+
+.tt-badge-live {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: #86efac;
+}
+
+.tt-badge-overdue {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.tt-badge-mb {
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  color: #fde047;
+}
+
+.tt-badge-done {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* Time bar */
+.tt-time-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+  width: 150px;
+}
+
+.tt-time-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.tt-time-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.tt-time-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+}
+
+.tt-threshold {
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* Assignee */
+.tt-assignee {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  width: 102px;
+  overflow: hidden;
+}
+
+.tt-assignee-name {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.45);
+  max-width: 72px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Chevron */
+.tt-chevron {
+  color: rgba(255, 255, 255, 0.25);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.tt-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* Expanded detail panel */
+.tt-row-detail {
+  padding: 0.5rem 0.9rem 0.65rem 0.9rem;
+  background: rgba(0, 0, 0, 0.15);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tt-detail-grid {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 0.28rem 0.6rem;
+  align-items: baseline;
+}
+
+.tt-detail-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.28);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tt-detail-value {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.tt-transition {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.tt-from-state {
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 600;
+}
+
+.tt-arrow {
+  color: rgba(255, 255, 255, 0.35);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.tt-arrow.tt-arrow-back {
+  color: #f87171;  /* red arrow = regression */
+}
+
+.tt-to-state {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
+}
+
+.tt-to-state.live {
+  color: #86efac;
+}
+
+.tt-to-state-back {
+  color: #fde047;
+}
+
+.tt-regression-tag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  margin-left: 0.2rem;
+}
+
+.tt-mismatch {
+  color: #fde047;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tt-comment {
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.45);
+}

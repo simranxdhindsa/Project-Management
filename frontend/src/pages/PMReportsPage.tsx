@@ -679,6 +679,7 @@ function TimeTrackingTab() {
   const [loading, setLoading] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
   // YouTrack avatar map: fullName → avatarUrl
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
@@ -751,6 +752,14 @@ function TimeTrackingTab() {
   const goThisWeek = () => {
     setSelectedWeek(getMondayOf(new Date()))
     setNoWeekFilter(false)
+  }
+
+  const toggleRow = (id: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
   }
 
   const togglePin = async (row: TimeTrackingRow) => {
@@ -1073,124 +1082,138 @@ function TimeTrackingTab() {
           <p style={{fontSize:'0.8rem'}}>Try <strong>All Time</strong> view or click <strong>Sync History</strong> to import from YouTrack.</p>
         </div>
       ) : (
-        <div className="pm-tracking-table-wrap glass-card">
-          <div className="pm-tracking-summary">
+        <div className="tt-card-list glass-card">
+          <div className="tt-list-summary">
             <span>{displayed.length} of {rows.length} transitions</span>
             {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
             {mismatchCount > 0 && <span className="mismatch-summary-badge"><AlertTriangle size={12} /> {mismatchCount} mismatch</span>}
             {movedBackCount > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {movedBackCount} moved back</span>}
           </div>
-          <table className="pm-tracking-table">
-            <thead>
-              <tr>
-                <th></th>{/* pin */}
-                <th>Issue</th>
-                <th>Assignee</th>
-                <th>Moved By</th>
-                <th>Priority</th>
-                <th>Transition</th>
-                <th>Time in Progress</th>
-                <th>Threshold</th>
-                <th>Status</th>
-                <th>Entered At</th>
-                <th>Comment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayed.map(row => {
-                const isLive = row.to_state.toLowerCase() === 'in progress'
-                const movedBack = isMovedBack(row.from_state, row.to_state)
-                return (
-                  <tr
-                    key={row.id}
-                    className={[
-                      row.overdue ? 'overdue-row' : '',
-                      row.moved_by_mismatch ? 'mismatch-row' : '',
-                      row.pinned ? 'pinned-row' : '',
-                    ].filter(Boolean).join(' ')}
+
+          {/* Column headers */}
+          <div className="tt-col-header">
+            <span className="tt-col-pin" />
+            <span className="tt-col-issue">Issue</span>
+            <span className="tt-col-priority">Priority</span>
+            <span className="tt-col-status">Status</span>
+            <span className="tt-col-time">Time / Threshold</span>
+            <span className="tt-col-assignee">Assignee</span>
+            <span className="tt-col-chevron" />
+          </div>
+
+          {displayed.map(row => {
+            const isLive = row.to_state.toLowerCase() === 'in progress'
+            const movedBack = isMovedBack(row.from_state, row.to_state)
+            const isExpanded = expandedRows.has(row.id)
+            const ratio = row.duration_in_prev_state_hours != null && row.threshold_hours > 0
+              ? Math.min(row.duration_in_prev_state_hours / row.threshold_hours, 1)
+              : 0
+            const barColor = row.overdue ? '#ef4444' : isLive ? '#22c55e' : '#6366f1'
+
+            return (
+              <div
+                key={row.id}
+                className={['tt-row', row.overdue ? 'tt-overdue' : '', row.pinned ? 'tt-pinned' : '', movedBack ? 'tt-moved-back' : ''].filter(Boolean).join(' ')}
+              >
+                {/* Collapsed row — click anywhere to expand */}
+                <div className="tt-row-main" onClick={() => toggleRow(row.id)}>
+                  {/* Pin button */}
+                  <button
+                    className={`tt-pin-btn ${row.pinned ? 'pinned' : ''}`}
+                    onClick={e => { e.stopPropagation(); togglePin(row) }}
+                    disabled={togglingPin === row.issue_id}
+                    title={row.pinned ? 'Unpin' : 'Pin (show every week)'}
                   >
-                    {/* Pin toggle */}
-                    <td className="pin-cell">
-                      <button
-                        className={`pin-btn ${row.pinned ? 'pinned' : ''}`}
-                        onClick={() => togglePin(row)}
-                        disabled={togglingPin === row.issue_id}
-                        title={row.pinned ? 'Unpin (remove from all weeks)' : 'Pin (show in every week)'}
-                      >
-                        {togglingPin === row.issue_id
-                          ? <Loader2 size={13} className="animate-spin" />
-                          : row.pinned ? <Pin size={13} /> : <PinOff size={13} />
-                        }
-                      </button>
-                    </td>
-                    <td className="issue-cell">
-                      <div className="issue-id">
-                        {row.pinned && <Pin size={10} className="pin-indicator" />}
-                        {row.issue_id}
-                      </div>
-                      <div className="issue-summary">{row.issue_summary}</div>
-                    </td>
-                    <td>{row.assignee || '—'}</td>
-                    <td>
-                      {row.moved_by ? (
-                        <span className={row.moved_by_mismatch ? 'moved-by-mismatch' : ''}>
-                          {row.moved_by}
-                          {row.moved_by_mismatch && <AlertTriangle size={12} style={{marginLeft: 4}} />}
+                    {togglingPin === row.issue_id
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : row.pinned ? <Pin size={12} /> : <PinOff size={12} />
+                    }
+                  </button>
+
+                  {/* Issue ID + summary */}
+                  <div className="tt-issue">
+                    {row.pinned && <Pin size={10} className="tt-pin-indicator" />}
+                    <span className="tt-issue-id">{row.issue_id}</span>
+                    <span className="tt-issue-summary">{row.issue_summary}</span>
+                  </div>
+
+                  {/* Priority */}
+                  <span className={`tt-priority ${priorityBadgeClass(row.priority)}`}>{row.priority || '—'}</span>
+
+                  {/* Status badge */}
+                  {isLive && !row.overdue && (
+                    <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>
+                  )}
+                  {row.overdue && (
+                    <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>
+                  )}
+                  {movedBack && !row.overdue && (
+                    <span className="tt-badge tt-badge-mb"><RotateCcw size={11} /> Back</span>
+                  )}
+                  {!isLive && !row.overdue && !movedBack && (
+                    <span className="tt-badge tt-badge-done">✓ Done</span>
+                  )}
+
+                  {/* Time bar + label */}
+                  <div className="tt-time-bar-wrap">
+                    <div className="tt-time-bar">
+                      <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
+                    </div>
+                    <span className="tt-time-label">
+                      {formatHours(row.duration_in_prev_state_hours)}
+                      <span className="tt-threshold"> / {row.threshold_hours}h</span>
+                    </span>
+                  </div>
+
+                  {/* Assignee */}
+                  <div className="tt-assignee">
+                    {avatarMap[row.assignee]
+                      ? <img src={avatarMap[row.assignee]} alt={row.assignee} className="filter-avatar-img" />
+                      : <span className="filter-avatar-placeholder">{(row.assignee || '?').charAt(0).toUpperCase()}</span>
+                    }
+                    <span className="tt-assignee-name">{row.assignee ? row.assignee.split(' ')[0] : '—'}</span>
+                  </div>
+
+                  <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
+                </div>
+
+                {/* Expanded detail panel */}
+                {isExpanded && (
+                  <div className="tt-row-detail">
+                    <div className="tt-detail-grid">
+                      <span className="tt-detail-label">Transition</span>
+                      <span className="tt-detail-value tt-transition">
+                        <span className="tt-from-state">{row.from_state || 'Backlog'}</span>
+                        <span className={`tt-arrow ${movedBack ? 'tt-arrow-back' : ''}`}>→</span>
+                        <span className={`tt-to-state${isLive ? ' live' : ''}${movedBack ? ' tt-to-state-back' : ''}`}>
+                          {row.to_state}{isLive ? ' ●' : ''}
                         </span>
-                      ) : '—'}
-                    </td>
-                    <td>
-                      {row.priority
-                        ? <span className={priorityBadgeClass(row.priority)}>{row.priority}</span>
-                        : '—'}
-                    </td>
-                    <td>
-                      <span className="state-transition">
-                        <span className="from-state">{row.from_state || 'Backlog'}</span>
-                        <span className="arrow">
-                          {movedBack ? <span className="moved-back-arrow" title="Moved back">↩</span> : '→'}
-                        </span>
-                        <span className={`to-state ${isLive ? 'in-progress-active' : ''}`}>
-                          {isLive ? 'In Progress ●' : row.to_state}
-                        </span>
+                        {movedBack && <span className="tt-regression-tag">regression</span>}
                       </span>
-                    </td>
-                    <td className={`duration-cell ${row.overdue ? 'overdue-duration' : ''}`}>
-                      {isLive
-                        ? <span className="live-elapsed">{formatHours(row.duration_in_prev_state_hours)} <span className="live-dot">live</span></span>
-                        : formatHours(row.duration_in_prev_state_hours)
-                      }
-                    </td>
-                    <td className="threshold-cell">{row.threshold_hours}h</td>
-                    <td>
-                      {isLive
-                        ? row.overdue
-                          ? <span className="overdue-badge"><AlertTriangle size={12} /> Overdue</span>
-                          : <span className="in-progress-badge">In Progress</span>
-                        : row.overdue
-                          ? <span className="overdue-badge"><AlertTriangle size={12} /> Overdue</span>
-                          : <span className="on-time-badge">Done ✓</span>
-                      }
-                    </td>
-                    <td className="date-cell">
-                      {new Date(row.transitioned_at).toLocaleString(undefined, {
-                        month: 'short', day: 'numeric',
-                        hour: '2-digit', minute: '2-digit'
-                      })}
-                    </td>
-                    <td className="comment-cell">
-                      {row.comment
-                        ? <span className="comment-text" title={row.comment}>
-                            {row.comment.length > 40 ? row.comment.slice(0, 40) + '…' : row.comment}
-                          </span>
-                        : <span className="no-comment">—</span>
-                      }
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+
+                      <span className="tt-detail-label">Moved By</span>
+                      <span className={`tt-detail-value${row.moved_by_mismatch ? ' tt-mismatch' : ''}`}>
+                        {row.moved_by || '—'}
+                        {row.moved_by_mismatch && <AlertTriangle size={11} style={{ marginLeft: 4 }} />}
+                      </span>
+
+                      <span className="tt-detail-label">Entered At</span>
+                      <span className="tt-detail-value">
+                        {new Date(row.transitioned_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+
+                      {row.comment && (
+                        <>
+                          <span className="tt-detail-label">Comment</span>
+                          <span className="tt-detail-value tt-comment">{row.comment}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
