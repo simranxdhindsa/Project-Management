@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -515,6 +516,341 @@ func (r *ReportRepository) GetPMReport(ctx context.Context, date string) (*PMRep
 		return nil, err
 	}
 	return &report, nil
+}
+
+// ─── Issue Timeline ───────────────────────────────────────────────────────────
+
+// IssueStint represents one contiguous In Progress stint for a ticket.
+// Stint starts when the ticket enters "in progress" and ends when it leaves.
+type IssueStint struct {
+	StintNumber          int      `json:"stint_number"`           // 1-based: 1st time, 2nd time, etc.
+	EnteredAt            time.Time `json:"entered_at"`             // when it entered In Progress this stint
+	ExitedAt             *time.Time `json:"exited_at,omitempty"`   // when it left (nil = still In Progress)
+	ExitedTo             string   `json:"exited_to"`               // the state it moved to ("DEV", "Backlog", "" if live)
+	DurationHours        *float64 `json:"duration_hours"`          // hours in this stint (nil = live)
+	MovedBack            bool     `json:"moved_back"`              // exited_to is a regression state
+	MovedBy              string   `json:"moved_by"`                // who moved it out
+	Comment              string   `json:"comment"`                 // reason / comment at time of exit
+}
+
+// IssueTimeline represents one ticket's full In Progress history aggregated from issue_state_log.
+type IssueTimeline struct {
+	IssueID            string       `json:"issue_id"`
+	IssueSummary       string       `json:"issue_summary"`
+	Assignee           string       `json:"assignee"`
+	Priority           string       `json:"priority"`
+	Pinned             bool         `json:"pinned"`
+	TotalStints        int          `json:"total_stints"`        // how many times entered In Progress
+	TotalHours         float64      `json:"total_hours"`         // sum of all completed stints + live elapsed
+	IsLive             bool         `json:"is_live"`             // currently In Progress
+	LiveHours          float64      `json:"live_hours"`          // elapsed hours for the current open stint (0 if not live)
+	MovedBackCount     int          `json:"moved_back_count"`    // times ticket regressed
+	IsOverdue          bool         `json:"is_overdue"`          // total_hours > threshold
+	ThresholdHours     float64      `json:"threshold_hours"`
+	FirstEnteredAt     time.Time    `json:"first_entered_at"`    // when it FIRST entered In Progress
+	LastActivityAt     time.Time    `json:"last_activity_at"`    // most recent transition
+	Stints             []IssueStint `json:"stints"`
+}
+
+// stateRankForTimeline returns a rank to determine backward moves (lower = earlier)
+var timelineStateRank = map[string]int{
+	"backlog":     0,
+	"open":        0,
+	"in progress": 1,
+	"findings":    2,
+	"dev":         3,
+	"stage":       4,
+	"prod":        5,
+	"done":        6,
+	"mobile done": 6,
+}
+
+func timelineIsMovedBack(fromState, toState string) bool {
+	from := strings.ToLower(strings.TrimSpace(fromState))
+	to := strings.ToLower(strings.TrimSpace(toState))
+	fromRank, fromOk := timelineStateRank[from]
+	toRank, toOk := timelineStateRank[to]
+	if !fromOk || !toOk {
+		return false
+	}
+	return toRank < fromRank
+}
+
+func overdueThresholdForPriority(priority string) float64 {
+	switch strings.ToUpper(priority) {
+	case "P0", "CRITICAL":
+		return 4
+	case "P1":
+		return 24
+	case "P2":
+		return 48
+	default:
+		return 72
+	}
+}
+
+// GetIssueTimelines builds a per-issue timeline aggregated from issue_state_log.
+// Each IssueTimeline contains every In Progress stint for that ticket, its total
+// accumulated time, moved-back count, and live status.
+func (r *ReportRepository) GetIssueTimelines(ctx context.Context, pinnedIDs []string) ([]IssueTimeline, error) {
+	pool := GetPool()
+
+	// Fetch ALL rows for issues that have ever been In Progress, ordered by issue+time.
+	// We also fetch exit rows (from_state = 'in progress') to close stints.
+	rows, err := pool.Query(ctx, `
+		SELECT
+			issue_id,
+			COALESCE(issue_summary,'') AS issue_summary,
+			COALESCE(assignee,'') AS assignee,
+			COALESCE(moved_by,'') AS moved_by,
+			COALESCE(from_state,'') AS from_state,
+			to_state,
+			COALESCE(priority,'') AS priority,
+			transitioned_at,
+			duration_in_prev_state_hours,
+			COALESCE(comment,'') AS comment
+		FROM issue_state_log
+		WHERE issue_id IN (
+			SELECT DISTINCT issue_id FROM issue_state_log
+			WHERE LOWER(to_state) = 'in progress'
+		)
+		ORDER BY issue_id, transitioned_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("GetIssueTimelines query failed: %w", err)
+	}
+	defer rows.Close()
+
+	// Group raw rows by issue_id
+	type rawRow struct {
+		issueID     string
+		summary     string
+		assignee    string
+		movedBy     string
+		fromState   string
+		toState     string
+		priority    string
+		at          time.Time
+		durationHrs *float64
+		comment     string
+	}
+
+	byIssue := map[string][]rawRow{}
+	issueOrder := []string{}
+
+	for rows.Next() {
+		var rr rawRow
+		if err := rows.Scan(
+			&rr.issueID, &rr.summary, &rr.assignee, &rr.movedBy,
+			&rr.fromState, &rr.toState, &rr.priority,
+			&rr.at, &rr.durationHrs, &rr.comment,
+		); err != nil {
+			return nil, err
+		}
+		if _, seen := byIssue[rr.issueID]; !seen {
+			issueOrder = append(issueOrder, rr.issueID)
+		}
+		byIssue[rr.issueID] = append(byIssue[rr.issueID], rr)
+	}
+
+	pinnedSet := map[string]bool{}
+	for _, id := range pinnedIDs {
+		pinnedSet[id] = true
+	}
+
+	now := time.Now()
+	var timelines []IssueTimeline
+
+	for _, issueID := range issueOrder {
+		rrows := byIssue[issueID]
+
+		// Use the most recent non-empty summary/assignee/priority
+		var summary, assignee, priority string
+		for _, rr := range rrows {
+			if rr.summary != "" {
+				summary = rr.summary
+			}
+			if rr.assignee != "" {
+				assignee = rr.assignee
+			}
+			if rr.priority != "" {
+				priority = rr.priority
+			}
+		}
+
+		// Build stints by pairing entry rows (to_state='in progress') with
+		// subsequent exit rows (from_state='in progress').
+		var stints []IssueStint
+		stintNum := 0
+
+		// We iterate in chronological order and track open stints.
+		var openStintEnteredAt *time.Time
+
+		for _, rr := range rrows {
+			toLower := strings.ToLower(rr.toState)
+			fromLower := strings.ToLower(rr.fromState)
+
+			if toLower == "in progress" {
+				// Ticket entered In Progress — open a new stint
+				t := rr.at
+				openStintEnteredAt = &t
+			} else if fromLower == "in progress" && openStintEnteredAt != nil {
+				// Ticket exited In Progress — close the current stint
+				stintNum++
+				exited := rr.at
+				d := rr.durationHrs
+				if d == nil {
+					// Compute from open timestamp
+					hrs := exited.Sub(*openStintEnteredAt).Hours()
+					d = &hrs
+				}
+				movedBack := timelineIsMovedBack("in progress", rr.toState)
+				stints = append(stints, IssueStint{
+					StintNumber:   stintNum,
+					EnteredAt:     *openStintEnteredAt,
+					ExitedAt:      &exited,
+					ExitedTo:      rr.toState,
+					DurationHours: d,
+					MovedBack:     movedBack,
+					MovedBy:       rr.movedBy,
+					Comment:       rr.comment,
+				})
+				openStintEnteredAt = nil
+			}
+		}
+
+		// If there's still an open stint, it's currently In Progress
+		isLive := openStintEnteredAt != nil
+		liveHours := 0.0
+		if isLive {
+			stintNum++
+			liveHours = now.Sub(*openStintEnteredAt).Hours()
+			stints = append(stints, IssueStint{
+				StintNumber:   stintNum,
+				EnteredAt:     *openStintEnteredAt,
+				ExitedAt:      nil,
+				ExitedTo:      "",
+				DurationHours: &liveHours,
+				MovedBack:     false,
+			})
+		}
+
+		// Compute totals
+		totalHours := 0.0
+		movedBackCount := 0
+		for _, s := range stints {
+			if s.DurationHours != nil {
+				totalHours += *s.DurationHours
+			}
+			if s.MovedBack {
+				movedBackCount++
+			}
+		}
+
+		threshold := overdueThresholdForPriority(priority)
+		isOverdue := totalHours > threshold
+
+		var firstEnteredAt, lastActivityAt time.Time
+		if len(rrows) > 0 {
+			lastActivityAt = rrows[len(rrows)-1].at
+		}
+		// First entry into In Progress
+		for _, rr := range rrows {
+			if strings.ToLower(rr.toState) == "in progress" {
+				firstEnteredAt = rr.at
+				break
+			}
+		}
+
+		timelines = append(timelines, IssueTimeline{
+			IssueID:        issueID,
+			IssueSummary:   summary,
+			Assignee:       assignee,
+			Priority:       priority,
+			Pinned:         pinnedSet[issueID],
+			TotalStints:    stintNum,
+			TotalHours:     totalHours,
+			IsLive:         isLive,
+			LiveHours:      liveHours,
+			MovedBackCount: movedBackCount,
+			IsOverdue:      isOverdue,
+			ThresholdHours: threshold,
+			FirstEnteredAt: firstEnteredAt,
+			LastActivityAt: lastActivityAt,
+			Stints:         stints,
+		})
+	}
+
+	// Sort: pinned first, then live, then by total hours desc
+	sort.Slice(timelines, func(i, j int) bool {
+		a, b := timelines[i], timelines[j]
+		if a.Pinned != b.Pinned {
+			return a.Pinned
+		}
+		if a.IsLive != b.IsLive {
+			return a.IsLive
+		}
+		return a.TotalHours > b.TotalHours
+	})
+
+	return timelines, nil
+}
+
+// GetDelayedIssues returns issues that are currently In Progress AND overdue
+// (total time in In Progress > priority threshold). Used for the daily report.
+func (r *ReportRepository) GetDelayedIssues(ctx context.Context) ([]IssueTimeline, error) {
+	timelines, err := r.GetIssueTimelines(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	var delayed []IssueTimeline
+	for _, t := range timelines {
+		if t.IsLive && t.IsOverdue {
+			delayed = append(delayed, t)
+		}
+	}
+	return delayed, nil
+}
+
+// DismissAlert records that the user has dismissed the moved-back alert for an issue.
+func (r *ReportRepository) DismissAlert(ctx context.Context, userID, issueID string) error {
+	pool := GetPool()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO dismissed_alerts (user_id, issue_id)
+		VALUES ($1, $2)
+		ON CONFLICT (user_id, issue_id) DO NOTHING
+	`, userID, issueID)
+	return err
+}
+
+// UndismissAlert removes a dismissed alert so it shows again.
+func (r *ReportRepository) UndismissAlert(ctx context.Context, userID, issueID string) error {
+	pool := GetPool()
+	_, err := pool.Exec(ctx, `
+		DELETE FROM dismissed_alerts WHERE user_id = $1 AND issue_id = $2
+	`, userID, issueID)
+	return err
+}
+
+// GetDismissedAlertIDs returns the set of issue IDs the user has dismissed.
+func (r *ReportRepository) GetDismissedAlertIDs(ctx context.Context, userID string) (map[string]bool, error) {
+	pool := GetPool()
+	rows, err := pool.Query(ctx, `
+		SELECT issue_id FROM dismissed_alerts WHERE user_id = $1
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		result[id] = true
+	}
+	return result, nil
 }
 
 // ListPMReports returns the most recent saved reports

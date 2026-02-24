@@ -175,6 +175,40 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 			sb.WriteString(line + "\n")
 		}
 	}
+	sb.WriteString("\n\n")
+
+	// --- Delayed / Overdue tickets section ---
+	sb.WriteString("*Tickets Getting Delayed:*\n")
+	sb.WriteString("\n")
+	delayedIssues, delayErr := h.reportRepo.GetDelayedIssues(r.Context())
+	if delayErr != nil || len(delayedIssues) == 0 {
+		sb.WriteString("_No overdue tickets in progress_\n")
+	} else {
+		for _, t := range delayedIssues {
+			// Format: • ARD-628 FE Studio: mic issue (Assignee: simranjot | In Progress: 4d 2h | Stints: 2 | Threshold: 24h)
+			days := int(t.TotalHours) / 24
+			hours := int(t.TotalHours) % 24
+			durationStr := ""
+			if days > 0 {
+				durationStr = fmt.Sprintf("%dd %dh", days, hours)
+			} else {
+				durationStr = fmt.Sprintf("%dh", int(t.TotalHours))
+			}
+			line := fmt.Sprintf("• %s %s", t.IssueID, t.IssueSummary)
+			meta := fmt.Sprintf("In Progress: %s | Threshold: %.0fh", durationStr, t.ThresholdHours)
+			if t.Assignee != "" {
+				meta = fmt.Sprintf("Assignee: %s | %s", t.Assignee, meta)
+			}
+			if t.MovedBackCount > 0 {
+				meta += fmt.Sprintf(" | Moved Back: %dx", t.MovedBackCount)
+			}
+			if t.TotalStints > 1 {
+				meta += fmt.Sprintf(" | Stints: %d", t.TotalStints)
+			}
+			sb.WriteString(line + "\n")
+			sb.WriteString(fmt.Sprintf("  _%s_\n", meta))
+		}
+	}
 
 	reportText := sb.String()
 
@@ -491,6 +525,90 @@ func (h *ReportHandler) GetPins(w http.ResponseWriter, r *http.Request) {
 		ids = []string{}
 	}
 	sendJSON(w, http.StatusOK, Response{Success: true, Data: ids})
+}
+
+// GetIssueTimelines returns the per-issue aggregated timeline view.
+// GET /api/reports/issue-timelines
+func (h *ReportHandler) GetIssueTimelines(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	pinnedIDs, _ := h.reportRepo.GetPinnedIssueIDs(r.Context(), user.ID)
+	dismissedSet, _ := h.reportRepo.GetDismissedAlertIDs(r.Context(), user.ID)
+
+	timelines, err := h.reportRepo.GetIssueTimelines(r.Context(), pinnedIDs)
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to get timelines: " + err.Error()})
+		return
+	}
+	if timelines == nil {
+		timelines = []database.IssueTimeline{}
+	}
+
+	// Annotate each timeline with whether the user has dismissed its moved-back alert
+	type TimelineWithDismiss struct {
+		database.IssueTimeline
+		AlertDismissed bool `json:"alert_dismissed"`
+	}
+	result := make([]TimelineWithDismiss, len(timelines))
+	for i, t := range timelines {
+		result[i] = TimelineWithDismiss{
+			IssueTimeline:  t,
+			AlertDismissed: dismissedSet[t.IssueID],
+		}
+	}
+
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: result})
+}
+
+// DismissAlert dismisses the moved-back alert for an issue for the current user.
+// POST /api/reports/alerts/dismiss  body: {"issue_id":"..."}
+func (h *ReportHandler) DismissAlert(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	var body struct {
+		IssueID string `json:"issue_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.IssueID == "" {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "issue_id required"})
+		return
+	}
+
+	if err := h.reportRepo.DismissAlert(r.Context(), user.ID, body.IssueID); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to dismiss: " + err.Error()})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Alert dismissed"})
+}
+
+// UndismissAlert restores a previously dismissed alert.
+// DELETE /api/reports/alerts/dismiss/{issueID}
+func (h *ReportHandler) UndismissAlert(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	vars := mux.Vars(r)
+	issueID := vars["issueID"]
+	if issueID == "" {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "issueID required"})
+		return
+	}
+
+	if err := h.reportRepo.UndismissAlert(r.Context(), user.ID, issueID); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to undismiss: " + err.Error()})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Alert restored"})
 }
 
 // overdueThresholdHoursForPriority returns overdue threshold in hours based on priority

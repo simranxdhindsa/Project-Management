@@ -284,6 +284,16 @@ func RunMigrations() error {
 			true,
 			'system'
 		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'pm_assistant')`,
+
+		// dismissed_alerts — lets users dismiss moved-back alerts per issue
+		`CREATE TABLE IF NOT EXISTS dismissed_alerts (
+			id SERIAL PRIMARY KEY,
+			user_id VARCHAR(255) NOT NULL,
+			issue_id VARCHAR(255) NOT NULL,
+			dismissed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE(user_id, issue_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_dismissed_alerts_user_id ON dismissed_alerts(user_id)`,
 	}
 
 	for i, migration := range migrations {

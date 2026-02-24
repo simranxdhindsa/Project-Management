@@ -872,6 +872,21 @@ class ApiService {
     return this.request<string[]>('/reports/pins')
   }
 
+  async getIssueTimelines() {
+    return this.request<IssueTimeline[]>('/reports/issue-timelines')
+  }
+
+  async dismissAlert(issueID: string) {
+    return this.request<void>('/reports/alerts/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ issue_id: issueID }),
+    })
+  }
+
+  async undismissAlert(issueID: string) {
+    return this.request<void>(`/reports/alerts/dismiss/${encodeURIComponent(issueID)}`, { method: 'DELETE' })
+  }
+
   async backfillStateLog() {
     return this.request<{ inserted: number; skipped: number; total: number }>('/reports/backfill', {
       method: 'POST',
@@ -1258,6 +1273,36 @@ export interface AssigneeStat {
   blocked: number
   avg_hours_in_progress: number | null
   issues?: string[]
+}
+
+export interface IssueStint {
+  stint_number: number
+  entered_at: string
+  exited_at: string | null
+  exited_to: string
+  duration_hours: number | null
+  moved_back: boolean
+  moved_by: string
+  comment: string
+}
+
+export interface IssueTimeline {
+  issue_id: string
+  issue_summary: string
+  assignee: string
+  priority: string
+  pinned: boolean
+  total_stints: number
+  total_hours: number
+  is_live: boolean
+  live_hours: number
+  moved_back_count: number
+  is_overdue: boolean
+  threshold_hours: number
+  first_entered_at: string
+  last_activity_at: string
+  stints: IssueStint[]
+  alert_dismissed: boolean
 }
 
 export interface TimeTrackingRow {

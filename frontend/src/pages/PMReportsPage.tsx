@@ -5,9 +5,11 @@ import {
   RefreshCw, ChevronDown, AlertTriangle, TrendingUp,
   Calendar, Pin, PinOff, ChevronLeft, ChevronRight,
   Search, RotateCcw, ArrowDownUp, ArrowUpNarrowWide,
-  ArrowDownNarrowWide, Star,
+  ArrowDownNarrowWide, Star, Activity, X, TriangleAlert,
+  CheckCircle2, Timer,
 } from 'lucide-react'
 import api, { getYouTrackAvatarMap } from '../services/api'
+import type { IssueTimeline, IssueStint } from '../services/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -98,6 +100,7 @@ function toISODate(d: Date): string {
 
 const TABS = [
   { id: 'tracking', label: 'Time Tracking', icon: Clock },
+  { id: 'timeline', label: 'Issue Timeline', icon: Activity },
   { id: 'daily', label: 'Daily Report', icon: FileText },
   { id: 'assignees', label: 'Assignee Stats', icon: Users },
   { id: 'assistant', label: 'PM Assistant', icon: MessageSquare },
@@ -1194,6 +1197,350 @@ function TimeTrackingTab() {
   )
 }
 
+// ─── Helpers for IssueTimelineTab ────────────────────────────────────────────
+
+function formatHoursDetailed(h: number | null): string {
+  if (h === null || h === undefined) return '—'
+  if (h < 1) return `${Math.round(h * 60)}m`
+  const days = Math.floor(h / 24)
+  const hrs = Math.floor(h % 24)
+  const mins = Math.round((h % 1) * 60)
+  if (days > 0 && hrs > 0) return `${days}d ${hrs}h`
+  if (days > 0) return `${days}d`
+  if (mins > 0 && hrs === 0) return `${mins}m`
+  return `${hrs}h`
+}
+
+function stintStatusClass(stint: IssueStint): string {
+  if (!stint.exited_at) return 'stint-live'
+  if (stint.moved_back) return 'stint-moved-back'
+  const toL = stint.exited_to.toLowerCase()
+  if (['dev', 'done', 'mobile done', 'stage', 'prod'].includes(toL)) return 'stint-completed'
+  return 'stint-other'
+}
+
+function stintLabel(stint: IssueStint): string {
+  if (!stint.exited_at) return '● Live'
+  if (stint.moved_back) return `↩ → ${stint.exited_to}`
+  return `→ ${stint.exited_to}`
+}
+
+// ─── Tab: Issue Timeline ──────────────────────────────────────────────────────
+
+function IssueTimelineTab() {
+  const [timelines, setTimelines] = useState<IssueTimeline[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [filterSearch, setFilterSearch] = useState('')
+  const [filterLive, setFilterLive] = useState(false)
+  const [filterOverdue, setFilterOverdue] = useState(false)
+  const [filterMovedBack, setFilterMovedBack] = useState(false)
+  const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
+  const [dismissing, setDismissing] = useState<string | null>(null)
+
+  const fetchTimelines = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await api.getIssueTimelines()
+      setTimelines(res.data || [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load timelines')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchTimelines() }, [fetchTimelines])
+  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
+
+  const toggleExpand = (issueID: string) => {
+    setExpandedIssues(prev => {
+      const next = new Set(prev)
+      if (next.has(issueID)) next.delete(issueID)
+      else next.add(issueID)
+      return next
+    })
+  }
+
+  const handleDismiss = async (issueID: string) => {
+    setDismissing(issueID)
+    try {
+      await api.dismissAlert(issueID)
+      setTimelines(prev => prev.map(t =>
+        t.issue_id === issueID ? { ...t, alert_dismissed: true } : t
+      ))
+    } finally {
+      setDismissing(null)
+    }
+  }
+
+  const handleUndismiss = async (issueID: string) => {
+    setDismissing(issueID)
+    try {
+      await api.undismissAlert(issueID)
+      setTimelines(prev => prev.map(t =>
+        t.issue_id === issueID ? { ...t, alert_dismissed: false } : t
+      ))
+    } finally {
+      setDismissing(null)
+    }
+  }
+
+  // Moved-back alerts: live tickets that were moved back and alert not dismissed
+  const movedBackAlerts = timelines.filter(
+    t => t.is_live && t.moved_back_count > 0 && !t.alert_dismissed
+  )
+
+  // Filter tickets
+  let displayed = timelines
+  if (filterSearch) {
+    const q = filterSearch.toLowerCase()
+    displayed = displayed.filter(t =>
+      t.issue_id.toLowerCase().includes(q) || t.issue_summary.toLowerCase().includes(q)
+    )
+  }
+  if (filterLive) displayed = displayed.filter(t => t.is_live)
+  if (filterOverdue) displayed = displayed.filter(t => t.is_overdue)
+  if (filterMovedBack) displayed = displayed.filter(t => t.moved_back_count > 0)
+
+  const liveCount = timelines.filter(t => t.is_live).length
+  const overdueCount = timelines.filter(t => t.is_overdue).length
+  const movedBackCount = timelines.filter(t => t.moved_back_count > 0).length
+
+  return (
+    <div className="pm-tab-content pm-timeline-tab">
+      {/* Header */}
+      <div className="pm-tab-header">
+        <h3 className="pm-section-title"><Activity size={18} /> Issue Timeline</h3>
+        <button className="btn-secondary btn-sm" onClick={fetchTimelines} disabled={loading}>
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Refresh
+        </button>
+      </div>
+
+      {error && <div className="pm-report-error"><AlertTriangle size={16} />{error}</div>}
+
+      {/* Moved-back alerts */}
+      {movedBackAlerts.length > 0 && (
+        <div className="tl-alert-section">
+          <div className="tl-alert-header">
+            <TriangleAlert size={16} />
+            <span>{movedBackAlerts.length} ticket{movedBackAlerts.length > 1 ? 's' : ''} moved back and still In Progress</span>
+          </div>
+          {movedBackAlerts.map(t => (
+            <div key={t.issue_id} className="tl-alert-card">
+              <div className="tl-alert-card-body">
+                <span className="tl-alert-issue-id">{t.issue_id}</span>
+                <span className="tl-alert-summary">{t.issue_summary}</span>
+                {t.assignee && (
+                  <span className="tl-alert-assignee">
+                    {avatarMap[t.assignee]
+                      ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" />
+                      : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>
+                    }
+                    {t.assignee.split(' ')[0]}
+                  </span>
+                )}
+                <span className="tl-alert-meta">
+                  Moved back {t.moved_back_count}× · {formatHoursDetailed(t.total_hours)} total
+                  {t.stints.filter(s => s.moved_back).slice(-1).map(s => s.comment).filter(Boolean).map(c => (
+                    <span key={c} className="tl-alert-reason"> · "{c}"</span>
+                  ))}
+                </span>
+              </div>
+              <div className="tl-alert-actions">
+                <button
+                  className="btn-sm btn-primary"
+                  onClick={() => { toggleExpand(t.issue_id); setFilterSearch(''); setFilterLive(false) }}
+                  title="See full timeline"
+                >
+                  View Timeline
+                </button>
+                <button
+                  className="btn-sm btn-secondary"
+                  onClick={() => handleDismiss(t.issue_id)}
+                  disabled={dismissing === t.issue_id}
+                  title="Dismiss this alert"
+                >
+                  {dismissing === t.issue_id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filter bar */}
+      <div className="pm-filter-bar">
+        <div className="pm-search-box">
+          <Search size={13} />
+          <input
+            type="text"
+            placeholder="Search issue…"
+            value={filterSearch}
+            onChange={e => setFilterSearch(e.target.value)}
+          />
+        </div>
+        <button
+          className={`btn-sm ${filterLive ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setFilterLive(f => !f)}
+        >
+          <Timer size={13} /> Live ({liveCount})
+        </button>
+        <button
+          className={`btn-sm ${filterOverdue ? 'btn-warning-active' : 'btn-secondary'}`}
+          onClick={() => setFilterOverdue(f => !f)}
+        >
+          <AlertTriangle size={13} /> Overdue ({overdueCount})
+        </button>
+        <button
+          className={`btn-sm ${filterMovedBack ? 'btn-warning-active' : 'btn-secondary'}`}
+          onClick={() => setFilterMovedBack(f => !f)}
+        >
+          <RotateCcw size={13} /> Moved Back ({movedBackCount})
+        </button>
+      </div>
+
+      {/* Summary bar */}
+      <div className="tl-summary-bar">
+        <span>{displayed.length} of {timelines.length} issues</span>
+      </div>
+
+      {/* Issue cards */}
+      {loading && timelines.length === 0 ? (
+        <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading timelines…</span></div>
+      ) : displayed.length === 0 ? (
+        <div className="pm-empty-state"><Activity size={40} /><p>No issues found.</p></div>
+      ) : (
+        <div className="tl-card-list">
+          {displayed.map(t => {
+            const isExpanded = expandedIssues.has(t.issue_id)
+            const lastMovedBackStint = [...t.stints].reverse().find(s => s.moved_back)
+
+            return (
+              <div
+                key={t.issue_id}
+                className={[
+                  'tl-issue-card glass-card',
+                  t.is_overdue ? 'tl-overdue' : '',
+                  t.is_live ? 'tl-live' : '',
+                  t.pinned ? 'tl-pinned' : '',
+                ].filter(Boolean).join(' ')}
+              >
+                {/* Card header */}
+                <div className="tl-card-header" onClick={() => toggleExpand(t.issue_id)}>
+                  <div className="tl-card-left">
+                    <div className="tl-card-id-row">
+                      {t.pinned && <Pin size={11} className="tl-pin-icon" />}
+                      <span className="tl-issue-id">{t.issue_id}</span>
+                      {t.priority && <span className={`tl-priority ${priorityBadgeClass(t.priority)}`}>{t.priority}</span>}
+                      {t.is_live && <span className="tl-live-badge"><span className="live-dot-pulse" />Live</span>}
+                      {t.is_overdue && <span className="tl-overdue-badge"><AlertTriangle size={11} /> Overdue</span>}
+                      {t.moved_back_count > 0 && (
+                        <span className="tl-moved-back-badge"><RotateCcw size={11} /> {t.moved_back_count}× back</span>
+                      )}
+                      {t.alert_dismissed && t.moved_back_count > 0 && (
+                        <button
+                          className="tl-undismiss-btn"
+                          onClick={e => { e.stopPropagation(); handleUndismiss(t.issue_id) }}
+                          title="Alert dismissed — click to restore"
+                        >
+                          {dismissing === t.issue_id ? <Loader2 size={10} className="animate-spin" /> : '↺'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="tl-issue-summary">{t.issue_summary}</div>
+                  </div>
+
+                  <div className="tl-card-right">
+                    {t.assignee && (
+                      <span className="tl-assignee" title={t.assignee}>
+                        {avatarMap[t.assignee]
+                          ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" />
+                          : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>
+                        }
+                        <span className="tl-assignee-name">{t.assignee.split(' ')[0]}</span>
+                      </span>
+                    )}
+                    <div className="tl-totals">
+                      <span className="tl-total-hours" title={`Total: ${t.total_hours.toFixed(1)}h`}>
+                        <Timer size={13} /> {formatHoursDetailed(t.total_hours)}
+                      </span>
+                      <span className="tl-threshold" title={`Threshold: ${t.threshold_hours}h`}>/ {t.threshold_hours}h</span>
+                      {t.total_stints > 1 && (
+                        <span className="tl-stints-badge">{t.total_stints} stints</span>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`tl-chevron ${isExpanded ? 'open' : ''}`} />
+                  </div>
+                </div>
+
+                {/* Stint timeline (expanded) */}
+                {isExpanded && (
+                  <div className="tl-stints">
+                    {t.stints.map(stint => (
+                      <div key={stint.stint_number} className={`tl-stint ${stintStatusClass(stint)}`}>
+                        <div className="tl-stint-marker">
+                          {!stint.exited_at
+                            ? <span className="stint-dot live-dot-pulse" />
+                            : stint.moved_back
+                              ? <RotateCcw size={12} />
+                              : <CheckCircle2 size={12} />
+                          }
+                          {stint.stint_number < t.total_stints && <div className="tl-stint-line" />}
+                        </div>
+                        <div className="tl-stint-body">
+                          <div className="tl-stint-header">
+                            <span className="tl-stint-num">#{stint.stint_number}</span>
+                            <span className={`tl-stint-label ${stintStatusClass(stint)}`}>
+                              {stintLabel(stint)}
+                            </span>
+                            <span className="tl-stint-duration">
+                              {formatHoursDetailed(stint.duration_hours)}
+                            </span>
+                          </div>
+                          <div className="tl-stint-dates">
+                            <span>
+                              {new Date(stint.entered_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                              {stint.exited_at && (
+                                <> → {new Date(stint.exited_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</>
+                              )}
+                            </span>
+                            {stint.moved_by && (
+                              <span className="tl-stint-movedby">by {stint.moved_by}</span>
+                            )}
+                          </div>
+                          {stint.comment && (
+                            <div className="tl-stint-comment">"{stint.comment}"</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Summary row */}
+                    <div className="tl-stint-summary">
+                      <span>Total: <strong>{formatHoursDetailed(t.total_hours)}</strong></span>
+                      <span>Threshold: <strong>{t.threshold_hours}h</strong></span>
+                      {lastMovedBackStint && (
+                        <span className="tl-last-reason">
+                          Last moved back: {lastMovedBackStint.comment || `→ ${lastMovedBackStint.exited_to}`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function PMReportsPage() {
@@ -1225,6 +1572,7 @@ export function PMReportsPage() {
           {activeTab === 'daily' && <DailyReportTab />}
           {activeTab === 'assignees' && <AssigneeStatsTab />}
           {activeTab === 'tracking' && <TimeTrackingTab />}
+          {activeTab === 'timeline' && <IssueTimelineTab />}
         </div>
       </div>
     </div>
