@@ -43,7 +43,8 @@ func (c *Client) SetBoardID(boardID string) {
 
 // Issue represents a YouTrack issue
 type Issue struct {
-	ID           string        `json:"id"`           // e.g., "PM-123"
+	ID           string        `json:"id"`           // internal id e.g. "3-671"
+	IDReadable   string        `json:"idReadable"`   // human-readable e.g. "ARD-628" (Cloud format)
 	Summary      string        `json:"summary"`      // Issue title
 	Description  string        `json:"description"`  // Issue description
 	Created      int64         `json:"created"`      // Unix timestamp ms
@@ -72,10 +73,11 @@ type Attachment struct {
 
 // User represents a YouTrack user
 type User struct {
-	ID       string `json:"id"`
-	Login    string `json:"login"`
-	FullName string `json:"fullName"`
-	Email    string `json:"email,omitempty"`
+	ID        string `json:"id"`
+	Login     string `json:"login"`
+	FullName  string `json:"fullName"`
+	Email     string `json:"email,omitempty"`
+	AvatarUrl string `json:"avatarUrl,omitempty"`
 }
 
 // Board represents an agile board
@@ -307,7 +309,7 @@ func (c *Client) GetStates(ctx context.Context) ([]State, error) {
 // GetIssues returns all issues from the project
 func (c *Client) GetIssues(ctx context.Context) ([]Issue, error) {
 	query := url.QueryEscape(fmt.Sprintf("project: %s", c.projectID))
-	fields := "id,summary,description,created,updated,customFields(name,value(name,presentation)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
 	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=200", fields, query)
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -325,8 +327,8 @@ func (c *Client) GetIssues(ctx context.Context) ([]Issue, error) {
 
 // GetIssue returns a single issue by ID
 func (c *Client) GetIssue(ctx context.Context, issueID string) (*Issue, error) {
-	fields := "id,summary,description,created,updated,customFields(name,value(name,presentation)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
-	path := fmt.Sprintf("/api/issues/%s?fields=%s", issueID, fields)
+	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	path := fmt.Sprintf("/api/issues/%s?fields=%s", url.PathEscape(issueID), fields)
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -405,9 +407,9 @@ func (c *Client) DeleteIssue(ctx context.Context, issueID string) error {
 	return err
 }
 
-// GetUsers returns all YouTrack users
+// GetUsers returns all YouTrack users with avatar URLs
 func (c *Client) GetUsers(ctx context.Context) ([]User, error) {
-	path := "/api/users?fields=id,login,fullName,email"
+	path := "/api/users?fields=id,login,fullName,email,avatarUrl&$top=200"
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -574,7 +576,7 @@ func (c *Client) GetIssuesByState(ctx context.Context, states []string) ([]Issue
 		stateFilters[i] = "{" + s + "}"
 	}
 	query := fmt.Sprintf("project: %s State: %s", c.projectID, strings.Join(stateFilters, ", "))
-	fields := "id,summary,created,updated,customFields(name,value(name,presentation)),project(shortName)"
+	fields := "id,idReadable,summary,created,updated,customFields(name,value(name,presentation,fullName,login)),project(shortName)"
 	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=200", fields, url.QueryEscape(query))
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -589,20 +591,83 @@ func (c *Client) GetIssuesByState(ctx context.Context, states []string) ([]Issue
 	return issues, nil
 }
 
-// WebhookEvent represents a YouTrack webhook event payload
+// WebhookEvent represents a YouTrack webhook event payload.
+// Supports two formats:
+//   Format A (YouTrack Cloud): {"author":{...}, "issue":{...}, "changes":[{"field":{"name":"State"},"from":"X","to":"Y"}]}
+//   Format B (self-hosted/older): {"type":"IssueEvent", "issue":{...}, "updater":{...}, "fieldChanges":[{"name":"State","oldValue":...,"newValue":...}]}
 type WebhookEvent struct {
-	Type      string                 `json:"type"`      // "IssueEvent"
-	Timestamp int64                  `json:"timestamp"`
-	Issue     *Issue                 `json:"issue"`
-	Updater   *User                  `json:"updater"`
-	FieldChanges []FieldChange       `json:"fieldChanges"`
+	// Format A (YouTrack Cloud)
+	Author  *User           `json:"author"`
+	IssueID string          `json:"issueId"` // readable ID like "ARD-628"
+	Changes []WebhookChange `json:"changes"` // YouTrack Cloud format
+
+	// Format B (self-hosted)
+	Type         string        `json:"type"`
+	Timestamp    int64         `json:"timestamp"`
+	Updater      *User         `json:"updater"`
+	FieldChanges []FieldChange `json:"fieldChanges"`
+
+	// Common
+	Issue *Issue `json:"issue"`
 }
 
-// FieldChange represents a changed field in a webhook event
+// WebhookChange is the YouTrack Cloud webhook change format
+type WebhookChange struct {
+	Field    WebhookChangeField `json:"field"`
+	From     interface{}        `json:"from"` // string or object with "name"
+	To       interface{}        `json:"to"`   // string or object with "name"
+	Added    interface{}        `json:"added"`
+	Removed  interface{}        `json:"removed"`
+}
+
+// WebhookChangeField identifies the changed field
+type WebhookChangeField struct {
+	Name string `json:"name"` // "State", "Assignee", etc.
+}
+
+// FieldChange represents a changed field in a webhook event (self-hosted format)
 type FieldChange struct {
 	Name     string      `json:"name"`     // "State", "Assignee", etc.
 	OldValue interface{} `json:"oldValue"` // previous value
 	NewValue interface{} `json:"newValue"` // new value
+}
+
+// NormalizedChanges returns all field changes in a unified format regardless of
+// which webhook format was received.
+func (e *WebhookEvent) NormalizedChanges() []FieldChange {
+	var result []FieldChange
+
+	// Format A: YouTrack Cloud "changes" array
+	for _, c := range e.Changes {
+		name := c.Field.Name
+		if name == "" {
+			continue
+		}
+		old := ExtractFieldChangeValue(c.From)
+		if old == "" {
+			old = ExtractFieldChangeValue(c.Removed)
+		}
+		new := ExtractFieldChangeValue(c.To)
+		if new == "" {
+			new = ExtractFieldChangeValue(c.Added)
+		}
+		result = append(result, FieldChange{Name: name, OldValue: old, NewValue: new})
+	}
+
+	// Format B: self-hosted "fieldChanges" array (only if format A had nothing)
+	if len(result) == 0 {
+		result = append(result, e.FieldChanges...)
+	}
+
+	return result
+}
+
+// GetUpdater returns the user who made the change, supporting both formats.
+func (e *WebhookEvent) GetUpdater() *User {
+	if e.Updater != nil {
+		return e.Updater
+	}
+	return e.Author
 }
 
 // ExtractFieldChangeValue extracts a string value from a webhook field change value
@@ -614,10 +679,17 @@ func ExtractFieldChangeValue(val interface{}) string {
 	if s, ok := val.(string); ok {
 		return s
 	}
-	// Could be an object with "name" field
+	// Could be an object with "name" field (state/enum value)
 	if m, ok := val.(map[string]interface{}); ok {
 		if name, ok := m["name"].(string); ok {
 			return name
+		}
+		// Could be a user object with "fullName"
+		if fullName, ok := m["fullName"].(string); ok {
+			return fullName
+		}
+		if login, ok := m["login"].(string); ok {
+			return login
 		}
 	}
 	// Could be an array (e.g., multi-value fields) — take first element
@@ -625,6 +697,74 @@ func ExtractFieldChangeValue(val interface{}) string {
 		return ExtractFieldChangeValue(arr[0])
 	}
 	return fmt.Sprintf("%v", val)
+}
+
+// IssueActivityItem represents a single activity entry from the YouTrack activities API
+type IssueActivityItem struct {
+	ID        string `json:"id"`
+	Timestamp int64  `json:"timestamp"` // Unix ms
+	Author    *User  `json:"author"`
+	Field     struct {
+		Presentation string `json:"presentation"` // "State", "Assignee", etc.
+	} `json:"field"`
+	Added   []ActivityValue `json:"added"`
+	Removed []ActivityValue `json:"removed"`
+	Target  struct {
+		ID         string `json:"id"`         // internal issue id, e.g. "3-884"
+		IDReadable string `json:"idReadable"` // human-readable id, e.g. "ARD-801"
+		Summary    string `json:"summary"`    // issue title (only set when fetching project-wide)
+	} `json:"target"`
+}
+
+// ActivityValue is the value inside added/removed arrays of an activity item
+type ActivityValue struct {
+	Name string `json:"name"`
+}
+
+// GetIssueActivities fetches the full state-change history for an issue using
+// the activitiesPage API. Returns activities in chronological order (oldest first).
+func (c *Client) GetIssueActivities(ctx context.Context, issueID string) ([]IssueActivityItem, error) {
+	path := fmt.Sprintf("/api/issues/%s/activitiesPage?categories=CustomFieldCategory&reverse=false&fields=id,activities(id,timestamp,author(id,fullName,login),field(id,presentation),added(id,name),removed(id,name),target(id,idReadable))&%%24top=1000", url.PathEscape(issueID))
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var page struct {
+		Activities []IssueActivityItem `json:"activities"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal activities: %w", err)
+	}
+	return page.Activities, nil
+}
+
+// GetProjectActivities fetches ALL CustomField activities (State + Assignee changes) across
+// the entire project in a single API call. Returns activities in chronological order.
+// The caller is responsible for filtering by field.presentation.
+func (c *Client) GetProjectActivities(ctx context.Context, top int) ([]IssueActivityItem, error) {
+	if top <= 0 {
+		top = 500
+	}
+	query := url.QueryEscape(fmt.Sprintf("project: %s", c.projectID))
+	// Note: fields must NOT be URL-encoded — YouTrack parses the parentheses literally.
+	// $top must be encoded as %24top to avoid shell/framework misinterpretation.
+	path := fmt.Sprintf(
+		"/api/activitiesPage?categories=CustomFieldCategory&query=%s&reverse=false"+
+			"&fields=id,activities(id,timestamp,author(id,fullName,login),field(id,presentation),added(id,name),removed(id,name),target(id,idReadable,summary))"+
+			"&%%24top=%d",
+		query, top,
+	)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var page struct {
+		Activities []IssueActivityItem `json:"activities"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal project activities: %w", err)
+	}
+	return page.Activities, nil
 }
 
 // IsDuplicateIssue checks if an issue with the same summary already exists

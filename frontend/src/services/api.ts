@@ -359,10 +359,10 @@ class ApiService {
   }
 
   // PM Assistant
-  async pmAssistantQuery(query: string) {
+  async pmAssistantQuery(query: string, history: { role: string; content: string }[] = []) {
     return this.request<{ response: string }>('/youtrack/pm-query', {
       method: 'POST',
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, history }),
     })
   }
 
@@ -851,8 +851,25 @@ class ApiService {
     return this.request<AssigneeStat[]>('/reports/assignee-stats')
   }
 
-  async getTimeTracking() {
-    return this.request<TimeTrackingRow[]>('/reports/time-tracking')
+  async getTimeTracking(params?: { week?: string; assignee?: string; priority?: string }) {
+    const qs = new URLSearchParams()
+    if (params?.week) qs.set('week', params.week)
+    if (params?.assignee) qs.set('assignee', params.assignee)
+    if (params?.priority) qs.set('priority', params.priority)
+    const query = qs.toString() ? `?${qs.toString()}` : ''
+    return this.request<TimeTrackingRow[]>(`/reports/time-tracking${query}`)
+  }
+
+  async pinIssue(issueID: string) {
+    return this.request<void>('/reports/pins', { method: 'POST', body: JSON.stringify({ issue_id: issueID }) })
+  }
+
+  async unpinIssue(issueID: string) {
+    return this.request<void>(`/reports/pins/${encodeURIComponent(issueID)}`, { method: 'DELETE' })
+  }
+
+  async getPinnedIssues() {
+    return this.request<string[]>('/reports/pins')
   }
 
   async backfillStateLog() {
@@ -869,6 +886,12 @@ class ApiService {
 
   async reconcileStateLog() {
     return this.request<{ reconciled: number; skipped: number; checked: number }>('/reports/reconcile', {
+      method: 'POST',
+    })
+  }
+
+  async importHistory() {
+    return this.request<{ inserted: number; skipped: number; errors: number; issues: number }>('/reports/import-history', {
       method: 'POST',
     })
   }
@@ -950,6 +973,7 @@ export interface YouTrackUser {
   login: string
   fullName: string
   email?: string
+  avatarUrl?: string
 }
 
 export interface YouTrackIssue {
@@ -1248,10 +1272,41 @@ export interface TimeTrackingRow {
   priority: string
   transitioned_at: string
   duration_in_prev_state_hours: number | null
+  comment: string
   overdue: boolean
   threshold_hours: number
+  pinned: boolean
 }
 
 // Export singleton instance
 export const api = new ApiService()
 export default api
+
+// ── YouTrack avatar cache ─────────────────────────────────────────────────
+// Maps fullName → absolute avatarUrl. Fetched once per session, reused everywhere.
+let _ytAvatarCache: Record<string, string> | null = null
+let _ytAvatarPromise: Promise<Record<string, string>> | null = null
+
+export async function getYouTrackAvatarMap(): Promise<Record<string, string>> {
+  if (_ytAvatarCache) return _ytAvatarCache
+  if (_ytAvatarPromise) return _ytAvatarPromise
+  _ytAvatarPromise = api.getYouTrackUsers().then(res => {
+    const map: Record<string, string> = {}
+    // getYouTrackUsers returns the raw response — handle both array and {data:[]} shapes
+    const users: YouTrackUser[] = Array.isArray(res)
+      ? res
+      : ((res as unknown as { data?: YouTrackUser[] }).data ?? [])
+    for (const u of users) {
+      if (u.fullName && u.avatarUrl) {
+        // YouTrack Cloud returns absolute URLs (https://xxx.youtrack.cloud/hub/...)
+        map[u.fullName] = u.avatarUrl
+      }
+    }
+    _ytAvatarCache = map
+    return map
+  }).catch(() => {
+    _ytAvatarCache = {}
+    return {}
+  })
+  return _ytAvatarPromise
+}

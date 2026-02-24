@@ -22,7 +22,7 @@ func NewBotConfigHandler() *BotConfigHandler {
 	}
 }
 
-// ListBots returns all bot configurations
+// ListBots returns all bot configurations, merging DB bots with any templates not yet saved.
 func (h *BotConfigHandler) ListBots(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUserFromContext(r)
 	if user == nil {
@@ -40,7 +40,6 @@ func (h *BotConfigHandler) ListBots(w http.ResponseWriter, r *http.Request) {
 
 	configs, err := h.botRepo.List(r.Context())
 	if err != nil {
-		// Return default templates on error
 		sendJSON(w, http.StatusOK, Response{
 			Success: true,
 			Data:    getDefaultTemplates(),
@@ -56,9 +55,27 @@ func (h *BotConfigHandler) ListBots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build set of bot_types already in DB
+	dbTypes := map[string]bool{}
+	for _, c := range configs {
+		dbTypes[string(c.BotType)] = true
+	}
+
+	// Build response: real DB bots first, then any templates whose type isn't in DB yet
+	var result []interface{}
+	for _, c := range configs {
+		result = append(result, c)
+	}
+	for _, tmpl := range getDefaultTemplates() {
+		bt, _ := tmpl["bot_type"].(string)
+		if !dbTypes[bt] {
+			result = append(result, tmpl)
+		}
+	}
+
 	sendJSON(w, http.StatusOK, Response{
 		Success: true,
-		Data:    configs,
+		Data:    result,
 	})
 }
 
@@ -266,6 +283,52 @@ Return a JSON response with team_members array containing name, assigned_tasks, 
 			"is_active":   true,
 			"prompt":      "Your custom prompt here. Use {{$VARIABLE_NAME$}} for variables.",
 			"variables":   `[]`,
+		},
+		{
+			"id":          "template-pm-assistant",
+			"name":        "PM Assistant",
+			"description": "Custom instructions for the PM Assistant chat. Live YouTrack + time tracking data is injected automatically.",
+			"bot_type":    "pm_assistant",
+			"is_active":   true,
+			"prompt": `You are a PM Assistant for a software development team.
+
+## Your Role
+Answer questions about YouTrack issues and time tracking data provided below. Be concise and accurate.
+
+## Assignee Task Format
+When asked for tasks assigned to a specific person, ALWAYS respond in this exact format:
+
+@{assignee_name}
+
+{Status}:
+{issueID} {summary}
+
+Group by status (Backlog, In Progress, Blocked, DEV, Done). One ticket per line. No tables, no pipes, no extra metadata.
+
+Example:
+@simranjot
+
+In Progress:
+3-671 FE Studio: UI theme text issue
+ARD-801 API refactor
+
+Blocked:
+3-896 FE UI: Mic remains activated when holding spacebar
+
+## General Format
+- Use bullet points for lists
+- Use tables only for multi-column comparisons
+- Bold (**text**) for important flags (OVERDUE, MOVED BACK)
+- Group data by assignee when showing team workload
+
+## Key Rules
+- OVERDUE = ticket's time in In Progress exceeds its priority threshold (P0:4h P1:24h P2:48h Other:72h)
+- MOVED BACK = ticket transitioned to a less-advanced state (e.g. DEV→In Progress, In Progress→Backlog) — treat as regression
+- PINNED = PM has manually flagged as important — always mention first
+- If a query is ambiguous, make reasonable assumptions and state them
+
+Today's date: {{DATE}}`,
+			"variables": `[{"name":"DATE","label":"Today's Date","type":"date","default":"today","required":false,"description":"Auto-substituted with today's date"}]`,
 		},
 	}
 }

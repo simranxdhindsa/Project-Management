@@ -244,7 +244,11 @@ func main() {
 	reportRoutes.HandleFunc("/pm-reports", reportHandler.ListReports).Methods("GET")
 	reportRoutes.HandleFunc("/assignee-stats", reportHandler.GetAssigneeStats).Methods("GET")
 	reportRoutes.HandleFunc("/time-tracking", reportHandler.GetTimeTracking).Methods("GET")
+	reportRoutes.HandleFunc("/pins", reportHandler.GetPins).Methods("GET")
+	reportRoutes.HandleFunc("/pins", reportHandler.PinIssue).Methods("POST")
+	reportRoutes.HandleFunc("/pins/{issueID}", reportHandler.UnpinIssue).Methods("DELETE")
 	reportRoutes.HandleFunc("/backfill", reportHandler.BackfillStateLog).Methods("POST")
+	reportRoutes.HandleFunc("/import-history", reportHandler.ImportHistory).Methods("POST")
 	reportRoutes.HandleFunc("/reconcile", reportHandler.ReconcileStateLog).Methods("POST")
 	reportRoutes.HandleFunc("/reset-state-log", reportHandler.ResetStateLog).Methods("DELETE")
 

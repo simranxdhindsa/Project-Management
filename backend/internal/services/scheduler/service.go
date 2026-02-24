@@ -25,9 +25,10 @@ type Service struct {
 	// Track which one-per-day checks have fired today (reset at midnight)
 	firedToday map[string]bool
 	// Track which issue IDs have had an overdue notification sent today
-	// Key: issueID, Value: true if notified today
 	firedOverdueToday map[string]bool
 	lastDate          string
+	// Last time we synced the state log from YouTrack activity feed
+	lastStateLogSync time.Time
 }
 
 // NewService creates a new scheduler service
@@ -92,6 +93,10 @@ func (s *Service) tick() {
 		s.firedOverdueToday = make(map[string]bool)
 		s.lastDate = today
 	}
+
+	// 0. Auto-sync state log from YouTrack activity feed every 2 minutes
+	//    This ensures time tracking stays current without needing a webhook.
+	s.autoSyncStateLog(ctx)
 
 	// 1. Process due reminders
 	s.processDueReminders(ctx)
@@ -422,6 +427,107 @@ func overdueThresholdForPriority(priority string) float64 {
 		return 48
 	default: // P3, Normal, Other
 		return 72
+	}
+}
+
+// autoSyncStateLog pulls the YouTrack project-wide activity feed in ONE API call
+// and inserts any new state transitions into issue_state_log. Runs at most every 2 minutes.
+func (s *Service) autoSyncStateLog(ctx context.Context) {
+	if time.Since(s.lastStateLogSync) < 2*time.Minute {
+		return
+	}
+	s.lastStateLogSync = time.Now()
+
+	baseURL := os.Getenv("YOUTRACK_BASE_URL")
+	token := os.Getenv("YOUTRACK_TOKEN")
+	projectID := os.Getenv("YOUTRACK_PROJECT_ID")
+	if baseURL == "" || token == "" || projectID == "" {
+		return
+	}
+	ytClient := youtrack.NewClient(baseURL, token, projectID)
+
+	// Single project-wide call — no per-issue loop
+	activities, err := ytClient.GetProjectActivities(ctx, 500)
+	if err != nil {
+		log.Printf("[Scheduler] autoSyncStateLog: failed to fetch activities: %v", err)
+		return
+	}
+
+	// First pass: build assignee map per issue from Assignee activity items
+	assigneeByIssue := make(map[string]string)
+	for _, act := range activities {
+		if !strings.EqualFold(act.Field.Presentation, "Assignee") || len(act.Added) == 0 {
+			continue
+		}
+		id := act.Target.IDReadable
+		if id == "" {
+			id = act.Target.ID
+		}
+		assigneeByIssue[id] = act.Added[0].Name
+	}
+
+	inserted := 0
+	for _, act := range activities {
+		if !strings.EqualFold(act.Field.Presentation, "State") {
+			continue
+		}
+		if len(act.Added) == 0 || len(act.Removed) == 0 {
+			continue
+		}
+		fromState := act.Removed[0].Name
+		toState := act.Added[0].Name
+		if fromState == "" || toState == "" || fromState == toState {
+			continue
+		}
+
+		issueID := act.Target.IDReadable
+		if issueID == "" {
+			issueID = act.Target.ID
+		}
+
+		movedBy := ""
+		if act.Author != nil {
+			if act.Author.FullName != "" {
+				movedBy = act.Author.FullName
+			} else {
+				movedBy = act.Author.Login
+			}
+		}
+
+		assignee := assigneeByIssue[issueID]
+		if assignee == "" {
+			assignee = movedBy
+		}
+
+		priority := "Other"
+		for _, p := range []string{"P0 ", "P1 ", "P2 ", "P3 "} {
+			if strings.HasPrefix(act.Target.Summary, p) {
+				priority = strings.TrimSuffix(p, " ")
+				break
+			}
+		}
+
+		transitionedAt := time.Unix(act.Timestamp/1000, (act.Timestamp%1000)*int64(time.Millisecond))
+
+		logEntry := &database.IssueStateLog{
+			IssueID:        issueID,
+			IssueSummary:   act.Target.Summary,
+			Assignee:       assignee,
+			MovedBy:        movedBy,
+			FromState:      fromState,
+			ToState:        toState,
+			Priority:       priority,
+			TransitionedAt: transitionedAt,
+			Comment:        "activity:" + act.ID,
+		}
+
+		if err := s.reportRepo.InsertStateLogIfNotExists(ctx, logEntry, act.ID); err == nil {
+			inserted++
+		}
+	}
+
+	if inserted > 0 {
+		log.Printf("[Scheduler] autoSyncStateLog: inserted %d new transitions", inserted)
 	}
 }
 

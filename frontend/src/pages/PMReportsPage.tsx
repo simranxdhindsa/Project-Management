@@ -1,11 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
   MessageSquare, Send, User, Bot, Loader2,
   FileText, Users, Clock, Copy, Check,
   RefreshCw, ChevronDown, AlertTriangle, TrendingUp,
-  Calendar,
+  Calendar, Pin, PinOff, ChevronLeft, ChevronRight,
+  Search, RotateCcw, ArrowDownUp, ArrowUpNarrowWide,
+  ArrowDownNarrowWide, Star,
 } from 'lucide-react'
-import api from '../services/api'
+import api, { getYouTrackAvatarMap } from '../services/api'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -52,6 +54,44 @@ interface TimeTrackingRow {
   comment: string
   overdue: boolean
   threshold_hours: number
+  pinned: boolean
+}
+
+// State order for moved-back detection (lower = earlier in workflow)
+const STATE_ORDER: Record<string, number> = {
+  'backlog': 0, 'open': 0,
+  'in progress': 1,
+  'dev': 2,
+  'stage': 3, 'ready for stage': 3,
+  'prod': 4, 'ready for prod': 4,
+  'done': 5, 'closed': 5, "won't fix": 5, 'duplicate': 5, 'mobile done': 5,
+}
+
+function isMovedBack(fromState: string, toState: string): boolean {
+  const from = STATE_ORDER[fromState.toLowerCase()] ?? 1
+  const to = STATE_ORDER[toState.toLowerCase()] ?? 1
+  return to < from
+}
+
+// Get Monday of the week containing the given date
+function getMondayOf(date: Date): Date {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day // adjust so Monday=0
+  d.setDate(d.getDate() + diff)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function formatWeekRange(monday: Date): string {
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }
+  return `${monday.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${sunday.toLocaleDateString(undefined, opts)}`
+}
+
+function toISODate(d: Date): string {
+  return d.toISOString().slice(0, 10)
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -66,12 +106,14 @@ const TABS = [
 type TabId = typeof TABS[number]['id']
 
 const SUGGESTED_QUERIES = [
-  'Give me open issues',
+  'Which tickets are currently overdue?',
+  'Show tickets that were moved back',
+  'How long has each In Progress ticket been active?',
+  'Show workload by assignee',
+  'Which tickets are pinned?',
+  'Give me a summary of blocked and In Progress tickets',
   'P1-P3 issues by status',
-  'Report by assignees',
-  'Blocked tickets',
-  'Issues in DEV',
-  'Summary of all tickets',
+  'Tickets in DEV',
 ]
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -206,12 +248,17 @@ function PMAssistantTab() {
     if (!text || loading) return
 
     const userMsg: ChatMessage = { id: `msg-${Date.now()}-user`, role: 'user', content: text, timestamp: new Date() }
-    setMessages(prev => [...prev, userMsg])
+    const updatedMessages = [...messages, userMsg]
+    setMessages(updatedMessages)
     setInput('')
     setLoading(true)
 
     try {
-      const response = await api.pmAssistantQuery(text)
+      // Send full conversation history for multi-turn memory
+      const history = updatedMessages.map(m => ({ role: m.role, content: m.content }))
+      // The last message (current user query) is sent separately as `query`
+      const historyWithoutLast = history.slice(0, -1)
+      const response = await api.pmAssistantQuery(text, historyWithoutLast)
       const assistantMsg: ChatMessage = {
         id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
@@ -233,14 +280,29 @@ function PMAssistantTab() {
     }
   }
 
+  const clearChat = () => setMessages([])
+
   return (
     <div className="pm-tab-content pm-assistant-tab">
+      {/* Context badge + clear button */}
+      <div className="pm-assistant-header">
+        <div className="pm-assistant-context-badge">
+          <Bot size={12} />
+          <span>Context: Live YouTrack issues + Time tracking data + Conversation memory</span>
+        </div>
+        {messages.length > 0 && (
+          <button className="btn-sm btn-secondary" onClick={clearChat} title="Start a new conversation">
+            Clear chat
+          </button>
+        )}
+      </div>
+
       <div className="pm-chat-messages">
         {messages.length === 0 && (
           <div className="pm-chat-empty">
             <MessageSquare size={48} />
             <h3>PM Assistant</h3>
-            <p>Ask questions about your YouTrack issues using natural language.</p>
+            <p>Ask about overdue tickets, regressions, workload, or anything about your project.</p>
             <div className="pm-suggested-queries">
               {SUGGESTED_QUERIES.map(q => (
                 <button key={q} className="pm-suggested-chip" onClick={() => handleSend(q)}>{q}</button>
@@ -272,7 +334,7 @@ function PMAssistantTab() {
             <div className="pm-chat-avatar"><Bot size={16} /></div>
             <div className="pm-chat-bubble pm-chat-loading">
               <Loader2 size={16} className="animate-spin" />
-              <span>Thinking...</span>
+              <span>Thinking…</span>
             </div>
           </div>
         )}
@@ -283,7 +345,7 @@ function PMAssistantTab() {
       <div className="pm-chat-input-bar">
         {messages.length > 0 && (
           <div className="pm-suggested-queries pm-suggested-inline">
-            {SUGGESTED_QUERIES.slice(0, 3).map(q => (
+            {SUGGESTED_QUERIES.slice(0, 4).map(q => (
               <button key={q} className="pm-suggested-chip pm-suggested-sm" onClick={() => handleSend(q)} disabled={loading}>{q}</button>
             ))}
           </div>
@@ -293,7 +355,7 @@ function PMAssistantTab() {
             ref={inputRef}
             type="text"
             className="pm-chat-input"
-            placeholder="Ask about your issues..."
+            placeholder="Ask about overdue tickets, workload, regressions…"
             value={input}
             onChange={e => setInput(e.target.value.slice(0, 500))}
             maxLength={500}
@@ -486,6 +548,7 @@ function AssigneeStatsTab() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
 
   const fetchStats = useCallback(async () => {
     setLoading(true)
@@ -501,6 +564,7 @@ function AssigneeStatsTab() {
   }, [])
 
   useEffect(() => { fetchStats() }, [fetchStats])
+  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
 
   const maxTotal = Math.max(...stats.map(s => s.open + s.in_progress + s.done + s.blocked), 1)
 
@@ -545,7 +609,11 @@ function AssigneeStatsTab() {
                   <>
                     <tr key={s.assignee} className={`pm-assignee-row ${isExpanded ? 'expanded' : ''}`}>
                       <td className="assignee-name-cell">
-                        <div className="assignee-avatar">{s.assignee.charAt(0).toUpperCase()}</div>
+                        {avatarMap[s.assignee] ? (
+                          <img src={avatarMap[s.assignee]} alt={s.assignee} className="assignee-avatar assignee-avatar-img" />
+                        ) : (
+                          <div className="assignee-avatar">{s.assignee.charAt(0).toUpperCase()}</div>
+                        )}
                         {s.assignee}
                       </td>
                       <td className="num-col"><span className="stat-chip open">{s.open}</span></td>
@@ -597,23 +665,50 @@ function AssigneeStatsTab() {
 
 // ─── Tab: Time Tracking ───────────────────────────────────────────────────────
 
+type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at'
+
 function TimeTrackingTab() {
+  // Week navigation — defaults to current week
+  const [selectedWeek, setSelectedWeek] = useState<Date>(() => getMondayOf(new Date()))
+  const [noWeekFilter, setNoWeekFilter] = useState(false)
+
   const [rows, setRows] = useState<TimeTrackingRow[]>([])
   const [loading, setLoading] = useState(false)
-  const [backfilling, setBackfilling] = useState(false)
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // YouTrack avatar map: fullName → avatarUrl
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
+
+  // Filters (client-side)
   const [filterOverdue, setFilterOverdue] = useState(false)
   const [filterMismatch, setFilterMismatch] = useState(false)
+  const [filterMovedBack, setFilterMovedBack] = useState(false)
+  const [filterAssignee, setFilterAssignee] = useState('')
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([])
+  const [sortKey, setSortKey] = useState<SortKey>('entered_at')
+  const [searchIssue, setSearchIssue] = useState('')
+
+  // Custom dropdown open states
+  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false)
+  const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
+  const assigneeDropdownRef = useRef<HTMLDivElement>(null)
+  const sortDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Actions
   const [resetting, setResetting] = useState(false)
   const [resetConfirm, setResetConfirm] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [reconciling, setReconciling] = useState(false)
+  const [togglingPin, setTogglingPin] = useState<string | null>(null)
 
-  const fetchRows = useCallback(async () => {
+  const fetchRows = useCallback(async (week: Date, skipWeek: boolean) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.getTimeTracking()
+      const params: { week?: string } = {}
+      if (!skipWeek) params.week = toISODate(week)
+      const res = await api.getTimeTracking(params)
       setRows(res.data || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load time tracking')
@@ -622,27 +717,58 @@ function TimeTrackingTab() {
     }
   }, [])
 
-  useEffect(() => { fetchRows() }, [fetchRows])
+  useEffect(() => { fetchRows(selectedWeek, noWeekFilter) }, [fetchRows, selectedWeek, noWeekFilter])
 
-  const runBackfill = async () => {
-    setBackfilling(true)
-    setBackfillMsg(null)
+  // Load YouTrack avatars once
+  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
+
+  // Close custom dropdowns on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (assigneeDropdownRef.current && !assigneeDropdownRef.current.contains(e.target as Node)) {
+        setAssigneeDropdownOpen(false)
+      }
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node)) {
+        setSortDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const changeWeek = (delta: number) => {
+    setSelectedWeek(w => {
+      const next = new Date(w)
+      next.setDate(next.getDate() + delta * 7)
+      return next
+    })
+    setNoWeekFilter(false)
+  }
+
+  const goThisWeek = () => {
+    setSelectedWeek(getMondayOf(new Date()))
+    setNoWeekFilter(false)
+  }
+
+  const togglePin = async (row: TimeTrackingRow) => {
+    setTogglingPin(row.issue_id)
     try {
-      const res = await api.backfillStateLog()
-      const d = res.data
-      setBackfillMsg(`Seeded ${d?.inserted ?? 0} entries from ${d?.total ?? 0} live tickets.`)
-      fetchRows()
-    } catch (err) {
-      setBackfillMsg(`Backfill failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      if (row.pinned) {
+        await api.unpinIssue(row.issue_id)
+      } else {
+        await api.pinIssue(row.issue_id)
+      }
+      await fetchRows(selectedWeek, noWeekFilter)
+    } catch {
+      // silently ignore
     } finally {
-      setBackfilling(false)
+      setTogglingPin(null)
     }
   }
 
   const runReset = async () => {
     if (!resetConfirm) {
       setResetConfirm(true)
-      // Auto-cancel confirm after 5s if user doesn't click again
       setTimeout(() => setResetConfirm(false), 5000)
       return
     }
@@ -651,8 +777,7 @@ function TimeTrackingTab() {
     setBackfillMsg(null)
     try {
       const res = await api.resetStateLog()
-      const deleted = res.data?.deleted ?? 0
-      setBackfillMsg(`State log cleared: ${deleted} rows deleted. Webhook events will repopulate it going forward.`)
+      setBackfillMsg(`State log cleared: ${res.data?.deleted ?? 0} rows deleted.`)
       setRows([])
     } catch (err) {
       setBackfillMsg(`Reset failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -667,8 +792,8 @@ function TimeTrackingTab() {
     try {
       const res = await api.reconcileStateLog()
       const d = res.data
-      setBackfillMsg(`Reconcile complete: ${d?.reconciled ?? 0} exit rows inserted for tickets that moved without webhook. ${d?.skipped ?? 0} already up-to-date.`)
-      fetchRows()
+      setBackfillMsg(`Reconcile: ${d?.reconciled ?? 0} exit rows inserted, ${d?.skipped ?? 0} up-to-date.`)
+      fetchRows(selectedWeek, noWeekFilter)
     } catch (err) {
       setBackfillMsg(`Reconcile failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally {
@@ -676,56 +801,81 @@ function TimeTrackingTab() {
     }
   }
 
+  const runImportHistory = async () => {
+    setImporting(true)
+    setBackfillMsg(null)
+    try {
+      const res = await api.importHistory()
+      const d = res.data
+      setBackfillMsg(`Sync done: ${d?.inserted ?? 0} transitions inserted. ${d?.skipped ?? 0} already existed.`)
+      fetchRows(selectedWeek, noWeekFilter)
+    } catch (err) {
+      setBackfillMsg(`Import failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // Derive unique assignees for dropdown
+  const allAssignees = Array.from(new Set(rows.map(r => r.assignee).filter(Boolean))).sort()
+
+  // Client-side filtering
   let displayed = rows
   if (filterOverdue) displayed = displayed.filter(r => r.overdue)
   if (filterMismatch) displayed = displayed.filter(r => r.moved_by_mismatch)
+  if (filterMovedBack) displayed = displayed.filter(r => isMovedBack(r.from_state, r.to_state))
+  if (filterAssignee) displayed = displayed.filter(r => r.assignee.toLowerCase() === filterAssignee.toLowerCase())
+  if (filterPriorities.length > 0) displayed = displayed.filter(r => filterPriorities.includes(r.priority))
+  if (searchIssue) {
+    const q = searchIssue.toLowerCase()
+    displayed = displayed.filter(r => r.issue_id.toLowerCase().includes(q) || r.issue_summary.toLowerCase().includes(q))
+  }
+
+  // Sort
+  displayed = [...displayed].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1 // pinned always first
+    switch (sortKey) {
+      case 'time_asc': return (a.duration_in_prev_state_hours ?? 0) - (b.duration_in_prev_state_hours ?? 0)
+      case 'time_desc': return (b.duration_in_prev_state_hours ?? 0) - (a.duration_in_prev_state_hours ?? 0)
+      case 'priority': {
+        const ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, Other: 4 }
+        return (ORDER[a.priority] ?? 4) - (ORDER[b.priority] ?? 4)
+      }
+      default: return new Date(b.transitioned_at).getTime() - new Date(a.transitioned_at).getTime()
+    }
+  })
 
   const overdueCount = rows.filter(r => r.overdue).length
   const mismatchCount = rows.filter(r => r.moved_by_mismatch).length
+  const movedBackCount = rows.filter(r => isMovedBack(r.from_state, r.to_state)).length
+  const pinnedCount = rows.filter(r => r.pinned).length
 
   return (
     <div className="pm-tab-content pm-tracking-tab">
+      {/* Header */}
       <div className="pm-tab-header">
         <h3 className="pm-section-title"><Clock size={18} /> Time Tracking</h3>
         <div className="pm-tracking-controls">
-          {mismatchCount > 0 && (
-            <button
-              className={`btn-sm ${filterMismatch ? 'btn-warning-active' : 'btn-secondary'}`}
-              onClick={() => setFilterMismatch(f => !f)}
-            >
-              <AlertTriangle size={14} />
-              {filterMismatch ? 'Show All' : `Mismatch (${mismatchCount})`}
-            </button>
-          )}
-          {overdueCount > 0 && (
-            <button
-              className={`btn-sm ${filterOverdue ? 'btn-danger-active' : 'btn-secondary'}`}
-              onClick={() => setFilterOverdue(f => !f)}
-            >
-              <AlertTriangle size={14} />
-              {filterOverdue ? 'Show All' : `Overdue (${overdueCount})`}
-            </button>
-          )}
           <button
             className={`btn-sm ${resetConfirm ? 'btn-danger-active' : 'btn-secondary'}`}
             onClick={runReset}
-            disabled={resetting || loading}
-            title={resetConfirm ? 'Click again to confirm — this deletes ALL state log rows' : 'Clear all state log rows (start fresh from webhooks)'}
+            disabled={resetting || importing || loading}
+            title={resetConfirm ? 'Click again to confirm' : 'Clear all rows'}
           >
             {resetting ? <Loader2 size={14} className="animate-spin" /> : <AlertTriangle size={14} />}
-            {resetting ? 'Clearing...' : resetConfirm ? 'Confirm Reset?' : 'Clear Log'}
+            {resetting ? 'Clearing…' : resetConfirm ? 'Confirm?' : 'Clear'}
           </button>
-          <button className="btn-secondary btn-sm" onClick={runBackfill} disabled={backfilling || loading} title="Seed existing In Progress tickets into time tracking">
-            {backfilling ? <Loader2 size={14} className="animate-spin" /> : <TrendingUp size={14} />}
-            Backfill
+          <button className="btn-secondary btn-sm" onClick={runReconcile} disabled={reconciling || importing || loading}
+            title="Reconcile: close any In Progress entries whose ticket has since moved">
+            {reconciling ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+            {reconciling ? 'Reconciling…' : 'Reconcile'}
           </button>
-          <button className="btn-secondary btn-sm" onClick={runReconcile} disabled={reconciling || loading} title="Check tickets still marked In Progress against live YouTrack and insert missing exit rows">
-            {reconciling ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            {reconciling ? 'Reconciling...' : 'Reconcile'}
+          <button className="btn-primary btn-sm" onClick={runImportHistory} disabled={importing || resetting || loading}>
+            {importing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {importing ? 'Syncing…' : 'Sync History'}
           </button>
-          <button className="btn-secondary btn-sm" onClick={fetchRows} disabled={loading}>
+          <button className="btn-secondary btn-sm" onClick={() => fetchRows(selectedWeek, noWeekFilter)} disabled={loading || importing}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Refresh
           </button>
         </div>
       </div>
@@ -737,24 +887,200 @@ function TimeTrackingTab() {
         </div>
       )}
 
+      {/* Week Navigator */}
+      <div className="pm-week-nav glass-card">
+        <button className="btn-icon" onClick={() => changeWeek(-1)} title="Previous week">
+          <ChevronLeft size={16} />
+        </button>
+        <div className="week-label">
+          {noWeekFilter ? (
+            <span className="week-all">All Time</span>
+          ) : (
+            <>
+              <Calendar size={14} />
+              <span>{formatWeekRange(selectedWeek)}</span>
+            </>
+          )}
+        </div>
+        <button className="btn-icon" onClick={() => changeWeek(1)} title="Next week">
+          <ChevronRight size={16} />
+        </button>
+        <button
+          className={`btn-sm ${noWeekFilter ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setNoWeekFilter(f => !f)}
+          title="Toggle between weekly view and all-time view"
+        >
+          {noWeekFilter ? 'By Week' : 'All Time'}
+        </button>
+        <button className="btn-sm btn-secondary" onClick={goThisWeek} disabled={noWeekFilter}>
+          This Week
+        </button>
+        {pinnedCount > 0 && (
+          <span className="pinned-count-badge"><Pin size={12} /> {pinnedCount} pinned</span>
+        )}
+      </div>
+
+      {/* Filter Bar */}
+      <div className="pm-filter-bar">
+        {/* Search */}
+        <div className="pm-search-box">
+          <Search size={13} />
+          <input
+            type="text"
+            placeholder="Search issue…"
+            value={searchIssue}
+            onChange={e => setSearchIssue(e.target.value)}
+          />
+        </div>
+
+        {/* Assignee custom dropdown with avatars */}
+        <div className="pm-custom-dropdown" ref={assigneeDropdownRef}>
+          <button
+            className="pm-custom-dropdown-trigger"
+            onClick={() => setAssigneeDropdownOpen(o => !o)}
+          >
+            {filterAssignee ? (
+              <>
+                {avatarMap[filterAssignee] ? (
+                  <img src={avatarMap[filterAssignee]} alt={filterAssignee} className="filter-avatar-img" />
+                ) : (
+                  <span className="filter-avatar-placeholder">{filterAssignee.charAt(0).toUpperCase()}</span>
+                )}
+                <span className="filter-assignee-name">{filterAssignee.split(' ')[0]}</span>
+              </>
+            ) : (
+              <>
+                <Users size={14} />
+                <span>All Assignees</span>
+              </>
+            )}
+            <ChevronDown size={12} className={`dropdown-chevron ${assigneeDropdownOpen ? 'open' : ''}`} />
+          </button>
+          {assigneeDropdownOpen && (
+            <div className="pm-custom-dropdown-menu">
+              <button
+                className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`}
+                onClick={() => { setFilterAssignee(''); setAssigneeDropdownOpen(false) }}
+              >
+                <Users size={14} />
+                <span>All Assignees</span>
+              </button>
+              {allAssignees.map(a => (
+                <button
+                  key={a}
+                  className={`pm-dropdown-item ${filterAssignee === a ? 'active' : ''}`}
+                  onClick={() => { setFilterAssignee(a); setAssigneeDropdownOpen(false) }}
+                >
+                  {avatarMap[a] ? (
+                    <img src={avatarMap[a]} alt={a} className="filter-avatar-img" />
+                  ) : (
+                    <span className="filter-avatar-placeholder">{a.charAt(0).toUpperCase()}</span>
+                  )}
+                  <span>{a}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Priority chips */}
+        <div className="pm-priority-chips">
+          {['P0', 'P1', 'P2', 'P3'].map(p => (
+            <button
+              key={p}
+              className={`priority-chip ${filterPriorities.includes(p) ? 'active' : ''} ${priorityBadgeClass(p)}`}
+              onClick={() => setFilterPriorities(prev =>
+                prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* Sort custom dropdown with icons */}
+        <div className="pm-custom-dropdown" ref={sortDropdownRef}>
+          <button
+            className="pm-custom-dropdown-trigger"
+            onClick={() => setSortDropdownOpen(o => !o)}
+          >
+            {sortKey === 'entered_at' && <><ArrowDownUp size={14} /><span>Newest First</span></>}
+            {sortKey === 'time_asc' && <><ArrowUpNarrowWide size={14} /><span>Time ↑</span></>}
+            {sortKey === 'time_desc' && <><ArrowDownNarrowWide size={14} /><span>Time ↓</span></>}
+            {sortKey === 'priority' && <><Star size={14} /><span>Priority</span></>}
+            <ChevronDown size={12} className={`dropdown-chevron ${sortDropdownOpen ? 'open' : ''}`} />
+          </button>
+          {sortDropdownOpen && (
+            <div className="pm-custom-dropdown-menu">
+              {([
+                { key: 'entered_at', label: 'Newest First', Icon: ArrowDownUp },
+                { key: 'time_asc',   label: 'Time ↑ (low→high)', Icon: ArrowUpNarrowWide },
+                { key: 'time_desc',  label: 'Time ↓ (high→low)', Icon: ArrowDownNarrowWide },
+                { key: 'priority',   label: 'Priority', Icon: Star },
+              ] as { key: SortKey; label: string; Icon: React.ElementType }[]).map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  className={`pm-dropdown-item ${sortKey === key ? 'active' : ''}`}
+                  onClick={() => { setSortKey(key); setSortDropdownOpen(false) }}
+                >
+                  <Icon size={14} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Toggle filters */}
+        <div className="pm-toggle-filters">
+          {overdueCount > 0 && (
+            <button
+              className={`btn-sm ${filterOverdue ? 'btn-danger-active' : 'btn-secondary'}`}
+              onClick={() => setFilterOverdue(f => !f)}
+            >
+              <AlertTriangle size={13} /> Overdue ({overdueCount})
+            </button>
+          )}
+          {mismatchCount > 0 && (
+            <button
+              className={`btn-sm ${filterMismatch ? 'btn-warning-active' : 'btn-secondary'}`}
+              onClick={() => setFilterMismatch(f => !f)}
+            >
+              <AlertTriangle size={13} /> Mismatch ({mismatchCount})
+            </button>
+          )}
+          {movedBackCount > 0 && (
+            <button
+              className={`btn-sm ${filterMovedBack ? 'btn-warning-active' : 'btn-secondary'}`}
+              onClick={() => setFilterMovedBack(f => !f)}
+            >
+              <RotateCcw size={13} /> Moved Back ({movedBackCount})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Table */}
       {loading && rows.length === 0 ? (
-        <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading time tracking...</span></div>
+        <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading time tracking…</span></div>
       ) : rows.length === 0 ? (
         <div className="pm-empty-state">
           <Clock size={40} />
-          <p>No time tracking data yet.</p>
-          <p style={{fontSize:'0.8rem'}}>Click <strong>Backfill</strong> to seed current In Progress tickets, or wait for YouTrack webhooks to fire on state changes.</p>
+          <p>No time tracking data for this week.</p>
+          <p style={{fontSize:'0.8rem'}}>Try <strong>All Time</strong> view or click <strong>Sync History</strong> to import from YouTrack.</p>
         </div>
       ) : (
         <div className="pm-tracking-table-wrap glass-card">
           <div className="pm-tracking-summary">
-            <span>{rows.length} transitions recorded</span>
+            <span>{displayed.length} of {rows.length} transitions</span>
             {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
-            {mismatchCount > 0 && <span className="mismatch-summary-badge"><AlertTriangle size={12} /> {mismatchCount} moved by non-assignee</span>}
+            {mismatchCount > 0 && <span className="mismatch-summary-badge"><AlertTriangle size={12} /> {mismatchCount} mismatch</span>}
+            {movedBackCount > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {movedBackCount} moved back</span>}
           </div>
           <table className="pm-tracking-table">
             <thead>
               <tr>
+                <th></th>{/* pin */}
                 <th>Issue</th>
                 <th>Assignee</th>
                 <th>Moved By</th>
@@ -769,76 +1095,95 @@ function TimeTrackingTab() {
             </thead>
             <tbody>
               {displayed.map(row => {
-                // A row with to_state='In Progress' and no exit yet = currently active
-                const isCurrentlyInProgress = row.to_state.toLowerCase() === 'in progress'
+                const isLive = row.to_state.toLowerCase() === 'in progress'
+                const movedBack = isMovedBack(row.from_state, row.to_state)
                 return (
-                <tr key={row.id} className={`${row.overdue ? 'overdue-row' : ''} ${row.moved_by_mismatch ? 'mismatch-row' : ''}`}>
-                  <td className="issue-cell">
-                    <div className="issue-id">{row.issue_id}</div>
-                    <div className="issue-summary">{row.issue_summary}</div>
-                  </td>
-                  <td>{row.assignee || '—'}</td>
-                  <td>
-                    {row.moved_by ? (
-                      <span className={row.moved_by_mismatch ? 'moved-by-mismatch' : ''}>
-                        {row.moved_by}
-                        {row.moved_by_mismatch && <AlertTriangle size={12} style={{marginLeft: 4}} />}
-                      </span>
-                    ) : '—'}
-                  </td>
-                  <td>
-                    {row.priority ? (
-                      <span className={priorityBadgeClass(row.priority)}>{row.priority}</span>
-                    ) : '—'}
-                  </td>
-                  <td>
-                    {isCurrentlyInProgress ? (
+                  <tr
+                    key={row.id}
+                    className={[
+                      row.overdue ? 'overdue-row' : '',
+                      row.moved_by_mismatch ? 'mismatch-row' : '',
+                      row.pinned ? 'pinned-row' : '',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    {/* Pin toggle */}
+                    <td className="pin-cell">
+                      <button
+                        className={`pin-btn ${row.pinned ? 'pinned' : ''}`}
+                        onClick={() => togglePin(row)}
+                        disabled={togglingPin === row.issue_id}
+                        title={row.pinned ? 'Unpin (remove from all weeks)' : 'Pin (show in every week)'}
+                      >
+                        {togglingPin === row.issue_id
+                          ? <Loader2 size={13} className="animate-spin" />
+                          : row.pinned ? <Pin size={13} /> : <PinOff size={13} />
+                        }
+                      </button>
+                    </td>
+                    <td className="issue-cell">
+                      <div className="issue-id">
+                        {row.pinned && <Pin size={10} className="pin-indicator" />}
+                        {row.issue_id}
+                      </div>
+                      <div className="issue-summary">{row.issue_summary}</div>
+                    </td>
+                    <td>{row.assignee || '—'}</td>
+                    <td>
+                      {row.moved_by ? (
+                        <span className={row.moved_by_mismatch ? 'moved-by-mismatch' : ''}>
+                          {row.moved_by}
+                          {row.moved_by_mismatch && <AlertTriangle size={12} style={{marginLeft: 4}} />}
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td>
+                      {row.priority
+                        ? <span className={priorityBadgeClass(row.priority)}>{row.priority}</span>
+                        : '—'}
+                    </td>
+                    <td>
                       <span className="state-transition">
                         <span className="from-state">{row.from_state || 'Backlog'}</span>
-                        <span className="arrow">→</span>
-                        <span className="to-state in-progress-active">In Progress ●</span>
-                      </span>
-                    ) : (
-                      <span className="state-transition">
-                        <span className="from-state">In Progress</span>
-                        <span className="arrow">→</span>
-                        <span className="to-state">{row.to_state}</span>
-                      </span>
-                    )}
-                  </td>
-                  <td className={`duration-cell ${row.overdue ? 'overdue-duration' : ''}`}>
-                    {isCurrentlyInProgress
-                      ? <span className="live-elapsed">{formatHours(row.duration_in_prev_state_hours)} <span className="live-dot">live</span></span>
-                      : formatHours(row.duration_in_prev_state_hours)
-                    }
-                  </td>
-                  <td className="threshold-cell">{row.threshold_hours}h</td>
-                  <td>
-                    {isCurrentlyInProgress ? (
-                      row.overdue
-                        ? <span className="overdue-badge"><AlertTriangle size={12} /> Overdue</span>
-                        : <span className="in-progress-badge">In Progress</span>
-                    ) : (
-                      row.overdue
-                        ? <span className="overdue-badge"><AlertTriangle size={12} /> Overdue</span>
-                        : <span className="on-time-badge">Done ✓</span>
-                    )}
-                  </td>
-                  <td className="date-cell">
-                    {new Date(row.transitioned_at).toLocaleString(undefined, {
-                      month: 'short', day: 'numeric',
-                      hour: '2-digit', minute: '2-digit'
-                    })}
-                  </td>
-                  <td className="comment-cell">
-                    {row.comment
-                      ? <span className="comment-text" title={row.comment}>
-                          {row.comment.length > 40 ? row.comment.slice(0, 40) + '…' : row.comment}
+                        <span className="arrow">
+                          {movedBack ? <span className="moved-back-arrow" title="Moved back">↩</span> : '→'}
                         </span>
-                      : <span className="no-comment">—</span>
-                    }
-                  </td>
-                </tr>
+                        <span className={`to-state ${isLive ? 'in-progress-active' : ''}`}>
+                          {isLive ? 'In Progress ●' : row.to_state}
+                        </span>
+                      </span>
+                    </td>
+                    <td className={`duration-cell ${row.overdue ? 'overdue-duration' : ''}`}>
+                      {isLive
+                        ? <span className="live-elapsed">{formatHours(row.duration_in_prev_state_hours)} <span className="live-dot">live</span></span>
+                        : formatHours(row.duration_in_prev_state_hours)
+                      }
+                    </td>
+                    <td className="threshold-cell">{row.threshold_hours}h</td>
+                    <td>
+                      {isLive
+                        ? row.overdue
+                          ? <span className="overdue-badge"><AlertTriangle size={12} /> Overdue</span>
+                          : <span className="in-progress-badge">In Progress</span>
+                        : row.overdue
+                          ? <span className="overdue-badge"><AlertTriangle size={12} /> Overdue</span>
+                          : <span className="on-time-badge">Done ✓</span>
+                      }
+                    </td>
+                    <td className="date-cell">
+                      {new Date(row.transitioned_at).toLocaleString(undefined, {
+                        month: 'short', day: 'numeric',
+                        hour: '2-digit', minute: '2-digit'
+                      })}
+                    </td>
+                    <td className="comment-cell">
+                      {row.comment
+                        ? <span className="comment-text" title={row.comment}>
+                            {row.comment.length > 40 ? row.comment.slice(0, 40) + '…' : row.comment}
+                          </span>
+                        : <span className="no-comment">—</span>
+                      }
+                    </td>
+                  </tr>
                 )
               })}
             </tbody>

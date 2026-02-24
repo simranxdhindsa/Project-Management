@@ -1444,7 +1444,81 @@ func (h *YouTrackHandler) GetSyncRecommendations(w http.ResponseWriter, r *http.
 // PM Assistant Query (AI Chat with YouTrack Context)
 // ============================================================
 
-// PMAssistantQuery handles natural language queries against YouTrack data
+// defaultPMAssistantPrompt is used when no active pm_assistant bot config exists.
+const defaultPMAssistantPrompt = `You are a PM Assistant for a software development team.
+
+## Your Role
+Answer questions about YouTrack issues and time tracking data provided below. Be concise and accurate.
+
+## Assignee Task Format
+When asked for tasks assigned to a specific person, ALWAYS respond in this exact format:
+
+@{assignee_name}
+
+{Status}:
+{issueID} {summary}
+
+Group by status (Backlog, In Progress, Blocked, DEV, Done). One ticket per line. No tables, no pipes, no extra metadata.
+
+Example:
+@simranjot
+
+In Progress:
+3-671 FE Studio: UI theme text issue
+ARD-801 API refactor
+
+Blocked:
+3-896 FE UI: Mic remains activated when holding spacebar
+
+## General Format
+- Use bullet points for lists
+- Use tables only for multi-column comparisons (e.g. showing all assignees side by side)
+- Bold (**text**) for important flags (OVERDUE, MOVED BACK)
+- Group data by assignee when showing team workload
+
+## Key Rules
+- OVERDUE = ticket's time in In Progress exceeds its priority threshold (P0:4h P1:24h P2:48h Other:72h)
+- MOVED BACK = ticket transitioned to a less-advanced state (e.g. DEV→In Progress, In Progress→Backlog) — treat as regression
+- PINNED = PM has manually flagged this ticket as important — always mention these first
+- If the query is ambiguous, make reasonable assumptions and state them
+
+Today's date: {{DATE}}`
+
+// pmStateOrder is used to detect moved-back (regression) transitions.
+var pmStateOrder = map[string]int{
+	"backlog": 0, "open": 0,
+	"in progress": 1,
+	"dev": 2,
+	"stage": 3, "ready for stage": 3,
+	"prod": 4, "ready for prod": 4,
+	"done": 5, "closed": 5, "won't fix": 5, "duplicate": 5, "mobile done": 5,
+}
+
+func pmIsMovedBack(from, to string) bool {
+	toRank, toOk := pmStateOrder[strings.ToLower(to)]
+	fromRank, fromOk := pmStateOrder[strings.ToLower(from)]
+	if !toOk || !fromOk {
+		return false
+	}
+	return toRank < fromRank
+}
+
+func pmOverdueThreshold(priority string) float64 {
+	switch strings.ToUpper(priority) {
+	case "P0", "CRITICAL":
+		return 4
+	case "P1":
+		return 24
+	case "P2":
+		return 48
+	default:
+		return 72
+	}
+}
+
+// PMAssistantQuery handles natural language queries against YouTrack + time tracking data.
+// It loads an active pm_assistant bot config for custom instructions, injects live data,
+// and supports multi-turn conversation history.
 func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
@@ -1453,51 +1527,122 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
-		Query string `json:"query"`
+		Query   string           `json:"query"`
+		History []ai.ConvMessage `json:"history"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Query == "" {
 		http.Error(w, "Invalid request: query is required", http.StatusBadRequest)
 		return
 	}
 
-	client, err := h.getYouTrackClient(r.Context())
-	if err != nil || client == nil {
-		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
-		return
-	}
-
-	issues, err := client.GetIssues(r.Context())
-	if err != nil {
-		http.Error(w, "Failed to fetch YouTrack issues: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Build context from YouTrack issues
-	var sb strings.Builder
-	sb.WriteString("Here are the current YouTrack issues:\n\n")
-	for _, issue := range issues {
-		status := youtrack.GetStatus(issue)
-		assignee := youtrack.GetAssignee(issue)
-		assigneeName := "Unassigned"
-		if assignee != nil && assignee.FullName != "" {
-			assigneeName = assignee.FullName
+	// ── 1. Load custom instructions from active pm_assistant bot config ──────
+	botRepo := database.NewBotConfigRepository()
+	bots, _ := botRepo.GetByType(r.Context(), models.BotTypePMAssistant)
+	customInstructions := ""
+	for _, b := range bots {
+		if b.IsActive {
+			customInstructions = b.Prompt
+			break
 		}
-		sb.WriteString(fmt.Sprintf("- %s | %s | Status: %s | Assignee: %s\n", issue.ID, issue.Summary, status, assigneeName))
+	}
+	if customInstructions == "" {
+		customInstructions = defaultPMAssistantPrompt
+	}
+	// Substitute {{DATE}} variable
+	customInstructions = strings.ReplaceAll(customInstructions, "{{DATE}}", time.Now().Format("2006-01-02"))
+
+	// ── 2. Fetch live YouTrack issues ────────────────────────────────────────
+	var issueSection strings.Builder
+	issueSection.WriteString("\n\n---\n## Live YouTrack Issues (current state)\n")
+	issueSection.WriteString("Format: ID | Priority | Summary | Status | Assignee\n\n")
+
+	ytClient, err := h.getYouTrackClient(r.Context())
+	if err == nil && ytClient != nil {
+		issues, err := ytClient.GetIssues(r.Context())
+		if err == nil {
+			for _, issue := range issues {
+				status := youtrack.GetStatus(issue)
+				assignee := youtrack.GetAssignee(issue)
+				assigneeName := "Unassigned"
+				if assignee != nil && assignee.FullName != "" {
+					assigneeName = assignee.FullName
+				}
+				priority := ""
+				for _, p := range []string{"P0", "P1", "P2", "P3"} {
+					if strings.HasPrefix(issue.Summary, p+" ") {
+						priority = p
+						break
+					}
+				}
+				issueSection.WriteString(fmt.Sprintf("- %s | %s | %s | %s | %s\n",
+					issue.ID, priority, issue.Summary, status, assigneeName))
+			}
+		} else {
+			issueSection.WriteString("(Failed to fetch live issues: " + err.Error() + ")\n")
+		}
+	} else {
+		issueSection.WriteString("(YouTrack not configured — no live issue data)\n")
 	}
 
-	systemPrompt := `You are a PM Assistant for a software development team. You have access to the team's YouTrack issue tracker data provided below.
+	// ── 3. Fetch time tracking log ───────────────────────────────────────────
+	var trackingSection strings.Builder
+	trackingSection.WriteString("\n\n---\n## Time Tracking History (In Progress transitions)\n")
+	trackingSection.WriteString("Format: IssueID | Summary | Assignee | MovedBy | From→To | Hours | Overdue? | MovedBack? | EnteredAt | Pinned?\n\n")
 
-Answer the user's questions about the project using this data. Format your responses in clean markdown:
-- Use tables for structured data
-- Use bullet points for lists
-- Use bold for emphasis
-- Be concise but thorough
-- If asked for reports, group and summarize data clearly
-- If the query is ambiguous, make reasonable assumptions and note them
+	reportRepo := database.NewReportRepository()
+	pinnedIDs, _ := reportRepo.GetPinnedIssueIDs(r.Context(), userID)
+	pinnedSet := make(map[string]bool, len(pinnedIDs))
+	for _, id := range pinnedIDs {
+		pinnedSet[id] = true
+	}
 
-` + sb.String()
+	trackingLogs, trackErr := reportRepo.GetTimeTracking(r.Context(), database.TimeTrackingParams{})
+	if trackErr == nil && len(trackingLogs) > 0 {
+		for _, row := range trackingLogs {
+			hours := 0.0
+			if row.DurationInPrevStateHours != nil {
+				hours = *row.DurationInPrevStateHours
+			}
+			threshold := pmOverdueThreshold(row.Priority)
+			overdue := hours > threshold && row.DurationInPrevStateHours != nil
+			overdueStr := "No"
+			if overdue {
+				overdueStr = fmt.Sprintf("OVERDUE (>%.0fh threshold)", threshold)
+			}
+			movedBack := pmIsMovedBack(row.FromState, row.ToState)
+			movedBackStr := "No"
+			if movedBack {
+				movedBackStr = "MOVED BACK"
+			}
+			pinnedStr := "-"
+			if pinnedSet[row.IssueID] {
+				pinnedStr = "PINNED"
+			}
+			enteredAt := row.TransitionedAt.Format("2006-01-02 15:04")
 
-	response, err := ai.QueryWithContext(r.Context(), systemPrompt, req.Query)
+			// Show "LIVE" for currently active In Progress entries
+			hoursStr := fmt.Sprintf("%.1fh", hours)
+			if strings.EqualFold(row.ToState, "in progress") && row.DurationInPrevStateHours == nil {
+				hoursStr = fmt.Sprintf("%.1fh (LIVE)", hours)
+			}
+
+			trackingSection.WriteString(fmt.Sprintf("- %s | %s | %s | %s | %s→%s | %s | %s | %s | %s | %s\n",
+				row.IssueID, row.IssueSummary, row.Assignee, row.MovedBy,
+				row.FromState, row.ToState,
+				hoursStr, overdueStr, movedBackStr, enteredAt, pinnedStr))
+		}
+		trackingSection.WriteString(fmt.Sprintf("\nOverdue thresholds: P0=4h, P1=24h, P2=48h, Other=72h\n"))
+	} else if trackErr != nil {
+		trackingSection.WriteString("(Failed to load time tracking data: " + trackErr.Error() + ")\n")
+	} else {
+		trackingSection.WriteString("(No time tracking data yet — run Sync History to import)\n")
+	}
+
+	// ── 4. Assemble full system prompt ───────────────────────────────────────
+	systemPrompt := customInstructions + issueSection.String() + trackingSection.String()
+
+	// ── 5. Query AI with conversation history ────────────────────────────────
+	response, err := ai.QueryWithHistory(r.Context(), systemPrompt, req.History, req.Query)
 	if err != nil {
 		http.Error(w, "AI query failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1527,7 +1672,8 @@ func (h *YouTrackHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 	defer r.Body.Close()
 
-	log.Printf("[YouTrack Webhook] Received payload (%d bytes)", len(body))
+	// Log full raw payload so we can diagnose the exact structure YouTrack sends
+	log.Printf("[YouTrack Webhook] Received payload (%d bytes): %s", len(body), string(body))
 
 	// YouTrack sends an array of events or a single event object
 	// Try to parse as a single event first, then as an array
@@ -1560,10 +1706,18 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 
 	for _, event := range events {
 		if event.Issue == nil {
+			log.Printf("[YouTrack Webhook] Skipping event with no issue field")
 			continue
 		}
 
+		// Prefer the human-readable ID (e.g. "ARD-628") over internal ID (e.g. "3-671").
+		// YouTrack Cloud sends idReadable in the issue object; top-level issueId is also readable.
 		issueID := event.Issue.ID
+		if event.Issue.IDReadable != "" {
+			issueID = event.Issue.IDReadable
+		} else if event.IssueID != "" {
+			issueID = event.IssueID
+		}
 		summary := event.Issue.Summary
 
 		// Extract assignee, priority and the person who made the change
@@ -1580,15 +1734,17 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 			}
 			priority = youtrack.GetPriority(*event.Issue)
 		}
-		if event.Updater != nil {
-			if event.Updater.FullName != "" {
-				movedBy = event.Updater.FullName
+		if updater := event.GetUpdater(); updater != nil {
+			if updater.FullName != "" {
+				movedBy = updater.FullName
 			} else {
-				movedBy = event.Updater.Login
+				movedBy = updater.Login
 			}
 		}
 
-		for _, change := range event.FieldChanges {
+		log.Printf("[YouTrack Webhook] Processing event for issue=%q summary=%q movedBy=%q assignee=%q", issueID, summary, movedBy, assignee)
+
+		for _, change := range event.NormalizedChanges() {
 			oldValue := youtrack.ExtractFieldChangeValue(change.OldValue)
 			newValue := youtrack.ExtractFieldChangeValue(change.NewValue)
 

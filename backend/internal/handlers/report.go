@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -349,7 +350,7 @@ func (h *ReportHandler) GetAssigneeStats(w http.ResponseWriter, r *http.Request)
 }
 
 // GetTimeTracking returns the time tracking table (In Progress durations per ticket)
-// GET /api/reports/time-tracking
+// GET /api/reports/time-tracking?week=2026-02-16&assignee=alice,bob&priority=P0,P1
 func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUserFromContext(r)
 	if user == nil {
@@ -357,7 +358,43 @@ func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	logs, err := h.reportRepo.GetTimeTracking(r.Context())
+	q := r.URL.Query()
+	params := database.TimeTrackingParams{}
+
+	// Parse week= (ISO Monday date, e.g. 2026-02-16)
+	if weekStr := q.Get("week"); weekStr != "" {
+		monday, err := time.Parse("2006-01-02", weekStr)
+		if err == nil {
+			monday = time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, time.UTC)
+			sunday := monday.AddDate(0, 0, 6).Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+			params.WeekStart = &monday
+			params.WeekEnd = &sunday
+		}
+	}
+
+	// Parse assignee= (comma-separated)
+	if a := q.Get("assignee"); a != "" {
+		for _, name := range strings.Split(a, ",") {
+			if trimmed := strings.TrimSpace(strings.ToLower(name)); trimmed != "" {
+				params.Assignees = append(params.Assignees, trimmed)
+			}
+		}
+	}
+
+	// Parse priority= (comma-separated, e.g. P0,P1)
+	if p := q.Get("priority"); p != "" {
+		for _, pri := range strings.Split(p, ",") {
+			if trimmed := strings.TrimSpace(pri); trimmed != "" {
+				params.Priorities = append(params.Priorities, trimmed)
+			}
+		}
+	}
+
+	// Always include pinned issues in the query so they show regardless of week
+	pinnedIDs, _ := h.reportRepo.GetPinnedIssueIDs(r.Context(), user.ID)
+	params.PinnedIssues = pinnedIDs
+
+	logs, err := h.reportRepo.GetTimeTracking(r.Context(), params)
 	if err != nil {
 		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to get time tracking: " + err.Error()})
 		return
@@ -367,11 +404,17 @@ func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) 
 		logs = []database.IssueStateLog{}
 	}
 
-	// Enrich with overdue flag
+	// Enrich with overdue flag and pinned flag
 	type TimeTrackingRow struct {
 		database.IssueStateLog
-		Overdue          bool    `json:"overdue"`
-		ThresholdHours   float64 `json:"threshold_hours"`
+		Overdue        bool    `json:"overdue"`
+		ThresholdHours float64 `json:"threshold_hours"`
+		Pinned         bool    `json:"pinned"`
+	}
+
+	pinnedSet := make(map[string]bool, len(pinnedIDs))
+	for _, id := range pinnedIDs {
+		pinnedSet[id] = true
 	}
 
 	var rows []TimeTrackingRow
@@ -382,10 +425,72 @@ func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) 
 			IssueStateLog:  l,
 			Overdue:        overdue,
 			ThresholdHours: threshold,
+			Pinned:         pinnedSet[l.IssueID],
 		})
 	}
 
 	sendJSON(w, http.StatusOK, Response{Success: true, Data: rows})
+}
+
+// PinIssue pins a ticket so it appears in every week view
+// POST /api/reports/pins  body: {"issue_id":"ARD-628"}
+func (h *ReportHandler) PinIssue(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+	var body struct {
+		IssueID string `json:"issue_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.IssueID == "" {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "issue_id required"})
+		return
+	}
+	if err := h.reportRepo.PinIssue(r.Context(), user.ID, body.IssueID); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to pin issue: " + err.Error()})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Pinned " + body.IssueID})
+}
+
+// UnpinIssue removes a pin
+// DELETE /api/reports/pins/{issueID}
+func (h *ReportHandler) UnpinIssue(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+	issueID := mux.Vars(r)["issueID"]
+	if issueID == "" {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "issueID required"})
+		return
+	}
+	if err := h.reportRepo.UnpinIssue(r.Context(), user.ID, issueID); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to unpin: " + err.Error()})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Unpinned " + issueID})
+}
+
+// GetPins returns pinned issue IDs for the current user
+// GET /api/reports/pins
+func (h *ReportHandler) GetPins(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+	ids, err := h.reportRepo.GetPinnedIssueIDs(r.Context(), user.ID)
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to get pins: " + err.Error()})
+		return
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: ids})
 }
 
 // overdueThresholdHoursForPriority returns overdue threshold in hours based on priority
@@ -489,6 +594,122 @@ func (h *ReportHandler) BackfillStateLog(w http.ResponseWriter, r *http.Request)
 			"inserted": inserted,
 			"skipped":  skipped,
 			"total":    len(issues),
+		},
+	})
+}
+
+// ImportHistory fetches ALL state-change activities across the entire project in a
+// single API call using the project-wide activitiesPage endpoint, then inserts
+// each unique transition into issue_state_log. 100% accurate YouTrack timestamps,
+// fully idempotent (activity ID used as dedup key in the comment field).
+//
+// POST /api/reports/import-history
+func (h *ReportHandler) ImportHistory(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	ytClient, err := h.getYouTrackClient(r.Context())
+	if err != nil || ytClient == nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "YouTrack not configured"})
+		return
+	}
+
+	// One API call for the entire project — no per-issue loops
+	activities, err := ytClient.GetProjectActivities(r.Context(), 2000)
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to fetch project activities: " + err.Error()})
+		return
+	}
+
+	// First pass: build assignee map per issue from Assignee activity items.
+	// When field.presentation == "Assignee", added[0].name is the current assignee login.
+	// We walk chronologically so the last Assignee activity wins (most recent assignment).
+	assigneeByIssue := make(map[string]string) // issueID -> assignee name
+	for _, act := range activities {
+		if !strings.EqualFold(act.Field.Presentation, "Assignee") {
+			continue
+		}
+		if len(act.Added) == 0 {
+			continue
+		}
+		issueID := act.Target.IDReadable
+		if issueID == "" {
+			issueID = act.Target.ID
+		}
+		assigneeByIssue[issueID] = act.Added[0].Name
+	}
+
+	inserted := 0
+	skipped := 0
+
+	// Second pass: insert State transitions with accurate assignee data
+	for _, act := range activities {
+		if !strings.EqualFold(act.Field.Presentation, "State") {
+			continue
+		}
+		if len(act.Added) == 0 || len(act.Removed) == 0 {
+			continue
+		}
+
+		fromState := act.Removed[0].Name
+		toState := act.Added[0].Name
+		if fromState == "" || toState == "" || fromState == toState {
+			continue
+		}
+
+		issueID := act.Target.IDReadable
+		if issueID == "" {
+			issueID = act.Target.ID
+		}
+		issueSummary := act.Target.Summary
+
+		movedBy := ""
+		if act.Author != nil {
+			if act.Author.FullName != "" {
+				movedBy = act.Author.FullName
+			} else {
+				movedBy = act.Author.Login
+			}
+		}
+
+		// Use the most recent assignee for this issue from the Assignee activities
+		assignee := assigneeByIssue[issueID]
+		if assignee == "" {
+			assignee = movedBy // fallback: whoever moved it
+		}
+
+		priority := extractPriority(issueSummary)
+		transitionedAt := time.Unix(act.Timestamp/1000, (act.Timestamp%1000)*int64(time.Millisecond))
+
+		logEntry := &database.IssueStateLog{
+			IssueID:        issueID,
+			IssueSummary:   issueSummary,
+			Assignee:       assignee,
+			MovedBy:        movedBy,
+			FromState:      fromState,
+			ToState:        toState,
+			Priority:       priority,
+			TransitionedAt: transitionedAt,
+			Comment:        "activity:" + act.ID,
+		}
+
+		if err := h.reportRepo.InsertStateLogIfNotExists(r.Context(), logEntry, act.ID); err != nil {
+			skipped++ // already exists
+		} else {
+			inserted++
+		}
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Message: fmt.Sprintf("History import complete: %d transitions inserted, %d skipped (already exist)", inserted, skipped),
+		Data: map[string]interface{}{
+			"inserted":   inserted,
+			"skipped":    skipped,
+			"activities": len(activities),
 		},
 	})
 }

@@ -9,6 +9,7 @@ const (
 	BotTypeSlackAnalysis BotType = "slack_analysis"
 	BotTypeDailyReport   BotType = "daily_report"
 	BotTypeCustom        BotType = "custom"
+	BotTypePMAssistant   BotType = "pm_assistant"
 )
 
 // BotConfig represents a configurable bot

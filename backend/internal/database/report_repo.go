@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -113,6 +114,51 @@ func (r *ReportRepository) InsertStateLog(ctx context.Context, log *IssueStateLo
 	return nil
 }
 
+// InsertStateLogIfNotExists inserts a state transition only if no row with the
+// same activityID already exists in the comment field (used as dedup key for
+// the history import). Returns an error (without wrapping) if the row exists.
+func (r *ReportRepository) InsertStateLogIfNotExists(ctx context.Context, log *IssueStateLog, activityID string) error {
+	pool := GetPool()
+
+	// Check whether this activity was already imported
+	var count int
+	err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM issue_state_log
+		WHERE comment = $1
+	`, "activity:"+activityID).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("dedup check failed: %w", err)
+	}
+	if count > 0 {
+		return fmt.Errorf("already exists")
+	}
+
+	// Compute duration from the previous In-Progress entry recorded just before this one
+	var durationHours *float64
+	if log.FromState != "" {
+		var lastTransitionedAt *time.Time
+		err := pool.QueryRow(ctx, `
+			SELECT transitioned_at FROM issue_state_log
+			WHERE issue_id = $1 AND to_state = $2
+			ORDER BY transitioned_at DESC
+			LIMIT 1
+		`, log.IssueID, log.FromState).Scan(&lastTransitionedAt)
+		if err == nil && lastTransitionedAt != nil {
+			d := log.TransitionedAt.Sub(*lastTransitionedAt).Hours()
+			durationHours = &d
+		}
+	}
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO issue_state_log (issue_id, issue_summary, assignee, moved_by, from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	`, log.IssueID, log.IssueSummary, log.Assignee, log.MovedBy, log.FromState, log.ToState, log.Priority, log.TransitionedAt, durationHours, log.Comment)
+	if err != nil {
+		return fmt.Errorf("failed to insert state log: %w", err)
+	}
+	return nil
+}
+
 // scanStateLog scans a row into IssueStateLog and computes MovedByMismatch
 // Column order must match all SELECT queries: id, issue_id, issue_summary, assignee, moved_by,
 // from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment
@@ -191,56 +237,117 @@ func (r *ReportRepository) GetDoneIssues(ctx context.Context, date string) ([]Is
 	return logs, nil
 }
 
-// GetTimeTracking returns one row per ticket showing its most relevant In Progress span:
-//   - If the ticket is currently In Progress (no exit yet): shows elapsed time live (NOW - entered).
-//   - If the ticket has exited In Progress: shows the MOST RECENT exit transition with stored duration.
-//
-// Only one row per ticket is returned (the latest relevant transition) to avoid duplicates.
-func (r *ReportRepository) GetTimeTracking(ctx context.Context) ([]IssueStateLog, error) {
+// TimeTrackingParams holds optional filters for the time tracking query.
+// nil/zero values mean "no filter".
+type TimeTrackingParams struct {
+	WeekStart    *time.Time // Monday 00:00:00 of selected week (nil = no week filter)
+	WeekEnd      *time.Time // Sunday 23:59:59 of selected week (nil = no week filter)
+	Assignees    []string   // filter to these assignees (empty = all)
+	Priorities   []string   // filter to these priorities e.g. ["P0","P1"] (empty = all)
+	PinnedIssues []string   // issue IDs that are pinned — always included regardless of week
+}
+
+// GetTimeTracking returns all In Progress activity rows matching the given params.
+// When WeekStart/WeekEnd are set it returns every row whose transitioned_at falls
+// within that window (or is currently In Progress), plus any pinned tickets.
+// When no week is specified it falls back to the legacy "one best row per ticket" view.
+func (r *ReportRepository) GetTimeTracking(ctx context.Context, params TimeTrackingParams) ([]IssueStateLog, error) {
 	pool := GetPool()
 
-	// Use DISTINCT ON (issue_id) with a deliberate ordering to pick the best row per ticket:
-	// Priority 1: rows where from_state='in progress' (ticket has already exited) — ordered by transitioned_at DESC (most recent exit)
-	// Priority 2: rows where to_state='in progress' (ticket is currently there) — only shown if no exit row exists
-	//
-	// We achieve this with a subquery that ranks rows per issue_id and picks rank=1.
-	rows, err := pool.Query(ctx, `
-		WITH ranked AS (
-			SELECT
-				id, issue_id, issue_summary,
-				COALESCE(assignee,'') AS assignee,
-				COALESCE(moved_by,'') AS moved_by,
-				COALESCE(from_state,'') AS from_state,
-				to_state,
-				COALESCE(priority,'') AS priority,
-				transitioned_at,
-				CASE
-					WHEN LOWER(to_state) = 'in progress' AND duration_in_prev_state_hours IS NULL
-						THEN EXTRACT(EPOCH FROM (NOW() - transitioned_at)) / 3600.0
-					ELSE duration_in_prev_state_hours
-				END AS duration_in_prev_state_hours,
-				COALESCE(comment,'') AS comment,
-				-- Rank: exit rows (from_state=in progress) get rank 0 (preferred), entry rows get rank 1
-				CASE WHEN LOWER(from_state) = 'in progress' THEN 0 ELSE 1 END AS row_rank,
-				ROW_NUMBER() OVER (
-					PARTITION BY issue_id
-					ORDER BY
-						CASE WHEN LOWER(from_state) = 'in progress' THEN 0 ELSE 1 END ASC,
-						transitioned_at DESC
-				) AS rn
-			FROM issue_state_log
-			WHERE LOWER(to_state) = 'in progress'
-			   OR LOWER(from_state) = 'in progress'
-		)
-		SELECT id, issue_id, issue_summary, assignee, moved_by,
-		       from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment
-		FROM ranked
-		WHERE rn = 1
+	// Build WHERE clause dynamically
+	conditions := []string{
+		"(LOWER(to_state) = 'in progress' OR LOWER(from_state) = 'in progress')",
+	}
+	args := []interface{}{}
+	argIdx := 1
+
+	if params.WeekStart != nil && params.WeekEnd != nil {
+		// Include rows active within the week window, plus any currently-active In Progress
+		// entries whose to_state entry happened before this week (spans across weeks).
+		weekCond := fmt.Sprintf(`(
+			transitioned_at >= $%d AND transitioned_at <= $%d
+		)`, argIdx, argIdx+1)
+		if len(params.PinnedIssues) > 0 {
+			// Also include pinned issues regardless of week
+			placeholders := ""
+			for i, id := range params.PinnedIssues {
+				if i > 0 {
+					placeholders += ","
+				}
+				placeholders += fmt.Sprintf("$%d", argIdx+2+i)
+				args = append(args, id)
+			}
+			weekCond = fmt.Sprintf(`(
+				(transitioned_at >= $%d AND transitioned_at <= $%d)
+				OR issue_id IN (%s)
+			)`, argIdx, argIdx+1, placeholders)
+			argIdx += 2 + len(params.PinnedIssues)
+		} else {
+			argIdx += 2
+		}
+		args = append([]interface{}{*params.WeekStart, *params.WeekEnd}, args...)
+		conditions = append(conditions, weekCond)
+	}
+
+	if len(params.Assignees) > 0 {
+		placeholders := ""
+		for i, a := range params.Assignees {
+			if i > 0 {
+				placeholders += ","
+			}
+			placeholders += fmt.Sprintf("$%d", argIdx)
+			args = append(args, a)
+			argIdx++
+		}
+		conditions = append(conditions, fmt.Sprintf("LOWER(COALESCE(assignee,'')) IN (%s)", placeholders))
+	}
+
+	if len(params.Priorities) > 0 {
+		placeholders := ""
+		for i, p := range params.Priorities {
+			if i > 0 {
+				placeholders += ","
+			}
+			placeholders += fmt.Sprintf("$%d", argIdx)
+			args = append(args, strings.ToUpper(p))
+			argIdx++
+		}
+		conditions = append(conditions, fmt.Sprintf("UPPER(COALESCE(priority,'')) IN (%s)", placeholders))
+	}
+
+	whereClause := ""
+	for i, c := range conditions {
+		if i == 0 {
+			whereClause = "WHERE " + c
+		} else {
+			whereClause += " AND " + c
+		}
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			id, issue_id, issue_summary,
+			COALESCE(assignee,'') AS assignee,
+			COALESCE(moved_by,'') AS moved_by,
+			COALESCE(from_state,'') AS from_state,
+			to_state,
+			COALESCE(priority,'') AS priority,
+			transitioned_at,
+			CASE
+				WHEN LOWER(to_state) = 'in progress' AND duration_in_prev_state_hours IS NULL
+					THEN EXTRACT(EPOCH FROM (NOW() - transitioned_at)) / 3600.0
+				ELSE duration_in_prev_state_hours
+			END AS duration_in_prev_state_hours,
+			COALESCE(comment,'') AS comment
+		FROM issue_state_log
+		%s
 		ORDER BY
-			row_rank ASC,         -- Currently In Progress first, then completed
+			CASE WHEN LOWER(from_state) = 'in progress' THEN 0 ELSE 1 END ASC,
 			transitioned_at DESC
-		LIMIT 200
-	`)
+		LIMIT 500
+	`, whereClause)
+
+	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +362,46 @@ func (r *ReportRepository) GetTimeTracking(ctx context.Context) ([]IssueStateLog
 		logs = append(logs, l)
 	}
 	return logs, nil
+}
+
+// PinIssue marks an issue as pinned for a user (idempotent via ON CONFLICT DO NOTHING)
+func (r *ReportRepository) PinIssue(ctx context.Context, userID, issueID string) error {
+	pool := GetPool()
+	_, err := pool.Exec(ctx, `
+		INSERT INTO pinned_issues (user_id, issue_id) VALUES ($1, $2)
+		ON CONFLICT (user_id, issue_id) DO NOTHING
+	`, userID, issueID)
+	return err
+}
+
+// UnpinIssue removes a pin for a user+issue
+func (r *ReportRepository) UnpinIssue(ctx context.Context, userID, issueID string) error {
+	pool := GetPool()
+	_, err := pool.Exec(ctx, `
+		DELETE FROM pinned_issues WHERE user_id = $1 AND issue_id = $2
+	`, userID, issueID)
+	return err
+}
+
+// GetPinnedIssueIDs returns all pinned issue IDs for a user
+func (r *ReportRepository) GetPinnedIssueIDs(ctx context.Context, userID string) ([]string, error) {
+	pool := GetPool()
+	rows, err := pool.Query(ctx, `
+		SELECT issue_id FROM pinned_issues WHERE user_id = $1 ORDER BY created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // GetInProgressOlderThan returns issues currently In Progress for longer than given hours

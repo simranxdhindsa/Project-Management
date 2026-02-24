@@ -45,12 +45,14 @@ function BotCard({
     slack_analysis: 'Slack Analysis',
     daily_report: 'Daily Report',
     custom: 'Custom',
+    pm_assistant: 'PM Assistant',
   }
 
   const botTypeColors: Record<string, string> = {
     slack_analysis: 'var(--color-primary)',
     daily_report: 'var(--color-success)',
     custom: 'var(--color-secondary)',
+    pm_assistant: '#f59e0b',
   }
 
   let variables: BotVariable[] = []
@@ -255,6 +257,7 @@ function BotEditor({
                 value={botType}
                 onChange={(e) => setBotType(e.target.value)}
               >
+                <option value="pm_assistant">PM Assistant</option>
                 <option value="slack_analysis">Slack Analysis</option>
                 <option value="daily_report">Daily Report</option>
                 <option value="custom">Custom</option>

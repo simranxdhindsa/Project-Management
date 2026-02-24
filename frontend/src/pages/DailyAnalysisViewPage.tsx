@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Calendar, CheckCircle, Clock, XCircle, AlertTriangle, ChevronLeft, ChevronRight, X, User } from 'lucide-react'
+import { getYouTrackAvatarMap } from '../services/api'
 import {
   DndContext,
   DragOverlay,
@@ -106,7 +107,7 @@ function TaskListModal({
 }
 
 // Sortable Task Card - uses same styling as Dashboard TaskCard
-function SortableTaskCard({ task }: { task: DailyTaskItem }) {
+function SortableTaskCard({ task, avatarUrl }: { task: DailyTaskItem; avatarUrl?: string }) {
   const {
     attributes,
     listeners,
@@ -123,13 +124,13 @@ function SortableTaskCard({ task }: { task: DailyTaskItem }) {
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <TaskCard task={task} isDragging={isDragging} />
+      <TaskCard task={task} isDragging={isDragging} avatarUrl={avatarUrl} />
     </div>
   )
 }
 
 // Task Card Component - styled exactly like Dashboard TaskCard
-function TaskCard({ task, isDragging }: { task: DailyTaskItem; isDragging?: boolean }) {
+function TaskCard({ task, isDragging, avatarUrl }: { task: DailyTaskItem; isDragging?: boolean; avatarUrl?: string }) {
   const getStatusBadgeClass = () => {
     switch (task.status) {
       case 'completed':
@@ -171,9 +172,13 @@ function TaskCard({ task, isDragging }: { task: DailyTaskItem; isDragging?: bool
       <div className="task-card-footer">
         <div className="task-card-meta"></div>
         <div className="task-assignee" title={task.assignee}>
-          <div className="task-assignee-placeholder">
-            {task.assignee?.charAt(0).toUpperCase() || '?'}
-          </div>
+          {avatarUrl ? (
+            <img src={avatarUrl} alt={task.assignee} className="task-assignee-avatar" />
+          ) : (
+            <div className="task-assignee-placeholder">
+              {task.assignee?.charAt(0).toUpperCase() || '?'}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -187,12 +192,14 @@ function KanbanColumn({
   icon,
   color,
   tasks,
+  avatarMap,
 }: {
   id: string
   title: string
   icon: React.ReactNode
   color: string
   tasks: DailyTaskItem[]
+  avatarMap: Record<string, string>
 }) {
   const { setNodeRef, isOver } = useDroppable({ id })
   const taskIds = tasks.map((t) => t.id)
@@ -222,7 +229,7 @@ function KanbanColumn({
             </div>
           ) : (
             tasks.map((task) => (
-              <SortableTaskCard key={task.id} task={task} />
+              <SortableTaskCard key={task.id} task={task} avatarUrl={avatarMap[task.assignee]} />
             ))
           )}
         </SortableContext>
@@ -241,6 +248,9 @@ export function DailyAnalysisViewPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeTask, setActiveTask] = useState<DailyTaskItem | null>(null)
   const [modalFilter, setModalFilter] = useState<FilterStatus | null>(null)
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
+
+  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
 
   // Configure sensors with distance constraint to prevent accidental drags
   const sensors = useSensors(
@@ -562,6 +572,7 @@ export function DailyAnalysisViewPage() {
                   icon={<CheckCircle size={20} />}
                   color="var(--status-done)"
                   tasks={getTasksByStatus('completed')}
+                  avatarMap={avatarMap}
                 />
                 <KanbanColumn
                   id="pending"
@@ -569,6 +580,7 @@ export function DailyAnalysisViewPage() {
                   icon={<Clock size={20} />}
                   color="var(--status-in-progress)"
                   tasks={getTasksByStatus('pending')}
+                  avatarMap={avatarMap}
                 />
                 <KanbanColumn
                   id="blocked"
@@ -576,6 +588,7 @@ export function DailyAnalysisViewPage() {
                   icon={<XCircle size={20} />}
                   color="var(--color-danger)"
                   tasks={getTasksByStatus('blocked')}
+                  avatarMap={avatarMap}
                 />
                 {totalSkipped > 0 && (
                   <KanbanColumn
@@ -584,6 +597,7 @@ export function DailyAnalysisViewPage() {
                     icon={<AlertTriangle size={20} />}
                     color="var(--color-secondary)"
                     tasks={getTasksByStatus('skipped')}
+                    avatarMap={avatarMap}
                   />
                 )}
               </div>

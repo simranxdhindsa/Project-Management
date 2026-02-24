@@ -228,6 +228,16 @@ func RunMigrations() error {
 		`ALTER TABLE notifications ALTER COLUMN user_id TYPE TEXT USING user_id::text`,
 		`ALTER TABLE notifications ALTER COLUMN task_id TYPE TEXT USING task_id::text`,
 
+		// Pinned issues — lets PMs pin tickets so they appear in every week view
+		`CREATE TABLE IF NOT EXISTS pinned_issues (
+			id SERIAL PRIMARY KEY,
+			user_id VARCHAR(255) NOT NULL,
+			issue_id VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE(user_id, issue_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_pinned_issues_user_id ON pinned_issues(user_id)`,
+
 		// Create indexes for performance
 		`CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id)`,
@@ -246,6 +256,34 @@ func RunMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_issue_state_log_transitioned_at ON issue_state_log(transitioned_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_issue_state_log_to_state ON issue_state_log(to_state)`,
 		`CREATE INDEX IF NOT EXISTS idx_pm_reports_date ON pm_reports(date)`,
+
+		// bot_configs table — stores PM-editable bot prompts
+		`CREATE TABLE IF NOT EXISTS bot_configs (
+			id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			name VARCHAR(255) NOT NULL,
+			description TEXT,
+			bot_type VARCHAR(50) NOT NULL DEFAULT 'custom',
+			prompt TEXT NOT NULL DEFAULT '',
+			variables TEXT NOT NULL DEFAULT '[]',
+			is_active BOOLEAN DEFAULT TRUE,
+			created_by VARCHAR(255),
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_bot_configs_bot_type ON bot_configs(bot_type)`,
+
+		// Seed a default PM Assistant bot config so it appears in Bot Config page immediately.
+		// Uses WHERE NOT EXISTS so it only inserts once even if migrations run multiple times.
+		`INSERT INTO bot_configs (name, description, bot_type, prompt, variables, is_active, created_by)
+		SELECT
+			'PM Assistant',
+			'Custom instructions for the PM Assistant chat. Live YouTrack + time tracking data is injected automatically.',
+			'pm_assistant',
+			E'You are a PM Assistant for a software development team.\n\n## Your Role\nAnswer questions about YouTrack issues and time tracking data provided below. Be concise and accurate.\n\n## Assignee Task Format\nWhen asked for tasks assigned to a specific person, ALWAYS respond in this exact format:\n\n@{assignee_name}\n\n{Status}:\n{issueID} {summary}\n\nGroup by status (Backlog, In Progress, Blocked, DEV, Done). One ticket per line. No tables, no pipes, no extra metadata.\n\nExample:\n@simranjot\n\nIn Progress:\n3-671 FE Studio: UI theme text issue\nARD-801 API refactor\n\nBlocked:\n3-896 FE UI: Mic remains activated when holding spacebar\n\n## General Format\n- Use bullet points for lists\n- Use tables only for multi-column comparisons\n- Bold (**text**) for important flags\n- Group data by assignee when showing team workload\n\n## Key Rules\n- OVERDUE = ticket time in In Progress exceeds threshold (P0:4h P1:24h P2:48h Other:72h)\n- MOVED BACK = ticket regressed to earlier state (DEV->In Progress, In Progress->Backlog) — flag as regression\n- PINNED = PM manually flagged as important — always mention first\n- If query is ambiguous, state your assumptions\n\nToday''s date: {{DATE}}',
+			'[{"name":"DATE","label":"Today''s Date","type":"date","default":"today","required":false}]',
+			true,
+			'system'
+		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'pm_assistant')`,
 	}
 
 	for i, migration := range migrations {
