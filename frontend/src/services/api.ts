@@ -1204,7 +1204,7 @@ export interface BotConfig {
   id: string
   name: string
   description: string
-  bot_type: 'slack_analysis' | 'daily_report' | 'custom'
+  bot_type: 'slack_analysis' | 'daily_report' | 'custom' | 'pm_assistant'
   prompt: string
   variables: string // JSON string of BotVariable[]
   is_active: boolean

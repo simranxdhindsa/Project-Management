@@ -156,7 +156,7 @@ function BotEditor({
 }) {
   const [name, setName] = useState(bot?.name || '')
   const [description, setDescription] = useState(bot?.description || '')
-  const [botType, setBotType] = useState(bot?.bot_type || 'custom')
+  const [botType, setBotType] = useState<BotConfig['bot_type']>(bot?.bot_type || 'custom')
   const [prompt, setPrompt] = useState(bot?.prompt || '')
   const [variables, setVariables] = useState<BotVariable[]>(() => {
     try {
@@ -255,7 +255,7 @@ function BotEditor({
               <select
                 className="form-input"
                 value={botType}
-                onChange={(e) => setBotType(e.target.value)}
+                onChange={(e) => setBotType(e.target.value as BotConfig['bot_type'])}
               >
                 <option value="pm_assistant">PM Assistant</option>
                 <option value="slack_analysis">Slack Analysis</option>
