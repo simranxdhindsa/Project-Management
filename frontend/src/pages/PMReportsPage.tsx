@@ -1278,6 +1278,12 @@ function IssueTimelineTab() {
   useEffect(() => { fetchTimelines() }, [fetchTimelines])
   useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
 
+  // Auto-refresh timeline every 2 minutes so new state transitions appear without restart
+  useEffect(() => {
+    const id = setInterval(() => { fetchTimelines() }, 2 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [fetchTimelines])
+
   const toggleExpand = (issueID: string) => {
     setExpandedIssues(prev => {
       const next = new Set(prev)
@@ -1438,6 +1444,21 @@ function IssueTimelineTab() {
       ) : displayed.length === 0 ? (
         <div className="pm-empty-state"><Activity size={40} /><p>No issues found.</p></div>
       ) : (
+        <div className="tl-scroll-wrapper">
+          {/* Column headers */}
+          <div className="tl-col-header">
+            <div className="tl-col-left">
+              <span className="tl-col-label tl-col-issue">Issue</span>
+              <span className="tl-col-label tl-col-priority">Priority</span>
+              <span className="tl-col-label tl-col-status">Status</span>
+              <span className="tl-col-label tl-col-summary">Summary</span>
+            </div>
+            <div className="tl-col-right">
+              <span className="tl-col-label">Assignee</span>
+              <span className="tl-col-label">Time / Threshold</span>
+              <span className="tl-col-label">Stints</span>
+            </div>
+          </div>
         <div className="tl-card-list">
           {displayed.map(t => {
             const isExpanded = expandedIssues.has(t.issue_id)
@@ -1559,6 +1580,7 @@ function IssueTimelineTab() {
             )
           })}
         </div>
+        </div>
       )}
     </div>
   )
@@ -1566,8 +1588,23 @@ function IssueTimelineTab() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export function PMReportsPage() {
-  const [activeTab, setActiveTab] = useState<TabId>('tracking')
+interface PMReportsPageProps {
+  initialTab?: TabId
+  onTabChange?: (tab: TabId) => void
+}
+
+export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReportsPageProps) {
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab)
+
+  const handleTabChange = (tab: TabId) => {
+    setActiveTab(tab)
+    onTabChange?.(tab)
+  }
+
+  // Sync if parent changes initialTab (e.g. URL navigated directly)
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
 
   return (
     <div className="pm-reports-page">
@@ -1580,7 +1617,7 @@ export function PMReportsPage() {
               <button
                 key={tab.id}
                 className={`pm-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
               >
                 <Icon size={16} />
                 <span>{tab.label}</span>

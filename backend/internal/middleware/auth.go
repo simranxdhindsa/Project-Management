@@ -42,7 +42,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		if strings.HasPrefix(tokenString, "dev-mode-token-") {
 			// Dev mode - bypass JWT validation
 			user = &models.User{
-				ID:    "dev-user-1",
+				ID:    "08938fa6-27b4-446f-a9aa-b8fe5c7b97c4",
 				Email: "simranjot@apyhub.com",
 				Name:  "Simranjot Singh",
 				Role:  models.RoleAdmin,

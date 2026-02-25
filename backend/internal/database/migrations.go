@@ -294,6 +294,50 @@ func RunMigrations() error {
 			UNIQUE(user_id, issue_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_dismissed_alerts_user_id ON dismissed_alerts(user_id)`,
+
+		// Dual-channel support: primary channel (for digest) + monitor channel (for mentions)
+		`ALTER TABLE slack_integrations ADD COLUMN IF NOT EXISTS monitor_channel_id VARCHAR(255)`,
+		`ALTER TABLE slack_integrations ADD COLUMN IF NOT EXISTS monitor_channel_name VARCHAR(255)`,
+
+		// Slack mention tracking: messages where the logged-in user is @mentioned
+		`CREATE TABLE IF NOT EXISTS slack_mentions (
+			id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id TEXT NOT NULL,
+			slack_user_id TEXT NOT NULL,
+			message_ts VARCHAR(50) NOT NULL,
+			thread_ts VARCHAR(50),
+			channel_id VARCHAR(255) NOT NULL,
+			message_text TEXT NOT NULL,
+			sender_name VARCHAR(255),
+			requires_reply BOOLEAN DEFAULT TRUE,
+			replied BOOLEAN DEFAULT FALSE,
+			reply_checked_at TIMESTAMP WITH TIME ZONE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE(user_id, message_ts)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_slack_mentions_user_id ON slack_mentions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_slack_mentions_replied ON slack_mentions(user_id, replied)`,
+
+		// Slack threads started by the user — track if they received replies
+		`CREATE TABLE IF NOT EXISTS slack_user_threads (
+			id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id TEXT NOT NULL,
+			channel_id VARCHAR(255) NOT NULL,
+			thread_ts VARCHAR(50) NOT NULL,
+			message_text TEXT NOT NULL,
+			reply_count INT DEFAULT 0,
+			last_checked_at TIMESTAMP WITH TIME ZONE,
+			has_reply BOOLEAN DEFAULT FALSE,
+			reminder_sent BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE(user_id, thread_ts)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_slack_user_threads_user_id ON slack_user_threads(user_id)`,
+
+		// Snooze support for slack_mentions
+		`ALTER TABLE slack_mentions ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE`,
+		// Snooze support for slack_user_threads
+		`ALTER TABLE slack_user_threads ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE`,
 	}
 
 	for i, migration := range migrations {

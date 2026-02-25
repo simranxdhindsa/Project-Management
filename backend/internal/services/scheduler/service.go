@@ -11,6 +11,7 @@ import (
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/handlers"
 	"github.com/dhindsa/project-management/internal/models"
+	slacksvc "github.com/dhindsa/project-management/internal/services/slack"
 	"github.com/dhindsa/project-management/internal/services/youtrack"
 )
 
@@ -21,6 +22,8 @@ type Service struct {
 	settingsRepo *database.SettingsRepository
 	dailyRepo    *database.DailyTaskRepository
 	reportRepo   *database.ReportRepository
+	slackRepo    *database.SlackRepository
+	slackService *slacksvc.Service
 	stop         chan struct{}
 	// Track which one-per-day checks have fired today (reset at midnight)
 	firedToday map[string]bool
@@ -28,7 +31,9 @@ type Service struct {
 	firedOverdueToday map[string]bool
 	lastDate          string
 	// Last time we synced the state log from YouTrack activity feed
-	lastStateLogSync time.Time
+	lastStateLogSync  time.Time
+	// Last time we auto-scanned Slack for all users
+	lastSlackScan     time.Time
 }
 
 // NewService creates a new scheduler service
@@ -39,6 +44,8 @@ func NewService(notifHandler *handlers.NotificationHandler) *Service {
 		settingsRepo:      database.NewSettingsRepository(),
 		dailyRepo:         database.NewDailyTaskRepository(),
 		reportRepo:        database.NewReportRepository(),
+		slackRepo:         database.NewSlackRepository(),
+		slackService:      slacksvc.NewService(),
 		stop:              make(chan struct{}),
 		firedToday:        make(map[string]bool),
 		firedOverdueToday: make(map[string]bool),
@@ -97,6 +104,9 @@ func (s *Service) tick() {
 	// 0. Auto-sync state log from YouTrack activity feed every 2 minutes
 	//    This ensures time tracking stays current without needing a webhook.
 	s.autoSyncStateLog(ctx)
+
+	// 0b. Auto-scan Slack for all connected users every 15 minutes
+	s.autoScanSlack(ctx)
 
 	// 1. Process due reminders
 	s.processDueReminders(ctx)
@@ -529,6 +539,64 @@ func (s *Service) autoSyncStateLog(ctx context.Context) {
 	if inserted > 0 {
 		log.Printf("[Scheduler] autoSyncStateLog: inserted %d new transitions", inserted)
 	}
+}
+
+// autoScanSlack scans Slack for @mentions and unanswered threads for all connected users.
+// Runs at most every 15 minutes. Creates SSE notifications for any new mentions found.
+func (s *Service) autoScanSlack(ctx context.Context) {
+	if time.Since(s.lastSlackScan) < 15*time.Minute {
+		return
+	}
+	s.lastSlackScan = time.Now()
+
+	// Get all users with an active Slack connection
+	userIDs, err := s.slackRepo.GetAllConnectedSlackUsers(ctx)
+	if err != nil || len(userIDs) == 0 {
+		return
+	}
+
+	pool := database.GetPool()
+
+	for _, userID := range userIDs {
+		// Look up the user's email from the users table
+		var email string
+		err := pool.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID).Scan(&email)
+		if err != nil || email == "" {
+			continue
+		}
+
+		newMentions, err := s.slackService.ScanMentions(ctx, userID, email)
+		if err != nil {
+			log.Printf("[Scheduler] autoScanSlack: ScanMentions failed for user %s: %v", userID, err)
+			continue
+		}
+
+		_, _ = s.slackService.ScanUserThreads(ctx, userID, email)
+
+		// Fire SSE notifications for each new @mention
+		for _, mention := range newMentions {
+			notif := &models.Notification{
+				UserID:  userID,
+				Type:    "slack_mention",
+				Title:   "New @mention in Slack",
+				Message: fmt.Sprintf("From %s: %s", mention.SenderName, truncateStr(mention.MessageText, 100)),
+			}
+			_ = s.notifHandler.CreateAndBroadcast(ctx, notif)
+		}
+
+		if len(newMentions) > 0 {
+			log.Printf("[Scheduler] autoScanSlack: %d new mention(s) for user %s", len(newMentions), userID)
+		}
+	}
+}
+
+// truncateStr is a local helper for scheduler log messages
+func truncateStr(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
 }
 
 // getSetting retrieves a setting value with a default

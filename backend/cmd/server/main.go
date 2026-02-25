@@ -148,8 +148,18 @@ func main() {
 	taskYouTrackRoutes.Use(middleware.AuthMiddleware)
 	taskYouTrackRoutes.HandleFunc("/sync", youtrackHandler.SyncTaskToYouTrack).Methods("POST")
 
+	// Notification handler must be created before Slack handler (Slack needs it for SSE broadcast)
+	notifHandler := handlers.NewNotificationHandler(sseHub)
+	notifRoutes := api.PathPrefix("/notifications").Subrouter()
+	notifRoutes.Use(middleware.AuthMiddleware)
+	notifRoutes.HandleFunc("", notifHandler.GetNotifications).Methods("GET")
+	notifRoutes.HandleFunc("/unread-count", notifHandler.GetUnreadCount).Methods("GET")
+	notifRoutes.HandleFunc("/{id}/read", notifHandler.MarkAsRead).Methods("PATCH")
+	notifRoutes.HandleFunc("/{id}", notifHandler.Delete).Methods("DELETE")
+	notifRoutes.HandleFunc("/read-all", notifHandler.MarkAllAsRead).Methods("PATCH")
+
 	// Slack routes (protected)
-	slackHandler := handlers.NewSlackHandler()
+	slackHandler := handlers.NewSlackHandler(notifHandler)
 	slackRoutes := api.PathPrefix("/slack").Subrouter()
 	slackRoutes.Use(middleware.AuthMiddleware)
 	slackRoutes.HandleFunc("/connect", slackHandler.Connect).Methods("POST")
@@ -157,8 +167,18 @@ func main() {
 	slackRoutes.HandleFunc("/status", slackHandler.GetStatus).Methods("GET")
 	slackRoutes.HandleFunc("/channels", slackHandler.GetChannels).Methods("GET")
 	slackRoutes.HandleFunc("/channel", slackHandler.SetChannel).Methods("POST")
+	slackRoutes.HandleFunc("/monitor-channel", slackHandler.SetMonitorChannel).Methods("POST")
 	slackRoutes.HandleFunc("/messages", slackHandler.GetMessages).Methods("GET")
 	slackRoutes.HandleFunc("/messages/yesterday", slackHandler.GetYesterdayMessages).Methods("GET")
+	// Slack intelligence routes
+	slackRoutes.HandleFunc("/scan", slackHandler.Scan).Methods("POST")
+	slackRoutes.HandleFunc("/mentions", slackHandler.GetMentions).Methods("GET")
+	slackRoutes.HandleFunc("/mentions/{messageTS}/dismiss", slackHandler.DismissMention).Methods("POST")
+	slackRoutes.HandleFunc("/mentions/{messageTS}/snooze", slackHandler.SnoozeMention).Methods("POST")
+	slackRoutes.HandleFunc("/threads", slackHandler.GetUnansweredThreads).Methods("GET")
+	slackRoutes.HandleFunc("/threads/{threadTS}/snooze", slackHandler.SnoozeThread).Methods("POST")
+	slackRoutes.HandleFunc("/digest", slackHandler.PostDigest).Methods("POST")
+	slackRoutes.HandleFunc("/reminders", slackHandler.CreateFollowupReminder).Methods("POST")
 
 	// AI Analysis routes (protected)
 	aiHandler := handlers.NewAIHandler()
@@ -206,16 +226,6 @@ func main() {
 	calendarRoutes.Use(middleware.AuthMiddleware)
 	calendarRoutes.HandleFunc("/{year}/{month}", calendarHandler).Methods("GET")
 
-	// Notification routes (protected)
-	notifHandler := handlers.NewNotificationHandler(sseHub)
-	notifRoutes := api.PathPrefix("/notifications").Subrouter()
-	notifRoutes.Use(middleware.AuthMiddleware)
-	notifRoutes.HandleFunc("", notifHandler.GetNotifications).Methods("GET")
-	notifRoutes.HandleFunc("/unread-count", notifHandler.GetUnreadCount).Methods("GET")
-	notifRoutes.HandleFunc("/{id}/read", notifHandler.MarkAsRead).Methods("PATCH")
-	notifRoutes.HandleFunc("/{id}", notifHandler.Delete).Methods("DELETE")
-	notifRoutes.HandleFunc("/read-all", notifHandler.MarkAllAsRead).Methods("PATCH")
-
 	// Reminder routes (protected)
 	reminderHandler := handlers.NewReminderHandler()
 	reminderRoutes := api.PathPrefix("/reminders").Subrouter()
@@ -229,6 +239,7 @@ func main() {
 	pmScheduler := scheduler.NewService(notifHandler)
 	pmScheduler.Start()
 	defer pmScheduler.Stop()
+
 
 	// Wire notification handler into YouTrack handler for overdue/blocked notifications
 	youtrackHandler.SetNotificationHandler(notifHandler)

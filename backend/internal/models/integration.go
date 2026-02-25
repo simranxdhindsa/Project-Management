@@ -28,16 +28,50 @@ type AsanaProject struct {
 
 // SlackIntegration represents the Slack connection
 type SlackIntegration struct {
-	ID          string    `json:"id" db:"id"`
-	UserID      string    `json:"user_id" db:"user_id"`
-	BotToken    string    `json:"-" db:"bot_token"` // Hidden in JSON
-	TeamID      string    `json:"team_id" db:"team_id"`
-	TeamName    string    `json:"team_name" db:"team_name"`
-	ChannelID   *string   `json:"channel_id,omitempty" db:"channel_id"`
-	ChannelName *string   `json:"channel_name,omitempty" db:"channel_name"`
-	Connected   bool      `json:"connected" db:"connected"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	ID                 string    `json:"id" db:"id"`
+	UserID             string    `json:"user_id" db:"user_id"`
+	BotToken           string    `json:"-" db:"bot_token"` // Hidden in JSON
+	TeamID             string    `json:"team_id" db:"team_id"`
+	TeamName           string    `json:"team_name" db:"team_name"`
+	ChannelID          *string   `json:"channel_id,omitempty" db:"channel_id"`
+	ChannelName        *string   `json:"channel_name,omitempty" db:"channel_name"`
+	MonitorChannelID   *string   `json:"monitor_channel_id,omitempty" db:"monitor_channel_id"`
+	MonitorChannelName *string   `json:"monitor_channel_name,omitempty" db:"monitor_channel_name"`
+	Connected          bool      `json:"connected" db:"connected"`
+	CreatedAt          time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// SlackMention represents a message where the user was @mentioned
+type SlackMention struct {
+	ID              string     `json:"id" db:"id"`
+	UserID          string     `json:"user_id" db:"user_id"`
+	SlackUserID     string     `json:"slack_user_id" db:"slack_user_id"`
+	MessageTS       string     `json:"message_ts" db:"message_ts"`
+	ThreadTS        *string    `json:"thread_ts,omitempty" db:"thread_ts"`
+	ChannelID       string     `json:"channel_id" db:"channel_id"`
+	MessageText     string     `json:"message_text" db:"message_text"`
+	SenderName      string     `json:"sender_name" db:"sender_name"`
+	RequiresReply   bool       `json:"requires_reply" db:"requires_reply"`
+	Replied         bool       `json:"replied" db:"replied"`
+	ReplyCheckedAt  *time.Time `json:"reply_checked_at,omitempty" db:"reply_checked_at"`
+	SnoozedUntil   *time.Time `json:"snoozed_until,omitempty" db:"snoozed_until"`
+	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+}
+
+// SlackUserThread represents a thread the user started — track reply counts
+type SlackUserThread struct {
+	ID            string     `json:"id" db:"id"`
+	UserID        string     `json:"user_id" db:"user_id"`
+	ChannelID     string     `json:"channel_id" db:"channel_id"`
+	ThreadTS      string     `json:"thread_ts" db:"thread_ts"`
+	MessageText   string     `json:"message_text" db:"message_text"`
+	ReplyCount    int        `json:"reply_count" db:"reply_count"`
+	LastCheckedAt *time.Time `json:"last_checked_at,omitempty" db:"last_checked_at"`
+	HasReply      bool       `json:"has_reply" db:"has_reply"`
+	ReminderSent  bool       `json:"reminder_sent" db:"reminder_sent"`
+	SnoozedUntil  *time.Time `json:"snoozed_until,omitempty" db:"snoozed_until"`
+	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
 }
 
 // SlackMessage represents a message fetched from Slack

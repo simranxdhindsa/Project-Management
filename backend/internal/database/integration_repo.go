@@ -128,16 +128,30 @@ func (r *IntegrationRepository) GetSlackIntegration(ctx context.Context, userID 
 
 	var integration models.SlackIntegration
 	err := pool.QueryRow(ctx, `
-		SELECT id, user_id, bot_token, team_id, team_name, channel_id, channel_name, connected, created_at, updated_at
+		SELECT id, user_id, bot_token, team_id, team_name, channel_id, channel_name,
+		       monitor_channel_id, monitor_channel_name, connected, created_at, updated_at
 		FROM slack_integrations WHERE user_id = $1
 	`, userID).Scan(&integration.ID, &integration.UserID, &integration.BotToken, &integration.TeamID,
 		&integration.TeamName, &integration.ChannelID, &integration.ChannelName,
+		&integration.MonitorChannelID, &integration.MonitorChannelName,
 		&integration.Connected, &integration.CreatedAt, &integration.UpdatedAt)
 
 	if err != nil {
 		return nil, err
 	}
 	return &integration, nil
+}
+
+// UpdateSlackMonitorChannel updates the monitoring channel (for @mention scanning)
+func (r *IntegrationRepository) UpdateSlackMonitorChannel(ctx context.Context, userID, channelID, channelName string) error {
+	pool := GetPool()
+
+	_, err := pool.Exec(ctx, `
+		UPDATE slack_integrations SET monitor_channel_id = $2, monitor_channel_name = $3, updated_at = NOW()
+		WHERE user_id = $1
+	`, userID, channelID, channelName)
+
+	return err
 }
 
 // UpdateSlackChannel updates the monitored channel

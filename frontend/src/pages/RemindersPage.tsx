@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import api from '../services/api'
 import type { ReminderItem, CreateReminderRequest, NotificationItem } from '../services/api'
 import { useNotifications } from '../services/useNotifications'
-import { Bell, Plus, Trash2, Clock, CheckCircle, AlertTriangle, Calendar, X, RefreshCw } from 'lucide-react'
+import { Bell, Plus, Trash2, Clock, CheckCircle, AlertTriangle, Calendar, X, RefreshCw, MessageSquare } from 'lucide-react'
 
 export function RemindersPage() {
   const [reminders, setReminders] = useState<ReminderItem[]>([])
@@ -109,6 +109,7 @@ export function RemindersPage() {
       case 'blocked_issue': return 'Blocker'
       case 'update_check': return 'Update Check'
       case 'daily_digest': return 'Daily Digest'
+      case 'slack_followup': return 'Slack Follow-up'
       default: return 'Custom'
     }
   }
@@ -271,7 +272,13 @@ export function RemindersPage() {
                           </span>
                         )}
                         {rem.related_issue_id && (
-                          <span style={{ color: 'var(--color-primary)' }}>{rem.related_issue_id}</span>
+                          rem.type === 'slack_followup' ? (
+                            <span className="reminder-slack-ref">
+                              <MessageSquare size={10} /> thread:{rem.related_issue_id.slice(0, 12)}…
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--color-primary)' }}>{rem.related_issue_id}</span>
+                          )
                         )}
                       </div>
                     </div>

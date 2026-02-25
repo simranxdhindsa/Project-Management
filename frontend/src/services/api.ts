@@ -418,6 +418,62 @@ class ApiService {
     return this.request<{ messages: SlackMessage[]; count: number }>('/slack/messages/yesterday')
   }
 
+  async setSlackMonitorChannel(channelId: string, channelName: string) {
+    return this.request('/slack/monitor-channel', {
+      method: 'POST',
+      body: JSON.stringify({ channel_id: channelId, channel_name: channelName }),
+    })
+  }
+
+  // Slack Intelligence endpoints
+  async scanSlack() {
+    return this.request<{ success: boolean; new_mentions: number; new_threads: number }>('/slack/scan', {
+      method: 'POST',
+    })
+  }
+
+  async getSlackMentions() {
+    return this.request<{ success: boolean; mentions: SlackMention[]; count: number; unreplied_count: number }>('/slack/mentions')
+  }
+
+  async dismissSlackMention(messageTS: string) {
+    return this.request(`/slack/mentions/${encodeURIComponent(messageTS)}/dismiss`, {
+      method: 'POST',
+    })
+  }
+
+  async snoozeSlackMention(messageTS: string, until: '2h' | 'tomorrow') {
+    return this.request(`/slack/mentions/${encodeURIComponent(messageTS)}/snooze`, {
+      method: 'POST',
+      body: JSON.stringify({ until }),
+    })
+  }
+
+  async snoozeSlackThread(threadTS: string, until: '2h' | 'tomorrow') {
+    return this.request(`/slack/threads/${encodeURIComponent(threadTS)}/snooze`, {
+      method: 'POST',
+      body: JSON.stringify({ until }),
+    })
+  }
+
+  async getSlackThreads() {
+    return this.request<{ success: boolean; threads: SlackThread[]; count: number }>('/slack/threads')
+  }
+
+  async postSlackDigest(issues: DigestIssue[]) {
+    return this.request<{ success: boolean; thread_ts: string; message: string }>('/slack/digest', {
+      method: 'POST',
+      body: JSON.stringify({ issues }),
+    })
+  }
+
+  async createSlackFollowupReminder(params: SlackReminderParams) {
+    return this.request<{ success: boolean; reminder: ReminderItem }>('/slack/reminders', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    })
+  }
+
   async analyzeSlackMessages(projectId: string) {
     return this.request<AIAnalysisResponse>(`/ai/analyze?project_id=${projectId}`, {
       method: 'POST',
@@ -580,23 +636,6 @@ class ApiService {
   // Calendar endpoints
   async getCalendarData(year: number, month: number) {
     return this.request<CalendarData>(`/calendar/${year}/${month}`)
-  }
-
-  // Notification endpoints
-  async getNotifications() {
-    return this.request<Notification[]>('/notifications')
-  }
-
-  async getUnreadCount() {
-    return this.request<{ count: number }>('/notifications/unread-count')
-  }
-
-  async markNotificationRead(id: string) {
-    return this.request(`/notifications/${id}/read`, { method: 'PATCH' })
-  }
-
-  async markAllNotificationsRead() {
-    return this.request('/notifications/read-all', { method: 'PATCH' })
   }
 
   // Report endpoints
@@ -1040,6 +1079,52 @@ export interface SlackAnalysis {
     status: string
     confidence: number
   }>
+}
+
+export interface SlackMention {
+  id: string
+  user_id: string
+  slack_user_id: string
+  message_ts: string
+  thread_ts?: string
+  channel_id: string
+  message_text: string
+  sender_name: string
+  requires_reply: boolean
+  replied: boolean
+  reply_checked_at?: string
+  snoozed_until?: string
+  created_at: string
+}
+
+export interface SlackThread {
+  id: string
+  user_id: string
+  channel_id: string
+  thread_ts: string
+  message_text: string
+  reply_count: number
+  last_checked_at?: string
+  has_reply: boolean
+  reminder_sent: boolean
+  snoozed_until?: string
+  created_at: string
+}
+
+export interface DigestIssue {
+  id: string
+  summary: string
+  assignee: string
+  status: string
+  priority: string
+}
+
+export interface SlackReminderParams {
+  thread_ts: string
+  channel_id: string
+  message_text: string
+  follow_up_date?: string
+  note?: string
 }
 
 export interface TaskStatusAnalysis {

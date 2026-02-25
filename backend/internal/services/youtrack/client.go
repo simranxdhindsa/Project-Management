@@ -41,6 +41,11 @@ func (c *Client) SetBoardID(boardID string) {
 	c.boardID = boardID
 }
 
+// GetBaseURL returns the YouTrack instance base URL (used for prefixing relative avatar URLs)
+func (c *Client) GetBaseURL() string {
+	return c.baseURL
+}
+
 // Issue represents a YouTrack issue
 type Issue struct {
 	ID           string        `json:"id"`           // internal id e.g. "3-671"
@@ -309,7 +314,7 @@ func (c *Client) GetStates(ctx context.Context) ([]State, error) {
 // GetIssues returns all issues from the project
 func (c *Client) GetIssues(ctx context.Context) ([]Issue, error) {
 	query := url.QueryEscape(fmt.Sprintf("project: %s", c.projectID))
-	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
 	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=200", fields, query)
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -327,7 +332,7 @@ func (c *Client) GetIssues(ctx context.Context) ([]Issue, error) {
 
 // GetIssue returns a single issue by ID
 func (c *Client) GetIssue(ctx context.Context, issueID string) (*Issue, error) {
-	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
 	path := fmt.Sprintf("/api/issues/%s?fields=%s", url.PathEscape(issueID), fields)
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -420,6 +425,13 @@ func (c *Client) GetUsers(ctx context.Context) ([]User, error) {
 		return nil, fmt.Errorf("failed to unmarshal users: %w", err)
 	}
 
+	// Prefix relative avatarUrl with baseURL
+	for i := range users {
+		if users[i].AvatarUrl != "" && !strings.HasPrefix(users[i].AvatarUrl, "http") {
+			users[i].AvatarUrl = c.baseURL + users[i].AvatarUrl
+		}
+	}
+
 	return users, nil
 }
 
@@ -508,6 +520,9 @@ func GetAssignee(issue Issue) *User {
 				if email, ok := valueMap["email"].(string); ok {
 					user.Email = email
 				}
+				if avatarUrl, ok := valueMap["avatarUrl"].(string); ok {
+					user.AvatarUrl = avatarUrl
+				}
 				return user
 			}
 		}
@@ -576,7 +591,7 @@ func (c *Client) GetIssuesByState(ctx context.Context, states []string) ([]Issue
 		stateFilters[i] = "{" + s + "}"
 	}
 	query := fmt.Sprintf("project: %s State: %s", c.projectID, strings.Join(stateFilters, ", "))
-	fields := "id,idReadable,summary,created,updated,customFields(name,value(name,presentation,fullName,login)),project(shortName)"
+	fields := "id,idReadable,summary,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),project(shortName)"
 	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=200", fields, url.QueryEscape(query))
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)

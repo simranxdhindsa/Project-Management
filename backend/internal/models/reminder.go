@@ -6,11 +6,12 @@ import "time"
 type ReminderType string
 
 const (
-	ReminderTaskFollowup ReminderType = "task_followup"
-	ReminderCustom       ReminderType = "custom"
-	ReminderDailyDigest  ReminderType = "daily_digest"
-	ReminderBlockedIssue ReminderType = "blocked_issue"
-	ReminderUpdateCheck  ReminderType = "update_check"
+	ReminderTaskFollowup  ReminderType = "task_followup"
+	ReminderCustom        ReminderType = "custom"
+	ReminderDailyDigest   ReminderType = "daily_digest"
+	ReminderBlockedIssue  ReminderType = "blocked_issue"
+	ReminderUpdateCheck   ReminderType = "update_check"
+	ReminderSlackFollowup ReminderType = "slack_followup"
 )
 
 // ReminderRecurring represents the recurring type

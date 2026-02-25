@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   DndContext,
   DragOverlay,
@@ -54,9 +55,10 @@ import { AIAnalysisPage } from './AIAnalysisPage'
 import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
 import { RemindersPage } from './RemindersPage'
+import { SlackIntelligencePage } from './SlackIntelligencePage'
 import { JellySwitch } from '../components/JellySwitch'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'reminders'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'reminders' | 'slack'
 
 // Pages accessible by members/viewers (limited access)
 const MEMBER_PAGES: Page[] = ['dashboard', 'list', 'daily-tasks']
@@ -133,9 +135,57 @@ function DraggableCard({ id, children }: { id: string; children: React.ReactNode
   )
 }
 
+// Map URL path segments to Page values
+const PATH_TO_PAGE: Record<string, Page> = {
+  '': 'dashboard',
+  'dashboard': 'dashboard',
+  'board': 'board',
+  'list': 'list',
+  'daily-tasks': 'daily-tasks',
+  'daily-analysis': 'daily-analysis',
+  'calendar': 'calendar',
+  'reports': 'reports',
+  'ai-analysis': 'ai-analysis',
+  'pm-reports': 'pm-reports',
+  'bots': 'bots',
+  'team': 'team',
+  'settings': 'settings',
+  'integrations': 'integrations',
+  'reminders': 'reminders',
+  'slack': 'slack',
+}
+
+const PM_REPORTS_TABS = ['tracking', 'timeline', 'daily', 'assignees', 'assistant'] as const
+type PMReportsTab = typeof PM_REPORTS_TABS[number]
+
+const SLACK_TABS = ['inbox', 'threads', 'followups', 'settings'] as const
+type SlackTab = typeof SLACK_TABS[number]
+
 export default function Dashboard() {
   const { user, logout } = useAuth()
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard')
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  // Derive current page from URL path
+  const pathSegments = location.pathname.replace(/^\//, '').split('/')
+  const currentPage: Page = PATH_TO_PAGE[pathSegments[0]] ?? 'dashboard'
+  const subTab: string | undefined = pathSegments[1]
+
+  // Derived sub-tab for pm-reports (with validation)
+  const pmReportsTab: PMReportsTab = (PM_REPORTS_TABS as readonly string[]).includes(subTab ?? '')
+    ? (subTab as PMReportsTab)
+    : 'tracking'
+
+  // Derived sub-tab for slack (with validation)
+  const slackTab: SlackTab = (SLACK_TABS as readonly string[]).includes(subTab ?? '')
+    ? (subTab as SlackTab)
+    : 'inbox'
+
+  // Navigate wrapper — updates URL and syncs page state
+  const setCurrentPage = (page: Page) => {
+    navigate(`/${page}`)
+  }
+
   const [showNotifications, setShowNotifications] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
 
@@ -191,9 +241,9 @@ export default function Dashboard() {
   // Guard: redirect members to allowed pages
   useEffect(() => {
     if (!isFullAccess && !MEMBER_PAGES.includes(currentPage)) {
-      setCurrentPage('dashboard')
+      navigate('/dashboard', { replace: true })
     }
-  }, [currentPage, isFullAccess])
+  }, [currentPage, isFullAccess, navigate])
 
   const localUnreadCount = notifications.filter(n => !n.read).length
   const unreadCount = localUnreadCount + serverUnreadCount
@@ -548,6 +598,22 @@ export default function Dashboard() {
                 <MessageSquare size={20} />
                 <span>PM Reports</span>
               </button>
+              <button
+                className={`sidebar-nav-item ${currentPage === 'slack' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('slack')}
+              >
+                <svg width="20" height="20" viewBox="0 0 54 54" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M19.7 32.5a4.9 4.9 0 1 1-4.9-4.9h4.9v4.9Z" fill="#E01E5A"/>
+                  <path d="M22.2 32.5a4.9 4.9 0 0 1 9.8 0v12.3a4.9 4.9 0 0 1-9.8 0V32.5Z" fill="#E01E5A"/>
+                  <path d="M27.1 19.7a4.9 4.9 0 1 1 4.9-4.9v4.9H27.1Z" fill="#36C5F0"/>
+                  <path d="M27.1 22.2a4.9 4.9 0 0 1 0 9.8H14.8a4.9 4.9 0 0 1 0-9.8H27.1Z" fill="#36C5F0"/>
+                  <path d="M39.9 27.1a4.9 4.9 0 1 1 4.9 4.9H39.9V27.1Z" fill="#2EB67D"/>
+                  <path d="M37.4 27.1a4.9 4.9 0 0 1-9.8 0V14.8a4.9 4.9 0 0 1 9.8 0V27.1Z" fill="#2EB67D"/>
+                  <path d="M32.5 39.9a4.9 4.9 0 1 1-4.9 4.9V39.9h4.9Z" fill="#ECB22E"/>
+                  <path d="M32.5 37.4a4.9 4.9 0 0 1 0-9.8h12.3a4.9 4.9 0 0 1 0 9.8H32.5Z" fill="#ECB22E"/>
+                </svg>
+                <span>Slack</span>
+              </button>
             </div>
           )}
 
@@ -628,6 +694,7 @@ export default function Dashboard() {
             {currentPage === 'settings' && 'Access Control'}
             {currentPage === 'integrations' && 'Integrations'}
             {currentPage === 'reminders' && 'Reminders'}
+            {currentPage === 'slack' && 'Slack Intelligence'}
           </h1>
         </div>
         <div className="header-actions">
@@ -812,6 +879,12 @@ export default function Dashboard() {
         {currentPage === 'integrations' && <IntegrationsPage />}
         {currentPage === 'settings' && <SettingsPage />}
         {currentPage === 'reminders' && <RemindersPage />}
+        {currentPage === 'slack' && (
+          <SlackIntelligencePage
+            initialTab={slackTab}
+            onTabChange={(tab) => navigate(`/slack/${tab}`)}
+          />
+        )}
 
         {/* Dashboard Content */}
         {currentPage === 'dashboard' && (
@@ -1181,7 +1254,12 @@ export default function Dashboard() {
         )}
 
         {/* PM Reports */}
-        {currentPage === 'pm-reports' && <PMReportsPage />}
+        {currentPage === 'pm-reports' && (
+          <PMReportsPage
+            initialTab={pmReportsTab}
+            onTabChange={(tab) => navigate(`/pm-reports/${tab}`)}
+          />
+        )}
 
         {/* Team Placeholder */}
         {currentPage === 'team' && (

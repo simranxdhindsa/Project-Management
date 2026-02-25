@@ -267,3 +267,107 @@ func (c *Client) GetYesterdayMessages(ctx context.Context, channelID string) ([]
 	return c.GetChannelHistory(ctx, channelID, startOfYesterday.Unix(), endOfYesterday.Unix(), 1000)
 }
 
+// GetUserByEmail looks up a Slack user by email address (users.lookupByEmail)
+func (c *Client) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	params := url.Values{}
+	params.Set("email", email)
+
+	body, err := c.doGetRequest(ctx, "/users.lookupByEmail", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Response
+		User User `json:"user"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !resp.OK {
+		return nil, fmt.Errorf("slack API error: %s", resp.Error)
+	}
+
+	return &resp.User, nil
+}
+
+// GetThreadReplies returns replies in a thread (conversations.replies)
+func (c *Client) GetThreadReplies(ctx context.Context, channelID, threadTS string) ([]Message, error) {
+	params := url.Values{}
+	params.Set("channel", channelID)
+	params.Set("ts", threadTS)
+	params.Set("limit", "200")
+
+	body, err := c.doGetRequest(ctx, "/conversations.replies", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Response
+		Messages []Message `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !resp.OK {
+		return nil, fmt.Errorf("slack API error: %s", resp.Error)
+	}
+
+	return resp.Messages, nil
+}
+
+// PostMessage posts a message to a channel (chat.postMessage)
+func (c *Client) PostMessage(ctx context.Context, channelID, text string) (string, error) {
+	payload := map[string]string{
+		"channel": channelID,
+		"text":    text,
+	}
+
+	body, err := c.doRequest(ctx, "POST", "/chat.postMessage", payload)
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		Response
+		TS string `json:"ts"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !resp.OK {
+		return "", fmt.Errorf("slack API error: %s", resp.Error)
+	}
+
+	return resp.TS, nil
+}
+
+// PostThreadReply posts a reply in a thread (chat.postMessage with thread_ts)
+func (c *Client) PostThreadReply(ctx context.Context, channelID, threadTS, text string) error {
+	payload := map[string]string{
+		"channel":   channelID,
+		"text":      text,
+		"thread_ts": threadTS,
+	}
+
+	body, err := c.doRequest(ctx, "POST", "/chat.postMessage", payload)
+	if err != nil {
+		return err
+	}
+
+	var resp Response
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !resp.OK {
+		return fmt.Errorf("slack API error: %s", resp.Error)
+	}
+
+	return nil
+}
+

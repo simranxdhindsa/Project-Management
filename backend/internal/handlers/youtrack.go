@@ -316,8 +316,13 @@ func (h *YouTrackHandler) GetIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Transform issues to include extracted fields
+	baseURL := client.GetBaseURL()
 	var response []map[string]interface{}
 	for _, issue := range issues {
+		assignee := youtrack.GetAssignee(issue)
+		if assignee != nil && assignee.AvatarUrl != "" && !strings.HasPrefix(assignee.AvatarUrl, "http") {
+			assignee.AvatarUrl = baseURL + assignee.AvatarUrl
+		}
 		response = append(response, map[string]interface{}{
 			"id":          issue.ID,
 			"summary":     issue.Summary,
@@ -325,7 +330,7 @@ func (h *YouTrackHandler) GetIssues(w http.ResponseWriter, r *http.Request) {
 			"status":      youtrack.GetStatus(issue),
 			"subsystem":   youtrack.GetSubsystem(issue),
 			"priority":    youtrack.GetPriority(issue),
-			"assignee":    youtrack.GetAssignee(issue),
+			"assignee":    assignee,
 			"created":     issue.Created,
 			"updated":     issue.Updated,
 			"attachments": issue.Attachments,
@@ -362,6 +367,11 @@ func (h *YouTrackHandler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	assignee := youtrack.GetAssignee(*issue)
+	if assignee != nil && assignee.AvatarUrl != "" && !strings.HasPrefix(assignee.AvatarUrl, "http") {
+		assignee.AvatarUrl = client.GetBaseURL() + assignee.AvatarUrl
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -372,7 +382,7 @@ func (h *YouTrackHandler) GetIssue(w http.ResponseWriter, r *http.Request) {
 			"status":      youtrack.GetStatus(*issue),
 			"subsystem":   youtrack.GetSubsystem(*issue),
 			"priority":    youtrack.GetPriority(*issue),
-			"assignee":    youtrack.GetAssignee(*issue),
+			"assignee":    assignee,
 			"created":     issue.Created,
 			"updated":     issue.Updated,
 			"attachments": issue.Attachments,

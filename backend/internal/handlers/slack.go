@@ -1,23 +1,33 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
+	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
-	"github.com/dhindsa/project-management/internal/services/slack"
+	"github.com/dhindsa/project-management/internal/models"
+	slacksvc "github.com/dhindsa/project-management/internal/services/slack"
+	"github.com/gorilla/mux"
 )
 
 // SlackHandler handles Slack integration API requests
 type SlackHandler struct {
-	service *slack.Service
+	service      *slacksvc.Service
+	slackRepo    *database.SlackRepository
+	reminderRepo *database.ReminderRepository
+	notifHandler *NotificationHandler
 }
 
 // NewSlackHandler creates a new Slack handler
-func NewSlackHandler() *SlackHandler {
+func NewSlackHandler(notifHandler *NotificationHandler) *SlackHandler {
 	return &SlackHandler{
-		service: slack.NewService(),
+		service:      slacksvc.NewService(),
+		slackRepo:    database.NewSlackRepository(),
+		reminderRepo: database.NewReminderRepository(),
+		notifHandler: notifHandler,
 	}
 }
 
@@ -215,4 +225,341 @@ func (h *SlackHandler) GetYesterdayMessages(w http.ResponseWriter, r *http.Reque
 		"messages": messages,
 		"count":    len(messages),
 	})
+}
+
+// SetMonitorChannel sets the channel to monitor for @mentions
+func (h *SlackHandler) SetMonitorChannel(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		ChannelID   string `json:"channel_id"`
+		ChannelName string `json:"channel_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.service.SetMonitorChannel(r.Context(), userID, req.ChannelID, req.ChannelName); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Monitor channel set successfully",
+	})
+}
+
+// Scan triggers a mention + thread scan and creates notifications for new mentions
+func (h *SlackHandler) Scan(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	newMentions, err := h.service.ScanMentions(r.Context(), user.ID, user.Email)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	newThreads, err := h.service.ScanUserThreads(r.Context(), user.ID, user.Email)
+	if err != nil {
+		// Non-fatal: proceed without threads
+		newThreads = nil
+	}
+
+	// Fire SSE notification for each new @mention
+	for _, mention := range newMentions {
+		notif := &models.Notification{
+			UserID:  user.ID,
+			Type:    "slack_mention",
+			Title:   "New @mention in Slack",
+			Message: "From " + mention.SenderName + ": " + truncate(mention.MessageText, 100),
+		}
+		_ = h.notifHandler.CreateAndBroadcast(r.Context(), notif)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"new_mentions": len(newMentions),
+		"new_threads":  len(newThreads),
+	})
+}
+
+// GetMentions returns unreplied @mentions for the logged-in user
+func (h *SlackHandler) GetMentions(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	mentions, err := h.slackRepo.GetAllMentions(r.Context(), userID, 50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	unrepliedCount, _ := h.slackRepo.CountUnrepliedMentions(r.Context(), userID)
+
+	if mentions == nil {
+		mentions = []models.SlackMention{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":         true,
+		"mentions":        mentions,
+		"count":           len(mentions),
+		"unreplied_count": unrepliedCount,
+	})
+}
+
+// DismissMention marks a mention as handled/replied
+func (h *SlackHandler) DismissMention(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	messageTS := vars["messageTS"]
+	if messageTS == "" {
+		http.Error(w, "messageTS is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.slackRepo.MarkMentionReplied(r.Context(), userID, messageTS); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Mention marked as handled",
+	})
+}
+
+// GetUnansweredThreads returns threads the user started with no or few replies
+func (h *SlackHandler) GetUnansweredThreads(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	threads, err := h.slackRepo.GetAllUserThreads(r.Context(), userID, 50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if threads == nil {
+		threads = []models.SlackUserThread{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"threads": threads,
+		"count":   len(threads),
+	})
+}
+
+// PostDigest posts today's digest to the configured primary channel
+func (h *SlackHandler) PostDigest(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Issues []slacksvc.DigestIssue `json:"issues"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	threadTS, err := h.service.PostDailyDigest(r.Context(), userID, req.Issues)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"thread_ts": threadTS,
+		"message":   "Digest posted successfully",
+	})
+}
+
+// CreateFollowupReminder creates a Slack follow-up reminder tied to a thread
+func (h *SlackHandler) CreateFollowupReminder(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		ThreadTS    string `json:"thread_ts"`
+		ChannelID   string `json:"channel_id"`
+		MessageText string `json:"message_text"`
+		FollowUpDate string `json:"follow_up_date"`
+		Note        string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.FollowUpDate == "" {
+		// Default to tomorrow
+		req.FollowUpDate = time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	}
+
+	title := "Follow up on Slack thread"
+	if req.MessageText != "" {
+		title = "Follow up: " + truncate(req.MessageText, 80)
+	}
+
+	var msg *string
+	if req.Note != "" {
+		msg = &req.Note
+	}
+
+	reminder := &models.Reminder{
+		UserID:         userID,
+		Type:           models.ReminderSlackFollowup,
+		Title:          title,
+		Message:        msg,
+		TargetDate:     req.FollowUpDate,
+		RelatedIssueID: &req.ThreadTS,
+		Recurring:      models.RecurringNone,
+	}
+
+	if err := h.reminderRepo.Create(r.Context(), reminder); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Fire notification
+	notif := &models.Notification{
+		UserID:  userID,
+		Type:    "reminder_created",
+		Title:   "Slack Follow-up Reminder Set",
+		Message: title + " — due " + req.FollowUpDate,
+	}
+	_ = h.notifHandler.CreateAndBroadcast(context.Background(), notif)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"reminder": reminder,
+	})
+}
+
+// SnoozeMention snoozes a mention for 2h or until tomorrow
+func (h *SlackHandler) SnoozeMention(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	messageTS := vars["messageTS"]
+	if messageTS == "" {
+		http.Error(w, "messageTS is required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Until string `json:"until"` // "2h" or "tomorrow" or RFC3339
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	var until time.Time
+	switch req.Until {
+	case "tomorrow":
+		t := time.Now().AddDate(0, 0, 1)
+		until = time.Date(t.Year(), t.Month(), t.Day(), 9, 0, 0, 0, t.Location())
+	default: // "2h" or anything else
+		until = time.Now().Add(2 * time.Hour)
+	}
+
+	if err := h.slackRepo.SnoozeMention(r.Context(), userID, messageTS, until); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"snoozed_until": until.Format(time.RFC3339),
+	})
+}
+
+// SnoozeThread snoozes a thread for 2h or until tomorrow
+func (h *SlackHandler) SnoozeThread(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	threadTS := vars["threadTS"]
+	if threadTS == "" {
+		http.Error(w, "threadTS is required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Until string `json:"until"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	var until time.Time
+	switch req.Until {
+	case "tomorrow":
+		t := time.Now().AddDate(0, 0, 1)
+		until = time.Date(t.Year(), t.Month(), t.Day(), 9, 0, 0, 0, t.Location())
+	default:
+		until = time.Now().Add(2 * time.Hour)
+	}
+
+	if err := h.slackRepo.SnoozeThread(r.Context(), userID, threadTS, until); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"snoozed_until": until.Format(time.RFC3339),
+	})
+}
+
+// truncate trims a string to maxLen and appends "…" if cut
+func truncate(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "…"
 }
