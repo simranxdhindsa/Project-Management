@@ -399,9 +399,14 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Summary     string `json:"summary"`
-		Description string `json:"description"`
-		State       string `json:"state,omitempty"`
+		Summary             string `json:"summary"`
+		Description         string `json:"description"`
+		State               string `json:"state,omitempty"`
+		Priority            string `json:"priority,omitempty"`
+		AssigneeLogin       string `json:"assignee_login,omitempty"`
+		Subsystem           string `json:"subsystem,omitempty"`
+		DueDate             *int64 `json:"due_date,omitempty"`       // Unix ms timestamp
+		EstimationMinutes   *int   `json:"estimation_minutes,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -419,13 +424,51 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 	}
 
+	var fields []youtrack.CustomField
 	if req.State != "" {
-		createReq.CustomFields = []youtrack.CustomField{
-			{
-				Name:  "State",
-				Value: map[string]string{"name": req.State},
-			},
-		}
+		fields = append(fields, youtrack.CustomField{
+			Type:  "StateIssueCustomField",
+			Name:  "State",
+			Value: map[string]string{"name": req.State},
+		})
+	}
+	if req.Priority != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "SingleEnumIssueCustomField",
+			Name:  "Priority",
+			Value: map[string]string{"name": req.Priority},
+		})
+	}
+	if req.AssigneeLogin != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "SingleUserIssueCustomField",
+			Name:  "Assignee",
+			Value: map[string]string{"login": req.AssigneeLogin},
+		})
+	}
+	if req.Subsystem != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "MultiOwnedIssueCustomField",
+			Name:  "Subsystem",
+			Value: []map[string]string{{"name": req.Subsystem}},
+		})
+	}
+	if req.DueDate != nil {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "DateIssueCustomField",
+			Name:  "Due Date",
+			Value: *req.DueDate,
+		})
+	}
+	if req.EstimationMinutes != nil {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "PeriodIssueCustomField",
+			Name:  "Estimation",
+			Value: map[string]interface{}{"minutes": *req.EstimationMinutes},
+		})
+	}
+	if len(fields) > 0 {
+		createReq.CustomFields = fields
 	}
 
 	issue, err := client.CreateIssue(r.Context(), createReq)

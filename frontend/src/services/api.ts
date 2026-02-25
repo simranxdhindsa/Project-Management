@@ -241,10 +241,19 @@ class ApiService {
     return this.request<YouTrackIssue>(`/youtrack/issues/${issueId}`)
   }
 
-  async createYouTrackIssue(summary: string, description: string, state?: string) {
+  async createYouTrackIssue(params: {
+    summary: string
+    description?: string
+    state?: string
+    priority?: string
+    assignee_login?: string
+    subsystem?: string
+    due_date?: number        // Unix ms timestamp
+    estimation_minutes?: number
+  }) {
     return this.request<YouTrackIssue>('/youtrack/issues', {
       method: 'POST',
-      body: JSON.stringify({ summary, description, state }),
+      body: JSON.stringify(params),
     })
   }
 

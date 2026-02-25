@@ -6,7 +6,7 @@ import {
   Calendar, Pin, PinOff, ChevronLeft, ChevronRight,
   Search, RotateCcw, ArrowDownUp, ArrowUpNarrowWide,
   ArrowDownNarrowWide, Star, Activity, X, TriangleAlert,
-  CheckCircle2, Timer,
+  CheckCircle2, Timer, Zap, Filter,
 } from 'lucide-react'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { IssueTimeline, IssueStint } from '../services/api'
@@ -688,6 +688,9 @@ function TimeTrackingTab() {
   const [filterOverdue, setFilterOverdue] = useState(false)
   const [filterMismatch, setFilterMismatch] = useState(false)
   const [filterMovedBack, setFilterMovedBack] = useState(false)
+  const [filterLive, setFilterLive] = useState(false)
+  const [filterDelayed, setFilterDelayed] = useState(false)
+  const [filterPinned, setFilterPinned] = useState(false)
   const [filterAssignee, setFilterAssignee] = useState('')
   const [filterPriorities, setFilterPriorities] = useState<string[]>([])
   const [sortKey, setSortKey] = useState<SortKey>('entered_at')
@@ -833,9 +836,16 @@ function TimeTrackingTab() {
 
   // Client-side filtering
   let displayed = rows
-  if (filterOverdue) displayed = displayed.filter(r => r.overdue)
-  if (filterMismatch) displayed = displayed.filter(r => r.moved_by_mismatch)
+  if (filterOverdue)   displayed = displayed.filter(r => r.overdue)
+  if (filterMismatch)  displayed = displayed.filter(r => r.moved_by_mismatch)
   if (filterMovedBack) displayed = displayed.filter(r => isMovedBack(r.from_state, r.to_state))
+  // Live = currently in progress (no exit yet: duration is null)
+  if (filterLive)    displayed = displayed.filter(r => r.duration_in_prev_state_hours === null)
+  // Delayed = time spent exceeds threshold
+  if (filterDelayed) displayed = displayed.filter(r =>
+    r.duration_in_prev_state_hours !== null && r.duration_in_prev_state_hours > r.threshold_hours
+  )
+  if (filterPinned)  displayed = displayed.filter(r => r.pinned)
   if (filterAssignee) displayed = displayed.filter(r => r.assignee.toLowerCase() === filterAssignee.toLowerCase())
   if (filterPriorities.length > 0) displayed = displayed.filter(r => filterPriorities.includes(r.priority))
   if (searchIssue) {
@@ -857,10 +867,14 @@ function TimeTrackingTab() {
     }
   })
 
-  const overdueCount = rows.filter(r => r.overdue).length
-  const mismatchCount = rows.filter(r => r.moved_by_mismatch).length
+  const overdueCount   = rows.filter(r => r.overdue).length
+  const mismatchCount  = rows.filter(r => r.moved_by_mismatch).length
   const movedBackCount = rows.filter(r => isMovedBack(r.from_state, r.to_state)).length
-  const pinnedCount = rows.filter(r => r.pinned).length
+  const pinnedCount    = rows.filter(r => r.pinned).length
+  const liveCount      = rows.filter(r => r.duration_in_prev_state_hours === null).length
+  const delayedCount   = rows.filter(r => r.duration_in_prev_state_hours !== null && r.duration_in_prev_state_hours > r.threshold_hours).length
+  const ttActiveFilterCount = [filterOverdue, filterMismatch, filterMovedBack, filterLive, filterDelayed,
+    filterPinned, filterAssignee !== '', filterPriorities.length > 0].filter(Boolean).length
 
   return (
     <div className="pm-tab-content pm-tracking-tab">
@@ -1045,6 +1059,22 @@ function TimeTrackingTab() {
 
         {/* Toggle filters */}
         <div className="pm-toggle-filters">
+          {liveCount > 0 && (
+            <button
+              className={`btn-sm ${filterLive ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterLive(f => !f)}
+            >
+              <Timer size={13} /> Live ({liveCount})
+            </button>
+          )}
+          {delayedCount > 0 && (
+            <button
+              className={`btn-sm ${filterDelayed ? 'btn-danger-active' : 'btn-secondary'}`}
+              onClick={() => setFilterDelayed(f => !f)}
+            >
+              <Zap size={13} /> Delayed ({delayedCount})
+            </button>
+          )}
           {overdueCount > 0 && (
             <button
               className={`btn-sm ${filterOverdue ? 'btn-danger-active' : 'btn-secondary'}`}
@@ -1067,6 +1097,26 @@ function TimeTrackingTab() {
               onClick={() => setFilterMovedBack(f => !f)}
             >
               <RotateCcw size={13} /> Moved Back ({movedBackCount})
+            </button>
+          )}
+          {pinnedCount > 0 && (
+            <button
+              className={`btn-sm ${filterPinned ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterPinned(f => !f)}
+            >
+              <Pin size={13} /> Pinned ({pinnedCount})
+            </button>
+          )}
+          {ttActiveFilterCount > 0 && (
+            <button
+              className="btn-sm btn-ghost tl-clear-filters"
+              onClick={() => {
+                setFilterOverdue(false); setFilterMismatch(false); setFilterMovedBack(false)
+                setFilterLive(false); setFilterDelayed(false); setFilterPinned(false)
+                setFilterAssignee(''); setFilterPriorities([]); setSearchIssue('')
+              }}
+            >
+              <X size={12} /> Clear filters
             </button>
           )}
         </div>
@@ -1258,6 +1308,12 @@ function IssueTimelineTab() {
   const [filterLive, setFilterLive] = useState(false)
   const [filterOverdue, setFilterOverdue] = useState(false)
   const [filterMovedBack, setFilterMovedBack] = useState(false)
+  const [filterDelayed, setFilterDelayed] = useState(false)
+  const [filterPinned, setFilterPinned] = useState(false)
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([])
+  const [filterAssignee, setFilterAssignee] = useState('')
+  const [tlAssigneeOpen, setTlAssigneeOpen] = useState(false)
+  const tlAssigneeRef = useRef<HTMLDivElement>(null)
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
   const [dismissing, setDismissing] = useState<string | null>(null)
@@ -1317,10 +1373,24 @@ function IssueTimelineTab() {
     }
   }
 
+  // Close assignee dropdown on outside click
+  useEffect(() => {
+    function onOutside(e: MouseEvent) {
+      if (tlAssigneeRef.current && !tlAssigneeRef.current.contains(e.target as Node)) {
+        setTlAssigneeOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onOutside)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [])
+
   // Moved-back alerts: live tickets that were moved back and alert not dismissed
   const movedBackAlerts = timelines.filter(
     t => t.is_live && t.moved_back_count > 0 && !t.alert_dismissed
   )
+
+  // Unique assignees for dropdown
+  const tlAllAssignees = Array.from(new Set(timelines.map(t => t.assignee).filter(Boolean))).sort()
 
   // Filter tickets
   let displayed = timelines
@@ -1330,13 +1400,21 @@ function IssueTimelineTab() {
       t.issue_id.toLowerCase().includes(q) || t.issue_summary.toLowerCase().includes(q)
     )
   }
-  if (filterLive) displayed = displayed.filter(t => t.is_live)
-  if (filterOverdue) displayed = displayed.filter(t => t.is_overdue)
-  if (filterMovedBack) displayed = displayed.filter(t => t.moved_back_count > 0)
+  if (filterLive)       displayed = displayed.filter(t => t.is_live)
+  if (filterOverdue)    displayed = displayed.filter(t => t.is_overdue)
+  if (filterMovedBack)  displayed = displayed.filter(t => t.moved_back_count > 0)
+  if (filterDelayed)    displayed = displayed.filter(t => t.total_hours > t.threshold_hours)
+  if (filterPinned)     displayed = displayed.filter(t => t.pinned)
+  if (filterAssignee)   displayed = displayed.filter(t => t.assignee?.toLowerCase() === filterAssignee.toLowerCase())
+  if (filterPriorities.length > 0) displayed = displayed.filter(t => filterPriorities.includes(t.priority))
 
-  const liveCount = timelines.filter(t => t.is_live).length
-  const overdueCount = timelines.filter(t => t.is_overdue).length
+  const liveCount      = timelines.filter(t => t.is_live).length
+  const overdueCount   = timelines.filter(t => t.is_overdue).length
   const movedBackCount = timelines.filter(t => t.moved_back_count > 0).length
+  const delayedCount   = timelines.filter(t => t.total_hours > t.threshold_hours).length
+  const pinnedCount    = timelines.filter(t => t.pinned).length
+  const activeFilterCount = [filterLive, filterOverdue, filterMovedBack, filterDelayed, filterPinned,
+    filterAssignee !== '', filterPriorities.length > 0].filter(Boolean).length
 
   return (
     <div className="pm-tab-content pm-timeline-tab">
@@ -1403,7 +1481,8 @@ function IssueTimelineTab() {
       )}
 
       {/* Filter bar */}
-      <div className="pm-filter-bar">
+      <div className="pm-filter-bar tl-filter-bar">
+        {/* Search */}
         <div className="pm-search-box">
           <Search size={13} />
           <input
@@ -1413,24 +1492,119 @@ function IssueTimelineTab() {
             onChange={e => setFilterSearch(e.target.value)}
           />
         </div>
-        <button
-          className={`btn-sm ${filterLive ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setFilterLive(f => !f)}
-        >
-          <Timer size={13} /> Live ({liveCount})
-        </button>
-        <button
-          className={`btn-sm ${filterOverdue ? 'btn-warning-active' : 'btn-secondary'}`}
-          onClick={() => setFilterOverdue(f => !f)}
-        >
-          <AlertTriangle size={13} /> Overdue ({overdueCount})
-        </button>
-        <button
-          className={`btn-sm ${filterMovedBack ? 'btn-warning-active' : 'btn-secondary'}`}
-          onClick={() => setFilterMovedBack(f => !f)}
-        >
-          <RotateCcw size={13} /> Moved Back ({movedBackCount})
-        </button>
+
+        {/* Assignee dropdown */}
+        <div className="pm-custom-dropdown" ref={tlAssigneeRef}>
+          <button
+            className="pm-custom-dropdown-trigger"
+            onClick={() => setTlAssigneeOpen(o => !o)}
+          >
+            {filterAssignee ? (
+              <>
+                {avatarMap[filterAssignee]
+                  ? <img src={avatarMap[filterAssignee]} alt={filterAssignee} className="filter-avatar-img" />
+                  : <span className="filter-avatar-placeholder">{filterAssignee.charAt(0).toUpperCase()}</span>
+                }
+                <span className="filter-assignee-name">{filterAssignee.split(' ')[0]}</span>
+              </>
+            ) : (
+              <><Users size={14} /><span>All Assignees</span></>
+            )}
+            <ChevronDown size={12} className={`dropdown-chevron ${tlAssigneeOpen ? 'open' : ''}`} />
+          </button>
+          {tlAssigneeOpen && (
+            <div className="pm-custom-dropdown-menu">
+              <button
+                className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`}
+                onClick={() => { setFilterAssignee(''); setTlAssigneeOpen(false) }}
+              >
+                <Users size={14} /><span>All Assignees</span>
+              </button>
+              {tlAllAssignees.map(a => (
+                <button
+                  key={a}
+                  className={`pm-dropdown-item ${filterAssignee === a ? 'active' : ''}`}
+                  onClick={() => { setFilterAssignee(a); setTlAssigneeOpen(false) }}
+                >
+                  {avatarMap[a]
+                    ? <img src={avatarMap[a]} alt={a} className="filter-avatar-img" />
+                    : <span className="filter-avatar-placeholder">{a.charAt(0).toUpperCase()}</span>
+                  }
+                  <span>{a}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Priority chips */}
+        <div className="pm-priority-chips">
+          {['P0', 'P1', 'P2', 'P3'].map(p => (
+            <button
+              key={p}
+              className={`priority-chip ${filterPriorities.includes(p) ? 'active' : ''} ${priorityBadgeClass(p)}`}
+              onClick={() => setFilterPriorities(prev =>
+                prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* Status / state quick-filters */}
+        <div className="pm-toggle-filters">
+          <button
+            className={`btn-sm ${filterLive ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setFilterLive(f => !f)}
+          >
+            <Timer size={13} /> Live {liveCount > 0 && `(${liveCount})`}
+          </button>
+          {delayedCount > 0 && (
+            <button
+              className={`btn-sm ${filterDelayed ? 'btn-danger-active' : 'btn-secondary'}`}
+              onClick={() => setFilterDelayed(f => !f)}
+            >
+              <Zap size={13} /> Delayed ({delayedCount})
+            </button>
+          )}
+          {overdueCount > 0 && (
+            <button
+              className={`btn-sm ${filterOverdue ? 'btn-warning-active' : 'btn-secondary'}`}
+              onClick={() => setFilterOverdue(f => !f)}
+            >
+              <AlertTriangle size={13} /> Overdue ({overdueCount})
+            </button>
+          )}
+          {movedBackCount > 0 && (
+            <button
+              className={`btn-sm ${filterMovedBack ? 'btn-warning-active' : 'btn-secondary'}`}
+              onClick={() => setFilterMovedBack(f => !f)}
+            >
+              <RotateCcw size={13} /> Moved Back ({movedBackCount})
+            </button>
+          )}
+          {pinnedCount > 0 && (
+            <button
+              className={`btn-sm ${filterPinned ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterPinned(f => !f)}
+            >
+              <Pin size={13} /> Pinned ({pinnedCount})
+            </button>
+          )}
+          {activeFilterCount > 0 && (
+            <button
+              className="btn-sm btn-ghost tl-clear-filters"
+              onClick={() => {
+                setFilterLive(false); setFilterOverdue(false); setFilterMovedBack(false)
+                setFilterDelayed(false); setFilterPinned(false); setFilterAssignee('')
+                setFilterPriorities([]); setFilterSearch('')
+              }}
+            >
+              <X size={12} /> Clear filters
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Summary bar */}
@@ -1454,9 +1628,10 @@ function IssueTimelineTab() {
               <span className="tl-col-label tl-col-summary">Summary</span>
             </div>
             <div className="tl-col-right">
-              <span className="tl-col-label">Assignee</span>
-              <span className="tl-col-label">Time / Threshold</span>
-              <span className="tl-col-label">Stints</span>
+              <span className="tl-col-label tl-col-assignee">Assignee</span>
+              <span className="tl-col-label tl-col-time">Time</span>
+              <span className="tl-col-label tl-col-stints">Stints</span>
+              <span className="tl-col-chevron-spacer" />
             </div>
           </div>
         <div className="tl-card-list">
@@ -1510,10 +1685,29 @@ function IssueTimelineTab() {
                       </span>
                     )}
                     <div className="tl-totals">
-                      <span className="tl-total-hours" title={`Total: ${t.total_hours.toFixed(1)}h`}>
-                        <Timer size={13} /> {formatHoursDetailed(t.total_hours)}
-                      </span>
-                      <span className="tl-threshold" title={`Threshold: ${t.threshold_hours}h`}>/ {t.threshold_hours}h</span>
+                      {(() => {
+                        const ratio = t.threshold_hours > 0
+                          ? Math.min(t.total_hours / t.threshold_hours, 1)
+                          : 0
+                        const barColor = t.is_overdue
+                          ? '#ef4444'
+                          : t.total_hours > t.threshold_hours
+                            ? '#f97316'
+                            : t.is_live ? '#22c55e' : '#6366f1'
+                        return (
+                          <>
+                            <div className="tt-time-bar">
+                              <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
+                            </div>
+                            <span className="tt-time-label">
+                              {formatHoursDetailed(t.total_hours)}
+                              <span className="tt-threshold"> / {t.threshold_hours}h</span>
+                            </span>
+                          </>
+                        )
+                      })()}
+                    </div>
+                    <div className="tl-stints-col">
                       {t.total_stints > 1 && (
                         <span className="tl-stints-badge">{t.total_stints} stints</span>
                       )}

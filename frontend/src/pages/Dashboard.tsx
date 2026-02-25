@@ -14,6 +14,7 @@ import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/contexts/AuthContext'
 import api from '@/services/api'
 import { ConfirmModal } from '@/components/ConfirmModal'
+import CreateIssueModal from '@/components/CreateIssueModal'
 import { useYouTrackEvents } from '@/services/useYouTrackEvents'
 import { useNotifications } from '@/services/useNotifications'
 import type { NotificationItem } from '@/services/api'
@@ -199,9 +200,6 @@ export default function Dashboard() {
 
   // New task modal state
   const [showNewTask, setShowNewTask] = useState(false)
-  const [newTaskTitle, setNewTaskTitle] = useState('')
-  const [newTaskDesc, setNewTaskDesc] = useState('')
-  const [creatingTask, setCreatingTask] = useState(false)
 
   const [showClearConfirm, setShowClearConfirm] = useState(false)
 
@@ -388,24 +386,6 @@ export default function Dashboard() {
     setSyncing(false)
   }
 
-  const handleCreateTask = async () => {
-    if (!newTaskTitle.trim()) return
-    setCreatingTask(true)
-    try {
-      await api.createYouTrackIssue(newTaskTitle.trim(), newTaskDesc.trim())
-      setShowNewTask(false)
-      setNewTaskTitle('')
-      setNewTaskDesc('')
-      setToast({ message: 'Task created in YouTrack', type: 'info' })
-      setTimeout(() => setToast(null), 3000)
-      fetchYouTrackIssues()
-    } catch {
-      setToast({ message: 'Failed to create task', type: 'warning' })
-      setTimeout(() => setToast(null), 3000)
-    } finally {
-      setCreatingTask(false)
-    }
-  }
 
   const handleLogout = async () => {
     await logout()
@@ -1273,47 +1253,10 @@ export default function Dashboard() {
 
       {/* New Task Modal */}
       {showNewTask && (
-        <div className="modal-overlay" onClick={() => setShowNewTask(false)}>
-          <div className="glass-card" onClick={e => e.stopPropagation()} style={{ width: '480px', padding: '1.5rem' }}>
-            <h3 style={{ marginBottom: '1rem' }}>Create New Task</h3>
-            <div className="form-group" style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Title</label>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Task title..."
-                value={newTaskTitle}
-                onChange={e => setNewTaskTitle(e.target.value.slice(0, 200))}
-                maxLength={200}
-                autoFocus
-                onKeyDown={e => { if (e.key === 'Enter' && newTaskTitle.trim()) handleCreateTask() }}
-                style={{ width: '100%', padding: '0.5rem 0.75rem' }}
-              />
-            </div>
-            <div className="form-group" style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Description (optional)</label>
-              <textarea
-                className="form-input"
-                placeholder="Task description..."
-                value={newTaskDesc}
-                onChange={e => setNewTaskDesc(e.target.value.slice(0, 2000))}
-                maxLength={2000}
-                rows={4}
-                style={{ width: '100%', padding: '0.5rem 0.75rem', resize: 'vertical' }}
-              />
-            </div>
-            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-              <button className="btn btn-ghost" onClick={() => setShowNewTask(false)}>Cancel</button>
-              <button
-                className="btn btn-primary"
-                onClick={handleCreateTask}
-                disabled={creatingTask || !newTaskTitle.trim()}
-              >
-                {creatingTask ? 'Creating...' : 'Create Task'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <CreateIssueModal
+          onClose={() => setShowNewTask(false)}
+          onCreated={() => setShowNewTask(false)}
+        />
       )}
 
       <ConfirmModal

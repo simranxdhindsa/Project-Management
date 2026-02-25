@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { KanbanBoard } from '../components/board'
-import type { Task, TaskStatus, AsanaSection, CreateTaskRequest } from '../types'
+import type { Task, TaskStatus, AsanaSection } from '../types'
 import api from '../services/api'
 import type { YouTrackIssue } from '../services/api'
 
@@ -46,7 +46,6 @@ export function BoardPage() {
   const [sections, setSections] = useState<AsanaSection[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [youtrackConnected, setYoutrackConnected] = useState(false)
@@ -65,7 +64,7 @@ export function BoardPage() {
       let ytConnected = false
       try {
         const ytStatus = await api.getYouTrackStatus()
-        ytConnected = ytStatus.configured === true
+        ytConnected = ytStatus.data?.configured === true
         setYoutrackConnected(ytConnected)
       } catch {
         ytConnected = false
@@ -163,30 +162,6 @@ export function BoardPage() {
     setSelectedTask(task)
   }
 
-  const handleCreateTask = async (taskData: CreateTaskRequest) => {
-    try {
-      if (youtrackConnected) {
-        // Create in YouTrack
-        const response = await api.createYouTrackIssue(
-          taskData.title,
-          taskData.description || '',
-          mapLocalStatusToYouTrack(taskData.status || 'todo')
-        )
-        if (response.success) {
-          await fetchTasksAndSections()
-          setShowCreateModal(false)
-        }
-      } else {
-        const response = await api.createTask(taskData)
-        if (response.success && response.data) {
-          setTasks((prev) => [...prev, response.data as Task])
-          setShowCreateModal(false)
-        }
-      }
-    } catch (err) {
-      console.error('Error creating task:', err)
-    }
-  }
 
   const handleSync = async () => {
     try {
@@ -297,16 +272,6 @@ export function BoardPage() {
               Sort
             </button>
           </div>
-          <button
-            className="btn btn-primary"
-            onClick={() => setShowCreateModal(true)}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Add Task
-          </button>
         </div>
       </div>
 
@@ -410,13 +375,6 @@ export function BoardPage() {
         </div>
       )}
 
-      {/* Create Task Modal */}
-      {showCreateModal && (
-        <CreateTaskModal
-          onClose={() => setShowCreateModal(false)}
-          onCreate={handleCreateTask}
-        />
-      )}
     </div>
   )
 }
@@ -431,119 +389,3 @@ function mapLocalStatusToYouTrack(status: TaskStatus | string): string {
   }
 }
 
-// Create Task Modal Component
-interface CreateTaskModalProps {
-  onClose: () => void
-  onCreate: (task: CreateTaskRequest) => void
-}
-
-function CreateTaskModal({ onClose, onCreate }: CreateTaskModalProps) {
-  const [formData, setFormData] = useState<CreateTaskRequest>({
-    title: '',
-    description: '',
-    status: 'todo',
-    priority: 'medium',
-    project_id: 'default',
-  })
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (formData.title.trim()) {
-      onCreate(formData)
-    }
-  }
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal glass-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>Create New Task</h2>
-          <button className="modal-close" onClick={onClose}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="modal-body">
-          <div className="form-group">
-            <label htmlFor="title">Title</label>
-            <input
-              type="text"
-              id="title"
-              className="form-input"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="Enter task title"
-              required
-              autoFocus
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="description">Description</label>
-            <textarea
-              id="description"
-              className="form-input"
-              rows={3}
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Enter task description (optional)"
-            />
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="status">Status</label>
-              <select
-                id="status"
-                className="form-input"
-                value={formData.status}
-                onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-              >
-                <option value="todo">To Do</option>
-                <option value="in_progress">In Progress</option>
-                <option value="review">Review</option>
-                <option value="done">Done</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="priority">Priority</label>
-              <select
-                id="priority"
-                className="form-input"
-                value={formData.priority}
-                onChange={(e) => setFormData({ ...formData, priority: e.target.value as any })}
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="due_date">Due Date</label>
-            <input
-              type="date"
-              id="due_date"
-              className="form-input"
-              value={formData.due_date || ''}
-              onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-            />
-          </div>
-
-          <div className="modal-actions">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary">
-              Create Task
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}

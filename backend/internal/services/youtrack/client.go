@@ -368,6 +368,20 @@ func (c *Client) CreateIssue(ctx context.Context, req CreateIssueRequest) (*Issu
 		req.Project.ID = c.projectID
 	}
 
+	// YouTrack requires the internal DB id (e.g. "0-2"), not the short name ("ARD").
+	// If the stored projectID looks like a short name (no "-"), resolve it via the projects list.
+	if !strings.Contains(req.Project.ID, "-") {
+		shortName := req.Project.ID
+		if projects, err := c.GetProjects(ctx); err == nil {
+			for _, p := range projects {
+				if strings.EqualFold(p.ShortName, shortName) || strings.EqualFold(p.Name, shortName) {
+					req.Project.ID = p.ID
+					break
+				}
+			}
+		}
+	}
+
 	path := "/api/issues?fields=id,summary,description,created,updated,customFields(name,value(name,presentation)),project(shortName)"
 	body, err := c.doRequest(ctx, http.MethodPost, path, req)
 	if err != nil {
