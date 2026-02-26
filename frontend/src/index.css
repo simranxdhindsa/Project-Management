@@ -1974,46 +1974,20 @@ body {
    KANBAN BOARD STYLES
    ======================================== */
 
-.board-page {
-  padding: 1.5rem;
-  min-height: 100vh;
-}
-
-.board-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
-  gap: 1rem;
-}
-
-.board-header-left {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.board-title {
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
+/* Board page — uses pm-reports-page as root, just needs overflow tweak for horizontal scroll */
+.board-page-layout {
+  overflow: visible !important;
 }
 
 .board-task-count {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
-  background: var(--glass-bg);
-  padding: 0.25rem 0.75rem;
+  background: rgba(255,255,255,0.07);
+  padding: 0.15rem 0.55rem;
   border-radius: var(--radius-full);
   border: 1px solid var(--glass-border);
-}
-
-.board-header-right {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  font-weight: 400;
+  margin-left: 0.25rem;
 }
 
 .board-filters {
@@ -2021,18 +1995,167 @@ body {
   gap: 0.5rem;
 }
 
+/* Kanban horizontal scroll wrapper */
+.board-kanban-wrap {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 0.5rem 0 1rem;
+}
+
+/* ── Board YouTrack badge ─────────────────────────────────────────────────── */
+.board-yt-badge {
+  background: rgba(130, 80, 223, 0.15);
+  color: #8250df;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* ── Board filter bar ────────────────────────────────────────────────────── */
+.board-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+/* Issue ID chip on task card */
+.board-issue-id {
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+}
+
+/* Overdue badge on card */
+.board-overdue-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* Live chip on card */
+.board-live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: #22c55e;
+}
+
+/* Active filter count badge on Clear button */
+.board-active-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+/* Board task card — slightly tighter than base */
+.board-task-card {
+  padding: 0.75rem;
+}
+.board-task-card .task-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+  gap: 0.4rem;
+}
+.board-task-card .task-card-title {
+  font-size: 0.875rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+/* Modal title row with issue ID */
+.board-modal-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+.board-modal-title h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* YouTrack link in modal */
+.board-yt-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1rem;
+  color: #8250df;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(130, 80, 223, 0.25);
+  background: rgba(130, 80, 223, 0.08);
+  transition: background 0.15s;
+}
+.board-yt-link:hover {
+  background: rgba(130, 80, 223, 0.15);
+}
+
+/* Light theme overrides */
+[data-theme="light"] .board-issue-id {
+  color: #6d28d9;
+  background: rgba(109, 40, 217, 0.08);
+}
+[data-theme="light"] .board-yt-badge {
+  background: rgba(109, 40, 217, 0.1);
+  color: #6d28d9;
+}
+[data-theme="light"] .board-yt-link {
+  color: #6d28d9;
+  border-color: rgba(109, 40, 217, 0.2);
+  background: rgba(109, 40, 217, 0.05);
+}
+[data-theme="light"] .board-yt-link:hover {
+  background: rgba(109, 40, 217, 0.1);
+}
+
 /* Kanban Board Container */
 .kanban-board {
   width: 100%;
-  overflow-x: auto;
-  padding-bottom: 1rem;
 }
 
 .kanban-columns {
   display: flex;
-  gap: 1.25rem;
+  gap: 1rem;
   min-width: max-content;
-  padding: 0.5rem;
+  padding: 0.25rem 0.25rem 0.5rem;
 }
 
 /* Kanban Column */
@@ -2056,7 +2179,7 @@ body {
 }
 
 .kanban-column-header {
-  padding: 1rem 1.25rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--glass-border);
 }
 
@@ -2074,10 +2197,12 @@ body {
 }
 
 .column-title {
-  font-size: 0.9375rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .column-task-count {
@@ -2112,10 +2237,10 @@ body {
 
 /* Task Card */
 .task-card {
-  background: var(--glass-bg);
+  background: rgba(255,255,255,0.05);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  padding: 1rem;
+  padding: 0.75rem 0.875rem;
   cursor: grab;
   transition: all var(--duration-normal) var(--ease-out);
   position: relative;
@@ -9687,6 +9812,47 @@ select.form-input {
 .priority-badge.other { background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); border: 1px solid var(--border-color); }
 
 /* ── Week Navigator ─────────────────────────────────────────────────── */
+/* ── Tracking mode toggle pill ─────────────────────────────────────────────── */
+.tracking-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 3px;
+  margin: 0 0.75rem 0.75rem;
+  width: fit-content;
+}
+.tracking-mode-toggle button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s;
+}
+.tracking-mode-toggle button.active {
+  background: rgba(99,102,241,0.2);
+  color: #a5b4fc;
+}
+.tracking-mode-toggle button:hover:not(.active) {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-secondary);
+}
+[data-theme="light"] .tracking-mode-toggle {
+  background: rgba(0,0,0,0.05);
+}
+[data-theme="light"] .tracking-mode-toggle button.active {
+  background: rgba(99,102,241,0.12);
+  color: #4f46e5;
+}
+
 .pm-week-nav {
   display: flex;
   align-items: center;
@@ -14656,12 +14822,19 @@ select.form-input {
 [data-theme="light"] .task-card .task-meta {
   color: var(--text-secondary) !important;
 }
+[data-theme="light"] .task-card {
+  background: rgba(255,255,255,0.7);
+}
 [data-theme="light"] .kanban-column {
   background: rgba(255, 255, 255, 0.35);
   border-color: var(--border-color);
 }
 [data-theme="light"] .kanban-column-header {
   border-bottom-color: var(--border-color);
+}
+[data-theme="light"] .board-task-count {
+  background: rgba(0,0,0,0.06);
+  border-color: var(--border-color);
 }
 
 /* ─── Floating PM Assistant Bubble ─────────────────────────────────────────── */

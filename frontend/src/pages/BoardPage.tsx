@@ -1,197 +1,219 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import {
+  RefreshCw, Search, Users, ChevronDown, X,
+  AlertTriangle, ArrowDownUp, ArrowUpNarrowWide, ArrowDownNarrowWide,
+  ExternalLink, Loader2, Filter, LayoutDashboard,
+} from 'lucide-react'
 import { KanbanBoard } from '../components/board'
-import type { Task, TaskStatus, AsanaSection } from '../types'
-import api from '../services/api'
+import api, { getYouTrackAvatarMap } from '../services/api'
 import type { YouTrackIssue } from '../services/api'
 
-// Map YouTrack status to local TaskStatus
-function mapYouTrackStatus(status: string): TaskStatus {
-  const s = status.toLowerCase()
-  if (s.includes('done') || s.includes('fixed') || s.includes('complete') || s.includes('verified')) return 'done'
-  if (s.includes('progress') || s.includes('doing') || s.includes('dev') || s.includes('active')) return 'in_progress'
-  if (s.includes('review') || s.includes('verify') || s.includes('stage') || s.includes('ready for stage')) return 'review'
-  return 'todo'
+// ── Priority helpers (same as PMReportsPage pattern) ─────────────────────────
+
+function ytPriorityLabel(priority: string): string {
+  const p = (priority || '').toLowerCase()
+  if (p.includes('critical') || p.includes('show-stopper') || p.includes('blocker')) return 'P0'
+  if (p.includes('major')) return 'P1'
+  if (p.includes('normal') || p.includes('medium')) return 'P2'
+  if (p.includes('minor') || p.includes('cosmetic') || p.includes('low')) return 'P3'
+  return priority || '—'
 }
 
-// Map YouTrack priority to local priority
-function mapYouTrackPriority(priority: string): 'low' | 'medium' | 'high' {
-  const p = priority.toLowerCase()
-  if (p.includes('critical') || p.includes('major') || p.includes('show-stopper')) return 'high'
-  if (p.includes('minor') || p.includes('cosmetic')) return 'low'
-  return 'medium'
+function ytPriorityBadgeClass(priority: string): string {
+  const label = ytPriorityLabel(priority)
+  if (label === 'P0') return 'priority-badge p0'
+  if (label === 'P1') return 'priority-badge p1'
+  if (label === 'P2') return 'priority-badge p2'
+  if (label === 'P3') return 'priority-badge p3'
+  return 'priority-badge other'
 }
 
-// Convert YouTrack issue to local Task format
-function youtrackToTask(issue: YouTrackIssue): Task {
-  return {
-    id: issue.id,
-    title: issue.summary,
-    description: issue.description || '',
-    status: mapYouTrackStatus(issue.status),
-    priority: mapYouTrackPriority(issue.priority),
-    youtrack_id: issue.id,
-    section_name: issue.status,
-    assignee: issue.assignee ? {
-      id: issue.assignee.id,
-      name: issue.assignee.fullName || issue.assignee.login,
-      email: issue.assignee.email || '',
-    } : undefined,
-    created_at: issue.created ? new Date(issue.created).toISOString() : undefined,
-    updated_at: issue.updated ? new Date(issue.updated).toISOString() : undefined,
-  }
+function priorityOrder(priority: string): number {
+  const label = ytPriorityLabel(priority)
+  if (label === 'P0') return 0
+  if (label === 'P1') return 1
+  if (label === 'P2') return 2
+  if (label === 'P3') return 3
+  return 4
 }
+
+function isOverdue(issue: YouTrackIssue): boolean {
+  const p = (issue.priority || '').toLowerCase()
+  const s = (issue.status || '').toLowerCase()
+  const isDone = s.includes('done') || s.includes('fixed') || s.includes('closed')
+    || s.includes('verified') || s.includes('mobile done') || s.includes("won't fix")
+    || s.includes('duplicate')
+  return !isDone && (p.includes('critical') || p.includes('show-stopper') || p.includes('blocker'))
+}
+
+// Canonical YouTrack workflow column order
+const YT_COLUMN_ORDER: string[] = [
+  'Backlog',
+  'In Progress',
+  'DEV',
+  'Ready for Stage',
+  'STAGE',
+  'Ready for PROD',
+  'PROD',
+  'Mobile DONE',
+  'Done',
+  'Findings',
+  'Blocked',
+  'Closed',
+]
+
+function sortColumns(cols: string[]): string[] {
+  return [...cols].sort((a, b) => {
+    const ai = YT_COLUMN_ORDER.indexOf(a)
+    const bi = YT_COLUMN_ORDER.indexOf(b)
+    if (ai === -1 && bi === -1) return a.localeCompare(b)
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
+}
+
+type SortKey = 'newest' | 'priority' | 'alpha'
+
+const YT_BASE_URL = 'https://simran.youtrack.cloud/issue/'
+
+// ── Main Page ────────────────────────────────────────────────────────────────
 
 export function BoardPage() {
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [sections, setSections] = useState<AsanaSection[]>([])
+  const [issues, setIssues] = useState<YouTrackIssue[]>([])
+  const [columns, setColumns] = useState<string[]>([])
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [syncing, setSyncing] = useState(false)
-  const [youtrackConnected, setYoutrackConnected] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedIssue, setSelectedIssue] = useState<YouTrackIssue | null>(null)
 
-  // Fetch tasks and sections on mount
+  // ── Filter state ───────────────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterAssignee, setFilterAssignee] = useState('')
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([])
+  const [filterOverdue, setFilterOverdue] = useState(false)
+  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false)
+  const assigneeDropdownRef = useRef<HTMLDivElement>(null)
+
+  // ── Sort state ─────────────────────────────────────────────────────────────
+  const [sortKey, setSortKey] = useState<SortKey>('newest')
+  const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
+  const sortDropdownRef = useRef<HTMLDivElement>(null)
+
+  // ── Close dropdowns on outside click ──────────────────────────────────────
   useEffect(() => {
-    fetchTasksAndSections()
+    const handler = (e: MouseEvent) => {
+      if (assigneeDropdownRef.current && !assigneeDropdownRef.current.contains(e.target as Node))
+        setAssigneeDropdownOpen(false)
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node))
+        setSortDropdownOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const fetchTasksAndSections = async () => {
+  // ── Close modal on Escape ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!selectedIssue) return
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedIssue(null) }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [selectedIssue])
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
+  const fetchBoard = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    else setSyncing(true)
+    setError(null)
     try {
-      setLoading(true)
-      setError(null)
-
-      // Check YouTrack status first
-      let ytConnected = false
-      try {
-        const ytStatus = await api.getYouTrackStatus()
-        ytConnected = ytStatus.data?.configured === true
-        setYoutrackConnected(ytConnected)
-      } catch {
-        ytConnected = false
-      }
-
-      if (ytConnected) {
-        // Fetch from YouTrack directly
-        const [issuesResponse, statesResponse] = await Promise.all([
-          api.getYouTrackIssues(),
-          api.getYouTrackStates(),
-        ])
-
-        if (issuesResponse.success && issuesResponse.data) {
-          const ytIssues = issuesResponse.data as YouTrackIssue[]
-          setTasks(ytIssues.map(youtrackToTask))
-        }
-
-        if (statesResponse.success && statesResponse.data) {
-          const states = statesResponse.data as { name: string }[]
-          const mappedSections: AsanaSection[] = states.map((state, i) => ({
-            gid: state.name,
-            name: state.name,
-            position: i,
-          }))
-          setSections(mappedSections)
-        }
-      } else {
-        // Fallback: fetch from local DB (Asana tasks)
-        const [tasksResponse, sectionsResponse] = await Promise.all([
-          api.getTasks(),
-          api.getProjectSections()
-        ])
-
-        if (tasksResponse.success && tasksResponse.data) {
-          setTasks(tasksResponse.data as Task[])
-        }
-
-        if (sectionsResponse.success && sectionsResponse.data) {
-          setSections(sectionsResponse.data as AsanaSection[])
-        }
+      const [issuesRes, statesRes] = await Promise.all([
+        api.getYouTrackIssues(),
+        api.getYouTrackStates(),
+      ])
+      if (issuesRes.data) setIssues(issuesRes.data as YouTrackIssue[])
+      if (statesRes.data) {
+        const states = statesRes.data as { name: string }[]
+        setColumns(sortColumns(states.map(s => s.name)))
       }
     } catch (err) {
-      setError('Failed to load tasks')
-      console.error('Error fetching tasks:', err)
+      setError(err instanceof Error ? err.message : 'Failed to load board')
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleTaskMove = async (taskId: string, newStatus: TaskStatus, sectionGid?: string, sectionName?: string) => {
-    const task = tasks.find(t => t.id === taskId)
-
-    // Optimistic update
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === taskId
-          ? {
-              ...t,
-              status: newStatus,
-              section_name: sectionName || t.section_name,
-            }
-          : t
-      )
-    )
-
-    try {
-      if (youtrackConnected && task?.youtrack_id) {
-        // Update state in YouTrack directly
-        const ytState = sectionName || mapLocalStatusToYouTrack(newStatus)
-        await api.updateYouTrackIssueState(task.youtrack_id, ytState)
-      } else if (sectionGid && sectionName) {
-        await api.updateTaskSection(taskId, sectionGid, sectionName)
-      } else {
-        await api.updateTaskStatus(taskId, newStatus)
-      }
-
-      // Push to Asana if task is linked (legacy)
-      if (task?.asana_id) {
-        await api.pushTaskToAsana(taskId).catch((err) => {
-          console.log('Asana sync skipped:', err)
-        })
-      }
-    } catch (err) {
-      // Revert on error
-      fetchTasksAndSections()
-      console.error('Error updating task:', err)
-    }
-  }
-
-  const handleTaskClick = (task: Task) => {
-    setSelectedTask(task)
-  }
-
-  const handleTaskEdit = (task: Task) => {
-    setSelectedTask(task)
-  }
-
-
-  const handleSync = async () => {
-    try {
-      setSyncing(true)
-      if (youtrackConnected) {
-        // Just refresh from YouTrack
-        await fetchTasksAndSections()
-        alert('Synced from YouTrack!')
-      } else {
-        const response = await api.importFromAsana()
-        if (response.success) {
-          await fetchTasksAndSections()
-          const data = response.data as { tasks_synced: number; tasks_created: number; tasks_updated: number }
-          alert(`Sync complete! Created: ${data.tasks_created}, Updated: ${data.tasks_updated}`)
-        }
-      }
-    } catch (err) {
-      console.error('Error syncing:', err)
-      alert('Failed to sync')
-    } finally {
       setSyncing(false)
     }
+  }, [])
+
+  useEffect(() => {
+    fetchBoard()
+    getYouTrackAvatarMap().then(setAvatarMap)
+  }, [fetchBoard])
+
+  // ── Derived values ─────────────────────────────────────────────────────────
+  const allAssignees = useMemo(() =>
+    Array.from(new Set(
+      issues.map(i => i.assignee?.fullName || i.assignee?.login || '').filter(Boolean)
+    )).sort()
+  , [issues])
+
+  const activeFilterCount = [
+    searchQuery !== '',
+    filterAssignee !== '',
+    filterPriorities.length > 0,
+    filterOverdue,
+  ].filter(Boolean).length
+
+  const getColumnIssues = useCallback((colName: string): YouTrackIssue[] => {
+    let list = issues.filter(i => i.status === colName)
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      list = list.filter(i => i.id.toLowerCase().includes(q) || i.summary.toLowerCase().includes(q))
+    }
+    if (filterAssignee) {
+      list = list.filter(i =>
+        (i.assignee?.fullName || i.assignee?.login || '') === filterAssignee
+      )
+    }
+    if (filterPriorities.length > 0) {
+      list = list.filter(i => filterPriorities.includes(ytPriorityLabel(i.priority || '')))
+    }
+    if (filterOverdue) {
+      list = list.filter(i => isOverdue(i))
+    }
+    return list.sort((a, b) => {
+      if (sortKey === 'alpha') return a.summary.localeCompare(b.summary)
+      if (sortKey === 'priority') return priorityOrder(a.priority || '') - priorityOrder(b.priority || '')
+      return (b.updated || 0) - (a.updated || 0)
+    })
+  }, [issues, searchQuery, filterAssignee, filterPriorities, filterOverdue, sortKey])
+
+  const handleIssueMove = useCallback(async (issueId: string, newState: string) => {
+    setIssues(prev => prev.map(i => i.id === issueId ? { ...i, status: newState } : i))
+    try {
+      await api.updateYouTrackIssueState(issueId, newState)
+    } catch {
+      fetchBoard(true)
+    }
+  }, [fetchBoard])
+
+  const clearFilters = () => {
+    setSearchQuery('')
+    setFilterAssignee('')
+    setFilterPriorities([])
+    setFilterOverdue(false)
   }
 
+  const visibleCount = useMemo(() =>
+    columns.reduce((acc, col) => acc + getColumnIssues(col).length, 0)
+  , [columns, getColumnIssues])
+
+  // ── Loading / error states ─────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="board-page">
-        <div className="loading-screen">
-          <div className="loading-spinner"></div>
-          <p>Loading tasks...</p>
+      <div className="pm-reports-page">
+        <div className="pm-loading-state">
+          <Loader2 size={32} className="animate-spin" />
+          <span>Loading board…</span>
         </div>
       </div>
     )
@@ -199,193 +221,237 @@ export function BoardPage() {
 
   if (error) {
     return (
-      <div className="board-page">
-        <div className="error-state">
-          <h3>Error Loading Tasks</h3>
+      <div className="pm-reports-page">
+        <div className="pm-empty-state">
+          <AlertTriangle size={40} />
           <p>{error}</p>
-          <button className="btn btn-primary" onClick={fetchTasksAndSections}>
-            Retry
-          </button>
+          <button className="btn-primary btn-sm" onClick={() => fetchBoard()}>Retry</button>
         </div>
       </div>
     )
   }
 
-  // Build YouTrack issue URL
-  const getYouTrackURL = (task: Task) => {
-    if (task.youtrack_id) {
-      return `https://simran.youtrack.cloud/issue/${task.youtrack_id}`
-    }
-    return null
+  const sortLabel: Record<SortKey, string> = {
+    newest: 'Newest First',
+    priority: 'Priority',
+    alpha: 'Alphabetical',
   }
 
   return (
-    <div className="board-page">
-      <div className="board-header">
-        <div className="board-header-left">
-          <h1 className="board-title">Project Board</h1>
-          <span className="board-task-count">{tasks.length} tasks</span>
-          {youtrackConnected && (
-            <span className="board-source-badge" style={{
-              background: 'rgba(130, 80, 223, 0.15)',
-              color: '#8250df',
-              padding: '2px 8px',
-              borderRadius: '12px',
-              fontSize: '12px',
-              fontWeight: 500,
-              marginLeft: '8px',
-            }}>
-              YouTrack
-            </span>
-          )}
-        </div>
-        <div className="board-header-right">
-          <div className="board-filters">
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={handleSync}
-              disabled={syncing}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={syncing ? 'animate-spin' : ''}>
-                <path d="M21 12a9 9 0 11-6.219-8.56" />
-              </svg>
-              {syncing ? 'Syncing...' : youtrackConnected ? 'Sync YouTrack' : 'Sync Asana'}
-            </button>
-            <button className="btn btn-ghost btn-sm">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
-              Filter
-            </button>
-            <button className="btn btn-ghost btn-sm">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="4" y1="21" x2="4" y2="14" />
-                <line x1="4" y1="10" x2="4" y2="3" />
-                <line x1="12" y1="21" x2="12" y2="12" />
-                <line x1="12" y1="8" x2="12" y2="3" />
-                <line x1="20" y1="21" x2="20" y2="16" />
-                <line x1="20" y1="12" x2="20" y2="3" />
-                <line x1="1" y1="14" x2="7" y2="14" />
-                <line x1="9" y1="8" x2="15" y2="8" />
-                <line x1="17" y1="16" x2="23" y2="16" />
-              </svg>
-              Sort
-            </button>
-          </div>
+    <div className="pm-reports-page board-page-layout">
+      {/* ── Header — same pattern as pm-tab-header ─────────────────────────── */}
+      <div className="pm-tab-header">
+        <h3 className="pm-section-title">
+          <LayoutDashboard size={18} />
+          Project Board
+          <span className="board-task-count">
+            {activeFilterCount > 0 ? `${visibleCount} / ${issues.length}` : issues.length}
+          </span>
+          <span className="board-yt-badge">YouTrack</span>
+        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <button
+            className="btn-secondary btn-sm"
+            onClick={() => fetchBoard(true)}
+            disabled={syncing}
+            title="Refresh from YouTrack"
+          >
+            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Refreshing…' : 'Refresh'}
+          </button>
         </div>
       </div>
 
-      <KanbanBoard
-        tasks={tasks}
-        sections={sections}
-        onTaskMove={handleTaskMove}
-        onTaskClick={handleTaskClick}
-        onTaskEdit={handleTaskEdit}
-      />
+      {/* ── Filter bar — identical to PMReportsPage pm-filter-bar ──────────── */}
+      <div className="pm-filter-bar">
+        {/* Search */}
+        <div className="pm-search-box">
+          <Search size={13} />
+          <input
+            type="text"
+            placeholder="Search issue…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+        </div>
 
-      {/* Task Detail Modal */}
-      {selectedTask && (
-        <div className="modal-overlay" onClick={() => setSelectedTask(null)}>
-          <div className="modal glass-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>{selectedTask.youtrack_id && <span style={{ color: '#8250df', marginRight: '8px', fontSize: '14px' }}>{selectedTask.youtrack_id}</span>}{selectedTask.title}</h2>
+        {/* Assignee dropdown */}
+        <div className="pm-custom-dropdown" ref={assigneeDropdownRef}>
+          <button className="pm-custom-dropdown-trigger" onClick={() => setAssigneeDropdownOpen(o => !o)}>
+            {filterAssignee ? (
+              <>
+                {avatarMap[filterAssignee]
+                  ? <img src={avatarMap[filterAssignee]} alt={filterAssignee} className="filter-avatar-img" />
+                  : <span className="filter-avatar-placeholder">{filterAssignee.charAt(0).toUpperCase()}</span>}
+                <span className="filter-assignee-name">{filterAssignee.split(' ')[0]}</span>
+              </>
+            ) : (
+              <><Users size={14} /><span>All Assignees</span></>
+            )}
+            <ChevronDown size={12} className={`dropdown-chevron ${assigneeDropdownOpen ? 'open' : ''}`} />
+          </button>
+          {assigneeDropdownOpen && (
+            <div className="pm-custom-dropdown-menu">
               <button
-                className="modal-close"
-                onClick={() => setSelectedTask(null)}
+                className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`}
+                onClick={() => { setFilterAssignee(''); setAssigneeDropdownOpen(false) }}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <Users size={14} /><span>All Assignees</span>
+              </button>
+              {allAssignees.map(a => (
+                <button
+                  key={a}
+                  className={`pm-dropdown-item ${filterAssignee === a ? 'active' : ''}`}
+                  onClick={() => { setFilterAssignee(a); setAssigneeDropdownOpen(false) }}
+                >
+                  {avatarMap[a]
+                    ? <img src={avatarMap[a]} alt={a} className="filter-avatar-img" />
+                    : <span className="filter-avatar-placeholder">{a.charAt(0).toUpperCase()}</span>}
+                  <span>{a}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Priority chips */}
+        <div className="pm-priority-chips">
+          {(['P0', 'P1', 'P2', 'P3'] as const).map(p => (
+            <button
+              key={p}
+              className={`priority-chip ${filterPriorities.includes(p) ? 'active' : ''} ${ytPriorityBadgeClass(p)}`}
+              onClick={() => setFilterPriorities(prev =>
+                prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
+              )}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* Sort dropdown */}
+        <div className="pm-custom-dropdown" ref={sortDropdownRef}>
+          <button className="pm-custom-dropdown-trigger" onClick={() => setSortDropdownOpen(o => !o)}>
+            <ArrowDownUp size={14} />
+            <span>{sortLabel[sortKey]}</span>
+            <ChevronDown size={12} className={`dropdown-chevron ${sortDropdownOpen ? 'open' : ''}`} />
+          </button>
+          {sortDropdownOpen && (
+            <div className="pm-custom-dropdown-menu">
+              {([
+                { key: 'newest' as SortKey, label: 'Newest First', Icon: ArrowDownNarrowWide },
+                { key: 'priority' as SortKey, label: 'Priority', Icon: ArrowUpNarrowWide },
+                { key: 'alpha' as SortKey, label: 'Alphabetical', Icon: ArrowDownUp },
+              ]).map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  className={`pm-dropdown-item ${sortKey === key ? 'active' : ''}`}
+                  onClick={() => { setSortKey(key); setSortDropdownOpen(false) }}
+                >
+                  <Icon size={14} /><span>{label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Toggle filters */}
+        <div className="pm-toggle-filters">
+          <button
+            className={`btn-sm ${filterOverdue ? 'btn-danger-active' : 'btn-secondary'}`}
+            onClick={() => setFilterOverdue(f => !f)}
+          >
+            <AlertTriangle size={13} /> Overdue
+          </button>
+          {activeFilterCount > 0 && (
+            <button className="btn-sm btn-ghost tl-clear-filters" onClick={clearFilters}>
+              <X size={12} /> Clear filters
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Board ──────────────────────────────────────────────────────────── */}
+      {columns.length === 0 ? (
+        <div className="pm-empty-state">
+          <Filter size={40} />
+          <p>No columns found. Make sure YouTrack is configured in Settings.</p>
+        </div>
+      ) : (
+        <div className="board-kanban-wrap">
+          <KanbanBoard
+            issues={issues}
+            columns={columns}
+            avatarMap={avatarMap}
+            getColumnIssues={getColumnIssues}
+            onIssueMove={handleIssueMove}
+            onIssueClick={setSelectedIssue}
+          />
+        </div>
+      )}
+
+      {/* ── Detail Modal ───────────────────────────────────────────────────── */}
+      {selectedIssue && (
+        <div className="modal-overlay" onClick={() => setSelectedIssue(null)}>
+          <div className="modal glass-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="board-modal-title">
+                <span className="board-issue-id">{selectedIssue.id}</span>
+                <h2>{selectedIssue.summary}</h2>
+              </div>
+              <button className="modal-close" onClick={() => setSelectedIssue(null)}>
+                <X size={20} />
               </button>
             </div>
             <div className="modal-body">
               <div className="task-detail-grid">
                 <div className="task-detail-item">
                   <label>Status</label>
-                  <span className={`status-badge status-${selectedTask.status}`}>
-                    {selectedTask.section_name || selectedTask.status.replace('_', ' ')}
-                  </span>
+                  <span className="tt-badge tt-badge-live">{selectedIssue.status}</span>
                 </div>
                 <div className="task-detail-item">
                   <label>Priority</label>
-                  <span className={`priority-badge priority-${selectedTask.priority}`}>
-                    {selectedTask.priority}
+                  <span className={`task-priority-badge ${ytPriorityBadgeClass(selectedIssue.priority || '')}`}>
+                    {ytPriorityLabel(selectedIssue.priority || '')}
                   </span>
                 </div>
-                {selectedTask.due_date && (
-                  <div className="task-detail-item">
-                    <label>Due Date</label>
-                    <span>{new Date(selectedTask.due_date).toLocaleDateString()}</span>
-                  </div>
-                )}
-                {selectedTask.assignee && (
+                {selectedIssue.assignee && (
                   <div className="task-detail-item">
                     <label>Assignee</label>
-                    <div className="assignee-info">
-                      {selectedTask.assignee.picture && (
-                        <img src={selectedTask.assignee.picture} alt="" className="assignee-avatar" />
-                      )}
-                      <span>{selectedTask.assignee.name}</span>
+                    <div className="tt-assignee">
+                      {avatarMap[selectedIssue.assignee.fullName || '']
+                        ? <img src={avatarMap[selectedIssue.assignee.fullName || '']} alt={selectedIssue.assignee.fullName} className="filter-avatar-img" />
+                        : <span className="filter-avatar-placeholder">{(selectedIssue.assignee.fullName || selectedIssue.assignee.login || '?').charAt(0).toUpperCase()}</span>}
+                      <span className="tt-assignee-name">{selectedIssue.assignee.fullName || selectedIssue.assignee.login}</span>
                     </div>
                   </div>
                 )}
+                {selectedIssue.subsystem && (
+                  <div className="task-detail-item">
+                    <label>Subsystem</label>
+                    <span>{selectedIssue.subsystem}</span>
+                  </div>
+                )}
               </div>
-              {selectedTask.description && (
+              {selectedIssue.description && (
                 <div className="task-description">
                   <label>Description</label>
-                  <p>{selectedTask.description}</p>
+                  <p>{selectedIssue.description}</p>
                 </div>
               )}
-              {/* YouTrack link */}
-              {getYouTrackURL(selectedTask) && (
-                <a
-                  href={getYouTrackURL(selectedTask)!}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-ghost btn-sm"
-                  style={{ color: '#8250df', marginTop: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                    <polyline points="15 3 21 3 21 9" />
-                    <line x1="10" y1="14" x2="21" y2="3" />
-                  </svg>
-                  View in YouTrack
-                </a>
-              )}
-              {/* Asana link (legacy) */}
-              {selectedTask.asana_url && !selectedTask.youtrack_id && (
-                <a
-                  href={selectedTask.asana_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-ghost btn-sm asana-link"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M18.77,10.5c-1.99,0-3.62,1.61-3.62,3.6s1.62,3.6,3.62,3.6,3.62-1.61,3.62-3.6-1.62-3.6-3.62-3.6Z"/>
-                    <path d="M5.23,10.5c-1.99,0-3.62,1.61-3.62,3.6s1.62,3.6,3.62,3.6,3.62-1.61,3.62-3.6-1.62-3.6-3.62-3.6Z"/>
-                    <path d="M12,3.3c-1.99,0-3.62,1.61-3.62,3.6s1.62,3.6,3.62,3.6,3.62-1.61,3.62-3.6-1.62-3.6-3.62-3.6Z"/>
-                  </svg>
-                  View in Asana
-                </a>
-              )}
+              <a
+                href={`${YT_BASE_URL}${selectedIssue.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="board-yt-link"
+              >
+                <ExternalLink size={14} />
+                View in YouTrack
+              </a>
             </div>
           </div>
         </div>
       )}
-
     </div>
   )
 }
-
-// Map local status to YouTrack state name
-function mapLocalStatusToYouTrack(status: TaskStatus | string): string {
-  switch (status) {
-    case 'done': return 'Fixed'
-    case 'in_progress': return 'In Progress'
-    case 'review': return 'To be discussed'
-    default: return 'Open'
-  }
-}
-

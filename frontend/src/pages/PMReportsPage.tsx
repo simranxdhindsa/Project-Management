@@ -100,8 +100,7 @@ function toISODate(d: Date): string {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'tracking', label: 'Time Tracking', icon: Clock },
-  { id: 'timeline', label: 'Issue Timeline', icon: Activity },
+  { id: 'tracking', label: 'Tracking', icon: Activity },
   { id: 'daily', label: 'Daily Report', icon: FileText },
   { id: 'assignees', label: 'Assignee Stats', icon: Users },
   { id: 'dailyops', label: 'Daily Ops', icon: Zap },
@@ -837,665 +836,7 @@ function AssigneeStatsTab() {
   )
 }
 
-// ─── Tab: Time Tracking ───────────────────────────────────────────────────────
-
-type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at' | 'status'
-
-function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
-  // Week navigation — defaults to current week
-  const [selectedWeek, setSelectedWeek] = useState<Date>(() => getMondayOf(new Date()))
-  const [noWeekFilter, setNoWeekFilter] = useState(false)
-
-  const [rows, setRows] = useState<TimeTrackingRow[]>([])
-  const [loading, setLoading] = useState(false)
-  const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
-
-  // YouTrack avatar map: fullName → avatarUrl
-  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-
-  // Filters (client-side)
-  const [filterOverdue, setFilterOverdue] = useState(false)
-  const [filterMismatch, setFilterMismatch] = useState(false)
-  const [filterMovedBack, setFilterMovedBack] = useState(false)
-  const [filterLive, setFilterLive] = useState(false)
-  const [filterDelayed, setFilterDelayed] = useState(false)
-  const [filterPinned, setFilterPinned] = useState(false)
-  const [filterAssignee, setFilterAssignee] = useState('')
-  const [filterPriorities, setFilterPriorities] = useState<string[]>([])
-  const [sortKey, setSortKey] = useState<SortKey>('entered_at')
-  const [searchIssue, setSearchIssue] = useState('')
-
-  // Custom dropdown open states
-  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false)
-  const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
-  const assigneeDropdownRef = useRef<HTMLDivElement>(null)
-  const sortDropdownRef = useRef<HTMLDivElement>(null)
-
-  // Actions
-  const [resetting, setResetting] = useState(false)
-  const [resetConfirm, setResetConfirm] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [reconciling, setReconciling] = useState(false)
-  const [togglingPin, setTogglingPin] = useState<string | null>(null)
-
-  const fetchRows = useCallback(async (week: Date, skipWeek: boolean) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const params: { week?: string } = {}
-      if (!skipWeek) params.week = toISODate(week)
-      const res = await api.getTimeTracking(params)
-      setRows(res.data || [])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load time tracking')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchRows(selectedWeek, noWeekFilter) }, [fetchRows, selectedWeek, noWeekFilter])
-
-  // Load YouTrack avatars once
-  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
-
-  // Close custom dropdowns on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (assigneeDropdownRef.current && !assigneeDropdownRef.current.contains(e.target as Node)) {
-        setAssigneeDropdownOpen(false)
-      }
-      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node)) {
-        setSortDropdownOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  const changeWeek = (delta: number) => {
-    setSelectedWeek(w => {
-      const next = new Date(w)
-      next.setDate(next.getDate() + delta * 7)
-      return next
-    })
-    setNoWeekFilter(false)
-  }
-
-  const goThisWeek = () => {
-    setSelectedWeek(getMondayOf(new Date()))
-    setNoWeekFilter(false)
-  }
-
-  const toggleRow = (id: string) => {
-    setExpandedRows(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  const togglePin = async (row: TimeTrackingRow) => {
-    setTogglingPin(row.issue_id)
-    try {
-      if (row.pinned) {
-        await api.unpinIssue(row.issue_id)
-      } else {
-        await api.pinIssue(row.issue_id)
-      }
-      await fetchRows(selectedWeek, noWeekFilter)
-    } catch {
-      // silently ignore
-    } finally {
-      setTogglingPin(null)
-    }
-  }
-
-  const runReset = async () => {
-    if (!resetConfirm) {
-      setResetConfirm(true)
-      setTimeout(() => setResetConfirm(false), 5000)
-      return
-    }
-    setResetConfirm(false)
-    setResetting(true)
-    setBackfillMsg(null)
-    try {
-      const res = await api.resetStateLog()
-      setBackfillMsg(`State log cleared: ${res.data?.deleted ?? 0} rows deleted.`)
-      setRows([])
-    } catch (err) {
-      setBackfillMsg(`Reset failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    } finally {
-      setResetting(false)
-    }
-  }
-
-  const runReconcile = async () => {
-    setReconciling(true)
-    setBackfillMsg(null)
-    try {
-      const res = await api.reconcileStateLog()
-      const d = res.data
-      setBackfillMsg(`Reconcile: ${d?.reconciled ?? 0} exit rows inserted, ${d?.skipped ?? 0} up-to-date.`)
-      fetchRows(selectedWeek, noWeekFilter)
-    } catch (err) {
-      setBackfillMsg(`Reconcile failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    } finally {
-      setReconciling(false)
-    }
-  }
-
-  const runImportHistory = async () => {
-    setImporting(true)
-    setBackfillMsg(null)
-    try {
-      const res = await api.importHistory()
-      const d = res.data
-      setBackfillMsg(`Sync done: ${d?.inserted ?? 0} transitions inserted. ${d?.skipped ?? 0} already existed.`)
-      fetchRows(selectedWeek, noWeekFilter)
-    } catch (err) {
-      setBackfillMsg(`Import failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  // Derive unique assignees for dropdown
-  const allAssignees = Array.from(new Set(rows.map(r => r.assignee).filter(Boolean))).sort()
-
-  // Client-side filtering
-  let displayed = rows
-  if (filterOverdue)   displayed = displayed.filter(r => r.overdue)
-  if (filterMismatch)  displayed = displayed.filter(r => r.moved_by_mismatch)
-  if (filterMovedBack) displayed = displayed.filter(r => isMovedBack(r.from_state, r.to_state))
-  // Live = currently in progress (no exit yet: duration is null)
-  if (filterLive)    displayed = displayed.filter(r => r.duration_in_prev_state_hours === null)
-  // Delayed = time spent exceeds threshold
-  if (filterDelayed) displayed = displayed.filter(r =>
-    r.duration_in_prev_state_hours !== null && r.duration_in_prev_state_hours > r.threshold_hours
-  )
-  if (filterPinned)  displayed = displayed.filter(r => r.pinned)
-  if (filterAssignee) displayed = displayed.filter(r => r.assignee.toLowerCase() === filterAssignee.toLowerCase())
-  if (filterPriorities.length > 0) displayed = displayed.filter(r => filterPriorities.includes(r.priority))
-  if (searchIssue) {
-    const q = searchIssue.toLowerCase()
-    displayed = displayed.filter(r => r.issue_id.toLowerCase().includes(q) || r.issue_summary.toLowerCase().includes(q))
-  }
-
-  // Sort
-  displayed = [...displayed].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1 // pinned always first
-    switch (sortKey) {
-      case 'time_asc': return (a.duration_in_prev_state_hours ?? 0) - (b.duration_in_prev_state_hours ?? 0)
-      case 'time_desc': return (b.duration_in_prev_state_hours ?? 0) - (a.duration_in_prev_state_hours ?? 0)
-      case 'priority': {
-        const ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, Other: 4 }
-        return (ORDER[a.priority] ?? 4) - (ORDER[b.priority] ?? 4)
-      }
-      case 'status': {
-        const statusOrder = (r: TimeTrackingRow) => {
-          if (r.overdue) return 0
-          if (r.duration_in_prev_state_hours === null) return 1  // live
-          if (isMovedBack(r.from_state, r.to_state)) return 2
-          return 3
-        }
-        return statusOrder(a) - statusOrder(b)
-      }
-      default: return new Date(b.transitioned_at).getTime() - new Date(a.transitioned_at).getTime()
-    }
-  })
-
-  // Group by issue_id — pick the most critical row as the representative
-  const groupedIssues: { rep: TimeTrackingRow; all: TimeTrackingRow[] }[] = []
-  const seenIssues = new Map<string, number>()
-  for (const row of displayed) {
-    const idx = seenIssues.get(row.issue_id)
-    if (idx === undefined) {
-      seenIssues.set(row.issue_id, groupedIssues.length)
-      groupedIssues.push({ rep: row, all: [row] })
-    } else {
-      groupedIssues[idx].all.push(row)
-      // promote rep if this row is more critical
-      const cur = groupedIssues[idx].rep
-      const curScore = cur.overdue ? 0 : cur.duration_in_prev_state_hours === null ? 1 : isMovedBack(cur.from_state, cur.to_state) ? 2 : 3
-      const newScore = row.overdue ? 0 : row.duration_in_prev_state_hours === null ? 1 : isMovedBack(row.from_state, row.to_state) ? 2 : 3
-      if (newScore < curScore) groupedIssues[idx].rep = row
-    }
-  }
-
-  const overdueCount   = rows.filter(r => r.overdue).length
-  const mismatchCount  = rows.filter(r => r.moved_by_mismatch).length
-  const movedBackCount = rows.filter(r => isMovedBack(r.from_state, r.to_state)).length
-  const pinnedCount    = rows.filter(r => r.pinned).length
-  const liveCount      = rows.filter(r => r.duration_in_prev_state_hours === null).length
-  const delayedCount   = rows.filter(r => r.duration_in_prev_state_hours !== null && r.duration_in_prev_state_hours > r.threshold_hours).length
-  const ttActiveFilterCount = [filterOverdue, filterMismatch, filterMovedBack, filterLive, filterDelayed,
-    filterPinned, filterAssignee !== '', filterPriorities.length > 0].filter(Boolean).length
-
-  return (
-    <div className="pm-tab-content pm-tracking-tab">
-      {/* Header */}
-      <div className="pm-tab-header">
-        <h3 className="pm-section-title"><Clock size={18} /> Time Tracking</h3>
-        <div className="pm-tracking-controls">
-          <button
-            className={`btn-sm ${resetConfirm ? 'btn-danger-active' : 'btn-secondary'}`}
-            onClick={runReset}
-            disabled={resetting || importing || loading}
-            title={resetConfirm ? 'Click again to confirm' : 'Clear all rows'}
-          >
-            {resetting ? <Loader2 size={14} className="animate-spin" /> : <AlertTriangle size={14} />}
-            {resetting ? 'Clearing…' : resetConfirm ? 'Confirm?' : 'Clear'}
-          </button>
-          <button className="btn-secondary btn-sm" onClick={runReconcile} disabled={reconciling || importing || loading}
-            title="Reconcile: close any In Progress entries whose ticket has since moved">
-            {reconciling ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-            {reconciling ? 'Reconciling…' : 'Reconcile'}
-          </button>
-          <button className="btn-primary btn-sm" onClick={runImportHistory} disabled={importing || resetting || loading}>
-            {importing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            {importing ? 'Syncing…' : 'Sync History'}
-          </button>
-          <button className="btn-secondary btn-sm" onClick={() => fetchRows(selectedWeek, noWeekFilter)} disabled={loading || importing}>
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          </button>
-        </div>
-      </div>
-
-      {error && <div className="pm-report-error"><AlertTriangle size={16} />{error}</div>}
-      {backfillMsg && (
-        <div className={`pm-backfill-msg ${backfillMsg.includes('failed') ? 'error' : 'success'}`}>
-          {backfillMsg}
-        </div>
-      )}
-
-      {/* Week Navigator */}
-      <div className="pm-week-nav glass-card">
-        <button className="btn-icon" onClick={() => changeWeek(-1)} title="Previous week">
-          <ChevronLeft size={16} />
-        </button>
-        <div className="week-label">
-          {noWeekFilter ? (
-            <span className="week-all">All Time</span>
-          ) : (
-            <>
-              <Calendar size={14} />
-              <span>{formatWeekRange(selectedWeek)}</span>
-            </>
-          )}
-        </div>
-        <button className="btn-icon" onClick={() => changeWeek(1)} title="Next week">
-          <ChevronRight size={16} />
-        </button>
-        <button
-          className={`btn-sm ${noWeekFilter ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setNoWeekFilter(f => !f)}
-          title="Toggle between weekly view and all-time view"
-        >
-          {noWeekFilter ? 'By Week' : 'All Time'}
-        </button>
-        <button className="btn-sm btn-secondary" onClick={goThisWeek} disabled={noWeekFilter}>
-          This Week
-        </button>
-        {pinnedCount > 0 && (
-          <span className="pinned-count-badge"><Pin size={12} /> {pinnedCount} pinned</span>
-        )}
-      </div>
-
-      {/* Filter Bar */}
-      <div className="pm-filter-bar">
-        {/* Search */}
-        <div className="pm-search-box">
-          <Search size={13} />
-          <input
-            type="text"
-            placeholder="Search issue…"
-            value={searchIssue}
-            onChange={e => setSearchIssue(e.target.value)}
-          />
-        </div>
-
-        {/* Assignee custom dropdown with avatars */}
-        <div className="pm-custom-dropdown" ref={assigneeDropdownRef}>
-          <button
-            className="pm-custom-dropdown-trigger"
-            onClick={() => setAssigneeDropdownOpen(o => !o)}
-          >
-            {filterAssignee ? (
-              <>
-                {avatarMap[filterAssignee] ? (
-                  <img src={avatarMap[filterAssignee]} alt={filterAssignee} className="filter-avatar-img" />
-                ) : (
-                  <span className="filter-avatar-placeholder">{filterAssignee.charAt(0).toUpperCase()}</span>
-                )}
-                <span className="filter-assignee-name">{filterAssignee.split(' ')[0]}</span>
-              </>
-            ) : (
-              <>
-                <Users size={14} />
-                <span>All Assignees</span>
-              </>
-            )}
-            <ChevronDown size={12} className={`dropdown-chevron ${assigneeDropdownOpen ? 'open' : ''}`} />
-          </button>
-          {assigneeDropdownOpen && (
-            <div className="pm-custom-dropdown-menu">
-              <button
-                className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`}
-                onClick={() => { setFilterAssignee(''); setAssigneeDropdownOpen(false) }}
-              >
-                <Users size={14} />
-                <span>All Assignees</span>
-              </button>
-              {allAssignees.map(a => (
-                <button
-                  key={a}
-                  className={`pm-dropdown-item ${filterAssignee === a ? 'active' : ''}`}
-                  onClick={() => { setFilterAssignee(a); setAssigneeDropdownOpen(false) }}
-                >
-                  {avatarMap[a] ? (
-                    <img src={avatarMap[a]} alt={a} className="filter-avatar-img" />
-                  ) : (
-                    <span className="filter-avatar-placeholder">{a.charAt(0).toUpperCase()}</span>
-                  )}
-                  <span>{a}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Priority chips */}
-        <div className="pm-priority-chips">
-          {['P0', 'P1', 'P2', 'P3'].map(p => (
-            <button
-              key={p}
-              className={`priority-chip ${filterPriorities.includes(p) ? 'active' : ''} ${priorityBadgeClass(p)}`}
-              onClick={() => setFilterPriorities(prev =>
-                prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
-              )}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-
-        {/* Sort custom dropdown with icons */}
-        <div className="pm-custom-dropdown" ref={sortDropdownRef}>
-          <button
-            className="pm-custom-dropdown-trigger"
-            onClick={() => setSortDropdownOpen(o => !o)}
-          >
-            {sortKey === 'entered_at' && <><ArrowDownUp size={14} /><span>Newest First</span></>}
-            {sortKey === 'time_asc' && <><ArrowUpNarrowWide size={14} /><span>Time ↑</span></>}
-            {sortKey === 'time_desc' && <><ArrowDownNarrowWide size={14} /><span>Time ↓</span></>}
-            {sortKey === 'priority' && <><Star size={14} /><span>Priority</span></>}
-            {sortKey === 'status' && <><Activity size={14} /><span>Status</span></>}
-            <ChevronDown size={12} className={`dropdown-chevron ${sortDropdownOpen ? 'open' : ''}`} />
-          </button>
-          {sortDropdownOpen && (
-            <div className="pm-custom-dropdown-menu">
-              {([
-                { key: 'entered_at', label: 'Newest First', Icon: ArrowDownUp },
-                { key: 'status',     label: 'Status (Overdue→Live→Done)', Icon: Activity },
-                { key: 'time_asc',   label: 'Time ↑ (low→high)', Icon: ArrowUpNarrowWide },
-                { key: 'time_desc',  label: 'Time ↓ (high→low)', Icon: ArrowDownNarrowWide },
-                { key: 'priority',   label: 'Priority', Icon: Star },
-              ] as { key: SortKey; label: string; Icon: React.ElementType }[]).map(({ key, label, Icon }) => (
-                <button
-                  key={key}
-                  className={`pm-dropdown-item ${sortKey === key ? 'active' : ''}`}
-                  onClick={() => { setSortKey(key); setSortDropdownOpen(false) }}
-                >
-                  <Icon size={14} />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Toggle filters */}
-        <div className="pm-toggle-filters">
-          {liveCount > 0 && (
-            <button
-              className={`btn-sm ${filterLive ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setFilterLive(f => !f)}
-            >
-              <Timer size={13} /> Live ({liveCount})
-            </button>
-          )}
-          {delayedCount > 0 && (
-            <button
-              className={`btn-sm ${filterDelayed ? 'btn-danger-active' : 'btn-secondary'}`}
-              onClick={() => setFilterDelayed(f => !f)}
-            >
-              <Zap size={13} /> Delayed ({delayedCount})
-            </button>
-          )}
-          {overdueCount > 0 && (
-            <button
-              className={`btn-sm ${filterOverdue ? 'btn-danger-active' : 'btn-secondary'}`}
-              onClick={() => setFilterOverdue(f => !f)}
-            >
-              <AlertTriangle size={13} /> Overdue ({overdueCount})
-            </button>
-          )}
-          {mismatchCount > 0 && (
-            <button
-              className={`btn-sm ${filterMismatch ? 'btn-warning-active' : 'btn-secondary'}`}
-              onClick={() => setFilterMismatch(f => !f)}
-            >
-              <AlertTriangle size={13} /> Mismatch ({mismatchCount})
-            </button>
-          )}
-          {movedBackCount > 0 && (
-            <button
-              className={`btn-sm ${filterMovedBack ? 'btn-warning-active' : 'btn-secondary'}`}
-              onClick={() => setFilterMovedBack(f => !f)}
-            >
-              <RotateCcw size={13} /> Moved Back ({movedBackCount})
-            </button>
-          )}
-          {pinnedCount > 0 && (
-            <button
-              className={`btn-sm ${filterPinned ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setFilterPinned(f => !f)}
-            >
-              <Pin size={13} /> Pinned ({pinnedCount})
-            </button>
-          )}
-          {ttActiveFilterCount > 0 && (
-            <button
-              className="btn-sm btn-ghost tl-clear-filters"
-              onClick={() => {
-                setFilterOverdue(false); setFilterMismatch(false); setFilterMovedBack(false)
-                setFilterLive(false); setFilterDelayed(false); setFilterPinned(false)
-                setFilterAssignee(''); setFilterPriorities([]); setSearchIssue('')
-              }}
-            >
-              <X size={12} /> Clear filters
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Table */}
-      {loading && rows.length === 0 ? (
-        <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading time tracking…</span></div>
-      ) : rows.length === 0 ? (
-        <div className="pm-empty-state">
-          <Clock size={40} />
-          <p>No time tracking data for this week.</p>
-          <p style={{fontSize:'0.8rem'}}>Try <strong>All Time</strong> view or click <strong>Sync History</strong> to import from YouTrack.</p>
-        </div>
-      ) : (
-        <div className="pm-card-list glass-card">
-          <div className="pm-list-summary">
-            <span>{groupedIssues.length} issues · {displayed.length} transitions</span>
-            {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
-            {mismatchCount > 0 && <span className="mismatch-summary-badge"><AlertTriangle size={12} /> {mismatchCount} mismatch</span>}
-            {movedBackCount > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {movedBackCount} moved back</span>}
-          </div>
-
-          {/* Column headers */}
-          <div className="pm-col-header">
-            <span className="tt-col-pin" />
-            <span className="tt-col-issue">Issue</span>
-            <span className="tt-col-regression">Regression</span>
-            <span className="tt-col-priority">Priority</span>
-            <span className="tt-col-status">Status</span>
-            <span className="tt-col-time">Time / Threshold</span>
-            <span className="tt-col-assignee">Assignee</span>
-            <span className="tt-col-chevron" />
-          </div>
-
-          <div className="pm-rows-scroll">
-          {groupedIssues.map(({ rep: row, all: transitions }) => {
-            const isLive = row.to_state.toLowerCase() === 'in progress'
-            const isBlocked = row.to_state.toLowerCase() === 'blocked'
-            const movedBack = isMovedBack(row.from_state, row.to_state)
-            const isExpanded = expandedRows.has(row.issue_id)
-            const isDone = ['dev', 'done', 'mobile done', 'stage', 'prod'].includes(row.to_state.toLowerCase())
-            const showOverdue = row.overdue && !isDone && !isBlocked
-            const hasRegression = transitions.some(t => isMovedBack(t.from_state, t.to_state))
-            const ratio = row.duration_in_prev_state_hours != null && row.threshold_hours > 0
-              ? Math.min(row.duration_in_prev_state_hours / row.threshold_hours, 1)
-              : 0
-            const barColor = row.overdue ? '#ef4444' : isLive ? '#22c55e' : '#6366f1'
-
-            return (
-              <div
-                key={row.issue_id}
-                className={['pm-row', showOverdue ? 'pm-row-overdue' : '', row.pinned ? 'pm-row-pinned' : '', movedBack ? 'pm-row-movedback' : ''].filter(Boolean).join(' ')}
-              >
-                {/* Collapsed row — click anywhere to expand */}
-                <div className="pm-row-main" onClick={() => toggleRow(row.issue_id)}>
-                  {/* Pin button */}
-                  <button
-                    className={`tt-pin-btn ${row.pinned ? 'pinned' : ''}`}
-                    onClick={e => { e.stopPropagation(); togglePin(row) }}
-                    disabled={togglingPin === row.issue_id}
-                    title={row.pinned ? 'Unpin' : 'Pin (show every week)'}
-                  >
-                    {togglingPin === row.issue_id
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : row.pinned ? <Pin size={12} /> : <PinOff size={12} />
-                    }
-                  </button>
-
-                  {/* Issue ID + summary */}
-                  <div className="tt-issue">
-                    {row.pinned && <Pin size={10} className="tt-pin-indicator" />}
-                    <span className="tt-issue-id">{row.issue_id}</span>
-                    <span className="tt-issue-summary">{row.issue_summary}</span>
-                    {transitions.length > 1 && (
-                      <span className="tt-transition-count" title={`${transitions.length} transitions`}>{transitions.length}</span>
-                    )}
-                    {blockerIssueIds?.has(row.issue_id) && (
-                      <span className="do-overdue-chip">⚠ Blocked</span>
-                    )}
-                  </div>
-
-                  {/* Regression indicator */}
-                  <span className="tt-col-regression">
-                    {hasRegression && (
-                      <span className="tt-regression-chip" title="Regression — moved back to an earlier state">↩R</span>
-                    )}
-                  </span>
-
-                  {/* Priority */}
-                  <span className={`tt-priority ${priorityBadgeClass(row.priority)}`}>{row.priority || '—'}</span>
-
-                  {/* Status badge */}
-                  <span className="tt-col-status">
-                    {isBlocked && (
-                      <span className="tt-badge tt-badge-blocked">⊘ Blocked</span>
-                    )}
-                    {isLive && !showOverdue && !isBlocked && (
-                      <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>
-                    )}
-                    {showOverdue && (
-                      <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>
-                    )}
-                    {movedBack && !showOverdue && !isBlocked && (
-                      <span className="tt-badge tt-badge-mb"><RotateCcw size={11} /> Back</span>
-                    )}
-                    {!isLive && !isBlocked && !showOverdue && !movedBack && (
-                      <span className="tt-badge tt-badge-done">✓ Done</span>
-                    )}
-                  </span>
-
-                  {/* Time bar + label */}
-                  <div className="tt-time-bar-wrap">
-                    <div className="tt-time-bar">
-                      <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
-                    </div>
-                    <span className="tt-time-label">
-                      {formatHours(row.duration_in_prev_state_hours)}
-                      <span className="tt-threshold"> / {row.threshold_hours}h</span>
-                    </span>
-                  </div>
-
-                  {/* Assignee */}
-                  <div className="tt-assignee">
-                    {avatarMap[row.assignee]
-                      ? <img src={avatarMap[row.assignee]} alt={row.assignee} className="filter-avatar-img" />
-                      : <span className="filter-avatar-placeholder">{(row.assignee || '?').charAt(0).toUpperCase()}</span>
-                    }
-                    <span className="tt-assignee-name">{row.assignee ? row.assignee.split(' ')[0] : '—'}</span>
-                  </div>
-
-                  <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
-                </div>
-
-                {/* Expanded: all transitions for this issue */}
-                {isExpanded && (
-                  <div className="tt-row-detail">
-                    {[...transitions].sort((a, b) => new Date(a.transitioned_at).getTime() - new Date(b.transitioned_at).getTime()).map((t, i) => {
-                      const tMovedBack = isMovedBack(t.from_state, t.to_state)
-                      const tIsLive = t.duration_in_prev_state_hours === null
-                      const isMostRecent = i === transitions.length - 1
-                      return (
-                        <div key={t.id} className="tt-transition-row">
-                          <span className="tt-tr-index">{i + 1}</span>
-                          <span className="tt-tr-transition">
-                            <span className="tt-from-state">{t.from_state || 'Backlog'}</span>
-                            <span className={`tt-arrow ${tMovedBack ? 'tt-arrow-back' : ''}`}>→</span>
-                            <span className={`tt-to-state${tIsLive && isMostRecent ? ' live' : ''}${tMovedBack ? ' tt-to-state-back' : ''}${isMostRecent && !tMovedBack ? ' tt-to-state-current' : ''}`}>
-                              {t.to_state}{tIsLive && isMostRecent ? ' ●' : ''}
-                            </span>
-                            {tMovedBack && <span className="tt-regression-tag">regression</span>}
-                          </span>
-                          <span className="tt-tr-time">{formatHours(t.duration_in_prev_state_hours)}</span>
-                          <span className="tt-tr-by">
-                            {t.moved_by || '—'}
-                            {t.moved_by_mismatch && <AlertTriangle size={10} className="tt-mismatch-icon" />}
-                          </span>
-                          <span className="tt-tr-at">
-                            {new Date(t.transitioned_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
-                          </span>
-                          {t.comment && !/^activity:[^\s]+$/.test(t.comment.trim()) && (
-                            <span className="tt-tr-comment">{t.comment}</span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Helpers for IssueTimelineTab ────────────────────────────────────────────
+// ─── Helpers for IssueTimeline (stint view) ──────────────────────────────────
 
 function formatHoursDetailed(h: number | null): string {
   if (h === null || h === undefined) return '—'
@@ -1523,139 +864,336 @@ function stintLabel(stint: IssueStint): string {
   return `→ ${stint.exited_to}`
 }
 
-// ─── Tab: Issue Timeline ──────────────────────────────────────────────────────
+// ─── Tab: Tracking (Logbook + Summary) ───────────────────────────────────────
 
-function IssueTimelineTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
-  const [timelines, setTimelines] = useState<IssueTimeline[]>([])
+type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at' | 'status'
+
+function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
+  const [mode, setMode] = useState<'logbook' | 'summary'>('logbook')
+
+  // ── Logbook state ─────────────────────────────────────────────────────────
+  const [selectedWeek, setSelectedWeek] = useState<Date>(() => getMondayOf(new Date()))
+  const [noWeekFilter, setNoWeekFilter] = useState(false)
+  const [rows, setRows] = useState<TimeTrackingRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [filterSearch, setFilterSearch] = useState('')
-  const [filterLive, setFilterLive] = useState(false)
-  const [filterOverdue, setFilterOverdue] = useState(false)
-  const [filterMovedBack, setFilterMovedBack] = useState(false)
-  const [filterDelayed, setFilterDelayed] = useState(false)
-  const [filterPinned, setFilterPinned] = useState(false)
-  const [filterPriorities, setFilterPriorities] = useState<string[]>([])
-  const [filterAssignee, setFilterAssignee] = useState('')
-  const [tlAssigneeOpen, setTlAssigneeOpen] = useState(false)
-  const tlAssigneeRef = useRef<HTMLDivElement>(null)
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [resetting, setResetting] = useState(false)
+  const [resetConfirm, setResetConfirm] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [reconciling, setReconciling] = useState(false)
+  const [togglingPin, setTogglingPin] = useState<string | null>(null)
+  const [sortKey, setSortKey] = useState<SortKey>('entered_at')
+  const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
+  const sortDropdownRef = useRef<HTMLDivElement>(null)
+  const [filterMismatch, setFilterMismatch] = useState(false)
+
+  // ── Summary state ─────────────────────────────────────────────────────────
+  const [timelines, setTimelines] = useState<IssueTimeline[]>([])
+  const [tlLoading, setTlLoading] = useState(false)
+  const [tlError, setTlError] = useState<string | null>(null)
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
-  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
   const [dismissing, setDismissing] = useState<string | null>(null)
 
-  const fetchTimelines = useCallback(async () => {
+  // ── Shared filter state ───────────────────────────────────────────────────
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
+  const [filterOverdue, setFilterOverdue] = useState(false)
+  const [filterMovedBack, setFilterMovedBack] = useState(false)
+  const [filterLive, setFilterLive] = useState(false)
+  const [filterDelayed, setFilterDelayed] = useState(false)
+  const [filterPinned, setFilterPinned] = useState(false)
+  const [filterAssignee, setFilterAssignee] = useState('')
+  const [filterPriorities, setFilterPriorities] = useState<string[]>([])
+  const [searchIssue, setSearchIssue] = useState('')
+  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false)
+  const assigneeDropdownRef = useRef<HTMLDivElement>(null)
+
+  // ── Data fetching ─────────────────────────────────────────────────────────
+  const fetchRows = useCallback(async (week: Date, skipWeek: boolean) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.getIssueTimelines()
-      setTimelines(res.data || [])
+      const params: { week?: string } = {}
+      if (!skipWeek) params.week = toISODate(week)
+      const res = await api.getTimeTracking(params)
+      setRows(res.data || [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load timelines')
+      setError(err instanceof Error ? err.message : 'Failed to load time tracking')
     } finally {
       setLoading(false)
     }
   }, [])
 
-  useEffect(() => { fetchTimelines() }, [fetchTimelines])
-  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
+  const fetchTimelines = useCallback(async () => {
+    setTlLoading(true)
+    setTlError(null)
+    try {
+      const res = await api.getIssueTimelines()
+      setTimelines(res.data || [])
+    } catch (err) {
+      setTlError(err instanceof Error ? err.message : 'Failed to load timelines')
+    } finally {
+      setTlLoading(false)
+    }
+  }, [])
 
-  // Auto-refresh timeline every 2 minutes so new state transitions appear without restart
+  useEffect(() => { fetchRows(selectedWeek, noWeekFilter) }, [fetchRows, selectedWeek, noWeekFilter])
+  useEffect(() => { fetchTimelines() }, [fetchTimelines])
   useEffect(() => {
     const id = setInterval(() => { fetchTimelines() }, 2 * 60 * 1000)
     return () => clearInterval(id)
   }, [fetchTimelines])
+  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
 
-  const toggleExpand = (issueID: string) => {
-    setExpandedIssues(prev => {
-      const next = new Set(prev)
-      if (next.has(issueID)) next.delete(issueID)
-      else next.add(issueID)
-      return next
-    })
+  // ── Close dropdowns on outside click ─────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (assigneeDropdownRef.current && !assigneeDropdownRef.current.contains(e.target as Node))
+        setAssigneeDropdownOpen(false)
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node))
+        setSortDropdownOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // ── Logbook handlers ──────────────────────────────────────────────────────
+  const changeWeek = (delta: number) => {
+    setSelectedWeek(w => { const next = new Date(w); next.setDate(next.getDate() + delta * 7); return next })
+    setNoWeekFilter(false)
+  }
+  const goThisWeek = () => { setSelectedWeek(getMondayOf(new Date())); setNoWeekFilter(false) }
+  const toggleRow = (id: string) => {
+    setExpandedRows(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
+  }
+  const togglePin = async (row: TimeTrackingRow) => {
+    setTogglingPin(row.issue_id)
+    try {
+      if (row.pinned) await api.unpinIssue(row.issue_id)
+      else await api.pinIssue(row.issue_id)
+      await fetchRows(selectedWeek, noWeekFilter)
+    } catch { /* ignore */ } finally { setTogglingPin(null) }
+  }
+  const runReset = async () => {
+    if (!resetConfirm) { setResetConfirm(true); setTimeout(() => setResetConfirm(false), 5000); return }
+    setResetConfirm(false); setResetting(true); setBackfillMsg(null)
+    try {
+      const res = await api.resetStateLog()
+      setBackfillMsg(`State log cleared: ${res.data?.deleted ?? 0} rows deleted.`)
+      setRows([])
+    } catch (err) { setBackfillMsg(`Reset failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally { setResetting(false) }
+  }
+  const runReconcile = async () => {
+    setReconciling(true); setBackfillMsg(null)
+    try {
+      const res = await api.reconcileStateLog()
+      const d = res.data
+      setBackfillMsg(`Reconcile: ${d?.reconciled ?? 0} exit rows inserted, ${d?.skipped ?? 0} up-to-date.`)
+      fetchRows(selectedWeek, noWeekFilter)
+    } catch (err) { setBackfillMsg(`Reconcile failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally { setReconciling(false) }
+  }
+  const runImportHistory = async () => {
+    setImporting(true); setBackfillMsg(null)
+    try {
+      const res = await api.importHistory()
+      const d = res.data
+      setBackfillMsg(`Sync done: ${d?.inserted ?? 0} transitions inserted. ${d?.skipped ?? 0} already existed.`)
+      fetchRows(selectedWeek, noWeekFilter)
+    } catch (err) { setBackfillMsg(`Import failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } finally { setImporting(false) }
   }
 
+  // ── Summary handlers ──────────────────────────────────────────────────────
+  const toggleExpand = (issueID: string) => {
+    setExpandedIssues(prev => { const next = new Set(prev); next.has(issueID) ? next.delete(issueID) : next.add(issueID); return next })
+  }
   const handleDismiss = async (issueID: string) => {
     setDismissing(issueID)
     try {
       await api.dismissAlert(issueID)
-      setTimelines(prev => prev.map(t =>
-        t.issue_id === issueID ? { ...t, alert_dismissed: true } : t
-      ))
-    } finally {
-      setDismissing(null)
-    }
+      setTimelines(prev => prev.map(t => t.issue_id === issueID ? { ...t, alert_dismissed: true } : t))
+    } finally { setDismissing(null) }
   }
-
   const handleUndismiss = async (issueID: string) => {
     setDismissing(issueID)
     try {
       await api.undismissAlert(issueID)
-      setTimelines(prev => prev.map(t =>
-        t.issue_id === issueID ? { ...t, alert_dismissed: false } : t
-      ))
-    } finally {
-      setDismissing(null)
-    }
+      setTimelines(prev => prev.map(t => t.issue_id === issueID ? { ...t, alert_dismissed: false } : t))
+    } finally { setDismissing(null) }
   }
 
-  // Close assignee dropdown on outside click
-  useEffect(() => {
-    function onOutside(e: MouseEvent) {
-      if (tlAssigneeRef.current && !tlAssigneeRef.current.contains(e.target as Node)) {
-        setTlAssigneeOpen(false)
+  // ── Logbook derived values ────────────────────────────────────────────────
+  let displayed = rows
+  if (filterOverdue)   displayed = displayed.filter(r => r.overdue)
+  if (filterMismatch)  displayed = displayed.filter(r => r.moved_by_mismatch)
+  if (filterMovedBack) displayed = displayed.filter(r => isMovedBack(r.from_state, r.to_state))
+  if (filterLive)      displayed = displayed.filter(r => r.duration_in_prev_state_hours === null)
+  if (filterDelayed)   displayed = displayed.filter(r => r.duration_in_prev_state_hours !== null && r.duration_in_prev_state_hours > r.threshold_hours)
+  if (filterPinned)    displayed = displayed.filter(r => r.pinned)
+  if (filterAssignee)  displayed = displayed.filter(r => r.assignee.toLowerCase() === filterAssignee.toLowerCase())
+  if (filterPriorities.length > 0) displayed = displayed.filter(r => filterPriorities.includes(r.priority))
+  if (searchIssue) {
+    const q = searchIssue.toLowerCase()
+    displayed = displayed.filter(r => r.issue_id.toLowerCase().includes(q) || r.issue_summary.toLowerCase().includes(q))
+  }
+  displayed = [...displayed].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+    switch (sortKey) {
+      case 'time_asc':  return (a.duration_in_prev_state_hours ?? 0) - (b.duration_in_prev_state_hours ?? 0)
+      case 'time_desc': return (b.duration_in_prev_state_hours ?? 0) - (a.duration_in_prev_state_hours ?? 0)
+      case 'priority': { const O: Record<string,number> = {P0:0,P1:1,P2:2,P3:3,Other:4}; return (O[a.priority]??4)-(O[b.priority]??4) }
+      case 'status': {
+        const s = (r: TimeTrackingRow) => r.overdue ? 0 : r.duration_in_prev_state_hours === null ? 1 : isMovedBack(r.from_state, r.to_state) ? 2 : 3
+        return s(a) - s(b)
       }
+      default: return new Date(b.transitioned_at).getTime() - new Date(a.transitioned_at).getTime()
     }
-    document.addEventListener('mousedown', onOutside)
-    return () => document.removeEventListener('mousedown', onOutside)
-  }, [])
-
-  // Moved-back alerts: live tickets that were moved back and alert not dismissed
-  const movedBackAlerts = timelines.filter(
-    t => t.is_live && t.moved_back_count > 0 && !t.alert_dismissed
-  )
-
-  // Unique assignees for dropdown
-  const tlAllAssignees = Array.from(new Set(timelines.map(t => t.assignee).filter(Boolean))).sort()
-
-  // Filter tickets
-  let displayed = timelines
-  if (filterSearch) {
-    const q = filterSearch.toLowerCase()
-    displayed = displayed.filter(t =>
-      t.issue_id.toLowerCase().includes(q) || t.issue_summary.toLowerCase().includes(q)
-    )
+  })
+  const groupedIssues: { rep: TimeTrackingRow; all: TimeTrackingRow[] }[] = []
+  const seenIssues = new Map<string, number>()
+  for (const row of displayed) {
+    const idx = seenIssues.get(row.issue_id)
+    if (idx === undefined) {
+      seenIssues.set(row.issue_id, groupedIssues.length)
+      groupedIssues.push({ rep: row, all: [row] })
+    } else {
+      groupedIssues[idx].all.push(row)
+      const cur = groupedIssues[idx].rep
+      const cs = cur.overdue ? 0 : cur.duration_in_prev_state_hours === null ? 1 : isMovedBack(cur.from_state, cur.to_state) ? 2 : 3
+      const ns = row.overdue ? 0 : row.duration_in_prev_state_hours === null ? 1 : isMovedBack(row.from_state, row.to_state) ? 2 : 3
+      if (ns < cs) groupedIssues[idx].rep = row
+    }
   }
-  if (filterLive)       displayed = displayed.filter(t => t.is_live)
-  if (filterOverdue)    displayed = displayed.filter(t => t.is_overdue)
-  if (filterMovedBack)  displayed = displayed.filter(t => t.moved_back_count > 0)
-  if (filterDelayed)    displayed = displayed.filter(t => t.total_hours > t.threshold_hours)
-  if (filterPinned)     displayed = displayed.filter(t => t.pinned)
-  if (filterAssignee)   displayed = displayed.filter(t => t.assignee?.toLowerCase() === filterAssignee.toLowerCase())
-  if (filterPriorities.length > 0) displayed = displayed.filter(t => filterPriorities.includes(t.priority))
+  const overdueCount   = rows.filter(r => r.overdue).length
+  const mismatchCount  = rows.filter(r => r.moved_by_mismatch).length
+  const lbMovedBack    = rows.filter(r => isMovedBack(r.from_state, r.to_state)).length
+  const pinnedCount    = rows.filter(r => r.pinned).length
+  const liveCount      = rows.filter(r => r.duration_in_prev_state_hours === null).length
+  const delayedCount   = rows.filter(r => r.duration_in_prev_state_hours !== null && r.duration_in_prev_state_hours > r.threshold_hours).length
 
-  const liveCount      = timelines.filter(t => t.is_live).length
-  const overdueCount   = timelines.filter(t => t.is_overdue).length
-  const movedBackCount = timelines.filter(t => t.moved_back_count > 0).length
-  const delayedCount   = timelines.filter(t => t.total_hours > t.threshold_hours).length
-  const pinnedCount    = timelines.filter(t => t.pinned).length
-  const activeFilterCount = [filterLive, filterOverdue, filterMovedBack, filterDelayed, filterPinned,
-    filterAssignee !== '', filterPriorities.length > 0].filter(Boolean).length
+  // ── Summary derived values ────────────────────────────────────────────────
+  const movedBackAlerts = timelines.filter(t => t.is_live && t.moved_back_count > 0 && !t.alert_dismissed)
+  let tlDisplayed = timelines
+  if (searchIssue) {
+    const q = searchIssue.toLowerCase()
+    tlDisplayed = tlDisplayed.filter(t => t.issue_id.toLowerCase().includes(q) || t.issue_summary.toLowerCase().includes(q))
+  }
+  if (filterLive)       tlDisplayed = tlDisplayed.filter(t => t.is_live)
+  if (filterOverdue)    tlDisplayed = tlDisplayed.filter(t => t.is_overdue)
+  if (filterMovedBack)  tlDisplayed = tlDisplayed.filter(t => t.moved_back_count > 0)
+  if (filterDelayed)    tlDisplayed = tlDisplayed.filter(t => t.total_hours > t.threshold_hours)
+  if (filterPinned)     tlDisplayed = tlDisplayed.filter(t => t.pinned)
+  if (filterAssignee)   tlDisplayed = tlDisplayed.filter(t => t.assignee?.toLowerCase() === filterAssignee.toLowerCase())
+  if (filterPriorities.length > 0) tlDisplayed = tlDisplayed.filter(t => filterPriorities.includes(t.priority))
+  const tlOverdueCount   = timelines.filter(t => t.is_overdue).length
+  const tlMovedBackCount = timelines.filter(t => t.moved_back_count > 0).length
+  const tlLiveCount      = timelines.filter(t => t.is_live).length
+  const tlDelayedCount   = timelines.filter(t => t.total_hours > t.threshold_hours).length
+  const tlPinnedCount    = timelines.filter(t => t.pinned).length
+
+  // ── Shared/active counts for filter bar ──────────────────────────────────
+  const activeOverdueCount   = mode === 'logbook' ? overdueCount   : tlOverdueCount
+  const activeLiveCount      = mode === 'logbook' ? liveCount      : tlLiveCount
+  const activeDelayedCount   = mode === 'logbook' ? delayedCount   : tlDelayedCount
+  const activeMovedBackCount = mode === 'logbook' ? lbMovedBack    : tlMovedBackCount
+  const activePinnedCount    = mode === 'logbook' ? pinnedCount    : tlPinnedCount
+  const allAssignees = Array.from(new Set(
+    mode === 'logbook'
+      ? rows.map(r => r.assignee).filter(Boolean)
+      : timelines.map(t => t.assignee).filter(Boolean)
+  )).sort()
+  const activeFilterCount = [
+    filterOverdue, filterMovedBack, filterLive, filterDelayed, filterPinned,
+    filterAssignee !== '', filterPriorities.length > 0,
+    ...(mode === 'logbook' ? [filterMismatch] : []),
+  ].filter(Boolean).length
 
   return (
-    <div className="pm-tab-content pm-timeline-tab">
-      {/* Header */}
+    <div className="pm-tab-content pm-tracking-tab">
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="pm-tab-header">
-        <h3 className="pm-section-title"><Activity size={18} /> Issue Timeline</h3>
-        <button className="btn-secondary btn-sm" onClick={fetchTimelines} disabled={loading}>
-          {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          Refresh
+        <h3 className="pm-section-title"><Activity size={18} /> Tracking</h3>
+        <div className="pm-tracking-controls">
+          {mode === 'logbook' && (
+            <>
+              <button
+                className={`btn-sm ${resetConfirm ? 'btn-danger-active' : 'btn-secondary'}`}
+                onClick={runReset}
+                disabled={resetting || importing || loading}
+                title={resetConfirm ? 'Click again to confirm' : 'Clear all rows'}
+              >
+                {resetting ? <Loader2 size={14} className="animate-spin" /> : <AlertTriangle size={14} />}
+                {resetting ? 'Clearing…' : resetConfirm ? 'Confirm?' : 'Clear'}
+              </button>
+              <button className="btn-secondary btn-sm" onClick={runReconcile} disabled={reconciling || importing || loading}
+                title="Reconcile: close any In Progress entries whose ticket has since moved">
+                {reconciling ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                {reconciling ? 'Reconciling…' : 'Reconcile'}
+              </button>
+              <button className="btn-primary btn-sm" onClick={runImportHistory} disabled={importing || resetting || loading}>
+                {importing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                {importing ? 'Syncing…' : 'Sync History'}
+              </button>
+              <button className="btn-secondary btn-sm" onClick={() => fetchRows(selectedWeek, noWeekFilter)} disabled={loading || importing}>
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              </button>
+            </>
+          )}
+          {mode === 'summary' && (
+            <button className="btn-secondary btn-sm" onClick={fetchTimelines} disabled={tlLoading}>
+              {tlLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              Refresh
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Mode toggle ────────────────────────────────────────────────────── */}
+      <div className="tracking-mode-toggle">
+        <button className={mode === 'logbook' ? 'active' : ''} onClick={() => setMode('logbook')}>
+          <RotateCcw size={13} /> Logbook
+        </button>
+        <button className={mode === 'summary' ? 'active' : ''} onClick={() => setMode('summary')}>
+          <Activity size={13} /> Summary
         </button>
       </div>
 
-      {error && <div className="pm-report-error"><AlertTriangle size={16} />{error}</div>}
+      {(error || tlError || backfillMsg) && (
+        <>
+          {error && <div className="pm-report-error"><AlertTriangle size={16} />{error}</div>}
+          {tlError && <div className="pm-report-error"><AlertTriangle size={16} />{tlError}</div>}
+          {backfillMsg && (
+            <div className={`pm-backfill-msg ${backfillMsg.includes('failed') ? 'error' : 'success'}`}>
+              {backfillMsg}
+            </div>
+          )}
+        </>
+      )}
 
-      {/* Moved-back alerts */}
-      {movedBackAlerts.length > 0 && (
+      {/* ── Week navigator (Logbook only) ───────────────────────────────────── */}
+      {mode === 'logbook' && (
+        <div className="pm-week-nav glass-card">
+          <button className="btn-icon" onClick={() => changeWeek(-1)} title="Previous week"><ChevronLeft size={16} /></button>
+          <div className="week-label">
+            {noWeekFilter
+              ? <span className="week-all">All Time</span>
+              : <><Calendar size={14} /><span>{formatWeekRange(selectedWeek)}</span></>
+            }
+          </div>
+          <button className="btn-icon" onClick={() => changeWeek(1)} title="Next week"><ChevronRight size={16} /></button>
+          <button className={`btn-sm ${noWeekFilter ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setNoWeekFilter(f => !f)}>
+            {noWeekFilter ? 'By Week' : 'All Time'}
+          </button>
+          <button className="btn-sm btn-secondary" onClick={goThisWeek} disabled={noWeekFilter}>This Week</button>
+          {pinnedCount > 0 && <span className="pinned-count-badge"><Pin size={12} /> {pinnedCount} pinned</span>}
+        </div>
+      )}
+
+      {/* ── Moved-back alerts (Summary only) ───────────────────────────────── */}
+      {mode === 'summary' && movedBackAlerts.length > 0 && (
         <div className="tl-alert-section">
           <div className="tl-alert-header">
             <TriangleAlert size={16} />
@@ -1670,8 +1208,7 @@ function IssueTimelineTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }
                   <span className="tl-alert-assignee">
                     {avatarMap[t.assignee]
                       ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" />
-                      : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>
-                    }
+                      : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>}
                     {t.assignee.split(' ')[0]}
                   </span>
                 )}
@@ -1683,19 +1220,8 @@ function IssueTimelineTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }
                 </span>
               </div>
               <div className="tl-alert-actions">
-                <button
-                  className="btn-sm btn-primary"
-                  onClick={() => { toggleExpand(t.issue_id); setFilterSearch(''); setFilterLive(false) }}
-                  title="See full timeline"
-                >
-                  View Timeline
-                </button>
-                <button
-                  className="btn-sm btn-secondary"
-                  onClick={() => handleDismiss(t.issue_id)}
-                  disabled={dismissing === t.issue_id}
-                  title="Dismiss this alert"
-                >
+                <button className="btn-sm btn-primary" onClick={() => toggleExpand(t.issue_id)} title="See full timeline">View Timeline</button>
+                <button className="btn-sm btn-secondary" onClick={() => handleDismiss(t.issue_id)} disabled={dismissing === t.issue_id} title="Dismiss alert">
                   {dismissing === t.issue_id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
                   Dismiss
                 </button>
@@ -1705,56 +1231,40 @@ function IssueTimelineTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }
         </div>
       )}
 
-      {/* Filter bar */}
-      <div className="pm-filter-bar tl-filter-bar">
-        {/* Search */}
+      {/* ── Shared filter bar ──────────────────────────────────────────────── */}
+      <div className="pm-filter-bar">
         <div className="pm-search-box">
           <Search size={13} />
           <input
             type="text"
             placeholder="Search issue…"
-            value={filterSearch}
-            onChange={e => setFilterSearch(e.target.value)}
+            value={searchIssue}
+            onChange={e => setSearchIssue(e.target.value)}
           />
         </div>
 
-        {/* Assignee dropdown */}
-        <div className="pm-custom-dropdown" ref={tlAssigneeRef}>
-          <button
-            className="pm-custom-dropdown-trigger"
-            onClick={() => setTlAssigneeOpen(o => !o)}
-          >
+        <div className="pm-custom-dropdown" ref={assigneeDropdownRef}>
+          <button className="pm-custom-dropdown-trigger" onClick={() => setAssigneeDropdownOpen(o => !o)}>
             {filterAssignee ? (
               <>
                 {avatarMap[filterAssignee]
                   ? <img src={avatarMap[filterAssignee]} alt={filterAssignee} className="filter-avatar-img" />
-                  : <span className="filter-avatar-placeholder">{filterAssignee.charAt(0).toUpperCase()}</span>
-                }
+                  : <span className="filter-avatar-placeholder">{filterAssignee.charAt(0).toUpperCase()}</span>}
                 <span className="filter-assignee-name">{filterAssignee.split(' ')[0]}</span>
               </>
             ) : (
               <><Users size={14} /><span>All Assignees</span></>
             )}
-            <ChevronDown size={12} className={`dropdown-chevron ${tlAssigneeOpen ? 'open' : ''}`} />
+            <ChevronDown size={12} className={`dropdown-chevron ${assigneeDropdownOpen ? 'open' : ''}`} />
           </button>
-          {tlAssigneeOpen && (
+          {assigneeDropdownOpen && (
             <div className="pm-custom-dropdown-menu">
-              <button
-                className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`}
-                onClick={() => { setFilterAssignee(''); setTlAssigneeOpen(false) }}
-              >
+              <button className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`} onClick={() => { setFilterAssignee(''); setAssigneeDropdownOpen(false) }}>
                 <Users size={14} /><span>All Assignees</span>
               </button>
-              {tlAllAssignees.map(a => (
-                <button
-                  key={a}
-                  className={`pm-dropdown-item ${filterAssignee === a ? 'active' : ''}`}
-                  onClick={() => { setFilterAssignee(a); setTlAssigneeOpen(false) }}
-                >
-                  {avatarMap[a]
-                    ? <img src={avatarMap[a]} alt={a} className="filter-avatar-img" />
-                    : <span className="filter-avatar-placeholder">{a.charAt(0).toUpperCase()}</span>
-                  }
+              {allAssignees.map(a => (
+                <button key={a} className={`pm-dropdown-item ${filterAssignee === a ? 'active' : ''}`} onClick={() => { setFilterAssignee(a); setAssigneeDropdownOpen(false) }}>
+                  {avatarMap[a] ? <img src={avatarMap[a]} alt={a} className="filter-avatar-img" /> : <span className="filter-avatar-placeholder">{a.charAt(0).toUpperCase()}</span>}
                   <span>{a}</span>
                 </button>
               ))}
@@ -1762,223 +1272,311 @@ function IssueTimelineTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }
           )}
         </div>
 
-        {/* Priority chips */}
         <div className="pm-priority-chips">
-          {['P0', 'P1', 'P2', 'P3'].map(p => (
-            <button
-              key={p}
-              className={`priority-chip ${filterPriorities.includes(p) ? 'active' : ''} ${priorityBadgeClass(p)}`}
-              onClick={() => setFilterPriorities(prev =>
-                prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
-              )}
-            >
+          {['P0','P1','P2','P3'].map(p => (
+            <button key={p} className={`priority-chip ${filterPriorities.includes(p) ? 'active' : ''} ${priorityBadgeClass(p)}`}
+              onClick={() => setFilterPriorities(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])}>
               {p}
             </button>
           ))}
         </div>
 
-        {/* Status / state quick-filters */}
+        {mode === 'logbook' && (
+          <div className="pm-custom-dropdown" ref={sortDropdownRef}>
+            <button className="pm-custom-dropdown-trigger" onClick={() => setSortDropdownOpen(o => !o)}>
+              {sortKey === 'entered_at'  && <><ArrowDownUp size={14} /><span>Newest First</span></>}
+              {sortKey === 'time_asc'    && <><ArrowUpNarrowWide size={14} /><span>Time ↑</span></>}
+              {sortKey === 'time_desc'   && <><ArrowDownNarrowWide size={14} /><span>Time ↓</span></>}
+              {sortKey === 'priority'    && <><Star size={14} /><span>Priority</span></>}
+              {sortKey === 'status'      && <><Activity size={14} /><span>Status</span></>}
+              <ChevronDown size={12} className={`dropdown-chevron ${sortDropdownOpen ? 'open' : ''}`} />
+            </button>
+            {sortDropdownOpen && (
+              <div className="pm-custom-dropdown-menu">
+                {([
+                  { key: 'entered_at', label: 'Newest First',              Icon: ArrowDownUp },
+                  { key: 'status',     label: 'Status (Overdue→Live→Done)', Icon: Activity },
+                  { key: 'time_asc',   label: 'Time ↑ (low→high)',         Icon: ArrowUpNarrowWide },
+                  { key: 'time_desc',  label: 'Time ↓ (high→low)',         Icon: ArrowDownNarrowWide },
+                  { key: 'priority',   label: 'Priority',                   Icon: Star },
+                ] as { key: SortKey; label: string; Icon: React.ElementType }[]).map(({ key, label, Icon }) => (
+                  <button key={key} className={`pm-dropdown-item ${sortKey === key ? 'active' : ''}`}
+                    onClick={() => { setSortKey(key); setSortDropdownOpen(false) }}>
+                    <Icon size={14} /><span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="pm-toggle-filters">
-          <button
-            className={`btn-sm ${filterLive ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setFilterLive(f => !f)}
-          >
-            <Timer size={13} /> Live {liveCount > 0 && `(${liveCount})`}
-          </button>
-          {delayedCount > 0 && (
-            <button
-              className={`btn-sm ${filterDelayed ? 'btn-danger-active' : 'btn-secondary'}`}
-              onClick={() => setFilterDelayed(f => !f)}
-            >
-              <Zap size={13} /> Delayed ({delayedCount})
+          {activeLiveCount > 0 && (
+            <button className={`btn-sm ${filterLive ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilterLive(f => !f)}>
+              <Timer size={13} /> Live ({activeLiveCount})
             </button>
           )}
-          {overdueCount > 0 && (
-            <button
-              className={`btn-sm ${filterOverdue ? 'btn-warning-active' : 'btn-secondary'}`}
-              onClick={() => setFilterOverdue(f => !f)}
-            >
-              <AlertTriangle size={13} /> Overdue ({overdueCount})
+          {activeDelayedCount > 0 && (
+            <button className={`btn-sm ${filterDelayed ? 'btn-danger-active' : 'btn-secondary'}`} onClick={() => setFilterDelayed(f => !f)}>
+              <Zap size={13} /> Delayed ({activeDelayedCount})
             </button>
           )}
-          {movedBackCount > 0 && (
-            <button
-              className={`btn-sm ${filterMovedBack ? 'btn-warning-active' : 'btn-secondary'}`}
-              onClick={() => setFilterMovedBack(f => !f)}
-            >
-              <RotateCcw size={13} /> Moved Back ({movedBackCount})
+          {activeOverdueCount > 0 && (
+            <button className={`btn-sm ${filterOverdue ? 'btn-danger-active' : 'btn-secondary'}`} onClick={() => setFilterOverdue(f => !f)}>
+              <AlertTriangle size={13} /> Overdue ({activeOverdueCount})
             </button>
           )}
-          {pinnedCount > 0 && (
-            <button
-              className={`btn-sm ${filterPinned ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setFilterPinned(f => !f)}
-            >
-              <Pin size={13} /> Pinned ({pinnedCount})
+          {mode === 'logbook' && mismatchCount > 0 && (
+            <button className={`btn-sm ${filterMismatch ? 'btn-warning-active' : 'btn-secondary'}`} onClick={() => setFilterMismatch(f => !f)}>
+              <AlertTriangle size={13} /> Mismatch ({mismatchCount})
+            </button>
+          )}
+          {activeMovedBackCount > 0 && (
+            <button className={`btn-sm ${filterMovedBack ? 'btn-warning-active' : 'btn-secondary'}`} onClick={() => setFilterMovedBack(f => !f)}>
+              <RotateCcw size={13} /> Moved Back ({activeMovedBackCount})
+            </button>
+          )}
+          {activePinnedCount > 0 && (
+            <button className={`btn-sm ${filterPinned ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilterPinned(f => !f)}>
+              <Pin size={13} /> Pinned ({activePinnedCount})
             </button>
           )}
           {activeFilterCount > 0 && (
-            <button
-              className="btn-sm btn-ghost tl-clear-filters"
-              onClick={() => {
-                setFilterLive(false); setFilterOverdue(false); setFilterMovedBack(false)
-                setFilterDelayed(false); setFilterPinned(false); setFilterAssignee('')
-                setFilterPriorities([]); setFilterSearch('')
-              }}
-            >
+            <button className="btn-sm btn-ghost tl-clear-filters" onClick={() => {
+              setFilterOverdue(false); setFilterMismatch(false); setFilterMovedBack(false)
+              setFilterLive(false); setFilterDelayed(false); setFilterPinned(false)
+              setFilterAssignee(''); setFilterPriorities([]); setSearchIssue('')
+            }}>
               <X size={12} /> Clear filters
             </button>
           )}
         </div>
       </div>
 
-      {/* Summary bar */}
-      <div className="tl-summary-bar">
-        <span>{displayed.length} of {timelines.length} issues</span>
-      </div>
-
-      {/* Issue list */}
-      {loading && timelines.length === 0 ? (
-        <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading timelines…</span></div>
-      ) : displayed.length === 0 ? (
-        <div className="pm-empty-state"><Activity size={40} /><p>No issues found.</p></div>
-      ) : (
-        <div className="pm-card-list glass-card">
-          {/* Summary */}
-          <div className="pm-list-summary">
-            <span>{displayed.length} of {timelines.length} issues</span>
-            {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
-            {movedBackCount > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {movedBackCount} moved back</span>}
+      {/* ── List ───────────────────────────────────────────────────────────── */}
+      {mode === 'logbook' ? (
+        loading && rows.length === 0 ? (
+          <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading…</span></div>
+        ) : rows.length === 0 ? (
+          <div className="pm-empty-state">
+            <Clock size={40} />
+            <p>No time tracking data for this week.</p>
+            <p style={{ fontSize: '0.8rem' }}>Try <strong>All Time</strong> view or click <strong>Sync History</strong>.</p>
           </div>
-
-          {/* Column headers */}
-          <div className="pm-col-header">
-            <span className="pm-col-pin" />
-            <span className="pm-col-issue">Issue</span>
-            <span className="pm-col-priority">Priority</span>
-            <span className="pm-col-status">Status</span>
-            <span className="pm-col-time">Time / Threshold</span>
-            <span className="pm-col-stints">Stints</span>
-            <span className="pm-col-assignee">Assignee</span>
-            <span className="pm-col-chevron" />
-          </div>
-
-          <div className="pm-rows-scroll">
-          {displayed.map(t => {
-            const isExpanded = expandedIssues.has(t.issue_id)
-            const lastMovedBackStint = [...t.stints].reverse().find(s => s.moved_back)
-            const ratio = t.threshold_hours > 0 ? Math.min(t.total_hours / t.threshold_hours, 1) : 0
-            const barColor = t.is_overdue ? '#ef4444' : t.total_hours > t.threshold_hours ? '#f97316' : t.is_live ? '#22c55e' : '#6366f1'
-
-            return (
-              <div
-                key={t.issue_id}
-                className={['pm-row', t.is_overdue ? 'pm-row-overdue' : '', t.is_live ? 'pm-row-live' : '', t.pinned ? 'pm-row-pinned' : ''].filter(Boolean).join(' ')}
-              >
-                <div className="pm-row-main" onClick={() => toggleExpand(t.issue_id)}>
-                  {/* Pin placeholder */}
-                  <span className="pm-col-pin">
-                    {t.pinned && <Pin size={10} className="tt-pin-indicator" />}
-                  </span>
-
-                  {/* Issue ID + summary */}
-                  <div className="pm-col-issue pm-issue-cell">
-                    <span className="pm-issue-id">{t.issue_id}</span>
-                    <span className="pm-issue-summary">{t.issue_summary}</span>
-                    {t.moved_back_count > 0 && (
-                      <span className="tt-regression-chip" title={`Moved back ${t.moved_back_count}× `}>↩{t.moved_back_count}</span>
-                    )}
-                    {blockerIssueIds?.has(t.issue_id) && (
-                      <span className="do-overdue-chip">⚠ Blocked</span>
-                    )}
-                  </div>
-
-                  {/* Priority */}
-                  <span className={`pm-col-priority tt-priority ${priorityBadgeClass(t.priority)}`}>{t.priority || '—'}</span>
-
-                  {/* Status */}
-                  <span className="pm-col-status">
-                    {t.is_live && !t.is_overdue && <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>}
-                    {t.is_overdue && <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>}
-                    {!t.is_live && !t.is_overdue && <span className="tt-badge tt-badge-done">✓ Done</span>}
-                  </span>
-
-                  {/* Time bar */}
-                  <div className="pm-col-time tt-time-bar-wrap">
-                    <div className="tt-time-bar">
-                      <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
-                    </div>
-                    <span className="tt-time-label">
-                      {formatHoursDetailed(t.total_hours)}
-                      <span className="tt-threshold"> / {t.threshold_hours}h</span>
-                    </span>
-                  </div>
-
-                  {/* Stints */}
-                  <span className="pm-col-stints">
-                    {t.total_stints > 1 && <span className="tt-transition-count" title={`${t.total_stints} stints`}>{t.total_stints}</span>}
-                  </span>
-
-                  {/* Assignee */}
-                  <div className="pm-col-assignee tt-assignee">
-                    {t.assignee && (avatarMap[t.assignee]
-                      ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" />
-                      : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>
-                    )}
-                    <span className="tt-assignee-name">{t.assignee ? t.assignee.split(' ')[0] : '—'}</span>
-                  </div>
-
-                  <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
-                </div>
-
-                {/* Expanded: stint timeline */}
-                {isExpanded && (
-                  <div className="tt-row-detail">
-                    {t.stints.map(stint => (
-                      <div key={stint.stint_number} className={`tl-stint ${stintStatusClass(stint)}`}>
-                        <div className="tl-stint-marker">
-                          {!stint.exited_at
-                            ? <span className="stint-dot live-dot-pulse" />
-                            : stint.moved_back ? <RotateCcw size={12} /> : <CheckCircle2 size={12} />
-                          }
-                          {stint.stint_number < t.total_stints && <div className="tl-stint-line" />}
+        ) : (
+          <div className="pm-card-list glass-card">
+            <div className="pm-list-summary">
+              <span>{groupedIssues.length} issues · {displayed.length} transitions</span>
+              {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
+              {mismatchCount > 0 && <span className="mismatch-summary-badge"><AlertTriangle size={12} /> {mismatchCount} mismatch</span>}
+              {lbMovedBack > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {lbMovedBack} moved back</span>}
+            </div>
+            <div className="pm-col-header">
+              <span className="tt-col-pin" />
+              <span className="tt-col-issue">Issue</span>
+              <span className="tt-col-regression">Regression</span>
+              <span className="tt-col-priority">Priority</span>
+              <span className="tt-col-status">Status</span>
+              <span className="tt-col-time">Time / Threshold</span>
+              <span className="tt-col-assignee">Assignee</span>
+              <span className="tt-col-chevron" />
+            </div>
+            <div className="pm-rows-scroll">
+              {groupedIssues.map(({ rep: row, all: transitions }) => {
+                const isLive    = row.to_state.toLowerCase() === 'in progress'
+                const isBlocked = row.to_state.toLowerCase() === 'blocked'
+                const movedBack = isMovedBack(row.from_state, row.to_state)
+                const isExpanded = expandedRows.has(row.issue_id)
+                const isDone    = ['dev','done','mobile done','stage','prod'].includes(row.to_state.toLowerCase())
+                const showOverdue = row.overdue && !isDone && !isBlocked
+                const hasRegression = transitions.some(t => isMovedBack(t.from_state, t.to_state))
+                const ratio = row.duration_in_prev_state_hours != null && row.threshold_hours > 0
+                  ? Math.min(row.duration_in_prev_state_hours / row.threshold_hours, 1) : 0
+                const barColor = row.overdue ? '#ef4444' : isLive ? '#22c55e' : '#6366f1'
+                return (
+                  <div key={row.issue_id} className={['pm-row', showOverdue ? 'pm-row-overdue' : '', row.pinned ? 'pm-row-pinned' : '', movedBack ? 'pm-row-movedback' : ''].filter(Boolean).join(' ')}>
+                    <div className="pm-row-main" onClick={() => toggleRow(row.issue_id)}>
+                      <button className={`tt-pin-btn ${row.pinned ? 'pinned' : ''}`} onClick={e => { e.stopPropagation(); togglePin(row) }} disabled={togglingPin === row.issue_id} title={row.pinned ? 'Unpin' : 'Pin'}>
+                        {togglingPin === row.issue_id ? <Loader2 size={12} className="animate-spin" /> : row.pinned ? <Pin size={12} /> : <PinOff size={12} />}
+                      </button>
+                      <div className="tt-issue">
+                        {row.pinned && <Pin size={10} className="tt-pin-indicator" />}
+                        <span className="tt-issue-id">{row.issue_id}</span>
+                        <span className="tt-issue-summary">{row.issue_summary}</span>
+                        {transitions.length > 1 && <span className="tt-transition-count" title={`${transitions.length} transitions`}>{transitions.length}</span>}
+                        {blockerIssueIds?.has(row.issue_id) && <span className="do-overdue-chip">⚠ Blocked</span>}
+                      </div>
+                      <span className="tt-col-regression">
+                        {hasRegression && <span className="tt-regression-chip" title="Regression">↩R</span>}
+                      </span>
+                      <span className={`tt-priority ${priorityBadgeClass(row.priority)}`}>{row.priority || '—'}</span>
+                      <span className="tt-col-status">
+                        {isBlocked && <span className="tt-badge tt-badge-blocked">⊘ Blocked</span>}
+                        {isLive && !showOverdue && !isBlocked && <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>}
+                        {showOverdue && <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>}
+                        {movedBack && !showOverdue && !isBlocked && <span className="tt-badge tt-badge-mb"><RotateCcw size={11} /> Back</span>}
+                        {!isLive && !isBlocked && !showOverdue && !movedBack && <span className="tt-badge tt-badge-done">✓ Done</span>}
+                      </span>
+                      <div className="tt-time-bar-wrap">
+                        <div className="tt-time-bar">
+                          <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
                         </div>
-                        <div className="tl-stint-body">
-                          <div className="tl-stint-header">
-                            <span className="tl-stint-num">#{stint.stint_number}</span>
-                            <span className={`tl-stint-label ${stintStatusClass(stint)}`}>{stintLabel(stint)}</span>
-                            <span className="tl-stint-duration">{formatHoursDetailed(stint.duration_hours)}</span>
+                        <span className="tt-time-label">{formatHours(row.duration_in_prev_state_hours)}<span className="tt-threshold"> / {row.threshold_hours}h</span></span>
+                      </div>
+                      <div className="tt-assignee">
+                        {avatarMap[row.assignee] ? <img src={avatarMap[row.assignee]} alt={row.assignee} className="filter-avatar-img" /> : <span className="filter-avatar-placeholder">{(row.assignee || '?').charAt(0).toUpperCase()}</span>}
+                        <span className="tt-assignee-name">{row.assignee ? row.assignee.split(' ')[0] : '—'}</span>
+                      </div>
+                      <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
+                    </div>
+                    {isExpanded && (
+                      <div className="tt-row-detail">
+                        {[...transitions].sort((a, b) => new Date(a.transitioned_at).getTime() - new Date(b.transitioned_at).getTime()).map((t, i) => {
+                          const tMovedBack = isMovedBack(t.from_state, t.to_state)
+                          const tIsLive = t.duration_in_prev_state_hours === null
+                          const isMostRecent = i === transitions.length - 1
+                          return (
+                            <div key={t.id} className="tt-transition-row">
+                              <span className="tt-tr-index">{i + 1}</span>
+                              <span className="tt-tr-transition">
+                                <span className="tt-from-state">{t.from_state || 'Backlog'}</span>
+                                <span className={`tt-arrow ${tMovedBack ? 'tt-arrow-back' : ''}`}>→</span>
+                                <span className={`tt-to-state${tIsLive && isMostRecent ? ' live' : ''}${tMovedBack ? ' tt-to-state-back' : ''}${isMostRecent && !tMovedBack ? ' tt-to-state-current' : ''}`}>
+                                  {t.to_state}{tIsLive && isMostRecent ? ' ●' : ''}
+                                </span>
+                                {tMovedBack && <span className="tt-regression-tag">regression</span>}
+                              </span>
+                              <span className="tt-tr-time">{formatHours(t.duration_in_prev_state_hours)}</span>
+                              <span className="tt-tr-by">
+                                {t.moved_by || '—'}
+                                {t.moved_by_mismatch && <AlertTriangle size={10} className="tt-mismatch-icon" />}
+                              </span>
+                              <span className="tt-tr-at">
+                                {new Date(t.transitioned_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
+                              </span>
+                              {t.comment && !/^activity:[^\s]+$/.test(t.comment.trim()) && (
+                                <span className="tt-tr-comment">{t.comment}</span>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      ) : (
+        tlLoading && timelines.length === 0 ? (
+          <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading…</span></div>
+        ) : tlDisplayed.length === 0 ? (
+          <div className="pm-empty-state"><Activity size={40} /><p>No issues found.</p></div>
+        ) : (
+          <div className="pm-card-list glass-card">
+            <div className="pm-list-summary">
+              <span>{tlDisplayed.length} of {timelines.length} issues</span>
+              {tlOverdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {tlOverdueCount} overdue</span>}
+              {tlMovedBackCount > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {tlMovedBackCount} moved back</span>}
+            </div>
+            <div className="pm-col-header">
+              <span className="pm-col-pin" />
+              <span className="pm-col-issue">Issue</span>
+              <span className="pm-col-priority">Priority</span>
+              <span className="pm-col-status">Status</span>
+              <span className="pm-col-time">Time / Threshold</span>
+              <span className="pm-col-stints">Stints</span>
+              <span className="pm-col-assignee">Assignee</span>
+              <span className="pm-col-chevron" />
+            </div>
+            <div className="pm-rows-scroll">
+              {tlDisplayed.map(t => {
+                const isExpanded = expandedIssues.has(t.issue_id)
+                const lastMovedBackStint = [...t.stints].reverse().find(s => s.moved_back)
+                const ratio = t.threshold_hours > 0 ? Math.min(t.total_hours / t.threshold_hours, 1) : 0
+                const barColor = t.is_overdue ? '#ef4444' : t.total_hours > t.threshold_hours ? '#f97316' : t.is_live ? '#22c55e' : '#6366f1'
+                return (
+                  <div key={t.issue_id} className={['pm-row', t.is_overdue ? 'pm-row-overdue' : '', t.is_live ? 'pm-row-live' : '', t.pinned ? 'pm-row-pinned' : ''].filter(Boolean).join(' ')}>
+                    <div className="pm-row-main" onClick={() => toggleExpand(t.issue_id)}>
+                      <span className="pm-col-pin">
+                        {t.pinned && <Pin size={10} className="tt-pin-indicator" />}
+                      </span>
+                      <div className="pm-col-issue pm-issue-cell">
+                        <span className="pm-issue-id">{t.issue_id}</span>
+                        <span className="pm-issue-summary">{t.issue_summary}</span>
+                        {t.moved_back_count > 0 && <span className="tt-regression-chip" title={`Moved back ${t.moved_back_count}×`}>↩{t.moved_back_count}</span>}
+                        {blockerIssueIds?.has(t.issue_id) && <span className="do-overdue-chip">⚠ Blocked</span>}
+                      </div>
+                      <span className={`pm-col-priority tt-priority ${priorityBadgeClass(t.priority)}`}>{t.priority || '—'}</span>
+                      <span className="pm-col-status">
+                        {t.is_live && !t.is_overdue && <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>}
+                        {t.is_overdue && <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>}
+                        {!t.is_live && !t.is_overdue && <span className="tt-badge tt-badge-done">✓ Done</span>}
+                      </span>
+                      <div className="pm-col-time tt-time-bar-wrap">
+                        <div className="tt-time-bar">
+                          <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
+                        </div>
+                        <span className="tt-time-label">{formatHoursDetailed(t.total_hours)}<span className="tt-threshold"> / {t.threshold_hours}h</span></span>
+                      </div>
+                      <span className="pm-col-stints">
+                        {t.total_stints > 1 && <span className="tt-transition-count" title={`${t.total_stints} stints`}>{t.total_stints}</span>}
+                      </span>
+                      <div className="pm-col-assignee tt-assignee">
+                        {t.assignee && (avatarMap[t.assignee] ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" /> : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>)}
+                        <span className="tt-assignee-name">{t.assignee ? t.assignee.split(' ')[0] : '—'}</span>
+                      </div>
+                      <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
+                    </div>
+                    {isExpanded && (
+                      <div className="tt-row-detail">
+                        {t.stints.map(stint => (
+                          <div key={stint.stint_number} className={`tl-stint ${stintStatusClass(stint)}`}>
+                            <div className="tl-stint-marker">
+                              {!stint.exited_at
+                                ? <span className="stint-dot live-dot-pulse" />
+                                : stint.moved_back ? <RotateCcw size={12} /> : <CheckCircle2 size={12} />
+                              }
+                              {stint.stint_number < t.total_stints && <div className="tl-stint-line" />}
+                            </div>
+                            <div className="tl-stint-body">
+                              <div className="tl-stint-header">
+                                <span className="tl-stint-num">#{stint.stint_number}</span>
+                                <span className={`tl-stint-label ${stintStatusClass(stint)}`}>{stintLabel(stint)}</span>
+                                <span className="tl-stint-duration">{formatHoursDetailed(stint.duration_hours)}</span>
+                              </div>
+                              <div className="tl-stint-dates">
+                                <span>
+                                  {new Date(stint.entered_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                  {stint.exited_at && <> → {new Date(stint.exited_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</>}
+                                </span>
+                                {stint.moved_by && <span className="tl-stint-movedby">by {stint.moved_by}</span>}
+                              </div>
+                              {stint.comment && <div className="tl-stint-comment">"{stint.comment}"</div>}
+                            </div>
                           </div>
-                          <div className="tl-stint-dates">
-                            <span>
-                              {new Date(stint.entered_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                              {stint.exited_at && <> → {new Date(stint.exited_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</>}
-                            </span>
-                            {stint.moved_by && <span className="tl-stint-movedby">by {stint.moved_by}</span>}
-                          </div>
-                          {stint.comment && <div className="tl-stint-comment">"{stint.comment}"</div>}
+                        ))}
+                        <div className="tl-stint-summary">
+                          <span>Total: <strong>{formatHoursDetailed(t.total_hours)}</strong></span>
+                          <span>Threshold: <strong>{t.threshold_hours}h</strong></span>
+                          {lastMovedBackStint && (
+                            <span className="tl-last-reason">Last moved back: {lastMovedBackStint.comment || `→ ${lastMovedBackStint.exited_to}`}</span>
+                          )}
+                          {t.alert_dismissed && t.moved_back_count > 0 && (
+                            <button className="tl-undismiss-btn" onClick={e => { e.stopPropagation(); handleUndismiss(t.issue_id) }} title="Restore alert">
+                              {dismissing === t.issue_id ? <Loader2 size={10} className="animate-spin" /> : '↺ Restore alert'}
+                            </button>
+                          )}
                         </div>
                       </div>
-                    ))}
-                    <div className="tl-stint-summary">
-                      <span>Total: <strong>{formatHoursDetailed(t.total_hours)}</strong></span>
-                      <span>Threshold: <strong>{t.threshold_hours}h</strong></span>
-                      {lastMovedBackStint && (
-                        <span className="tl-last-reason">Last moved back: {lastMovedBackStint.comment || `→ ${lastMovedBackStint.exited_to}`}</span>
-                      )}
-                      {t.alert_dismissed && t.moved_back_count > 0 && (
-                        <button className="tl-undismiss-btn" onClick={e => { e.stopPropagation(); handleUndismiss(t.issue_id) }} title="Restore alert">
-                          {dismissing === t.issue_id ? <Loader2 size={10} className="animate-spin" /> : '↺ Restore alert'}
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
-          })}
+                )
+              })}
+            </div>
           </div>
-        </div>
+        )
       )}
     </div>
   )
@@ -2000,38 +1598,27 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
     onTabChange?.(tab)
   }
 
-  // Sync if parent changes initialTab (e.g. URL navigated directly)
-  useEffect(() => {
-    setActiveTab(initialTab)
-  }, [initialTab])
+  useEffect(() => { setActiveTab(initialTab) }, [initialTab])
 
   return (
     <div className="pm-reports-page">
       <div className="pm-reports-container">
-        {/* Tab Bar */}
         <div className="pm-tab-bar glass-card">
           {TABS.map(tab => {
             const Icon = tab.icon
             return (
-              <button
-                key={tab.id}
-                className={`pm-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
-                onClick={() => handleTabChange(tab.id)}
-              >
+              <button key={tab.id} className={`pm-tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => handleTabChange(tab.id)}>
                 <Icon size={16} />
                 <span>{tab.label}</span>
               </button>
             )
           })}
         </div>
-
-        {/* Tab Content */}
         <div className={`pm-tab-panel glass-card${activeTab === 'daily' ? ' pm-tab-panel--daily' : ''}`}>
-          {activeTab === 'daily' && <DailyReportTab />}
+          {activeTab === 'daily'     && <DailyReportTab />}
           {activeTab === 'assignees' && <AssigneeStatsTab />}
-          {activeTab === 'tracking' && <TimeTrackingTab blockerIssueIds={blockerIssueIds} />}
-          {activeTab === 'timeline' && <IssueTimelineTab blockerIssueIds={blockerIssueIds} />}
-          {activeTab === 'dailyops' && <DailyOpsTab onBlockersChange={setBlockerIssueIds} />}
+          {activeTab === 'tracking'  && <TrackingTab blockerIssueIds={blockerIssueIds} />}
+          {activeTab === 'dailyops'  && <DailyOpsTab onBlockersChange={setBlockerIssueIds} />}
         </div>
       </div>
     </div>

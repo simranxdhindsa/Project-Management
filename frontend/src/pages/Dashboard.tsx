@@ -160,7 +160,7 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'slack': 'slack',
 }
 
-const PM_REPORTS_TABS = ['tracking', 'timeline', 'daily', 'assignees', 'dailyops'] as const
+const PM_REPORTS_TABS = ['tracking', 'daily', 'assignees', 'dailyops'] as const
 type PMReportsTab = typeof PM_REPORTS_TABS[number]
 
 const SLACK_TABS = ['inbox', 'threads', 'followups', 'settings'] as const

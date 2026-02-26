@@ -1,199 +1,110 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState } from 'react'
 import {
-  DndContext,
-  DragOverlay,
-  closestCorners,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
+  DndContext, DragOverlay, closestCorners,
+  KeyboardSensor, PointerSensor, useSensor, useSensors,
 } from '@dnd-kit/core'
 import type { DragStartEvent, DragOverEvent, DragEndEvent } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
-
 import { KanbanColumn } from './KanbanColumn'
 import { TaskCard } from './TaskCard'
-import type { Task, TaskStatus, AsanaSection } from '../../types'
-
-// Default columns when no Asana sections are available
-const DEFAULT_COLUMNS: AsanaSection[] = [
-  { gid: 'todo', name: 'To Do', position: 0 },
-  { gid: 'in_progress', name: 'In Progress', position: 1 },
-  { gid: 'review', name: 'Review', position: 2 },
-  { gid: 'done', name: 'Done', position: 3 },
-]
+import type { YouTrackIssue } from '../../services/api'
 
 interface KanbanBoardProps {
-  tasks: Task[]
-  sections?: AsanaSection[]
-  onTaskMove: (taskId: string, newStatus: TaskStatus, sectionGid?: string, sectionName?: string) => void
-  onTaskClick?: (task: Task) => void
-  onTaskEdit?: (task: Task) => void
+  issues: YouTrackIssue[]
+  columns: string[]
+  avatarMap: Record<string, string>
+  getColumnIssues: (col: string) => YouTrackIssue[]
+  onIssueMove: (issueId: string, newState: string) => void
+  onIssueClick?: (issue: YouTrackIssue) => void
 }
 
-export function KanbanBoard({ tasks, sections, onTaskMove, onTaskClick, onTaskEdit }: KanbanBoardProps) {
-  const [activeTask, setActiveTask] = useState<Task | null>(null)
-
-  // Use provided sections or default columns
-  const columns = useMemo(() => {
-    if (sections && sections.length > 0) {
-      return sections
-    }
-    return DEFAULT_COLUMNS
-  }, [sections])
+export function KanbanBoard({
+  issues, columns, avatarMap, getColumnIssues, onIssueMove, onIssueClick,
+}: KanbanBoardProps) {
+  const [activeIssue, setActiveIssue] = useState<YouTrackIssue | null>(null)
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  )
-
-  // Get tasks by section - matches by section_name or falls back to status for legacy tasks
-  const getTasksBySection = useCallback(
-    (sectionGid: string, sectionName: string) => {
-      return tasks.filter((task) => {
-        // First try to match by section_name (Asana synced tasks)
-        if (task.section_name) {
-          return task.section_name === sectionName
-        }
-        // Fall back to status matching for legacy tasks
-        // Map section names to status if no section_name set
-        const statusMap: Record<string, TaskStatus[]> = {
-          'To Do': ['todo'],
-          'In Progress': ['in_progress'],
-          'Review': ['review'],
-          'Done': ['done'],
-        }
-        const matchingStatuses = statusMap[sectionName]
-        if (matchingStatuses) {
-          return matchingStatuses.includes(task.status)
-        }
-        // For custom Asana sections, check if gid matches
-        return task.asana_section_gid === sectionGid
-      })
-    },
-    [tasks]
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
   const handleDragStart = (event: DragStartEvent) => {
-    const { active } = event
-    const task = tasks.find((t) => t.id === active.id)
-    if (task) {
-      setActiveTask(task)
-    }
+    const found = issues.find(i => i.id === (event.active.id as string))
+    if (found) setActiveIssue(found)
   }
 
   const handleDragOver = (event: DragOverEvent) => {
     const { active, over } = event
     if (!over) return
-
     const activeId = active.id as string
     const overId = over.id as string
+    const activeIssueItem = issues.find(i => i.id === activeId)
+    if (!activeIssueItem) return
 
-    const activeTask = tasks.find((t) => t.id === activeId)
-    if (!activeTask) return
-
-    // Check if we're over a column (section)
-    const overColumn = columns.find((col) => col.gid === overId)
-    if (overColumn) {
-      const currentSection = activeTask.section_name || activeTask.status
-      if (currentSection !== overColumn.name) {
-        // Map section name to status for backward compatibility
-        const newStatus = mapSectionToStatus(overColumn.name)
-        onTaskMove(activeId, newStatus, overColumn.gid, overColumn.name)
-      }
+    const overColumn = columns.find(col => col === overId)
+    if (overColumn && activeIssueItem.status !== overColumn) {
+      onIssueMove(activeId, overColumn)
       return
     }
-
-    // Check if we're over another task
-    const overTask = tasks.find((t) => t.id === overId)
-    if (overTask) {
-      const overSection = overTask.section_name || overTask.status
-      const activeSection = activeTask.section_name || activeTask.status
-      if (activeSection !== overSection) {
-        const newStatus = mapSectionToStatus(overSection)
-        const sectionGid = overTask.asana_section_gid || overTask.status
-        onTaskMove(activeId, newStatus, sectionGid, overSection)
-      }
+    const overIssue = issues.find(i => i.id === overId)
+    if (overIssue && overIssue.status !== activeIssueItem.status) {
+      onIssueMove(activeId, overIssue.status)
     }
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
-    setActiveTask(null)
-
+    setActiveIssue(null)
     if (!over) return
-
     const activeId = active.id as string
     const overId = over.id as string
+    const activeIssueItem = issues.find(i => i.id === activeId)
+    if (!activeIssueItem) return
 
-    const activeTask = tasks.find((t) => t.id === activeId)
-    if (!activeTask) return
-
-    // If dropped on a column (section)
-    const overColumn = columns.find((col) => col.gid === overId)
-    if (overColumn) {
-      const currentSection = activeTask.section_name || activeTask.status
-      if (currentSection !== overColumn.name) {
-        const newStatus = mapSectionToStatus(overColumn.name)
-        onTaskMove(activeId, newStatus, overColumn.gid, overColumn.name)
-      }
+    const overColumn = columns.find(col => col === overId)
+    if (overColumn && activeIssueItem.status !== overColumn) {
+      onIssueMove(activeId, overColumn)
     }
   }
 
   return (
-    <div className="kanban-board">
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="kanban-columns">
-          {columns.map((column) => {
-            const columnTasks = getTasksBySection(column.gid, column.name)
-            return (
-              <KanbanColumn
-                key={column.gid}
-                id={column.gid}
-                title={column.name}
-                tasks={columnTasks}
-                position={column.position}
-                onTaskClick={onTaskClick}
-                onTaskEdit={onTaskEdit}
-              />
-            )
-          })}
-        </div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCorners}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+    >
+      {/* Use same .kanban-board class as Dashboard */}
+      <div className="kanban-board">
+        {columns.map(col => (
+          <KanbanColumn
+            key={col}
+            id={col}
+            title={col}
+            issues={getColumnIssues(col)}
+            avatarMap={avatarMap}
+            onIssueClick={onIssueClick}
+          />
+        ))}
+      </div>
 
-        <DragOverlay>
-          {activeTask ? (
-            <TaskCard task={activeTask} isDragging />
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-    </div>
+      <DragOverlay>
+        {activeIssue ? (
+          <div
+            className="task-card priority-medium"
+            style={{ opacity: 0.9, boxShadow: '0 8px 25px rgba(0,0,0,0.3)', transform: 'rotate(3deg)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+              <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{activeIssue.id}</span>
+            </div>
+            <h4 className="task-title">{activeIssue.summary}</h4>
+            <div className="task-meta">
+              <span className="badge badge-todo">{activeIssue.status}</span>
+            </div>
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   )
-}
-
-// Helper function to map section names to legacy status values
-function mapSectionToStatus(sectionName: string): TaskStatus {
-  const name = sectionName.toLowerCase()
-  if (name.includes('done') || name.includes('complete')) {
-    return 'done'
-  }
-  if (name.includes('progress') || name.includes('doing') || name.includes('working')) {
-    return 'in_progress'
-  }
-  if (name.includes('review') || name.includes('testing') || name.includes('qa')) {
-    return 'review'
-  }
-  // Default to todo for anything else (including "To Do", "Backlog", etc.)
-  return 'todo'
 }

@@ -198,7 +198,7 @@ export function DailyTaskListPage() {
     try {
       const response = await api.getNextDayTasks(selectedDate)
       if (response.success && response.data) {
-        setTaskList(response.data)
+        setTaskList({ ...response.data, assignments: response.data.assignments ?? [] })
       } else {
         setTaskList(null)
       }
@@ -226,7 +226,7 @@ export function DailyTaskListPage() {
 
       const response = await api.generateNextDayTasks(sourceDate, selectedDate)
       if (response.success && response.data) {
-        setTaskList(response.data)
+        setTaskList({ ...response.data, assignments: response.data.assignments ?? [] })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate task list')
@@ -345,7 +345,7 @@ export function DailyTaskListPage() {
       if (tasks.length > 0) {
         const response = await api.bulkCreateNextDayTasks(selectedDate, tasks)
         if (response.success && response.data) {
-          setTaskList(response.data)
+          setTaskList({ ...response.data, assignments: response.data.assignments ?? [] })
         } else {
           await fetchTaskList()
         }
