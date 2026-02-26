@@ -1315,6 +1315,7 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
             <span className="tt-col-chevron" />
           </div>
 
+          <div className="tt-rows-scroll">
           {displayed.map(row => {
             const isLive = row.to_state.toLowerCase() === 'in progress'
             const movedBack = isMovedBack(row.from_state, row.to_state)
@@ -1431,6 +1432,7 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
               </div>
             )
           })}
+          </div>
         </div>
       )}
     </div>

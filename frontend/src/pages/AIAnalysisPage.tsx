@@ -619,7 +619,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
           <div className="ai-person-section">
             <h2 className="section-title">Per-Person Analysis</h2>
             <div className="ai-person-grid">
-              {results.person_breakdown.map((person) => (
+              {(results.person_breakdown || []).map((person) => (
                 <div key={person.name} className={`ai-person-card glass-card ${person.no_update_received ? 'ai-person-no-update' : ''}`}>
                   <div className="ai-person-header">
                     <h3 className="ai-person-name">@{person.name}</h3>
@@ -650,7 +650,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
                       </div>
                     )}
 
-                    {!person.no_update_received && person.completed.length > 0 && (
+                    {!person.no_update_received && (person.completed?.length || 0) > 0 && (
                       <div className="ai-task-group">
                         <span className="ai-task-group-label" style={{ color: 'var(--color-success)' }}>
                           <CheckCircle size={14} /> Completed ({person.completed.length})
@@ -663,7 +663,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
                       </div>
                     )}
 
-                    {!person.no_update_received && person.pending.length > 0 && (
+                    {!person.no_update_received && (person.pending?.length || 0) > 0 && (
                       <div className="ai-task-group">
                         <span className="ai-task-group-label" style={{ color: 'var(--color-warning)' }}>
                           <Clock size={14} /> In Progress / Pending ({person.pending.length})
@@ -676,7 +676,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
                       </div>
                     )}
 
-                    {!person.no_update_received && person.blocked.length > 0 && (
+                    {!person.no_update_received && (person.blocked?.length || 0) > 0 && (
                       <div className="ai-task-group">
                         <span className="ai-task-group-label" style={{ color: 'var(--color-danger)' }}>
                           <XCircle size={14} /> Blocked ({person.blocked.length})

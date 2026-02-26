@@ -9280,6 +9280,10 @@ select.form-input {
 /* ─ Time Tracking Tab ─ */
 .pm-tracking-tab {
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .pm-tracking-controls {
@@ -11419,6 +11423,16 @@ select.form-input {
 .tt-card-list {
   border-radius: 12px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.tt-rows-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .tt-list-summary {
