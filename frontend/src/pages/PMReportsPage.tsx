@@ -378,6 +378,13 @@ function PMAssistantTab() {
 
 // ─── Tab: Daily Report ────────────────────────────────────────────────────────
 
+const drMonthNames = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+function drFormatDisplay(dateStr: string) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return `${String(d).padStart(2,'0')}-${String(m).padStart(2,'0')}-${y}`
+}
+
 function DailyReportTab() {
   const [date, setDate] = useState(todayStr())
   const [report, setReport] = useState<PMReport | null>(null)
@@ -386,6 +393,50 @@ function DailyReportTab() {
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Calendar dropdown state
+  const [calOpen, setCalOpen] = useState(false)
+  const [calDate, setCalDate] = useState(() => new Date())
+  const calRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!calOpen) return
+    function handler(e: MouseEvent) {
+      if (calRef.current && !calRef.current.contains(e.target as Node)) setCalOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [calOpen])
+
+  function drSelectDate(d: string) {
+    setDate(d)
+    setReport(null)
+    setCalOpen(false)
+  }
+
+  function drNavigateMonth(dir: number) {
+    setCalDate(new Date(calDate.getFullYear(), calDate.getMonth() + dir, 1))
+  }
+
+  const drDaysInMonth = new Date(calDate.getFullYear(), calDate.getMonth() + 1, 0).getDate()
+  const drFirstDay   = new Date(calDate.getFullYear(), calDate.getMonth(), 1).getDay()
+  const drTodayStr   = todayStr()
+
+  // Carry-over from yesterday's EOD plan — only shown when viewing today
+  const [carryoverItems, setCarryoverItems] = useState<{ text: string; done: boolean }[]>([])
+
+  useEffect(() => {
+    if (date !== todayStr()) { setCarryoverItems([]); return }
+    api.getCarryover().then(res => {
+      if (res.data?.yesterday?.length) setCarryoverItems(res.data.yesterday)
+    }).catch(() => {})
+  }, [date])
+
+  async function handleCarryoverToggle(idx: number) {
+    const updated = carryoverItems.map((item, i) => i === idx ? { ...item, done: !item.done } : item)
+    setCarryoverItems(updated)
+    try { await api.saveCarryoverPlan(updated) } catch { setCarryoverItems(carryoverItems) }
+  }
 
   const fetchHistory = useCallback(async () => {
     setLoadingHistory(true)
@@ -456,14 +507,62 @@ function DailyReportTab() {
         <div className="pm-daily-main glass-card">
           <div className="pm-daily-toolbar">
             <div className="pm-daily-date-row">
-              <Calendar size={16} />
-              <input
-                type="date"
-                className="pm-date-input"
-                value={date}
-                max={todayStr()}
-                onChange={e => { setDate(e.target.value); setReport(null) }}
-              />
+              <div className="dr-cal-wrap" ref={calRef}>
+                <button className="dr-cal-trigger" onClick={() => setCalOpen(o => !o)}>
+                  <Calendar size={14} />
+                  {drFormatDisplay(date)}
+                  <ChevronDown size={13} style={{ marginLeft: '0.15rem', opacity: 0.6 }} />
+                </button>
+                {calOpen && (
+                  <div className="dr-cal-dropdown daily-calendar glass-card">
+                    <div className="calendar-nav">
+                      <button className="calendar-nav-btn" onClick={() => drNavigateMonth(-1)}>
+                        <ChevronLeft size={16} />
+                      </button>
+                      <span className="calendar-month-label">
+                        {drMonthNames[calDate.getMonth()]} {calDate.getFullYear()}
+                      </span>
+                      <button className="calendar-nav-btn" onClick={() => drNavigateMonth(1)}>
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                    <div className="calendar-grid">
+                      <div className="calendar-header-row">
+                        {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+                          <span key={d} className="calendar-day-label">{d}</span>
+                        ))}
+                      </div>
+                      <div className="calendar-body">
+                        {Array.from({ length: drFirstDay }).map((_, i) => (
+                          <span key={`e-${i}`} className="calendar-day empty" />
+                        ))}
+                        {Array.from({ length: drDaysInMonth }).map((_, i) => {
+                          const day = i + 1
+                          const ds = `${calDate.getFullYear()}-${String(calDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+                          const isFuture = ds > drTodayStr
+                          return (
+                            <button
+                              key={day}
+                              className={`calendar-day ${ds === date ? 'selected' : ''} ${ds === drTodayStr ? 'today' : ''} ${isFuture ? 'empty' : ''}`}
+                              disabled={isFuture}
+                              onClick={() => !isFuture && drSelectDate(ds)}
+                            >
+                              {day}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-ghost btn-sm calendar-today-btn"
+                      onClick={() => { drSelectDate(drTodayStr); setCalDate(new Date()) }}
+                    >
+                      <Calendar size={14} />
+                      Today
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="pm-daily-actions">
               <button className="btn-primary pm-generate-btn" onClick={generateReport} disabled={loading}>
@@ -483,6 +582,34 @@ function DailyReportTab() {
             <div className="pm-report-error">
               <AlertTriangle size={16} />
               {error}
+            </div>
+          )}
+
+          {/* Carry-over checklist — shown at top when viewing today */}
+          {date === todayStr() && carryoverItems.length > 0 && (
+            <div className="pm-carryover-block">
+              <div className="pm-carryover-header">
+                <Pin size={13} />
+                <span>Carry-over from yesterday's plan</span>
+                <span className="pm-carryover-count">
+                  {carryoverItems.filter(i => i.done).length}/{carryoverItems.length} done
+                </span>
+              </div>
+              <div className="pm-carryover-list">
+                {carryoverItems.map((item, idx) => (
+                  <label
+                    key={idx}
+                    className={`pm-carryover-item ${item.done ? 'pm-carryover-item--done' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.done}
+                      onChange={() => handleCarryoverToggle(idx)}
+                    />
+                    <span>{item.text}</span>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1830,7 +1957,7 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
         </div>
 
         {/* Tab Content */}
-        <div className="pm-tab-panel glass-card">
+        <div className={`pm-tab-panel glass-card${activeTab === 'daily' ? ' pm-tab-panel--daily' : ''}`}>
           {activeTab === 'assistant' && <PMAssistantTab />}
           {activeTab === 'daily' && <DailyReportTab />}
           {activeTab === 'assignees' && <AssigneeStatsTab />}

@@ -8613,6 +8613,9 @@ select.form-input {
   flex-direction: column;
   padding: 0;
 }
+.pm-tab-panel--daily {
+  overflow: visible;
+}
 
 /* Generic tab content area */
 .pm-tab-content {
@@ -8620,6 +8623,11 @@ select.form-input {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Daily Report tab needs visible overflow for calendar dropdown */
+.pm-tab-content.pm-daily-tab {
+  overflow: visible;
 }
 
 /* Assistant tab keeps old scroll behaviour */
@@ -8707,14 +8715,14 @@ select.form-input {
 
 /* ─ Daily Report Tab ─ */
 .pm-daily-tab {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .pm-daily-layout {
   display: flex;
   gap: 0.75rem;
   flex: 1;
-  overflow: hidden;
+  overflow: visible;
   padding: 0.75rem;
 }
 
@@ -8722,7 +8730,7 @@ select.form-input {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   padding: 0;
 }
 
@@ -8735,6 +8743,9 @@ select.form-input {
   flex-shrink: 0;
   gap: 0.75rem;
   flex-wrap: wrap;
+  overflow: visible;
+  position: relative;
+  z-index: 10;
 }
 
 .pm-daily-date-row {
@@ -8871,6 +8882,72 @@ select.form-input {
   text-align: center;
   font-size: 0.85rem;
 }
+
+/* Daily Report — calendar dropdown trigger */
+.dr-cal-wrap { position: relative; }
+.dr-cal-trigger {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md); color: var(--text-primary);
+  font-size: 0.82rem; font-weight: 500;
+  padding: 0.35rem 0.7rem; cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.dr-cal-trigger:hover { background: var(--glass-bg-hover); }
+.dr-cal-dropdown {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 200;
+  width: 320px;
+  min-width: 320px;
+  box-sizing: border-box;
+  overflow: visible;
+  padding: 1rem;
+}
+.dr-cal-dropdown.daily-calendar {
+  overflow: visible;
+  max-width: none;
+}
+.dr-cal-dropdown .calendar-month-label { white-space: nowrap; }
+.dr-cal-dropdown .calendar-grid { width: 100%; min-width: 100%; }
+.dr-cal-dropdown .calendar-body,
+.dr-cal-dropdown .calendar-header-row { gap: 4px; min-width: 100%; }
+.dr-cal-dropdown .calendar-day {
+  font-size: 0.85rem;
+  min-width: 34px;
+  overflow: visible;
+}
+.dr-cal-dropdown .calendar-day-label { min-width: 34px; overflow: visible; }
+
+/* Carry-over checklist in Daily Report tab */
+.pm-carryover-block {
+  margin: 0 0 1rem 0;
+  background: rgba(167,139,250,0.06);
+  border: 1px solid rgba(167,139,250,0.18);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.pm-carryover-header {
+  display: flex; align-items: center; gap: 0.45rem;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.72rem; font-weight: 600; color: rgba(167,139,250,0.9);
+  border-bottom: 1px solid rgba(167,139,250,0.12);
+}
+.pm-carryover-count {
+  margin-left: auto; font-size: 0.65rem; font-weight: 500;
+  color: rgba(255,255,255,0.35);
+}
+.pm-carryover-list {
+  display: flex; flex-direction: column; gap: 0;
+  padding: 0.25rem 0;
+}
+.pm-carryover-item {
+  display: flex; align-items: flex-start; gap: 0.55rem;
+  padding: 0.3rem 0.85rem; font-size: 0.75rem;
+  color: rgba(255,255,255,0.8); cursor: pointer;
+  transition: background 0.1s;
+}
+.pm-carryover-item:hover { background: rgba(255,255,255,0.03); }
+.pm-carryover-item input[type="checkbox"] { accent-color: #a78bfa; margin-top: 0.15rem; flex-shrink: 0; }
+.pm-carryover-item--done { color: rgba(255,255,255,0.28); text-decoration: line-through; }
 
 /* History Sidebar */
 .pm-daily-sidebar {

@@ -1692,10 +1692,36 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		trackingSection.WriteString("(No time tracking data yet — run Sync History to import)\n")
 	}
 
-	// ── 4. Assemble full system prompt ───────────────────────────────────────
-	systemPrompt := customInstructions + issueSection.String() + trackingSection.String()
+	// ── 4. Fetch cached blocker reasons ─────────────────────────────────────
+	var blockerSection strings.Builder
+	blockerSection.WriteString("\n\n---\n## Blocker Reasons (AI-analysed from ticket comments)\n")
+	blockerSection.WriteString("Format: IssueID | Summary | Reason\n\n")
 
-	// ── 5. Query AI with conversation history ────────────────────────────────
+	blockerRows, bErr := database.GetPool().Query(r.Context(),
+		`SELECT issue_id, reason FROM blocker_analysis_cache ORDER BY analyzed_at DESC`,
+	)
+	if bErr == nil {
+		defer blockerRows.Close()
+		count := 0
+		for blockerRows.Next() {
+			var issueID, reason string
+			if blockerRows.Scan(&issueID, &reason) == nil {
+				// Find summary from the live issue list we already fetched (stored in issueSection)
+				blockerSection.WriteString(fmt.Sprintf("- %s | %s\n", issueID, reason))
+				count++
+			}
+		}
+		if count == 0 {
+			blockerSection.WriteString("(No blocker reasons cached yet — load Daily Ops morning brief first)\n")
+		}
+	} else {
+		blockerSection.WriteString("(Could not load blocker reasons)\n")
+	}
+
+	// ── 5. Assemble full system prompt ───────────────────────────────────────
+	systemPrompt := customInstructions + issueSection.String() + trackingSection.String() + blockerSection.String()
+
+	// ── 6. Query AI with conversation history ────────────────────────────────
 	response, err := ai.QueryWithHistory(r.Context(), systemPrompt, req.History, req.Query)
 	if err != nil {
 		http.Error(w, "AI query failed: "+err.Error(), http.StatusInternalServerError)

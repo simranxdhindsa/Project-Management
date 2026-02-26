@@ -1,6 +1,6 @@
-# Ardoise Project Management
+# Project Management
 
-A PM command centre built for the Ardoise/Apyhub delivery workflow. Connects to YouTrack for live issue tracking, Slack for reporting and monitoring, and uses AI to surface blocker reasons, generate EOD action plans, and keep the PM's daily loop tight.
+A PM command centre built for the Apyhub delivery workflow. Connects to YouTrack for live issue tracking, Slack for reporting and monitoring, and uses AI to surface blocker reasons, generate EOD action plans, and keep the PM's daily loop tight.
 
 ---
 
