@@ -752,78 +752,86 @@ function AssigneeStatsTab() {
       ) : stats.length === 0 ? (
         <div className="pm-empty-state"><Users size={40} /><p>No assignee data yet. Stats populate from YouTrack webhook events.</p></div>
       ) : (
-        <div className="pm-assignees-table-wrap glass-card">
-          <table className="pm-assignees-table">
-            <thead>
-              <tr>
-                <th>Assignee</th>
-                <th className="num-col">Open</th>
-                <th className="num-col">In Progress</th>
-                <th className="num-col">Done</th>
-                <th className="num-col">Blocked</th>
-                <th className="num-col">Avg Time in Progress</th>
-                <th>Workload</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.map(s => {
-                const total = s.open + s.in_progress + s.done + s.blocked
-                const pct = Math.round((total / maxTotal) * 100)
-                const isExpanded = expandedRow === s.assignee
+        <div className="pm-card-list glass-card">
+          <div className="pm-list-summary">
+            <span>{stats.length} assignees</span>
+          </div>
 
-                return (
-                  <>
-                    <tr key={s.assignee} className={`pm-assignee-row ${isExpanded ? 'expanded' : ''}`}>
-                      <td className="assignee-name-cell">
-                        {avatarMap[s.assignee] ? (
-                          <img src={avatarMap[s.assignee]} alt={s.assignee} className="assignee-avatar assignee-avatar-img" />
-                        ) : (
-                          <div className="assignee-avatar">{s.assignee.charAt(0).toUpperCase()}</div>
-                        )}
-                        {s.assignee}
-                      </td>
-                      <td className="num-col"><span className="stat-chip open">{s.open}</span></td>
-                      <td className="num-col"><span className="stat-chip in-progress">{s.in_progress}</span></td>
-                      <td className="num-col"><span className="stat-chip done">{s.done}</span></td>
-                      <td className="num-col">
-                        <span className={`stat-chip ${s.blocked > 0 ? 'blocked' : 'zero'}`}>{s.blocked}</span>
-                      </td>
-                      <td className="num-col avg-time">{formatHours(s.avg_hours_in_progress)}</td>
-                      <td className="workload-cell">
-                        <div className="workload-bar-bg">
-                          <div className="workload-bar-fill" style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="workload-label">{total}</span>
-                      </td>
-                      <td>
-                        {s.issues && s.issues.length > 0 && (
-                          <button
-                            className="pm-expand-btn"
-                            onClick={() => setExpandedRow(isExpanded ? null : s.assignee)}
-                          >
-                            <ChevronDown size={14} className={isExpanded ? 'rotated' : ''} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                    {isExpanded && s.issues && s.issues.length > 0 && (
-                      <tr key={`${s.assignee}-expanded`} className="pm-assignee-issues-row">
-                        <td colSpan={8}>
-                          <div className="pm-assignee-issues">
-                            <span className="issues-label">Open Issues:</span>
-                            {s.issues.map((issue, idx) => (
-                              <span key={idx} className="issue-tag">{issue}</span>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )
-              })}
-            </tbody>
-          </table>
+          {/* Column headers */}
+          <div className="pm-col-header">
+            <span className="pm-col-as-name">Assignee</span>
+            <span className="pm-col-as-stat">Open</span>
+            <span className="pm-col-as-stat">In Progress</span>
+            <span className="pm-col-as-stat">Done</span>
+            <span className="pm-col-as-stat">Blocked</span>
+            <span className="pm-col-as-avg">Avg Time</span>
+            <span className="pm-col-as-workload">Workload</span>
+            <span className="pm-col-chevron" />
+          </div>
+
+          <div className="pm-rows-scroll">
+          {stats.map(s => {
+            const total = s.open + s.in_progress + s.done + s.blocked
+            const pct = Math.round((total / maxTotal) * 100)
+            const isExpanded = expandedRow === s.assignee
+
+            return (
+              <div key={s.assignee} className={`pm-row ${isExpanded ? 'pm-row-expanded' : ''}`}>
+                <div className="pm-row-main" onClick={() => setExpandedRow(isExpanded ? null : s.assignee)}>
+                  {/* Assignee */}
+                  <div className="pm-col-as-name tt-assignee">
+                    {avatarMap[s.assignee]
+                      ? <img src={avatarMap[s.assignee]} alt={s.assignee} className="filter-avatar-img" />
+                      : <span className="filter-avatar-placeholder">{s.assignee.charAt(0).toUpperCase()}</span>
+                    }
+                    <span className="tt-assignee-name">{s.assignee}</span>
+                  </div>
+
+                  {/* Stat badges */}
+                  <span className="pm-col-as-stat">
+                    <span className={`tt-badge ${s.open > 0 ? 'tt-badge-open' : 'tt-badge-zero'}`}>{s.open}</span>
+                  </span>
+                  <span className="pm-col-as-stat">
+                    <span className={`tt-badge ${s.in_progress > 0 ? 'tt-badge-live' : 'tt-badge-zero'}`}>{s.in_progress}</span>
+                  </span>
+                  <span className="pm-col-as-stat">
+                    <span className={`tt-badge ${s.done > 0 ? 'tt-badge-done' : 'tt-badge-zero'}`}>{s.done}</span>
+                  </span>
+                  <span className="pm-col-as-stat">
+                    <span className={`tt-badge ${s.blocked > 0 ? 'tt-badge-blocked' : 'tt-badge-zero'}`}>{s.blocked}</span>
+                  </span>
+
+                  {/* Avg time */}
+                  <span className="pm-col-as-avg tt-time-label">{formatHours(s.avg_hours_in_progress)}</span>
+
+                  {/* Workload bar */}
+                  <div className="pm-col-as-workload workload-cell">
+                    <div className="tt-time-bar">
+                      <div className="tt-time-bar-fill" style={{ width: `${pct}%`, background: '#6366f1' }} />
+                    </div>
+                    <span className="tt-threshold">{total}</span>
+                  </div>
+
+                  <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
+                </div>
+
+                {/* Expanded: open issues */}
+                {isExpanded && s.issues && s.issues.length > 0 && (
+                  <div className="tt-row-detail">
+                    <div className="pm-issue-tags">
+                      <span className="tt-detail-label">Open Issues</span>
+                      <div className="pm-issue-tags-list">
+                        {s.issues.map((issue, idx) => (
+                          <span key={idx} className="pm-issue-tag">{issue}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          </div>
         </div>
       )}
     </div>
@@ -1325,8 +1333,8 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
           <p style={{fontSize:'0.8rem'}}>Try <strong>All Time</strong> view or click <strong>Sync History</strong> to import from YouTrack.</p>
         </div>
       ) : (
-        <div className="tt-card-list glass-card">
-          <div className="tt-list-summary">
+        <div className="pm-card-list glass-card">
+          <div className="pm-list-summary">
             <span>{groupedIssues.length} issues · {displayed.length} transitions</span>
             {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
             {mismatchCount > 0 && <span className="mismatch-summary-badge"><AlertTriangle size={12} /> {mismatchCount} mismatch</span>}
@@ -1334,7 +1342,7 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
           </div>
 
           {/* Column headers */}
-          <div className="tt-col-header">
+          <div className="pm-col-header">
             <span className="tt-col-pin" />
             <span className="tt-col-issue">Issue</span>
             <span className="tt-col-regression">Regression</span>
@@ -1345,7 +1353,7 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
             <span className="tt-col-chevron" />
           </div>
 
-          <div className="tt-rows-scroll">
+          <div className="pm-rows-scroll">
           {groupedIssues.map(({ rep: row, all: transitions }) => {
             const isLive = row.to_state.toLowerCase() === 'in progress'
             const isBlocked = row.to_state.toLowerCase() === 'blocked'
@@ -1362,10 +1370,10 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
             return (
               <div
                 key={row.issue_id}
-                className={['tt-row', showOverdue ? 'tt-overdue' : '', row.pinned ? 'tt-pinned' : '', movedBack ? 'tt-moved-back' : ''].filter(Boolean).join(' ')}
+                className={['pm-row', showOverdue ? 'pm-row-overdue' : '', row.pinned ? 'pm-row-pinned' : '', movedBack ? 'pm-row-movedback' : ''].filter(Boolean).join(' ')}
               >
                 {/* Collapsed row — click anywhere to expand */}
-                <div className="tt-row-main" onClick={() => toggleRow(row.issue_id)}>
+                <div className="pm-row-main" onClick={() => toggleRow(row.issue_id)}>
                   {/* Pin button */}
                   <button
                     className={`tt-pin-btn ${row.pinned ? 'pinned' : ''}`}
@@ -1830,163 +1838,139 @@ function IssueTimelineTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }
         <span>{displayed.length} of {timelines.length} issues</span>
       </div>
 
-      {/* Issue cards */}
+      {/* Issue list */}
       {loading && timelines.length === 0 ? (
         <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading timelines…</span></div>
       ) : displayed.length === 0 ? (
         <div className="pm-empty-state"><Activity size={40} /><p>No issues found.</p></div>
       ) : (
-        <div className="tl-scroll-wrapper">
-          {/* Column headers */}
-          <div className="tl-col-header">
-            <div className="tl-col-left">
-              <span className="tl-col-label tl-col-issue">Issue</span>
-              <span className="tl-col-label tl-col-priority">Priority</span>
-              <span className="tl-col-label tl-col-status">Status</span>
-              <span className="tl-col-label tl-col-summary">Summary</span>
-            </div>
-            <div className="tl-col-right">
-              <span className="tl-col-label tl-col-assignee">Assignee</span>
-              <span className="tl-col-label tl-col-time">Time</span>
-              <span className="tl-col-label tl-col-stints">Stints</span>
-              <span className="tl-col-chevron-spacer" />
-            </div>
+        <div className="pm-card-list glass-card">
+          {/* Summary */}
+          <div className="pm-list-summary">
+            <span>{displayed.length} of {timelines.length} issues</span>
+            {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
+            {movedBackCount > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {movedBackCount} moved back</span>}
           </div>
-        <div className="tl-card-list">
+
+          {/* Column headers */}
+          <div className="pm-col-header">
+            <span className="pm-col-pin" />
+            <span className="pm-col-issue">Issue</span>
+            <span className="pm-col-priority">Priority</span>
+            <span className="pm-col-status">Status</span>
+            <span className="pm-col-time">Time / Threshold</span>
+            <span className="pm-col-stints">Stints</span>
+            <span className="pm-col-assignee">Assignee</span>
+            <span className="pm-col-chevron" />
+          </div>
+
+          <div className="pm-rows-scroll">
           {displayed.map(t => {
             const isExpanded = expandedIssues.has(t.issue_id)
             const lastMovedBackStint = [...t.stints].reverse().find(s => s.moved_back)
+            const ratio = t.threshold_hours > 0 ? Math.min(t.total_hours / t.threshold_hours, 1) : 0
+            const barColor = t.is_overdue ? '#ef4444' : t.total_hours > t.threshold_hours ? '#f97316' : t.is_live ? '#22c55e' : '#6366f1'
 
             return (
               <div
                 key={t.issue_id}
-                className={[
-                  'tl-issue-card glass-card',
-                  t.is_overdue ? 'tl-overdue' : '',
-                  t.is_live ? 'tl-live' : '',
-                  t.pinned ? 'tl-pinned' : '',
-                ].filter(Boolean).join(' ')}
+                className={['pm-row', t.is_overdue ? 'pm-row-overdue' : '', t.is_live ? 'pm-row-live' : '', t.pinned ? 'pm-row-pinned' : ''].filter(Boolean).join(' ')}
               >
-                {/* Card header */}
-                <div className="tl-card-header" onClick={() => toggleExpand(t.issue_id)}>
-                  <div className="tl-card-left">
-                    <div className="tl-card-id-row">
-                      {t.pinned && <Pin size={11} className="tl-pin-icon" />}
-                      <span className="tl-issue-id">{t.issue_id}</span>
-                      {t.priority && <span className={`tl-priority ${priorityBadgeClass(t.priority)}`}>{t.priority}</span>}
-                      {t.is_live && <span className="tl-live-badge"><span className="live-dot-pulse" />Live</span>}
-                      {t.is_overdue && <span className="tl-overdue-badge"><AlertTriangle size={11} /> Overdue</span>}
-                      {blockerIssueIds?.has(t.issue_id) && (
-                        <span className="do-blocker-badge">🚧 Blocked</span>
-                      )}
-                      {t.moved_back_count > 0 && (
-                        <span className="tl-moved-back-badge"><RotateCcw size={11} /> {t.moved_back_count}× back</span>
-                      )}
-                      {t.alert_dismissed && t.moved_back_count > 0 && (
-                        <button
-                          className="tl-undismiss-btn"
-                          onClick={e => { e.stopPropagation(); handleUndismiss(t.issue_id) }}
-                          title="Alert dismissed — click to restore"
-                        >
-                          {dismissing === t.issue_id ? <Loader2 size={10} className="animate-spin" /> : '↺'}
-                        </button>
-                      )}
-                    </div>
-                    <div className="tl-issue-summary">{t.issue_summary}</div>
+                <div className="pm-row-main" onClick={() => toggleExpand(t.issue_id)}>
+                  {/* Pin placeholder */}
+                  <span className="pm-col-pin">
+                    {t.pinned && <Pin size={10} className="tt-pin-indicator" />}
+                  </span>
+
+                  {/* Issue ID + summary */}
+                  <div className="pm-col-issue pm-issue-cell">
+                    <span className="pm-issue-id">{t.issue_id}</span>
+                    <span className="pm-issue-summary">{t.issue_summary}</span>
+                    {t.moved_back_count > 0 && (
+                      <span className="tt-regression-chip" title={`Moved back ${t.moved_back_count}× `}>↩{t.moved_back_count}</span>
+                    )}
+                    {blockerIssueIds?.has(t.issue_id) && (
+                      <span className="do-overdue-chip">⚠ Blocked</span>
+                    )}
                   </div>
 
-                  <div className="tl-card-right">
-                    {t.assignee && (
-                      <span className="tl-assignee" title={t.assignee}>
-                        {avatarMap[t.assignee]
-                          ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" />
-                          : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>
-                        }
-                        <span className="tl-assignee-name">{t.assignee.split(' ')[0]}</span>
-                      </span>
-                    )}
-                    <div className="tl-totals">
-                      {(() => {
-                        const ratio = t.threshold_hours > 0
-                          ? Math.min(t.total_hours / t.threshold_hours, 1)
-                          : 0
-                        const barColor = t.is_overdue
-                          ? '#ef4444'
-                          : t.total_hours > t.threshold_hours
-                            ? '#f97316'
-                            : t.is_live ? '#22c55e' : '#6366f1'
-                        return (
-                          <>
-                            <div className="tt-time-bar">
-                              <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
-                            </div>
-                            <span className="tt-time-label">
-                              {formatHoursDetailed(t.total_hours)}
-                              <span className="tt-threshold"> / {t.threshold_hours}h</span>
-                            </span>
-                          </>
-                        )
-                      })()}
+                  {/* Priority */}
+                  <span className={`pm-col-priority tt-priority ${priorityBadgeClass(t.priority)}`}>{t.priority || '—'}</span>
+
+                  {/* Status */}
+                  <span className="pm-col-status">
+                    {t.is_live && !t.is_overdue && <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>}
+                    {t.is_overdue && <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>}
+                    {!t.is_live && !t.is_overdue && <span className="tt-badge tt-badge-done">✓ Done</span>}
+                  </span>
+
+                  {/* Time bar */}
+                  <div className="pm-col-time tt-time-bar-wrap">
+                    <div className="tt-time-bar">
+                      <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
                     </div>
-                    <div className="tl-stints-col">
-                      {t.total_stints > 1 && (
-                        <span className="tl-stints-badge">{t.total_stints} stints</span>
-                      )}
-                    </div>
-                    <ChevronDown size={14} className={`tl-chevron ${isExpanded ? 'open' : ''}`} />
+                    <span className="tt-time-label">
+                      {formatHoursDetailed(t.total_hours)}
+                      <span className="tt-threshold"> / {t.threshold_hours}h</span>
+                    </span>
                   </div>
+
+                  {/* Stints */}
+                  <span className="pm-col-stints">
+                    {t.total_stints > 1 && <span className="tt-transition-count" title={`${t.total_stints} stints`}>{t.total_stints}</span>}
+                  </span>
+
+                  {/* Assignee */}
+                  <div className="pm-col-assignee tt-assignee">
+                    {t.assignee && (avatarMap[t.assignee]
+                      ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" />
+                      : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>
+                    )}
+                    <span className="tt-assignee-name">{t.assignee ? t.assignee.split(' ')[0] : '—'}</span>
+                  </div>
+
+                  <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
                 </div>
 
-                {/* Stint timeline (expanded) */}
+                {/* Expanded: stint timeline */}
                 {isExpanded && (
-                  <div className="tl-stints">
+                  <div className="tt-row-detail">
                     {t.stints.map(stint => (
                       <div key={stint.stint_number} className={`tl-stint ${stintStatusClass(stint)}`}>
                         <div className="tl-stint-marker">
                           {!stint.exited_at
                             ? <span className="stint-dot live-dot-pulse" />
-                            : stint.moved_back
-                              ? <RotateCcw size={12} />
-                              : <CheckCircle2 size={12} />
+                            : stint.moved_back ? <RotateCcw size={12} /> : <CheckCircle2 size={12} />
                           }
                           {stint.stint_number < t.total_stints && <div className="tl-stint-line" />}
                         </div>
                         <div className="tl-stint-body">
                           <div className="tl-stint-header">
                             <span className="tl-stint-num">#{stint.stint_number}</span>
-                            <span className={`tl-stint-label ${stintStatusClass(stint)}`}>
-                              {stintLabel(stint)}
-                            </span>
-                            <span className="tl-stint-duration">
-                              {formatHoursDetailed(stint.duration_hours)}
-                            </span>
+                            <span className={`tl-stint-label ${stintStatusClass(stint)}`}>{stintLabel(stint)}</span>
+                            <span className="tl-stint-duration">{formatHoursDetailed(stint.duration_hours)}</span>
                           </div>
                           <div className="tl-stint-dates">
                             <span>
                               {new Date(stint.entered_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                              {stint.exited_at && (
-                                <> → {new Date(stint.exited_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</>
-                              )}
+                              {stint.exited_at && <> → {new Date(stint.exited_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</>}
                             </span>
-                            {stint.moved_by && (
-                              <span className="tl-stint-movedby">by {stint.moved_by}</span>
-                            )}
+                            {stint.moved_by && <span className="tl-stint-movedby">by {stint.moved_by}</span>}
                           </div>
-                          {stint.comment && (
-                            <div className="tl-stint-comment">"{stint.comment}"</div>
-                          )}
+                          {stint.comment && <div className="tl-stint-comment">"{stint.comment}"</div>}
                         </div>
                       </div>
                     ))}
-
-                    {/* Summary row */}
                     <div className="tl-stint-summary">
                       <span>Total: <strong>{formatHoursDetailed(t.total_hours)}</strong></span>
                       <span>Threshold: <strong>{t.threshold_hours}h</strong></span>
                       {lastMovedBackStint && (
-                        <span className="tl-last-reason">
-                          Last moved back: {lastMovedBackStint.comment || `→ ${lastMovedBackStint.exited_to}`}
-                        </span>
+                        <span className="tl-last-reason">Last moved back: {lastMovedBackStint.comment || `→ ${lastMovedBackStint.exited_to}`}</span>
+                      )}
+                      {t.alert_dismissed && t.moved_back_count > 0 && (
+                        <button className="tl-undismiss-btn" onClick={e => { e.stopPropagation(); handleUndismiss(t.issue_id) }} title="Restore alert">
+                          {dismissing === t.issue_id ? <Loader2 size={10} className="animate-spin" /> : '↺ Restore alert'}
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1994,7 +1978,7 @@ function IssueTimelineTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }
               </div>
             )
           })}
-        </div>
+          </div>
         </div>
       )}
     </div>

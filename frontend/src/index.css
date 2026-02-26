@@ -8635,6 +8635,138 @@ select.form-input {
   overflow: hidden;
 }
 
+/* ─── Shared card-list + row system (all tabs) ───────────────────────── */
+
+.pm-card-list {
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.pm-list-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.pm-col-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.9rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.025);
+}
+.pm-col-header span {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pm-rows-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Shared row */
+.pm-row {
+  border-left: 3px solid transparent;
+  transition: border-color 0.15s;
+}
+.pm-row-overdue  { border-left-color: #ef4444; }
+.pm-row-movedback { border-left-color: #eab308; }
+.pm-row-pinned   { background: rgba(139, 92, 246, 0.04); }
+
+.pm-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.52rem 0.9rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+.pm-row-main:hover { background: rgba(255, 255, 255, 0.03); }
+
+/* Issue cell */
+.pm-issue-cell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  overflow: hidden;
+}
+.pm-issue-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #a78bfa;
+  flex-shrink: 0;
+}
+.pm-issue-summary {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Shared column widths — IssueTimeline uses pm-col-* */
+.pm-col-pin      { flex-shrink: 0; width: 20px; display: flex; align-items: center; }
+.pm-col-issue    { flex: 1; min-width: 0; }
+.pm-col-priority { flex-shrink: 0; width: 44px; text-align: center; }
+.pm-col-status   { flex-shrink: 0; width: 80px; display: flex; align-items: center; justify-content: center; }
+.pm-col-time     { flex-shrink: 0; width: 150px; }
+.pm-col-stints   { flex-shrink: 0; width: 48px; text-align: center; }
+.pm-col-assignee { flex-shrink: 0; width: 102px; }
+.pm-col-chevron  { flex-shrink: 0; width: 13px; }
+
+/* AssigneeStats column widths */
+.pm-col-as-name     { flex: 1; min-width: 0; }
+.pm-col-as-stat     { flex-shrink: 0; width: 72px; display: flex; align-items: center; justify-content: center; }
+.pm-col-as-avg      { flex-shrink: 0; width: 80px; text-align: right; font-size: 0.8rem; color: rgba(255,255,255,0.5); }
+.pm-col-as-workload { flex-shrink: 0; width: 140px; }
+
+/* Issue tags in expanded assignee row */
+.pm-issue-tags { display: flex; flex-direction: column; gap: 0.4rem; }
+.pm-issue-tags-list { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.25rem; }
+.pm-issue-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+/* Shared tt-badge zero state */
+.tt-badge-zero {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.2);
+}
+.tt-badge-open {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+}
+
 /* Assistant tab keeps old scroll behaviour */
 .pm-assistant-tab {
   overflow: hidden;
@@ -11420,20 +11552,9 @@ select.form-input {
    Time Tracking — compact card rows (replaces wide table)
    ============================================================ */
 
-.tt-card-list {
-  border-radius: 12px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.tt-rows-scroll {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-}
+/* tt-* aliases → shared pm-* system */
+.tt-card-list  { border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.tt-rows-scroll { flex: 1; overflow-y: auto; min-height: 0; }
 
 .tt-list-summary {
   display: flex;
@@ -11446,7 +11567,7 @@ select.form-input {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Column header row — mirrors .tt-row-main layout exactly */
+/* tt-col-header aliases pm-col-header */
 .tt-col-header {
   display: flex;
   align-items: center;
@@ -11455,7 +11576,6 @@ select.form-input {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.025);
 }
-
 .tt-col-header span {
   font-size: 0.68rem;
   font-weight: 600;
@@ -11474,30 +11594,18 @@ select.form-input {
 .tt-col-assignee   { flex-shrink: 0; width: 102px; }
 .tt-col-chevron    { flex-shrink: 0; width: 13px; }
 
-.tt-row {
+/* pm-row — shared row system (used by all tabs) */
+.pm-row {
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   border-left: 3px solid transparent;
   transition: border-left-color 0.15s ease;
 }
+.pm-row:last-child { border-bottom: none; }
+.pm-row.pm-row-overdue  { border-left-color: rgba(239, 68, 68, 0.6); }
+.pm-row.pm-row-movedback:not(.pm-row-overdue) { border-left-color: rgba(234, 179, 8, 0.5); }
+.pm-row.pm-row-pinned   { background: rgba(139, 92, 246, 0.04); }
 
-.tt-row:last-child {
-  border-bottom: none;
-}
-
-.tt-row.tt-overdue {
-  border-left-color: rgba(239, 68, 68, 0.6);
-}
-
-.tt-row.tt-moved-back:not(.tt-overdue) {
-  border-left-color: rgba(234, 179, 8, 0.5);
-}
-
-.tt-row.tt-pinned {
-  background: rgba(139, 92, 246, 0.04);
-}
-
-/* Collapsed row */
-.tt-row-main {
+.pm-row-main {
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -11505,10 +11613,7 @@ select.form-input {
   cursor: pointer;
   user-select: none;
 }
-
-.tt-row-main:hover {
-  background: rgba(255, 255, 255, 0.025);
-}
+.pm-row-main:hover { background: rgba(255, 255, 255, 0.025); }
 
 /* Pin button */
 .tt-pin-btn {
@@ -14444,6 +14549,19 @@ select.form-input {
 [data-theme="light"] .tt-transition-row:hover {
   background: rgba(99, 102, 241, 0.05);
 }
+
+/* ─── Shared pm-row system — light theme ────────────────────────────── */
+[data-theme="light"] .pm-card-list { background: var(--glass-bg); }
+[data-theme="light"] .pm-list-summary { color: var(--text-muted); border-bottom-color: var(--border-color); }
+[data-theme="light"] .pm-col-header { background: rgba(99,102,241,0.04); border-bottom-color: var(--border-color); }
+[data-theme="light"] .pm-col-header span { color: var(--text-muted); }
+[data-theme="light"] .pm-row { border-bottom-color: var(--border-color); }
+[data-theme="light"] .pm-row-main:hover { background: rgba(99,102,241,0.04); }
+[data-theme="light"] .pm-issue-id { color: var(--color-primary) !important; }
+[data-theme="light"] .pm-issue-summary { color: var(--text-primary) !important; }
+[data-theme="light"] .tt-badge-open { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.25); color: var(--text-secondary) !important; }
+[data-theme="light"] .tt-badge-zero { background: transparent; border-color: var(--border-color); color: var(--text-muted) !important; }
+[data-theme="light"] .pm-issue-tag { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.2); color: var(--text-secondary); }
 
 /* ─── Issue Timeline tab — full override ────────────────────────────── */
 [data-theme="light"] .tl-issue-summary {
