@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   DndContext,
@@ -45,7 +45,11 @@ import {
   AlertTriangle,
   X,
   MessageSquare,
+  Sparkles,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react'
+import { PMAssistantTab } from './PMReportsPage'
 import { IntegrationsPage } from './IntegrationsPage'
 import { SettingsPage } from './SettingsPage'
 import { BoardPage } from './BoardPage'
@@ -156,7 +160,7 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'slack': 'slack',
 }
 
-const PM_REPORTS_TABS = ['tracking', 'timeline', 'daily', 'assignees', 'assistant'] as const
+const PM_REPORTS_TABS = ['tracking', 'timeline', 'daily', 'assignees', 'dailyops'] as const
 type PMReportsTab = typeof PM_REPORTS_TABS[number]
 
 const SLACK_TABS = ['inbox', 'threads', 'followups', 'settings'] as const
@@ -239,6 +243,9 @@ export default function Dashboard() {
     return []
   })
   const [toast, setToast] = useState<{ message: string; type: 'warning' | 'info' } | null>(null)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatFullscreen, setChatFullscreen] = useState(false)
+  const chatPanelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     sessionStorage.setItem('pm_notifications', JSON.stringify(notifications))
@@ -1290,6 +1297,42 @@ export default function Dashboard() {
           </button>
         </div>
       )}
+
+      {/* Floating PM Assistant */}
+      {chatOpen && (
+        <div className={`pm-chat-panel${chatFullscreen ? ' pm-chat-panel--fullscreen' : ''}`} ref={chatPanelRef}>
+          <div className="pm-chat-panel-header">
+            <div className="pm-chat-panel-title">
+              <Sparkles size={16} className="pm-chat-panel-title-icon" />
+              <span>PM Assistant</span>
+            </div>
+            <div className="pm-chat-panel-actions">
+              <button
+                className="pm-chat-panel-close"
+                onClick={() => setChatFullscreen(v => !v)}
+                title={chatFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              >
+                {chatFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              </button>
+              <button className="pm-chat-panel-close" onClick={() => { setChatOpen(false); setChatFullscreen(false) }}>
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+          <div className="pm-chat-panel-body">
+            <PMAssistantTab />
+          </div>
+        </div>
+      )}
+
+      <button
+        className={`pm-chat-bubble${chatOpen ? ' pm-chat-bubble--open' : ''}`}
+        onClick={() => setChatOpen(v => !v)}
+        aria-label="PM Assistant"
+      >
+        <span className="pm-chat-bubble-glow" />
+        {chatOpen ? <X size={22} /> : <Sparkles size={22} />}
+      </button>
     </div>
   )
 }

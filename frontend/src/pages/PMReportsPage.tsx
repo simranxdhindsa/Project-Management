@@ -104,7 +104,6 @@ const TABS = [
   { id: 'timeline', label: 'Issue Timeline', icon: Activity },
   { id: 'daily', label: 'Daily Report', icon: FileText },
   { id: 'assignees', label: 'Assignee Stats', icon: Users },
-  { id: 'assistant', label: 'PM Assistant', icon: MessageSquare },
   { id: 'dailyops', label: 'Daily Ops', icon: Zap },
 ] as const
 
@@ -237,7 +236,7 @@ function renderMarkdown(text: string): string {
 
 // ─── Tab: PM Assistant ────────────────────────────────────────────────────────
 
-function PMAssistantTab() {
+export function PMAssistantTab() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -2028,7 +2027,6 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
 
         {/* Tab Content */}
         <div className={`pm-tab-panel glass-card${activeTab === 'daily' ? ' pm-tab-panel--daily' : ''}`}>
-          {activeTab === 'assistant' && <PMAssistantTab />}
           {activeTab === 'daily' && <DailyReportTab />}
           {activeTab === 'assignees' && <AssigneeStatsTab />}
           {activeTab === 'tracking' && <TimeTrackingTab blockerIssueIds={blockerIssueIds} />}
