@@ -257,7 +257,7 @@ func (r *ReportRepository) GetTimeTracking(ctx context.Context, params TimeTrack
 
 	// Build WHERE clause dynamically
 	conditions := []string{
-		"(LOWER(to_state) = 'in progress' OR LOWER(from_state) = 'in progress')",
+		"(LOWER(to_state) = 'in progress' OR LOWER(from_state) = 'in progress' OR LOWER(to_state) = 'blocked' OR LOWER(from_state) = 'blocked')",
 	}
 	args := []interface{}{}
 	argIdx := 1

@@ -328,7 +328,7 @@ function PMAssistantTab() {
                 <div className="pm-chat-content">{msg.content}</div>
               )}
               <span className="pm-chat-time">
-                {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}
               </span>
             </div>
           </div>
@@ -832,7 +832,7 @@ function AssigneeStatsTab() {
 
 // ─── Tab: Time Tracking ───────────────────────────────────────────────────────
 
-type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at'
+type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at' | 'status'
 
 function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   // Week navigation — defaults to current week
@@ -1027,9 +1027,36 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
         const ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3, Other: 4 }
         return (ORDER[a.priority] ?? 4) - (ORDER[b.priority] ?? 4)
       }
+      case 'status': {
+        const statusOrder = (r: TimeTrackingRow) => {
+          if (r.overdue) return 0
+          if (r.duration_in_prev_state_hours === null) return 1  // live
+          if (isMovedBack(r.from_state, r.to_state)) return 2
+          return 3
+        }
+        return statusOrder(a) - statusOrder(b)
+      }
       default: return new Date(b.transitioned_at).getTime() - new Date(a.transitioned_at).getTime()
     }
   })
+
+  // Group by issue_id — pick the most critical row as the representative
+  const groupedIssues: { rep: TimeTrackingRow; all: TimeTrackingRow[] }[] = []
+  const seenIssues = new Map<string, number>()
+  for (const row of displayed) {
+    const idx = seenIssues.get(row.issue_id)
+    if (idx === undefined) {
+      seenIssues.set(row.issue_id, groupedIssues.length)
+      groupedIssues.push({ rep: row, all: [row] })
+    } else {
+      groupedIssues[idx].all.push(row)
+      // promote rep if this row is more critical
+      const cur = groupedIssues[idx].rep
+      const curScore = cur.overdue ? 0 : cur.duration_in_prev_state_hours === null ? 1 : isMovedBack(cur.from_state, cur.to_state) ? 2 : 3
+      const newScore = row.overdue ? 0 : row.duration_in_prev_state_hours === null ? 1 : isMovedBack(row.from_state, row.to_state) ? 2 : 3
+      if (newScore < curScore) groupedIssues[idx].rep = row
+    }
+  }
 
   const overdueCount   = rows.filter(r => r.overdue).length
   const mismatchCount  = rows.filter(r => r.moved_by_mismatch).length
@@ -1198,12 +1225,14 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
             {sortKey === 'time_asc' && <><ArrowUpNarrowWide size={14} /><span>Time ↑</span></>}
             {sortKey === 'time_desc' && <><ArrowDownNarrowWide size={14} /><span>Time ↓</span></>}
             {sortKey === 'priority' && <><Star size={14} /><span>Priority</span></>}
+            {sortKey === 'status' && <><Activity size={14} /><span>Status</span></>}
             <ChevronDown size={12} className={`dropdown-chevron ${sortDropdownOpen ? 'open' : ''}`} />
           </button>
           {sortDropdownOpen && (
             <div className="pm-custom-dropdown-menu">
               {([
                 { key: 'entered_at', label: 'Newest First', Icon: ArrowDownUp },
+                { key: 'status',     label: 'Status (Overdue→Live→Done)', Icon: Activity },
                 { key: 'time_asc',   label: 'Time ↑ (low→high)', Icon: ArrowUpNarrowWide },
                 { key: 'time_desc',  label: 'Time ↓ (high→low)', Icon: ArrowDownNarrowWide },
                 { key: 'priority',   label: 'Priority', Icon: Star },
@@ -1298,7 +1327,7 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
       ) : (
         <div className="tt-card-list glass-card">
           <div className="tt-list-summary">
-            <span>{displayed.length} of {rows.length} transitions</span>
+            <span>{groupedIssues.length} issues · {displayed.length} transitions</span>
             {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
             {mismatchCount > 0 && <span className="mismatch-summary-badge"><AlertTriangle size={12} /> {mismatchCount} mismatch</span>}
             {movedBackCount > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {movedBackCount} moved back</span>}
@@ -1308,6 +1337,7 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
           <div className="tt-col-header">
             <span className="tt-col-pin" />
             <span className="tt-col-issue">Issue</span>
+            <span className="tt-col-regression">Regression</span>
             <span className="tt-col-priority">Priority</span>
             <span className="tt-col-status">Status</span>
             <span className="tt-col-time">Time / Threshold</span>
@@ -1316,10 +1346,14 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
           </div>
 
           <div className="tt-rows-scroll">
-          {displayed.map(row => {
+          {groupedIssues.map(({ rep: row, all: transitions }) => {
             const isLive = row.to_state.toLowerCase() === 'in progress'
+            const isBlocked = row.to_state.toLowerCase() === 'blocked'
             const movedBack = isMovedBack(row.from_state, row.to_state)
-            const isExpanded = expandedRows.has(row.id)
+            const isExpanded = expandedRows.has(row.issue_id)
+            const isDone = ['dev', 'done', 'mobile done', 'stage', 'prod'].includes(row.to_state.toLowerCase())
+            const showOverdue = row.overdue && !isDone && !isBlocked
+            const hasRegression = transitions.some(t => isMovedBack(t.from_state, t.to_state))
             const ratio = row.duration_in_prev_state_hours != null && row.threshold_hours > 0
               ? Math.min(row.duration_in_prev_state_hours / row.threshold_hours, 1)
               : 0
@@ -1327,11 +1361,11 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
 
             return (
               <div
-                key={row.id}
-                className={['tt-row', row.overdue ? 'tt-overdue' : '', row.pinned ? 'tt-pinned' : '', movedBack ? 'tt-moved-back' : ''].filter(Boolean).join(' ')}
+                key={row.issue_id}
+                className={['tt-row', showOverdue ? 'tt-overdue' : '', row.pinned ? 'tt-pinned' : '', movedBack ? 'tt-moved-back' : ''].filter(Boolean).join(' ')}
               >
                 {/* Collapsed row — click anywhere to expand */}
-                <div className="tt-row-main" onClick={() => toggleRow(row.id)}>
+                <div className="tt-row-main" onClick={() => toggleRow(row.issue_id)}>
                   {/* Pin button */}
                   <button
                     className={`tt-pin-btn ${row.pinned ? 'pinned' : ''}`}
@@ -1350,27 +1384,42 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
                     {row.pinned && <Pin size={10} className="tt-pin-indicator" />}
                     <span className="tt-issue-id">{row.issue_id}</span>
                     <span className="tt-issue-summary">{row.issue_summary}</span>
+                    {transitions.length > 1 && (
+                      <span className="tt-transition-count" title={`${transitions.length} transitions`}>{transitions.length}</span>
+                    )}
                     {blockerIssueIds?.has(row.issue_id) && (
                       <span className="do-overdue-chip">⚠ Blocked</span>
                     )}
                   </div>
 
+                  {/* Regression indicator */}
+                  <span className="tt-col-regression">
+                    {hasRegression && (
+                      <span className="tt-regression-chip" title="Regression — moved back to an earlier state">↩R</span>
+                    )}
+                  </span>
+
                   {/* Priority */}
                   <span className={`tt-priority ${priorityBadgeClass(row.priority)}`}>{row.priority || '—'}</span>
 
                   {/* Status badge */}
-                  {isLive && !row.overdue && (
-                    <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>
-                  )}
-                  {row.overdue && (
-                    <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>
-                  )}
-                  {movedBack && !row.overdue && (
-                    <span className="tt-badge tt-badge-mb"><RotateCcw size={11} /> Back</span>
-                  )}
-                  {!isLive && !row.overdue && !movedBack && (
-                    <span className="tt-badge tt-badge-done">✓ Done</span>
-                  )}
+                  <span className="tt-col-status">
+                    {isBlocked && (
+                      <span className="tt-badge tt-badge-blocked">⊘ Blocked</span>
+                    )}
+                    {isLive && !showOverdue && !isBlocked && (
+                      <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>
+                    )}
+                    {showOverdue && (
+                      <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>
+                    )}
+                    {movedBack && !showOverdue && !isBlocked && (
+                      <span className="tt-badge tt-badge-mb"><RotateCcw size={11} /> Back</span>
+                    )}
+                    {!isLive && !isBlocked && !showOverdue && !movedBack && (
+                      <span className="tt-badge tt-badge-done">✓ Done</span>
+                    )}
+                  </span>
 
                   {/* Time bar + label */}
                   <div className="tt-time-bar-wrap">
@@ -1395,38 +1444,38 @@ function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> })
                   <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
                 </div>
 
-                {/* Expanded detail panel */}
+                {/* Expanded: all transitions for this issue */}
                 {isExpanded && (
                   <div className="tt-row-detail">
-                    <div className="tt-detail-grid">
-                      <span className="tt-detail-label">Transition</span>
-                      <span className="tt-detail-value tt-transition">
-                        <span className="tt-from-state">{row.from_state || 'Backlog'}</span>
-                        <span className={`tt-arrow ${movedBack ? 'tt-arrow-back' : ''}`}>→</span>
-                        <span className={`tt-to-state${isLive ? ' live' : ''}${movedBack ? ' tt-to-state-back' : ''}`}>
-                          {row.to_state}{isLive ? ' ●' : ''}
-                        </span>
-                        {movedBack && <span className="tt-regression-tag">regression</span>}
-                      </span>
-
-                      <span className="tt-detail-label">Moved By</span>
-                      <span className={`tt-detail-value${row.moved_by_mismatch ? ' tt-mismatch' : ''}`}>
-                        {row.moved_by || '—'}
-                        {row.moved_by_mismatch && <AlertTriangle size={11} style={{ marginLeft: 4 }} />}
-                      </span>
-
-                      <span className="tt-detail-label">Entered At</span>
-                      <span className="tt-detail-value">
-                        {new Date(row.transitioned_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </span>
-
-                      {row.comment && (
-                        <>
-                          <span className="tt-detail-label">Comment</span>
-                          <span className="tt-detail-value tt-comment">{row.comment}</span>
-                        </>
-                      )}
-                    </div>
+                    {[...transitions].sort((a, b) => new Date(a.transitioned_at).getTime() - new Date(b.transitioned_at).getTime()).map((t, i) => {
+                      const tMovedBack = isMovedBack(t.from_state, t.to_state)
+                      const tIsLive = t.duration_in_prev_state_hours === null
+                      const isMostRecent = i === transitions.length - 1
+                      return (
+                        <div key={t.id} className="tt-transition-row">
+                          <span className="tt-tr-index">{i + 1}</span>
+                          <span className="tt-tr-transition">
+                            <span className="tt-from-state">{t.from_state || 'Backlog'}</span>
+                            <span className={`tt-arrow ${tMovedBack ? 'tt-arrow-back' : ''}`}>→</span>
+                            <span className={`tt-to-state${tIsLive && isMostRecent ? ' live' : ''}${tMovedBack ? ' tt-to-state-back' : ''}${isMostRecent && !tMovedBack ? ' tt-to-state-current' : ''}`}>
+                              {t.to_state}{tIsLive && isMostRecent ? ' ●' : ''}
+                            </span>
+                            {tMovedBack && <span className="tt-regression-tag">regression</span>}
+                          </span>
+                          <span className="tt-tr-time">{formatHours(t.duration_in_prev_state_hours)}</span>
+                          <span className="tt-tr-by">
+                            {t.moved_by || '—'}
+                            {t.moved_by_mismatch && <AlertTriangle size={10} className="tt-mismatch-icon" />}
+                          </span>
+                          <span className="tt-tr-at">
+                            {new Date(t.transitioned_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
+                          </span>
+                          {t.comment && !/^activity:[^\s]+$/.test(t.comment.trim()) && (
+                            <span className="tt-tr-comment">{t.comment}</span>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
