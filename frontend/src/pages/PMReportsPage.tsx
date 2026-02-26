@@ -578,67 +578,69 @@ function DailyReportTab() {
             </div>
           </div>
 
-          {error && (
-            <div className="pm-report-error">
-              <AlertTriangle size={16} />
-              {error}
-            </div>
-          )}
+          <div className="pm-report-scroll">
+            {error && (
+              <div className="pm-report-error">
+                <AlertTriangle size={16} />
+                {error}
+              </div>
+            )}
 
-          {/* Carry-over checklist — shown at top when viewing today */}
-          {date === todayStr() && carryoverItems.length > 0 && (
-            <div className="pm-carryover-block">
-              <div className="pm-carryover-header">
-                <Pin size={13} />
-                <span>Carry-over from yesterday's plan</span>
-                <span className="pm-carryover-count">
-                  {carryoverItems.filter(i => i.done).length}/{carryoverItems.length} done
-                </span>
+            {/* Carry-over checklist — shown at top when viewing today */}
+            {date === todayStr() && carryoverItems.length > 0 && (
+              <div className="pm-carryover-block">
+                <div className="pm-carryover-header">
+                  <Pin size={13} />
+                  <span>Carry-over from yesterday's plan</span>
+                  <span className="pm-carryover-count">
+                    {carryoverItems.filter(i => i.done).length}/{carryoverItems.length} done
+                  </span>
+                </div>
+                <div className="pm-carryover-list">
+                  {carryoverItems.map((item, idx) => (
+                    <label
+                      key={idx}
+                      className={`pm-carryover-item ${item.done ? 'pm-carryover-item--done' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={item.done}
+                        onChange={() => handleCarryoverToggle(idx)}
+                      />
+                      <span>{item.text}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
-              <div className="pm-carryover-list">
-                {carryoverItems.map((item, idx) => (
-                  <label
-                    key={idx}
-                    className={`pm-carryover-item ${item.done ? 'pm-carryover-item--done' : ''}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={item.done}
-                      onChange={() => handleCarryoverToggle(idx)}
-                    />
-                    <span>{item.text}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
+            )}
 
-          {report ? (
-            <div className="pm-report-viewer">
-              <div className="pm-report-meta">
-                <div className="pm-report-stat-chip done">
-                  <span className="chip-num">{report.done_count}</span> Done
+            {report ? (
+              <div className="pm-report-viewer">
+                <div className="pm-report-meta">
+                  <div className="pm-report-stat-chip done">
+                    <span className="chip-num">{report.done_count}</span> Done
+                  </div>
+                  <div className="pm-report-stat-chip open">
+                    <span className="chip-num">{report.open_count}</span> Open
+                  </div>
+                  <div className="pm-report-stat-chip blocked">
+                    <span className="chip-num">{report.blocked_count}</span> Blocked
+                  </div>
+                  <span className="pm-report-date-label">
+                    {new Date(report.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                  </span>
                 </div>
-                <div className="pm-report-stat-chip open">
-                  <span className="chip-num">{report.open_count}</span> Open
+                <div className="pm-report-body">
+                  {renderReportText(report.report_text)}
                 </div>
-                <div className="pm-report-stat-chip blocked">
-                  <span className="chip-num">{report.blocked_count}</span> Blocked
-                </div>
-                <span className="pm-report-date-label">
-                  {new Date(report.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                </span>
               </div>
-              <div className="pm-report-body">
-                {renderReportText(report.report_text)}
+            ) : (
+              <div className="pm-report-empty">
+                <FileText size={40} />
+                <p>Select a date and click <strong>Generate Report</strong> to create today's Slack-style PM report.</p>
               </div>
-            </div>
-          ) : (
-            <div className="pm-report-empty">
-              <FileText size={40} />
-              <p>Select a date and click <strong>Generate Report</strong> to create today's Slack-style PM report.</p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Right: History Sidebar */}
