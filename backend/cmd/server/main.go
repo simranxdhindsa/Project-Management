@@ -261,6 +261,7 @@ func main() {
 	reportRoutes.HandleFunc("/pm-report/{date}/saved", reportHandler.GetSavedReport).Methods("GET")
 	reportRoutes.HandleFunc("/pm-report/{date}", reportHandler.GeneratePMReport).Methods("GET")
 	reportRoutes.HandleFunc("/pm-reports", reportHandler.ListReports).Methods("GET")
+	reportRoutes.HandleFunc("/pm-report/{id}/delete", reportHandler.DeletePMReport).Methods("DELETE")
 	reportRoutes.HandleFunc("/assignee-stats", reportHandler.GetAssigneeStats).Methods("GET")
 	reportRoutes.HandleFunc("/time-tracking", reportHandler.GetTimeTracking).Methods("GET")
 	reportRoutes.HandleFunc("/pins", reportHandler.GetPins).Methods("GET")

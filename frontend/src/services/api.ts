@@ -950,6 +950,10 @@ class ApiService {
     return this.request<PMReportSummary[]>('/reports/pm-reports')
   }
 
+  async deletePMReport(id: string) {
+    return this.request<{ message: string }>(`/reports/pm-report/${id}/delete`, { method: 'DELETE' })
+  }
+
   async getAssigneeStats() {
     return this.request<AssigneeStat[]>('/reports/assignee-stats')
   }

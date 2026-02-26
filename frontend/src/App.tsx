@@ -1,10 +1,14 @@
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
+import ThemePreviewPage from '@/pages/ThemePreviewPage'
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth()
+  const location = useLocation()
+
+  if (location.pathname === '/theme-preview') return <ThemePreviewPage />
 
   if (isLoading) {
     return (

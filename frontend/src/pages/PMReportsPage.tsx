@@ -6,7 +6,7 @@ import {
   Calendar, Pin, PinOff, ChevronLeft, ChevronRight,
   Search, RotateCcw, ArrowDownUp, ArrowUpNarrowWide,
   ArrowDownNarrowWide, Star, Activity, X, TriangleAlert,
-  CheckCircle2, Timer, Zap, Filter,
+  CheckCircle2, Timer, Zap, Filter, Trash2,
 } from 'lucide-react'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { IssueTimeline, IssueStint } from '../services/api'
@@ -393,6 +393,7 @@ function DailyReportTab() {
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   // Calendar dropdown state
   const [calOpen, setCalOpen] = useState(false)
@@ -656,17 +657,49 @@ function DailyReportTab() {
               <p className="pm-history-empty">No saved reports yet.</p>
             )}
             {history.map(r => (
-              <button
-                key={r.id}
-                className={`pm-history-item ${report?.id === r.id ? 'active' : ''}`}
-                onClick={() => loadHistoricReport(r)}
-              >
-                <div className="pm-history-date">{r.date}</div>
-                <div className="pm-history-counts">
-                  <span className="hc done">{r.done_count} done</span>
-                  <span className="hc blocked">{r.blocked_count} blocked</span>
+              <div key={r.id} className={`pm-history-item ${report?.id === r.id ? 'active' : ''}`}>
+                <button className="pm-history-item-btn" onClick={() => loadHistoricReport(r)}>
+                  <div className="pm-history-date">{r.date}</div>
+                  <div className="pm-history-counts">
+                    <span className="hc done">{r.done_count} done</span>
+                    <span className="hc blocked">{r.blocked_count} blocked</span>
+                  </div>
+                </button>
+                <div className="pm-history-actions">
+                  {confirmDeleteId === r.id ? (
+                    <>
+                      <button
+                        className="pm-history-confirm-btn confirm-yes"
+                        title="Confirm delete"
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          await api.deletePMReport(r.id)
+                          setHistory(prev => prev.filter(h => h.id !== r.id))
+                          if (report?.id === r.id) setReport(null)
+                          setConfirmDeleteId(null)
+                        }}
+                      >
+                        <Check size={12} />
+                      </button>
+                      <button
+                        className="pm-history-confirm-btn confirm-no"
+                        title="Cancel"
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null) }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="pm-history-delete-btn"
+                      title="Delete report"
+                      onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(r.id) }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>

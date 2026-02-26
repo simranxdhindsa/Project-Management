@@ -188,7 +188,15 @@ export default function Dashboard() {
   }
 
   const [showNotifications, setShowNotifications] = useState(false)
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    return localStorage.getItem('theme') !== 'light'
+  })
+
+  useEffect(() => {
+    const theme = darkMode ? 'dark' : 'light'
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('theme', theme)
+  }, [darkMode])
 
   // YouTrack state
   const [ytIssues, setYtIssues] = useState<YTIssue[]>([])

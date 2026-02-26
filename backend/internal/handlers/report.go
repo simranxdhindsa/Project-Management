@@ -291,6 +291,30 @@ func (h *ReportHandler) ListReports(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, Response{Success: true, Data: reports})
 }
 
+// DeletePMReport deletes a saved PM report by ID
+// DELETE /api/reports/pm-report/{id}
+func (h *ReportHandler) DeletePMReport(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	vars := mux.Vars(r)
+	id := vars["id"]
+	if id == "" {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Missing report ID"})
+		return
+	}
+
+	if err := h.reportRepo.DeletePMReport(r.Context(), id); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to delete report: " + err.Error()})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Report deleted"})
+}
+
 // GetAssigneeStats returns per-assignee open/done/blocked counts from YouTrack + state log
 // GET /api/reports/assignee-stats
 func (h *ReportHandler) GetAssigneeStats(w http.ResponseWriter, r *http.Request) {

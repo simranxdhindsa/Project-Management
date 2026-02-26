@@ -882,3 +882,10 @@ func (r *ReportRepository) ListPMReports(ctx context.Context) ([]PMReport, error
 	}
 	return reports, nil
 }
+
+// DeletePMReport deletes a saved PM report by ID
+func (r *ReportRepository) DeletePMReport(ctx context.Context, id string) error {
+	pool := GetPool()
+	_, err := pool.Exec(ctx, `DELETE FROM pm_reports WHERE id = $1`, id)
+	return err
+}

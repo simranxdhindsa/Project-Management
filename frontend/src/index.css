@@ -50,6 +50,10 @@
   --transition-normal: 250ms ease;
   --transition-slow: 350ms ease;
   --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Surface & Border */
+  --surface-bg: rgba(15, 23, 42, 0.8);
+  --border-color: rgba(255, 255, 255, 0.12);
 }
 
 /* Reset & Base */
@@ -8288,9 +8292,10 @@ select.form-input {
 
 .pm-reports-page {
   padding: 1.5rem;
-  height: calc(100vh - 80px);
+  height: calc(100vh - 70px - 4rem);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .pm-reports-container {
@@ -9013,14 +9018,13 @@ select.form-input {
 }
 
 .pm-history-item {
-  background: transparent;
+  display: flex;
+  align-items: center;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 0.5rem 0.75rem;
-  text-align: left;
-  cursor: pointer;
   transition: all 0.15s;
   width: 100%;
+  overflow: hidden;
 }
 
 .pm-history-item:hover {
@@ -9031,6 +9035,63 @@ select.form-input {
 .pm-history-item.active {
   background: rgba(99, 102, 241, 0.1);
   border-color: var(--color-primary);
+}
+
+.pm-history-item-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.pm-history-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-right: 0.4rem;
+  gap: 0.2rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.pm-history-item:hover .pm-history-actions {
+  opacity: 1;
+}
+
+.pm-history-delete-btn,
+.pm-history-confirm-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.pm-history-delete-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.pm-history-confirm-btn.confirm-yes:hover {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.pm-history-confirm-btn.confirm-no:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
 }
 
 .pm-history-date {
@@ -13898,5 +13959,133 @@ select.form-input {
 }
 .do-save-items-btn:hover { background: rgba(74,222,128,0.18); }
 .do-save-items-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ========================================
+   LIGHT THEME — Glassmorphism light palette
+   Must be at end of file to win cascade.
+   Applied when <html data-theme="light">
+   ======================================== */
+
+[data-theme="light"] {
+  --text-primary: #1e1b4b;
+  --text-secondary: #3730a3;
+  --text-muted: #6366f1;
+  --bg-gradient: linear-gradient(135deg, #e0e7ff 0%, #f0f4ff 50%, #dbeafe 100%);
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-hover: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.82);
+  --glass-shadow: 0 8px 32px rgba(99, 102, 241, 0.12);
+  --surface-bg: rgba(255, 255, 255, 0.65);
+  --border-color: rgba(99, 102, 241, 0.18);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.07);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.09);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+}
+
+/* Hardcoded overrides — elements using rgba(15,23,42) directly */
+
+[data-theme="light"] body {
+  background: var(--bg-gradient);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .header {
+  background: var(--surface-bg) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-color);
+}
+
+[data-theme="light"] .sidebar {
+  background: var(--surface-bg) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-right: 1px solid var(--border-color);
+}
+
+[data-theme="light"] .notification-badge {
+  border-color: var(--surface-bg) !important;
+}
+
+[data-theme="light"] .glass-card {
+  background: var(--glass-bg) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: var(--glass-shadow);
+}
+
+[data-theme="light"] .glass-card:hover {
+  background: var(--glass-bg-hover) !important;
+  border-color: var(--glass-border) !important;
+}
+
+/* Scrollbar */
+[data-theme="light"] ::-webkit-scrollbar-track {
+  background: rgba(99, 102, 241, 0.05);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.25);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.4);
+}
+
+/* Inputs */
+[data-theme="light"] input,
+[data-theme="light"] textarea,
+[data-theme="light"] select {
+  background: rgba(255, 255, 255, 0.7) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* Sidebar nav items */
+[data-theme="light"] .sidebar-nav-item:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+[data-theme="light"] .sidebar-nav-item.active {
+  background: rgba(99, 102, 241, 0.18);
+}
+
+/* Tab bars */
+[data-theme="light"] .pm-tab-bar,
+[data-theme="light"] .si-tab-bar {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: var(--border-color);
+}
+
+/* Active tab button */
+[data-theme="light"] .pm-tab-btn.active,
+[data-theme="light"] .si-tab-btn.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+/* Modals / dropdowns */
+[data-theme="light"] [class*="-dropdown"],
+[data-theme="light"] [class*="-modal"],
+[data-theme="light"] .confirm-modal {
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-color: var(--border-color) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Text colors that are hardcoded */
+[data-theme="light"] .sidebar-section-title,
+[data-theme="light"] .sidebar-nav-label {
+  color: var(--text-secondary);
+}
+[data-theme="light"] .sidebar-user-name {
+  color: var(--text-primary);
+}
+[data-theme="light"] .sidebar-user-role {
+  color: var(--text-muted);
+}
 
 /* ─── End Daily Ops Tab ─────────────────────────────────────────────── */
