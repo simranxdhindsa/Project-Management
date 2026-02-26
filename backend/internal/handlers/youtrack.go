@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1974,4 +1975,744 @@ func overdueThresholdHours(priority string) float64 {
 	default: // P3, Normal, Other
 		return 72
 	}
+}
+
+// issueRow is a compact representation of a YouTrack issue for Daily Ops responses
+type issueRow struct {
+	ID            string `json:"id"`
+	Summary       string `json:"summary"`
+	Status        string `json:"status"`
+	Priority      string `json:"priority"`
+	Assignee      string `json:"assignee"`
+	BlockerReason string `json:"blocker_reason,omitempty"`
+}
+
+func toIssueRow(issue map[string]interface{}) issueRow {
+	str := func(v interface{}) string {
+		if v == nil {
+			return ""
+		}
+		s, _ := v.(string)
+		return s
+	}
+	assignee := ""
+	if a, ok := issue["assignee"]; ok && a != nil {
+		if am, ok := a.(map[string]interface{}); ok {
+			assignee = str(am["fullName"])
+			if assignee == "" {
+				assignee = str(am["login"])
+			}
+		}
+	}
+	return issueRow{
+		ID:       str(issue["id"]),
+		Summary:  str(issue["summary"]),
+		Status:   str(issue["status"]),
+		Priority: str(issue["priority"]),
+		Assignee: assignee,
+	}
+}
+
+// GetDailyBrief returns a grouped morning brief derived from live YouTrack data
+// and yesterday's state transitions from issue_state_log.
+// GET /api/youtrack/daily-brief
+func (h *YouTrackHandler) GetDailyBrief(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch all live issues
+	issues, err := client.GetIssues(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	baseURL := client.GetBaseURL()
+
+	// Transform to map for easier handling
+	var allIssues []map[string]interface{}
+	for _, issue := range issues {
+		assignee := youtrack.GetAssignee(issue)
+		if assignee != nil && assignee.AvatarUrl != "" && !strings.HasPrefix(assignee.AvatarUrl, "http") {
+			assignee.AvatarUrl = baseURL + assignee.AvatarUrl
+		}
+		row := map[string]interface{}{
+			"id":       issue.ID,
+			"summary":  issue.Summary,
+			"status":   youtrack.GetStatus(issue),
+			"priority": youtrack.GetPriority(issue),
+			"assignee": assignee,
+		}
+		allIssues = append(allIssues, row)
+	}
+
+	// Query done_yesterday from issue_state_log
+	// "Done" = moved to Dev, Ready for Stage, Stage, Ready for PROD, or PROD yesterday
+	pool := database.GetPool()
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	doneStates := []string{"Dev", "Ready for Stage", "Stage", "Ready for PROD", "PROD"}
+	_ = doneStates
+
+	rows, err := pool.Query(r.Context(), `
+		SELECT DISTINCT ON (issue_id) issue_id, issue_summary, assignee, to_state, priority
+		FROM issue_state_log
+		WHERE DATE(transitioned_at AT TIME ZONE 'UTC') = $1
+		  AND to_state = ANY($2)
+		ORDER BY issue_id, transitioned_at DESC
+	`, yesterday, []string{"Dev", "Ready for Stage", "Stage", "Ready for PROD", "PROD"})
+
+	var doneYesterday []issueRow
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id, summary, assignee, toState, priority string
+			if scanErr := rows.Scan(&id, &summary, &assignee, &toState, &priority); scanErr == nil {
+				doneYesterday = append(doneYesterday, issueRow{
+					ID: id, Summary: summary, Status: toState, Priority: priority, Assignee: assignee,
+				})
+			}
+		}
+	} else {
+		log.Printf("[DailyBrief] issue_state_log query failed: %v", err)
+	}
+
+	// Group live issues by priority (exclude Closed)
+	var p0, p1, p2, p3, blockedOurs, blockedTheirs, openItems, unassigned []issueRow
+	for _, issue := range allIssues {
+		status := ""
+		if s, ok := issue["status"].(string); ok {
+			status = s
+		}
+		if strings.EqualFold(status, "Closed") {
+			continue
+		}
+
+		row := toIssueRow(issue)
+		isBlocked := strings.EqualFold(status, "Blocked")
+
+		if isBlocked {
+			// Heuristic: if no assignee → blocked from their side, else ours
+			if row.Assignee == "" {
+				blockedTheirs = append(blockedTheirs, row)
+			} else {
+				blockedOurs = append(blockedOurs, row)
+			}
+			continue
+		}
+
+		if row.Assignee == "" && !strings.EqualFold(status, "Backlog") {
+			unassigned = append(unassigned, row)
+		}
+
+		p := strings.ToUpper(row.Priority)
+		switch {
+		case p == "P0" || p == "CRITICAL":
+			p0 = append(p0, row)
+		case p == "P1":
+			p1 = append(p1, row)
+		case p == "P2":
+			p2 = append(p2, row)
+		default:
+			p3 = append(p3, row)
+		}
+	}
+
+	// Open items: state = "In Progress" with no assignee OR backlog with special tag
+	// For now, treat unassigned In-Progress as open items
+	for _, issue := range allIssues {
+		status := ""
+		if s, ok := issue["status"].(string); ok {
+			status = s
+		}
+		if strings.EqualFold(status, "In Progress") {
+			row := toIssueRow(issue)
+			if row.Assignee == "" {
+				openItems = append(openItems, row)
+			}
+		}
+	}
+
+	if doneYesterday == nil {
+		doneYesterday = []issueRow{}
+	}
+	if p0 == nil { p0 = []issueRow{} }
+	if p1 == nil { p1 = []issueRow{} }
+	if p2 == nil { p2 = []issueRow{} }
+	if p3 == nil { p3 = []issueRow{} }
+	if blockedOurs == nil { blockedOurs = []issueRow{} }
+	if blockedTheirs == nil { blockedTheirs = []issueRow{} }
+	if openItems == nil { openItems = []issueRow{} }
+	if unassigned == nil { unassigned = []issueRow{} }
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"done_yesterday":  doneYesterday,
+			"p0":              p0,
+			"p1":              p1,
+			"p2":              p2,
+			"p3":              p3,
+			"blocked_ours":    blockedOurs,
+			"blocked_theirs":  blockedTheirs,
+			"open_items":      openItems,
+			"unassigned":      unassigned,
+			"generated_at":    time.Now().Format(time.RFC3339),
+		},
+	})
+}
+
+// GetEODSummary returns today's completed, in-progress, no-movement, and new-blocker issues.
+// GET /api/youtrack/eod-summary
+func (h *YouTrackHandler) GetEODSummary(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	today := time.Now().Format("2006-01-02")
+	pool := database.GetPool()
+
+	// completed_today: transitioned to forward states today
+	completedRows, err := pool.Query(r.Context(), `
+		SELECT DISTINCT ON (issue_id) issue_id, issue_summary, assignee, to_state, priority
+		FROM issue_state_log
+		WHERE DATE(transitioned_at AT TIME ZONE 'UTC') = $1
+		  AND to_state = ANY($2)
+		ORDER BY issue_id, transitioned_at DESC
+	`, today, []string{"Dev", "Ready for Stage", "Stage", "Ready for PROD", "PROD"})
+
+	var completedToday []issueRow
+	if err == nil {
+		defer completedRows.Close()
+		for completedRows.Next() {
+			var id, summary, assignee, toState, priority string
+			if scanErr := completedRows.Scan(&id, &summary, &assignee, &toState, &priority); scanErr == nil {
+				completedToday = append(completedToday, issueRow{ID: id, Summary: summary, Status: toState, Priority: priority, Assignee: assignee})
+			}
+		}
+	}
+
+	// new_blockers: transitioned to Blocked today
+	blockerRows, err := pool.Query(r.Context(), `
+		SELECT DISTINCT ON (issue_id) issue_id, issue_summary, assignee, to_state, priority
+		FROM issue_state_log
+		WHERE DATE(transitioned_at AT TIME ZONE 'UTC') = $1
+		  AND LOWER(to_state) = 'blocked'
+		ORDER BY issue_id, transitioned_at DESC
+	`, today)
+
+	var newBlockers []issueRow
+	if err == nil {
+		defer blockerRows.Close()
+		for blockerRows.Next() {
+			var id, summary, assignee, toState, priority string
+			if scanErr := blockerRows.Scan(&id, &summary, &assignee, &toState, &priority); scanErr == nil {
+				newBlockers = append(newBlockers, issueRow{ID: id, Summary: summary, Status: toState, Priority: priority, Assignee: assignee})
+			}
+		}
+	}
+
+	// Fetch live issues for still_in_progress and no_movement
+	issues, err := client.GetIssues(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Build set of issue IDs that had transitions today
+	movedToday := make(map[string]bool)
+	movedTodayRows, qErr := pool.Query(r.Context(), `
+		SELECT DISTINCT issue_id FROM issue_state_log
+		WHERE DATE(transitioned_at AT TIME ZONE 'UTC') = $1
+	`, today)
+	if qErr == nil {
+		defer movedTodayRows.Close()
+		for movedTodayRows.Next() {
+			var id string
+			if scanErr := movedTodayRows.Scan(&id); scanErr == nil {
+				movedToday[id] = true
+			}
+		}
+	}
+
+	var stillInProgress, noMovement []issueRow
+	for _, issue := range issues {
+		status := youtrack.GetStatus(issue)
+		if !strings.EqualFold(status, "In Progress") {
+			continue
+		}
+		assignee := youtrack.GetAssignee(issue)
+		assigneeName := ""
+		if assignee != nil {
+			assigneeName = assignee.FullName
+			if assigneeName == "" {
+				assigneeName = assignee.Login
+			}
+		}
+		row := issueRow{
+			ID:       issue.ID,
+			Summary:  issue.Summary,
+			Status:   status,
+			Priority: youtrack.GetPriority(issue),
+			Assignee: assigneeName,
+		}
+		if movedToday[issue.ID] {
+			stillInProgress = append(stillInProgress, row)
+		} else {
+			noMovement = append(noMovement, row)
+		}
+	}
+
+	if completedToday == nil { completedToday = []issueRow{} }
+	if newBlockers == nil { newBlockers = []issueRow{} }
+	if stillInProgress == nil { stillInProgress = []issueRow{} }
+	if noMovement == nil { noMovement = []issueRow{} }
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"completed_today":   completedToday,
+			"still_in_progress": stillInProgress,
+			"no_movement":       noMovement,
+			"new_blockers":      newBlockers,
+			"date":              today,
+		},
+	})
+}
+
+// GetDeveloperLoad returns per-assignee workload: active issues, blocked, avg hours per priority.
+// GET /api/youtrack/developer-load
+func (h *YouTrackHandler) GetDeveloperLoad(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	issues, err := client.GetIssues(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	type devLoad struct {
+		Assignee        string     `json:"assignee"`
+		ActiveIssues    []issueRow `json:"active_issues"`
+		BlockedIssues   []issueRow `json:"blocked_issues"`
+		DoneToday       int        `json:"done_today"`
+		AvgHoursPerP1   float64    `json:"avg_hours_per_p1"`
+		AvgHoursPerP2   float64    `json:"avg_hours_per_p2"`
+		LastActivityAt  *string    `json:"last_activity_at"`
+		MissingUpdate   bool       `json:"missing_update"`
+		Overloaded      bool       `json:"overloaded"`
+	}
+
+	loadsMap := make(map[string]*devLoad)
+
+	for _, issue := range issues {
+		status := youtrack.GetStatus(issue)
+		if strings.EqualFold(status, "Closed") {
+			continue
+		}
+		assignee := youtrack.GetAssignee(issue)
+		if assignee == nil {
+			continue
+		}
+		name := assignee.FullName
+		if name == "" {
+			name = assignee.Login
+		}
+		if name == "" {
+			continue
+		}
+
+		if loadsMap[name] == nil {
+			loadsMap[name] = &devLoad{
+				Assignee:      name,
+				ActiveIssues:  []issueRow{},
+				BlockedIssues: []issueRow{},
+			}
+		}
+		dl := loadsMap[name]
+		row := issueRow{
+			ID:       issue.ID,
+			Summary:  issue.Summary,
+			Status:   status,
+			Priority: youtrack.GetPriority(issue),
+			Assignee: name,
+		}
+		if strings.EqualFold(status, "Blocked") {
+			dl.BlockedIssues = append(dl.BlockedIssues, row)
+		} else if strings.EqualFold(status, "In Progress") {
+			dl.ActiveIssues = append(dl.ActiveIssues, row)
+		}
+	}
+
+	// Per-assignee: avg hours in In Progress before reaching Dev, grouped by priority
+	// Also: done_today count and last_activity_at
+	pool := database.GetPool()
+	today := time.Now().Format("2006-01-02")
+
+	avgRows, qErr := pool.Query(r.Context(), `
+		SELECT
+			assignee,
+			priority,
+			AVG(duration_in_prev_state_hours) as avg_hours
+		FROM issue_state_log
+		WHERE LOWER(to_state) = 'dev'
+		  AND duration_in_prev_state_hours IS NOT NULL
+		  AND assignee IS NOT NULL AND assignee != ''
+		GROUP BY assignee, priority
+	`)
+	if qErr == nil {
+		defer avgRows.Close()
+		for avgRows.Next() {
+			var assignee, priority string
+			var avgHours float64
+			if scanErr := avgRows.Scan(&assignee, &priority, &avgHours); scanErr == nil {
+				if loadsMap[assignee] == nil {
+					loadsMap[assignee] = &devLoad{
+						Assignee:      assignee,
+						ActiveIssues:  []issueRow{},
+						BlockedIssues: []issueRow{},
+					}
+				}
+				p := strings.ToUpper(priority)
+				if p == "P1" {
+					loadsMap[assignee].AvgHoursPerP1 = avgHours
+				} else if p == "P2" {
+					loadsMap[assignee].AvgHoursPerP2 = avgHours
+				}
+			}
+		}
+	}
+
+	// done_today per assignee
+	doneTodayRows, qErr := pool.Query(r.Context(), `
+		SELECT assignee, COUNT(*) as cnt
+		FROM issue_state_log
+		WHERE DATE(transitioned_at AT TIME ZONE 'UTC') = $1
+		  AND to_state = ANY($2)
+		  AND assignee IS NOT NULL AND assignee != ''
+		GROUP BY assignee
+	`, today, []string{"Dev", "Ready for Stage", "Stage", "Ready for PROD", "PROD"})
+	if qErr == nil {
+		defer doneTodayRows.Close()
+		for doneTodayRows.Next() {
+			var assignee string
+			var cnt int
+			if scanErr := doneTodayRows.Scan(&assignee, &cnt); scanErr == nil {
+				if loadsMap[assignee] == nil {
+					loadsMap[assignee] = &devLoad{
+						Assignee:      assignee,
+						ActiveIssues:  []issueRow{},
+						BlockedIssues: []issueRow{},
+					}
+				}
+				loadsMap[assignee].DoneToday = cnt
+			}
+		}
+	}
+
+	// last_activity_at per assignee
+	lastActivityRows, qErr := pool.Query(r.Context(), `
+		SELECT assignee, MAX(transitioned_at) as last_at
+		FROM issue_state_log
+		WHERE assignee IS NOT NULL AND assignee != ''
+		GROUP BY assignee
+	`)
+	if qErr == nil {
+		defer lastActivityRows.Close()
+		for lastActivityRows.Next() {
+			var assignee string
+			var lastAt time.Time
+			if scanErr := lastActivityRows.Scan(&assignee, &lastAt); scanErr == nil {
+				if loadsMap[assignee] == nil {
+					loadsMap[assignee] = &devLoad{
+						Assignee:      assignee,
+						ActiveIssues:  []issueRow{},
+						BlockedIssues: []issueRow{},
+					}
+				}
+				lastAtStr := lastAt.Format(time.RFC3339)
+				loadsMap[assignee].LastActivityAt = &lastAtStr
+				// missing_update: no transition today
+				loadsMap[assignee].MissingUpdate = !strings.HasPrefix(lastAt.Format("2006-01-02"), today)
+			}
+		}
+	}
+
+	// overloaded: >3 In Progress issues
+	var result []devLoad
+	for _, dl := range loadsMap {
+		dl.Overloaded = len(dl.ActiveIssues) > 3
+		result = append(result, *dl)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    result,
+	})
+}
+
+// GetBlockerReasons returns AI-extracted blocker reasons for a set of issue IDs.
+// Results are cached in blocker_analysis_cache and only re-analysed when a new comment
+// is added or the issue has moved out of Blocked state.
+// GET /api/youtrack/blocker-reasons?ids=ARD-123,ARD-456
+func (h *YouTrackHandler) GetBlockerReasons(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	idsParam := r.URL.Query().Get("ids")
+	if idsParam == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]string{}})
+		return
+	}
+	ids := strings.Split(idsParam, ",")
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	pool := database.GetPool()
+	reasons := make(map[string]string)
+
+	for _, rawID := range ids {
+		issueID := strings.TrimSpace(rawID)
+		if issueID == "" {
+			continue
+		}
+
+		// Fetch live comments to get current count
+		comments, commErr := client.GetIssueComments(r.Context(), issueID)
+		currentCount := len(comments)
+
+		// Check cache
+		var cachedReason string
+		var cachedCount int
+		var cachedState string
+		row := pool.QueryRow(r.Context(),
+			`SELECT reason, comment_count, last_state FROM blocker_analysis_cache WHERE issue_id = $1`,
+			issueID,
+		)
+		cacheHit := row.Scan(&cachedReason, &cachedCount, &cachedState) == nil
+
+		// Determine if cache is still valid:
+		// valid = cache exists AND comment count hasn't grown AND issue is still Blocked
+		if cacheHit && currentCount == cachedCount && strings.EqualFold(cachedState, "Blocked") {
+			reasons[issueID] = cachedReason
+			continue
+		}
+
+		// Need to (re-)analyse
+		var reason string
+		if commErr != nil || len(comments) == 0 {
+			reason = "No comments — reason unknown"
+		} else {
+			reason = analyseBlockerComments(r.Context(), issueID, comments)
+		}
+
+		// Upsert cache
+		_, _ = pool.Exec(r.Context(),
+			`INSERT INTO blocker_analysis_cache(issue_id, reason, comment_count, last_state, analyzed_at)
+			 VALUES($1,$2,$3,'Blocked',NOW())
+			 ON CONFLICT(issue_id) DO UPDATE
+			   SET reason=$2, comment_count=$3, last_state='Blocked', analyzed_at=NOW()`,
+			issueID, reason, currentCount,
+		)
+
+		reasons[issueID] = reason
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    reasons,
+	})
+}
+
+// analyseBlockerComments calls the AI to extract a one-sentence blocker reason from comments.
+func analyseBlockerComments(ctx context.Context, issueID string, comments []string) string {
+	apiKey := os.Getenv("GROQ_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		return "AI not configured"
+	}
+
+	apiURL := "https://api.groq.com/openai/v1/chat/completions"
+	model := "llama-3.3-70b-versatile"
+	if os.Getenv("GROQ_API_KEY") == "" {
+		apiURL = "https://api.openai.com/v1/chat/completions"
+		model = "gpt-4o-mini"
+	}
+
+	commentText := strings.Join(comments, "\n---\n")
+	if len(commentText) > 4000 {
+		commentText = commentText[:4000] + "…"
+	}
+
+	prompt := fmt.Sprintf(
+		"The following comments are from a blocked YouTrack ticket (%s).\nIn ONE short sentence, what is blocking this ticket? Be specific.\n\nComments:\n%s",
+		issueID, commentText,
+	)
+
+	reqBody := map[string]interface{}{
+		"model":  model,
+		"stream": false,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return "AI request error"
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		return "AI unavailable"
+	}
+	defer resp.Body.Close()
+
+	respBytes, _ := io.ReadAll(resp.Body)
+
+	var aiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if json.Unmarshal(respBytes, &aiResp) != nil || len(aiResp.Choices) == 0 {
+		return "Could not analyse"
+	}
+	return strings.TrimSpace(aiResp.Choices[0].Message.Content)
+}
+
+// SaveCarryoverPlan saves today's EOD action items for carry-over to tomorrow's morning brief.
+// POST /api/youtrack/save-plan
+func (h *YouTrackHandler) SaveCarryoverPlan(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Items []struct {
+			Text string `json:"text"`
+			Done bool   `json:"done"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	itemsJSON, err := json.Marshal(req.Items)
+	if err != nil {
+		http.Error(w, "Failed to encode items", http.StatusInternalServerError)
+		return
+	}
+
+	today := time.Now().Format("2006-01-02")
+	pool := database.GetPool()
+	_, err = pool.Exec(r.Context(),
+		`INSERT INTO daily_ops_carryover(user_id, date, items)
+		 VALUES($1, $2, $3)
+		 ON CONFLICT(user_id, date) DO UPDATE
+		   SET items=$3, updated_at=NOW()`,
+		userID, today, itemsJSON,
+	)
+	if err != nil {
+		http.Error(w, "Failed to save plan: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// GetCarryover returns yesterday's saved action items (for morning brief) and today's (for EOD).
+// GET /api/youtrack/carryover
+func (h *YouTrackHandler) GetCarryover(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	pool := database.GetPool()
+	today := time.Now().Format("2006-01-02")
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+
+	type carryoverItem struct {
+		Text string `json:"text"`
+		Done bool   `json:"done"`
+	}
+
+	fetchItems := func(date string) []carryoverItem {
+		var rawItems []byte
+		err := pool.QueryRow(r.Context(),
+			`SELECT items FROM daily_ops_carryover WHERE user_id=$1 AND date=$2`,
+			userID, date,
+		).Scan(&rawItems)
+		if err != nil {
+			return []carryoverItem{}
+		}
+		var items []carryoverItem
+		if json.Unmarshal(rawItems, &items) != nil {
+			return []carryoverItem{}
+		}
+		return items
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":        true,
+		"data": map[string]interface{}{
+			"yesterday":      fetchItems(yesterday),
+			"today":          fetchItems(today),
+			"yesterday_date": yesterday,
+			"today_date":     today,
+		},
+	})
 }

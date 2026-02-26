@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
@@ -552,6 +553,55 @@ func (h *SlackHandler) SnoozeThread(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":       true,
 		"snoozed_until": until.Format(time.RFC3339),
+	})
+}
+
+// PostMorningReport posts the PM's formatted morning report to one or more Slack channels.
+// POST /api/slack/post-morning-report
+func (h *SlackHandler) PostMorningReport(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		ReportText string   `json:"report_text"`
+		ChannelIDs []string `json:"channel_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.ReportText == "" {
+		http.Error(w, "report_text is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.ChannelIDs) == 0 {
+		http.Error(w, "at least one channel_id is required", http.StatusBadRequest)
+		return
+	}
+
+	var posted []string
+	var errs []string
+	for _, channelID := range req.ChannelIDs {
+		if err := h.service.PostMessage(r.Context(), userID, channelID, req.ReportText); err != nil {
+			errs = append(errs, channelID+": "+err.Error())
+		} else {
+			posted = append(posted, channelID)
+		}
+	}
+
+	if len(posted) == 0 {
+		http.Error(w, "Failed to post to any channel: "+strings.Join(errs, "; "), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":         true,
+		"posted_channels": posted,
+		"errors":          errs,
 	})
 }
 

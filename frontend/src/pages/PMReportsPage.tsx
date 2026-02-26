@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { IssueTimeline, IssueStint } from '../services/api'
+import DailyOpsTab from './DailyOpsTab'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -104,6 +105,7 @@ const TABS = [
   { id: 'daily', label: 'Daily Report', icon: FileText },
   { id: 'assignees', label: 'Assignee Stats', icon: Users },
   { id: 'assistant', label: 'PM Assistant', icon: MessageSquare },
+  { id: 'dailyops', label: 'Daily Ops', icon: Zap },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -670,7 +672,7 @@ function AssigneeStatsTab() {
 
 type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at'
 
-function TimeTrackingTab() {
+function TimeTrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   // Week navigation — defaults to current week
   const [selectedWeek, setSelectedWeek] = useState<Date>(() => getMondayOf(new Date()))
   const [noWeekFilter, setNoWeekFilter] = useState(false)
@@ -1185,6 +1187,9 @@ function TimeTrackingTab() {
                     {row.pinned && <Pin size={10} className="tt-pin-indicator" />}
                     <span className="tt-issue-id">{row.issue_id}</span>
                     <span className="tt-issue-summary">{row.issue_summary}</span>
+                    {blockerIssueIds?.has(row.issue_id) && (
+                      <span className="do-overdue-chip">⚠ Blocked</span>
+                    )}
                   </div>
 
                   {/* Priority */}
@@ -1300,7 +1305,7 @@ function stintLabel(stint: IssueStint): string {
 
 // ─── Tab: Issue Timeline ──────────────────────────────────────────────────────
 
-function IssueTimelineTab() {
+function IssueTimelineTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   const [timelines, setTimelines] = useState<IssueTimeline[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1658,6 +1663,9 @@ function IssueTimelineTab() {
                       {t.priority && <span className={`tl-priority ${priorityBadgeClass(t.priority)}`}>{t.priority}</span>}
                       {t.is_live && <span className="tl-live-badge"><span className="live-dot-pulse" />Live</span>}
                       {t.is_overdue && <span className="tl-overdue-badge"><AlertTriangle size={11} /> Overdue</span>}
+                      {blockerIssueIds?.has(t.issue_id) && (
+                        <span className="do-blocker-badge">🚧 Blocked</span>
+                      )}
                       {t.moved_back_count > 0 && (
                         <span className="tl-moved-back-badge"><RotateCcw size={11} /> {t.moved_back_count}× back</span>
                       )}
@@ -1789,6 +1797,7 @@ interface PMReportsPageProps {
 
 export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReportsPageProps) {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab)
+  const [blockerIssueIds, setBlockerIssueIds] = useState<Set<string>>(new Set())
 
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab)
@@ -1825,8 +1834,9 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
           {activeTab === 'assistant' && <PMAssistantTab />}
           {activeTab === 'daily' && <DailyReportTab />}
           {activeTab === 'assignees' && <AssigneeStatsTab />}
-          {activeTab === 'tracking' && <TimeTrackingTab />}
-          {activeTab === 'timeline' && <IssueTimelineTab />}
+          {activeTab === 'tracking' && <TimeTrackingTab blockerIssueIds={blockerIssueIds} />}
+          {activeTab === 'timeline' && <IssueTimelineTab blockerIssueIds={blockerIssueIds} />}
+          {activeTab === 'dailyops' && <DailyOpsTab onBlockersChange={setBlockerIssueIds} />}
         </div>
       </div>
     </div>

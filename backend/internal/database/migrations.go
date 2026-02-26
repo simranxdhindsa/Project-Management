@@ -338,6 +338,26 @@ func RunMigrations() error {
 		`ALTER TABLE slack_mentions ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE`,
 		// Snooze support for slack_user_threads
 		`ALTER TABLE slack_user_threads ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE`,
+
+		// Blocker analysis cache — AI-extracted blocker reasons, cached per issue
+		`CREATE TABLE IF NOT EXISTS blocker_analysis_cache (
+			issue_id      VARCHAR(255) PRIMARY KEY,
+			reason        TEXT NOT NULL,
+			comment_count INT NOT NULL DEFAULT 0,
+			last_state    VARCHAR(100),
+			analyzed_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+
+		// Daily Ops carry-over — EOD action items that surface in next morning's brief
+		`CREATE TABLE IF NOT EXISTS daily_ops_carryover (
+			id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id    TEXT NOT NULL,
+			date       DATE NOT NULL,
+			items      JSONB NOT NULL DEFAULT '[]',
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE(user_id, date)
+		)`,
 	}
 
 	for i, migration := range migrations {

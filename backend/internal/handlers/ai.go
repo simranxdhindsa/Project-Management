@@ -1,8 +1,14 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
@@ -293,5 +299,145 @@ func (h *AIHandler) AnalyzeManualInput(w http.ResponseWriter, r *http.Request) {
 				"not_mentioned": fullResponse.Summary.NotMentioned,
 			},
 		},
+	})
+}
+
+// eodIssue is the subset of issue data the frontend sends for EOD plan generation.
+type eodIssue struct {
+	ID       string `json:"id"`
+	Summary  string `json:"summary"`
+	Status   string `json:"status"`
+	Priority string `json:"priority"`
+	Assignee string `json:"assignee"`
+}
+
+// GenerateEODPlan uses AI to draft a next-day action plan from today's EOD data.
+// POST /api/ai/eod-plan
+func (h *AIHandler) GenerateEODPlan(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		CompletedToday  []eodIssue `json:"completed_today"`
+		StillInProgress []eodIssue `json:"still_in_progress"`
+		NoMovement      []eodIssue `json:"no_movement"`
+		NewBlockers     []eodIssue `json:"new_blockers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	formatList := func(issues []eodIssue) string {
+		if len(issues) == 0 {
+			return "  (none)"
+		}
+		var sb strings.Builder
+		for _, iss := range issues {
+			sb.WriteString(fmt.Sprintf("  - %s %s (assignee: %s, priority: %s)\n", iss.ID, iss.Summary, iss.Assignee, iss.Priority))
+		}
+		return sb.String()
+	}
+
+	prompt := fmt.Sprintf(`You are a PM assistant. Today is %s.
+
+Generate a concise next-day action plan based on the following EOD data. Output as a bullet list (max 10 items). Focus on: follow-ups for skipped items, resolving blockers, reviewing items done today, and next priorities.
+
+Completed today:
+%s
+Still in progress (had some activity):
+%s
+No movement today (skipped/stale):
+%s
+New blockers raised today:
+%s
+
+Next-day action plan:`,
+		time.Now().Format("2006-01-02"),
+		formatList(req.CompletedToday),
+		formatList(req.StillInProgress),
+		formatList(req.NoMovement),
+		formatList(req.NewBlockers),
+	)
+
+	apiKey := os.Getenv("GROQ_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		http.Error(w, "No AI API key configured (GROQ_API_KEY or OPENAI_API_KEY)", http.StatusInternalServerError)
+		return
+	}
+
+	apiURL := "https://api.groq.com/openai/v1/chat/completions"
+	model := "llama-3.3-70b-versatile"
+	if os.Getenv("GROQ_API_KEY") == "" {
+		apiURL = "https://api.openai.com/v1/chat/completions"
+		model = "gpt-4o-mini"
+	}
+
+	reqBody := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"stream": false,
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, apiURL, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		http.Error(w, "Failed to create AI request", http.StatusInternalServerError)
+		return
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		http.Error(w, "AI request failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "Failed to read AI response", http.StatusInternalServerError)
+		return
+	}
+
+	var aiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(respBytes, &aiResp); err != nil {
+		http.Error(w, "Failed to parse AI response", http.StatusInternalServerError)
+		return
+	}
+	if aiResp.Error != nil {
+		http.Error(w, "AI error: "+aiResp.Error.Message, http.StatusInternalServerError)
+		return
+	}
+	if len(aiResp.Choices) == 0 {
+		http.Error(w, "No response from AI", http.StatusInternalServerError)
+		return
+	}
+
+	planText := strings.TrimSpace(aiResp.Choices[0].Message.Content)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"plan_text": planText,
 	})
 }

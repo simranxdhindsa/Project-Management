@@ -142,6 +142,12 @@ func main() {
 	youtrackRoutes.HandleFunc("/bulk-update-states", youtrackHandler.BulkUpdateStates).Methods("POST")
 	youtrackRoutes.HandleFunc("/sync-recommendations", youtrackHandler.GetSyncRecommendations).Methods("POST")
 	youtrackRoutes.HandleFunc("/pm-query", youtrackHandler.PMAssistantQuery).Methods("POST")
+	youtrackRoutes.HandleFunc("/daily-brief", youtrackHandler.GetDailyBrief).Methods("GET")
+	youtrackRoutes.HandleFunc("/eod-summary", youtrackHandler.GetEODSummary).Methods("GET")
+	youtrackRoutes.HandleFunc("/developer-load", youtrackHandler.GetDeveloperLoad).Methods("GET")
+	youtrackRoutes.HandleFunc("/blocker-reasons", youtrackHandler.GetBlockerReasons).Methods("GET")
+	youtrackRoutes.HandleFunc("/save-plan", youtrackHandler.SaveCarryoverPlan).Methods("POST")
+	youtrackRoutes.HandleFunc("/carryover", youtrackHandler.GetCarryover).Methods("GET")
 
 	// Task-specific YouTrack routes (protected)
 	taskYouTrackRoutes := api.PathPrefix("/tasks/{id}/youtrack").Subrouter()
@@ -179,6 +185,7 @@ func main() {
 	slackRoutes.HandleFunc("/threads/{threadTS}/snooze", slackHandler.SnoozeThread).Methods("POST")
 	slackRoutes.HandleFunc("/digest", slackHandler.PostDigest).Methods("POST")
 	slackRoutes.HandleFunc("/reminders", slackHandler.CreateFollowupReminder).Methods("POST")
+	slackRoutes.HandleFunc("/post-morning-report", slackHandler.PostMorningReport).Methods("POST")
 
 	// AI Analysis routes (protected)
 	aiHandler := handlers.NewAIHandler()
@@ -187,6 +194,7 @@ func main() {
 	aiRoutes.HandleFunc("/analyze", aiHandler.AnalyzeSlackMessages).Methods("POST")
 	aiRoutes.HandleFunc("/analyze-manual", aiHandler.AnalyzeManualInput).Methods("POST")
 	aiRoutes.HandleFunc("/discrepancies", aiHandler.GetDiscrepancies).Methods("GET")
+	aiRoutes.HandleFunc("/eod-plan", aiHandler.GenerateEODPlan).Methods("POST")
 
 	// Daily Task Management routes (protected)
 	dailyTaskHandler := handlers.NewDailyTaskHandler()

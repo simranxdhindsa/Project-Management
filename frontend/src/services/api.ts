@@ -375,6 +375,61 @@ class ApiService {
     })
   }
 
+  // Daily Ops endpoints
+  async getDailyBrief() {
+    return this.request<DailyBrief>('/youtrack/daily-brief')
+  }
+
+  async getEODSummary() {
+    return this.request<EODSummary>('/youtrack/eod-summary')
+  }
+
+  async getDeveloperLoad() {
+    return this.request<DeveloperLoad[]>('/youtrack/developer-load')
+  }
+
+  async postMorningReport(reportText: string, channelIds: string[]) {
+    return this.request<{ posted_channels: string[]; errors: string[] }>('/slack/post-morning-report', {
+      method: 'POST',
+      body: JSON.stringify({ report_text: reportText, channel_ids: channelIds }),
+    })
+  }
+
+  async generateEODPlan(summary: EODSummary) {
+    return this.request<{ plan_text: string }>('/ai/eod-plan', {
+      method: 'POST',
+      body: JSON.stringify(summary),
+    })
+  }
+
+  async getBlockerReasons(issueIds: string[]) {
+    return this.request<Record<string, string>>(`/youtrack/blocker-reasons?ids=${issueIds.join(',')}`)
+  }
+
+  async saveCarryoverPlan(items: CarryoverItem[]) {
+    return this.request<{ success: boolean }>('/youtrack/save-plan', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    })
+  }
+
+  async getCarryover() {
+    return this.request<CarryoverData>('/youtrack/carryover')
+  }
+
+  async createIssueReminder(issueId: string, issueSummary: string, targetDate: string) {
+    return this.request<{ id: string }>('/reminders', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'blocked_issue',
+        title: `Follow up: ${issueSummary}`,
+        related_issue_id: issueId,
+        target_date: targetDate,
+        recurring: 'none',
+      }),
+    })
+  }
+
   // Slack endpoints
   async connectSlack(botToken: string, channelId?: string) {
     return this.request('/slack/connect', {
@@ -1448,4 +1503,59 @@ export async function getYouTrackAvatarMap(): Promise<Record<string, string>> {
     return {}
   })
   return _ytAvatarPromise
+}
+
+// Daily Ops interfaces
+export interface DailyOpsIssue {
+  id: string
+  summary: string
+  status: string
+  priority: string
+  assignee: string
+  blocker_reason?: string
+}
+
+export interface DailyBrief {
+  done_yesterday: DailyOpsIssue[]
+  p0: DailyOpsIssue[]
+  p1: DailyOpsIssue[]
+  p2: DailyOpsIssue[]
+  p3: DailyOpsIssue[]
+  blocked_ours: DailyOpsIssue[]
+  blocked_theirs: DailyOpsIssue[]
+  open_items: DailyOpsIssue[]
+  unassigned: DailyOpsIssue[]
+  generated_at: string
+}
+
+export interface EODSummary {
+  completed_today: DailyOpsIssue[]
+  still_in_progress: DailyOpsIssue[]
+  no_movement: DailyOpsIssue[]
+  new_blockers: DailyOpsIssue[]
+  date: string
+}
+
+export interface DeveloperLoad {
+  assignee: string
+  active_issues: DailyOpsIssue[]
+  blocked_issues: DailyOpsIssue[]
+  done_today: number
+  avg_hours_per_p1: number
+  avg_hours_per_p2: number
+  last_activity_at: string | null
+  missing_update: boolean
+  overloaded: boolean
+}
+
+export interface CarryoverItem {
+  text: string
+  done: boolean
+}
+
+export interface CarryoverData {
+  yesterday: CarryoverItem[]
+  today: CarryoverItem[]
+  yesterday_date: string
+  today_date: string
 }
