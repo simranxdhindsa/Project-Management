@@ -266,7 +266,9 @@ func (r *ReportRepository) GetTimeTracking(ctx context.Context, params TimeTrack
 		// Include rows active within the week window, plus any currently-active In Progress
 		// entries whose to_state entry happened before this week (spans across weeks).
 		weekCond := fmt.Sprintf(`(
-			transitioned_at >= $%d AND transitioned_at <= $%d
+			(transitioned_at >= $%d AND transitioned_at <= $%d)
+			OR (duration_in_prev_state_hours IS NULL AND LOWER(to_state) = 'in progress')
+			OR (duration_in_prev_state_hours IS NULL AND LOWER(to_state) = 'blocked')
 		)`, argIdx, argIdx+1)
 		if len(params.PinnedIssues) > 0 {
 			// Also include pinned issues regardless of week
@@ -280,6 +282,8 @@ func (r *ReportRepository) GetTimeTracking(ctx context.Context, params TimeTrack
 			}
 			weekCond = fmt.Sprintf(`(
 				(transitioned_at >= $%d AND transitioned_at <= $%d)
+				OR (duration_in_prev_state_hours IS NULL AND LOWER(to_state) = 'in progress')
+				OR (duration_in_prev_state_hours IS NULL AND LOWER(to_state) = 'blocked')
 				OR issue_id IN (%s)
 			)`, argIdx, argIdx+1, placeholders)
 			argIdx += 2 + len(params.PinnedIssues)
