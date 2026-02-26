@@ -14088,4 +14088,319 @@ select.form-input {
   color: var(--text-muted);
 }
 
-/* ─── End Daily Ops Tab ─────────────────────────────────────────────── */
+/* ─── Issue summary text across all tabs ───────────────────────────── */
+[data-theme="light"] .tt-issue-summary,
+[data-theme="light"] .tl-issue-summary,
+[data-theme="light"] .do-issue-summary {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .do-dev-more {
+  color: var(--text-muted) !important;
+}
+
+/* ─── Time Tracking tab ─────────────────────────────────────────────── */
+[data-theme="light"] .tt-row,
+[data-theme="light"] .tt-issue-row {
+  border-color: var(--border-color);
+}
+[data-theme="light"] .tt-issue-id {
+  color: var(--color-primary);
+}
+[data-theme="light"] .tt-assignee-name,
+[data-theme="light"] .tt-duration,
+[data-theme="light"] .tt-state-label,
+[data-theme="light"] .tt-label,
+[data-theme="light"] .tt-meta {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .tt-header-row,
+[data-theme="light"] .tt-col-header {
+  color: var(--text-muted) !important;
+  border-color: var(--border-color);
+}
+[data-theme="light"] .tt-filter-bar,
+[data-theme="light"] .tt-toolbar {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: var(--border-color);
+}
+[data-theme="light"] .tt-search-input,
+[data-theme="light"] .tt-select {
+  background: rgba(255, 255, 255, 0.8) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* ─── Issue Timeline tab ────────────────────────────────────────────── */
+[data-theme="light"] .tl-issue-id {
+  color: var(--color-primary);
+}
+[data-theme="light"] .tl-state-chip {
+  border-color: var(--border-color);
+}
+[data-theme="light"] .tl-duration-label,
+[data-theme="light"] .tl-meta-text {
+  color: var(--text-secondary) !important;
+}
+
+/* ─── Daily Ops tab ─────────────────────────────────────────────────── */
+[data-theme="light"] .do-issue-id {
+  color: var(--color-primary);
+}
+[data-theme="light"] .do-section-title,
+[data-theme="light"] .do-section-header {
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+[data-theme="light"] .do-assignee-name,
+[data-theme="light"] .do-issue-meta,
+[data-theme="light"] .do-issue-assignee {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .do-issue-row {
+  border-color: var(--border-color);
+}
+[data-theme="light"] .do-issue-row:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
+[data-theme="light"] .do-dev-card {
+  background: var(--glass-bg) !important;
+  border-color: var(--glass-border) !important;
+}
+[data-theme="light"] .do-dev-name {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .do-blocker-reason {
+  color: var(--text-muted) !important;
+}
+
+/* ─── Assignee stats tab ────────────────────────────────────────────── */
+[data-theme="light"] .pm-assignees-table th {
+  color: var(--text-muted) !important;
+  border-color: var(--border-color);
+  background: rgba(255, 255, 255, 0.4);
+}
+[data-theme="light"] .pm-assignees-table td {
+  color: var(--text-primary) !important;
+  border-color: var(--border-color);
+}
+[data-theme="light"] .pm-assignees-table tr:hover td {
+  background: rgba(99, 102, 241, 0.04);
+}
+
+/* ─── General text that uses rgba(255,255,255,x) hardcoded ──────────── */
+[data-theme="light"] .pm-tab-btn {
+  color: var(--text-secondary);
+}
+[data-theme="light"] .pm-tab-btn.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+[data-theme="light"] .pm-tab-btn:hover:not(.active) {
+  color: var(--text-primary);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+/* Stat chips */
+[data-theme="light"] .pm-report-stat-chip.done { color: #16a34a; background: rgba(22,163,74,0.1); }
+[data-theme="light"] .pm-report-stat-chip.open { color: var(--text-secondary); background: rgba(99,102,241,0.08); }
+[data-theme="light"] .pm-report-stat-chip.blocked { color: #dc2626; background: rgba(220,38,38,0.1); }
+
+/* Report body */
+[data-theme="light"] .pm-report-body,
+[data-theme="light"] .pm-report-line,
+[data-theme="light"] .pm-report-bullet,
+[data-theme="light"] .pm-report-italic {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .pm-report-section-header {
+  color: var(--text-primary) !important;
+}
+
+/* ─── Time Tracking tab — full override ─────────────────────────────── */
+[data-theme="light"] .tt-col-header {
+  background: rgba(99, 102, 241, 0.04);
+  border-bottom-color: var(--border-color);
+}
+[data-theme="light"] .tt-col-header span {
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .tt-row {
+  border-bottom-color: var(--border-color);
+}
+[data-theme="light"] .tt-row-main:hover {
+  background: rgba(99, 102, 241, 0.04);
+}
+[data-theme="light"] .tt-row.tt-pinned {
+  background: rgba(99, 102, 241, 0.06);
+}
+[data-theme="light"] .tt-pin-btn {
+  color: rgba(99, 102, 241, 0.3);
+}
+[data-theme="light"] .tt-pin-btn:hover {
+  color: rgba(99, 102, 241, 0.7);
+}
+[data-theme="light"] .tt-issue-id {
+  color: var(--color-primary) !important;
+}
+[data-theme="light"] .tt-issue-summary {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .tt-time-label {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .tt-threshold {
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .tt-assignee-name {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .tt-chevron {
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .tt-time-bar {
+  background: rgba(99, 102, 241, 0.12);
+}
+[data-theme="light"] .tt-badge-done {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: var(--border-color);
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .tt-badge-live {
+  background: rgba(22, 163, 74, 0.12);
+  border-color: rgba(22, 163, 74, 0.3);
+  color: #16a34a !important;
+}
+[data-theme="light"] .tt-badge-overdue {
+  color: #dc2626 !important;
+}
+[data-theme="light"] .tt-badge-mb {
+  color: #b45309 !important;
+}
+
+/* Detail panel */
+[data-theme="light"] .tt-row-detail {
+  background: rgba(99, 102, 241, 0.03);
+  border-top-color: var(--border-color);
+}
+[data-theme="light"] .tt-detail-label {
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .tt-detail-value {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .tt-from-state {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .tt-arrow {
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .tt-to-state {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .tt-comment {
+  color: var(--text-muted) !important;
+}
+
+/* ─── Issue Timeline tab — full override ────────────────────────────── */
+[data-theme="light"] .tl-issue-summary {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .tl-issue-id {
+  color: var(--color-primary) !important;
+}
+[data-theme="light"] .tl-assignee-name {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .tl-stints-badge {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.25);
+  color: var(--color-primary) !important;
+}
+[data-theme="light"] .tl-stints {
+  border-top-color: var(--border-color);
+}
+[data-theme="light"] .tl-stints-label {
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .tl-col-label {
+  color: var(--text-muted) !important;
+}
+/* Issue cards */
+[data-theme="light"] .tl-card,
+[data-theme="light"] .tl-issue-card {
+  background: var(--glass-bg) !important;
+  border-color: var(--glass-border) !important;
+}
+[data-theme="light"] .tl-card:hover,
+[data-theme="light"] .tl-issue-card:hover {
+  background: var(--glass-bg-hover) !important;
+}
+/* State chips in timeline */
+[data-theme="light"] .tl-state-chip,
+[data-theme="light"] .tl-state-label {
+  color: var(--text-secondary) !important;
+  border-color: var(--border-color) !important;
+  background: rgba(99, 102, 241, 0.06) !important;
+}
+/* Stint rows inside expanded card */
+[data-theme="light"] .tl-stint-row {
+  border-bottom-color: var(--border-color);
+}
+[data-theme="light"] .tl-stint-state {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .tl-stint-duration {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .tl-stint-date {
+  color: var(--text-muted) !important;
+}
+/* Header row */
+[data-theme="light"] .tl-header-row,
+[data-theme="light"] .tl-col-header {
+  background: rgba(99, 102, 241, 0.04);
+  border-color: var(--border-color);
+}
+/* Total time */
+[data-theme="light"] .tl-total-time,
+[data-theme="light"] .tl-time-value {
+  color: var(--text-primary) !important;
+}
+
+/* Expand chevrons */
+[data-theme="light"] .tl-chevron {
+  color: var(--text-muted) !important;
+}
+[data-theme="light"] .tl-chevron:hover {
+  color: var(--text-primary) !important;
+}
+
+/* ─── Board / Kanban cards — priority backgrounds ───────────────────── */
+/* In dark mode cards are solid priority-coloured. In light mode use glass + coloured border only. */
+[data-theme="light"] .task-card.priority-high,
+[data-theme="light"] .task-card.priority-medium,
+[data-theme="light"] .task-card.priority-low,
+[data-theme="light"] .task-card.priority-critical {
+  background: var(--glass-bg) !important;
+  background-color: var(--glass-bg) !important;
+}
+[data-theme="light"] .task-card.priority-high { border-left: 3px solid var(--color-danger); }
+[data-theme="light"] .task-card.priority-medium { border-left: 3px solid var(--color-warning); }
+[data-theme="light"] .task-card.priority-low { border-left: 3px solid var(--color-success); }
+
+[data-theme="light"] .task-card .task-title {
+  color: var(--text-primary) !important;
+}
+[data-theme="light"] .task-card .task-meta {
+  color: var(--text-secondary) !important;
+}
+[data-theme="light"] .kanban-column {
+  background: rgba(255, 255, 255, 0.35);
+  border-color: var(--border-color);
+}
+[data-theme="light"] .kanban-column-header {
+  border-bottom-color: var(--border-color);
+}
+
+/* ─── End Light Theme ───────────────────────────────────────────────── */
