@@ -9010,6 +9010,66 @@ select.form-input {
   z-index: 10;
 }
 
+/* Daily / Weekly mode toggle pill */
+.pm-report-mode-toggle {
+  display: flex;
+  align-items: center;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.pm-mode-btn {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.pm-mode-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+.pm-mode-btn.active { background: rgba(99,102,241,0.2); color: #a78bfa; }
+
+/* Scope toggle (Full Report / Summary) — reuses same pill style as mode toggle */
+.pm-report-scope-toggle {
+  display: flex;
+  align-items: center;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.pm-scope-btn {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.pm-scope-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+.pm-scope-btn.active { background: rgba(99,102,241,0.2); color: #a78bfa; }
+
+/* Week range highlight — reuses .calendar-day, adds range band */
+.calendar-day.week-range { background: rgba(99,102,241,0.12); border-radius: 0; }
+.calendar-day.week-range-start { border-radius: 4px 0 0 4px; }
+.calendar-day.week-range-end { border-radius: 0 4px 4px 0; }
+
+[data-theme="light"] .pm-mode-btn.active { background: rgba(99,102,241,0.12); color: #6366f1; }
+[data-theme="light"] .pm-scope-btn.active { background: rgba(99,102,241,0.12); color: #6366f1; }
+[data-theme="light"] .calendar-day.week-range { background: rgba(99,102,241,0.1); }
+[data-theme="light"] .dr-cal-dropdown { background: rgba(240, 240, 255, 0.92) !important; }
+
 .pm-daily-date-row {
   display: flex;
   align-items: center;
@@ -9171,6 +9231,9 @@ select.form-input {
   box-sizing: border-box;
   overflow: visible;
   padding: 1rem;
+  background: rgba(18, 18, 32, 0.88) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
 }
 .dr-cal-dropdown.daily-calendar {
   overflow: visible;
@@ -9355,7 +9418,29 @@ select.form-input {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
+
+.pm-history-scope-badge {
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+.pm-history-scope-badge.full {
+  background: rgba(99,102,241,0.18);
+  color: #a78bfa;
+}
+.pm-history-scope-badge.summary {
+  background: rgba(34,197,94,0.15);
+  color: #4ade80;
+}
+[data-theme="light"] .pm-history-scope-badge.full { background: rgba(99,102,241,0.12); color: #6366f1; }
+[data-theme="light"] .pm-history-scope-badge.summary { background: rgba(34,197,94,0.12); color: #16a34a; }
 
 .pm-history-counts {
   display: flex;

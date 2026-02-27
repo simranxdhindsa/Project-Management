@@ -25,10 +25,11 @@ type IssueStateLog struct {
 	MovedByMismatch          bool      `json:"moved_by_mismatch"`
 }
 
-// PMReport represents a saved daily PM report
+// PMReport represents a saved daily or weekly PM report
 type PMReport struct {
 	ID           string    `json:"id"`
 	Date         string    `json:"date"`
+	ReportType   string    `json:"report_type"` // "daily" or "weekly"
 	ReportText   string    `json:"report_text"`
 	DoneCount    int       `json:"done_count"`
 	OpenCount    int       `json:"open_count"`
@@ -209,6 +210,7 @@ func (r *ReportRepository) GetStateLogForIssue(ctx context.Context, issueID stri
 }
 
 // GetDoneIssues returns issues that moved to DEV on a specific date
+// and have NOT been moved back out of DEV since (i.e. still in DEV or beyond).
 func (r *ReportRepository) GetDoneIssues(ctx context.Context, date string) ([]IssueStateLog, error) {
 	pool := GetPool()
 
@@ -217,11 +219,56 @@ func (r *ReportRepository) GetDoneIssues(ctx context.Context, date string) ([]Is
 		       COALESCE(assignee,''), COALESCE(moved_by,''),
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
 		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
-		FROM issue_state_log
+		FROM issue_state_log isl
 		WHERE LOWER(to_state) = 'dev'
 		  AND date(transitioned_at) = $1::date
+		  AND NOT EXISTS (
+		      SELECT 1 FROM issue_state_log later
+		      WHERE later.issue_id = isl.issue_id
+		        AND LOWER(later.from_state) = 'dev'
+		        AND later.transitioned_at > isl.transitioned_at
+		  )
 		ORDER BY transitioned_at DESC
 	`, date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []IssueStateLog
+	for rows.Next() {
+		l, err := scanStateLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
+// GetDoneIssuesForWeek returns issues that moved to DEV during a Mon–Sun week,
+// sorted by assignee for easy grouping in the weekly report.
+// Excludes tickets that were subsequently moved back out of DEV (e.g. QA rejected).
+func (r *ReportRepository) GetDoneIssuesForWeek(ctx context.Context, weekStart, weekEnd string) ([]IssueStateLog, error) {
+	pool := GetPool()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, issue_id, issue_summary,
+		       COALESCE(assignee,''), COALESCE(moved_by,''),
+		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		FROM issue_state_log isl
+		WHERE LOWER(to_state) = 'dev'
+		  AND date(transitioned_at) >= $1::date
+		  AND date(transitioned_at) <= $2::date
+		  AND NOT EXISTS (
+		      SELECT 1 FROM issue_state_log later
+		      WHERE later.issue_id = isl.issue_id
+		        AND LOWER(later.from_state) = 'dev'
+		        AND later.transitioned_at > isl.transitioned_at
+		  )
+		ORDER BY assignee ASC, transitioned_at DESC
+	`, weekStart, weekEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -474,25 +521,25 @@ func (r *ReportRepository) GetAssigneeStats(ctx context.Context) ([]AssigneeStat
 	return stats, nil
 }
 
-// SavePMReport upserts a PM report by date
-func (r *ReportRepository) SavePMReport(ctx context.Context, date, reportText string, doneCount, openCount, blockedCount int) (*PMReport, error) {
+// SavePMReport upserts a PM report by date + report_type
+func (r *ReportRepository) SavePMReport(ctx context.Context, date, reportType, reportText string, doneCount, openCount, blockedCount int) (*PMReport, error) {
 	pool := GetPool()
 
 	now := time.Now()
 	var report PMReport
 
 	err := pool.QueryRow(ctx, `
-		INSERT INTO pm_reports (date, report_text, done_count, open_count, blocked_count, generated_at, updated_at)
-		VALUES ($1::date, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (date) DO UPDATE SET
+		INSERT INTO pm_reports (date, report_type, report_text, done_count, open_count, blocked_count, generated_at, updated_at)
+		VALUES ($1::date, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (date, report_type) DO UPDATE SET
 			report_text = EXCLUDED.report_text,
 			done_count = EXCLUDED.done_count,
 			open_count = EXCLUDED.open_count,
 			blocked_count = EXCLUDED.blocked_count,
 			updated_at = EXCLUDED.updated_at
-		RETURNING id, date::text, report_text, done_count, open_count, blocked_count, generated_at, updated_at
-	`, date, reportText, doneCount, openCount, blockedCount, now, now).Scan(
-		&report.ID, &report.Date, &report.ReportText,
+		RETURNING id, date::text, report_type, report_text, done_count, open_count, blocked_count, generated_at, updated_at
+	`, date, reportType, reportText, doneCount, openCount, blockedCount, now, now).Scan(
+		&report.ID, &report.Date, &report.ReportType, &report.ReportText,
 		&report.DoneCount, &report.OpenCount, &report.BlockedCount,
 		&report.GeneratedAt, &report.UpdatedAt,
 	)
@@ -502,17 +549,17 @@ func (r *ReportRepository) SavePMReport(ctx context.Context, date, reportText st
 	return &report, nil
 }
 
-// GetPMReport fetches a saved report for a specific date
+// GetPMReport fetches a saved daily report for a specific date
 func (r *ReportRepository) GetPMReport(ctx context.Context, date string) (*PMReport, error) {
 	pool := GetPool()
 
 	var report PMReport
 	err := pool.QueryRow(ctx, `
-		SELECT id, date::text, report_text, done_count, open_count, blocked_count, generated_at, updated_at
+		SELECT id, date::text, report_type, report_text, done_count, open_count, blocked_count, generated_at, updated_at
 		FROM pm_reports
-		WHERE date = $1::date
+		WHERE date = $1::date AND report_type LIKE 'daily%'
 	`, date).Scan(
-		&report.ID, &report.Date, &report.ReportText,
+		&report.ID, &report.Date, &report.ReportType, &report.ReportText,
 		&report.DoneCount, &report.OpenCount, &report.BlockedCount,
 		&report.GeneratedAt, &report.UpdatedAt,
 	)
@@ -857,15 +904,16 @@ func (r *ReportRepository) GetDismissedAlertIDs(ctx context.Context, userID stri
 	return result, nil
 }
 
-// ListPMReports returns the most recent saved reports
+// ListPMReports returns the most recent saved daily reports (both daily-full and daily-summary)
 func (r *ReportRepository) ListPMReports(ctx context.Context) ([]PMReport, error) {
 	pool := GetPool()
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, date::text, report_text, done_count, open_count, blocked_count, generated_at, updated_at
+		SELECT id, date::text, report_type, report_text, done_count, open_count, blocked_count, generated_at, updated_at
 		FROM pm_reports
-		ORDER BY date DESC
-		LIMIT 30
+		WHERE report_type LIKE 'daily%'
+		ORDER BY date DESC, report_type ASC
+		LIMIT 60
 	`)
 	if err != nil {
 		return nil, err
@@ -876,7 +924,38 @@ func (r *ReportRepository) ListPMReports(ctx context.Context) ([]PMReport, error
 	for rows.Next() {
 		var report PMReport
 		if err := rows.Scan(
-			&report.ID, &report.Date, &report.ReportText,
+			&report.ID, &report.Date, &report.ReportType, &report.ReportText,
+			&report.DoneCount, &report.OpenCount, &report.BlockedCount,
+			&report.GeneratedAt, &report.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		reports = append(reports, report)
+	}
+	return reports, nil
+}
+
+// ListWeeklyPMReports returns the most recent saved weekly reports (both weekly-full and weekly-summary)
+func (r *ReportRepository) ListWeeklyPMReports(ctx context.Context) ([]PMReport, error) {
+	pool := GetPool()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, date::text, report_type, report_text, done_count, open_count, blocked_count, generated_at, updated_at
+		FROM pm_reports
+		WHERE report_type LIKE 'weekly%'
+		ORDER BY date DESC, report_type ASC
+		LIMIT 40
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reports []PMReport
+	for rows.Next() {
+		var report PMReport
+		if err := rows.Scan(
+			&report.ID, &report.Date, &report.ReportType, &report.ReportText,
 			&report.DoneCount, &report.OpenCount, &report.BlockedCount,
 			&report.GeneratedAt, &report.UpdatedAt,
 		); err != nil {

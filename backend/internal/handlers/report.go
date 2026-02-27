@@ -52,7 +52,7 @@ func extractPriority(summary string) string {
 }
 
 // GeneratePMReport generates a Slack-style PM report for a given date and saves it
-// GET /api/reports/pm-report/{date}
+// GET /api/reports/pm-report/{date}?scope=full|summary
 func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUserFromContext(r)
 	if user == nil {
@@ -64,6 +64,12 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 	date := vars["date"] // YYYY-MM-DD
 	if date == "" {
 		date = time.Now().Format("2006-01-02")
+	}
+
+	// scope=summary → only done tickets; scope=full (default) → complete report
+	scope := r.URL.Query().Get("scope")
+	if scope != "summary" {
+		scope = "full"
 	}
 
 	// Parse date for display
@@ -82,139 +88,183 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 		doneIssues = nil // non-fatal
 	}
 
-	// --- 2. Open + Blocked tickets from YouTrack live ---
+	// --- 2. Open + Blocked tickets from YouTrack live (full scope only) ---
 	var openIssues []youtrack.Issue
 	var blockedIssues []youtrack.Issue
+	var ytErr error
 
-	ytClient, ytErr := h.getYouTrackClient(r.Context())
-	if ytErr == nil {
-		open, err := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
-		if err == nil {
-			openIssues = open
-		}
-		blocked, err := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
-		if err == nil {
-			blockedIssues = blocked
+	if scope == "full" {
+		var ytClient *youtrack.Client
+		ytClient, ytErr = h.getYouTrackClient(r.Context())
+		if ytErr == nil {
+			open, err := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
+			if err == nil {
+				openIssues = open
+			}
+			blocked, err := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
+			if err == nil {
+				blockedIssues = blocked
+			}
 		}
 	}
 
 	// --- 3. Build Slack-style message ---
 	var sb strings.Builder
 
-	// Done section
-	sb.WriteString(fmt.Sprintf("*Tickets Done %s:*\n", parsedDate.AddDate(0, 0, -1).Format("Mon, Jan 2")))
-	sb.WriteString("\n")
+	// Done section — always included
+	doneLabel := parsedDate.AddDate(0, 0, -1).Format("Mon, Jan 2")
+	if scope == "summary" {
+		sb.WriteString(fmt.Sprintf("*Summary — Tickets Done %s:*\n\n", doneLabel))
+	} else {
+		sb.WriteString(fmt.Sprintf("*Tickets Done %s:*\n\n", doneLabel))
+	}
+
 	if len(doneIssues) == 0 {
 		sb.WriteString("_No tickets moved to DEV yesterday_\n")
 	} else {
-		for _, issue := range doneIssues {
-			sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
-		}
-	}
-	sb.WriteString("\n\n")
-
-	// Open items grouped by priority
-	sb.WriteString("*These are the open items today:*\n")
-	sb.WriteString("\n")
-
-	if ytErr != nil {
-		sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
-	} else if len(openIssues) == 0 {
-		sb.WriteString("_No open items_\n")
-	} else {
-		// Group by priority
-		priorityGroups := map[string][]youtrack.Issue{
-			"P0":    {},
-			"P1":    {},
-			"P2":    {},
-			"P3":    {},
-			"Other": {},
-		}
-		priorityOrder := []string{"P0", "P1", "P2", "P3", "Other"}
-
-		for _, issue := range openIssues {
-			p := extractPriority(issue.Summary)
-			priorityGroups[p] = append(priorityGroups[p], issue)
-		}
-
-		for _, p := range priorityOrder {
-			issues := priorityGroups[p]
-			if len(issues) == 0 {
-				continue
+		if scope == "summary" {
+			// Group by assignee for summary view
+			type assigneeGroup struct {
+				name   string
+				issues []database.IssueStateLog
 			}
-			label := p
-			if p == "Other" {
-				label = "Other Issues"
-			}
-			sb.WriteString(fmt.Sprintf("*%s:*\n", label))
-			for _, issue := range issues {
-				sb.WriteString(fmt.Sprintf("• %s %s\n", issue.ID, issue.Summary))
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	// Blocked section
-	sb.WriteString("*Blocked:*\n")
-	sb.WriteString("\n")
-	if len(blockedIssues) == 0 {
-		sb.WriteString("_No blocked tickets_\n")
-	} else {
-		for _, issue := range blockedIssues {
-			assignee := ""
-			if u := youtrack.GetAssignee(issue); u != nil {
-				assignee = u.FullName
-				if assignee == "" {
-					assignee = u.Login
+			var groups []assigneeGroup
+			assigneeIdx := map[string]int{}
+			for _, issue := range doneIssues {
+				name := issue.Assignee
+				if name == "" {
+					name = "Unassigned"
+				}
+				if idx, ok := assigneeIdx[name]; ok {
+					groups[idx].issues = append(groups[idx].issues, issue)
+				} else {
+					assigneeIdx[name] = len(groups)
+					groups = append(groups, assigneeGroup{name: name, issues: []database.IssueStateLog{issue}})
 				}
 			}
-			line := fmt.Sprintf("• %s %s", issue.ID, issue.Summary)
-			if assignee != "" {
-				line += fmt.Sprintf(" (Assignee: %s)", assignee)
+			for i, g := range groups {
+				if i > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(fmt.Sprintf("@%s\n", g.name))
+				for _, issue := range g.issues {
+					sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+				}
 			}
-			sb.WriteString(line + "\n")
+		} else {
+			for _, issue := range doneIssues {
+				sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+			}
 		}
 	}
-	sb.WriteString("\n\n")
 
-	// --- Delayed / Overdue tickets section ---
-	sb.WriteString("*Tickets Getting Delayed:*\n")
-	sb.WriteString("\n")
-	delayedIssues, delayErr := h.reportRepo.GetDelayedIssues(r.Context())
-	if delayErr != nil || len(delayedIssues) == 0 {
-		sb.WriteString("_No overdue tickets in progress_\n")
-	} else {
-		for _, t := range delayedIssues {
-			// Format: • ARD-628 FE Studio: mic issue (Assignee: simranjot | In Progress: 4d 2h | Stints: 2 | Threshold: 24h)
-			days := int(t.TotalHours) / 24
-			hours := int(t.TotalHours) % 24
-			durationStr := ""
-			if days > 0 {
-				durationStr = fmt.Sprintf("%dd %dh", days, hours)
-			} else {
-				durationStr = fmt.Sprintf("%dh", int(t.TotalHours))
+	// Full report sections (skipped in summary mode)
+	if scope == "full" {
+		sb.WriteString("\n\n")
+
+		// Open items grouped by priority
+		sb.WriteString("*These are the open items today:*\n")
+		sb.WriteString("\n")
+
+		if ytErr != nil {
+			sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
+		} else if len(openIssues) == 0 {
+			sb.WriteString("_No open items_\n")
+		} else {
+			// Group by priority
+			priorityGroups := map[string][]youtrack.Issue{
+				"P0":    {},
+				"P1":    {},
+				"P2":    {},
+				"P3":    {},
+				"Other": {},
 			}
-			line := fmt.Sprintf("• %s %s", t.IssueID, t.IssueSummary)
-			meta := fmt.Sprintf("In Progress: %s | Threshold: %.0fh", durationStr, t.ThresholdHours)
-			if t.Assignee != "" {
-				meta = fmt.Sprintf("Assignee: %s | %s", t.Assignee, meta)
+			priorityOrder := []string{"P0", "P1", "P2", "P3", "Other"}
+
+			for _, issue := range openIssues {
+				p := extractPriority(issue.Summary)
+				priorityGroups[p] = append(priorityGroups[p], issue)
 			}
-			if t.MovedBackCount > 0 {
-				meta += fmt.Sprintf(" | Moved Back: %dx", t.MovedBackCount)
+
+			for _, p := range priorityOrder {
+				issues := priorityGroups[p]
+				if len(issues) == 0 {
+					continue
+				}
+				label := p
+				if p == "Other" {
+					label = "Other Issues"
+				}
+				sb.WriteString(fmt.Sprintf("*%s:*\n", label))
+				for _, issue := range issues {
+					sb.WriteString(fmt.Sprintf("• %s %s\n", issue.ID, issue.Summary))
+				}
+				sb.WriteString("\n")
 			}
-			if t.TotalStints > 1 {
-				meta += fmt.Sprintf(" | Stints: %d", t.TotalStints)
+		}
+
+		// Blocked section
+		sb.WriteString("*Blocked:*\n")
+		sb.WriteString("\n")
+		if len(blockedIssues) == 0 {
+			sb.WriteString("_No blocked tickets_\n")
+		} else {
+			for _, issue := range blockedIssues {
+				assignee := ""
+				if u := youtrack.GetAssignee(issue); u != nil {
+					assignee = u.FullName
+					if assignee == "" {
+						assignee = u.Login
+					}
+				}
+				line := fmt.Sprintf("• %s %s", issue.ID, issue.Summary)
+				if assignee != "" {
+					line += fmt.Sprintf(" (Assignee: %s)", assignee)
+				}
+				sb.WriteString(line + "\n")
 			}
-			sb.WriteString(line + "\n")
-			sb.WriteString(fmt.Sprintf("  _%s_\n", meta))
+		}
+		sb.WriteString("\n\n")
+
+		// --- Delayed / Overdue tickets section ---
+		sb.WriteString("*Tickets Getting Delayed:*\n")
+		sb.WriteString("\n")
+		delayedIssues, delayErr := h.reportRepo.GetDelayedIssues(r.Context())
+		if delayErr != nil || len(delayedIssues) == 0 {
+			sb.WriteString("_No overdue tickets in progress_\n")
+		} else {
+			for _, t := range delayedIssues {
+				days := int(t.TotalHours) / 24
+				hours := int(t.TotalHours) % 24
+				durationStr := ""
+				if days > 0 {
+					durationStr = fmt.Sprintf("%dd %dh", days, hours)
+				} else {
+					durationStr = fmt.Sprintf("%dh", int(t.TotalHours))
+				}
+				line := fmt.Sprintf("• %s %s", t.IssueID, t.IssueSummary)
+				meta := fmt.Sprintf("In Progress: %s | Threshold: %.0fh", durationStr, t.ThresholdHours)
+				if t.Assignee != "" {
+					meta = fmt.Sprintf("Assignee: %s | %s", t.Assignee, meta)
+				}
+				if t.MovedBackCount > 0 {
+					meta += fmt.Sprintf(" | Moved Back: %dx", t.MovedBackCount)
+				}
+				if t.TotalStints > 1 {
+					meta += fmt.Sprintf(" | Stints: %d", t.TotalStints)
+				}
+				sb.WriteString(line + "\n")
+				sb.WriteString(fmt.Sprintf("  _%s_\n", meta))
+			}
 		}
 	}
 
 	reportText := sb.String()
 
-	// --- 4. Save report ---
+	// --- 4. Save report — type encodes both period and scope ---
+	reportType := "daily-" + scope // "daily-full" or "daily-summary"
 	savedReport, err := h.reportRepo.SavePMReport(
-		r.Context(), date, reportText,
+		r.Context(), date, reportType, reportText,
 		len(doneIssues), len(openIssues), len(blockedIssues),
 	)
 	if err != nil {
@@ -932,6 +982,252 @@ func (h *ReportHandler) ReconcileStateLog(w http.ResponseWriter, r *http.Request
 			"checked":    len(activeLogs),
 		},
 	})
+}
+
+// GenerateWeeklyPMReport generates a weekly Slack-style PM report for a Mon–Sun week.
+// GET /api/reports/pm-report/weekly/{weekStart}?scope=full|summary
+func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	// scope=summary → only done tickets grouped by assignee; scope=full (default) → complete report
+	scope := r.URL.Query().Get("scope")
+	if scope != "summary" {
+		scope = "full"
+	}
+
+	vars := mux.Vars(r)
+	weekStartStr := vars["weekStart"] // YYYY-MM-DD
+
+	monday, err := time.Parse("2006-01-02", weekStartStr)
+	if err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Invalid weekStart (use YYYY-MM-DD Monday)"})
+		return
+	}
+
+	// Snap to Monday of that week in case a non-Monday date was passed
+	if monday.Weekday() != time.Monday {
+		diff := int(monday.Weekday())
+		if diff == 0 {
+			diff = 7
+		}
+		monday = monday.AddDate(0, 0, 1-diff)
+	}
+
+	sunday := monday.AddDate(0, 0, 6)
+	weekStartDate := monday.Format("2006-01-02")
+	weekEndDate := sunday.Format("2006-01-02")
+
+	// --- 1. Done tickets for the full week ---
+	doneIssues, err := h.reportRepo.GetDoneIssuesForWeek(r.Context(), weekStartDate, weekEndDate)
+	if err != nil {
+		doneIssues = nil
+	}
+
+	// --- 2. Open + Blocked tickets from YouTrack live (full scope only) ---
+	var openIssues []youtrack.Issue
+	var blockedIssues []youtrack.Issue
+	var ytErr error
+
+	if scope == "full" {
+		var ytClient *youtrack.Client
+		ytClient, ytErr = h.getYouTrackClient(r.Context())
+		if ytErr == nil {
+			open, err := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
+			if err == nil {
+				openIssues = open
+			}
+			blocked, err := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
+			if err == nil {
+				blockedIssues = blocked
+			}
+		}
+	}
+
+	// --- 3. Build Slack-style weekly message ---
+	var sb strings.Builder
+
+	weekLabel := fmt.Sprintf("Mon %s – Sun %s", monday.Format("Jan 2"), sunday.Format("Jan 2"))
+	if scope == "summary" {
+		sb.WriteString(fmt.Sprintf("*Summary — Tickets Done This Week (%s):*\n\n", weekLabel))
+	} else {
+		sb.WriteString(fmt.Sprintf("*Tickets Done This Week (%s):*\n\n", weekLabel))
+	}
+
+	if len(doneIssues) == 0 {
+		sb.WriteString("_No tickets moved to DEV this week_\n")
+	} else {
+		// Always group by assignee for weekly (summary or full)
+		currentAssignee := ""
+		for _, issue := range doneIssues {
+			name := issue.Assignee
+			if name == "" {
+				name = "Unassigned"
+			}
+			if name != currentAssignee {
+				if currentAssignee != "" {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(fmt.Sprintf("@%s\n", name))
+				currentAssignee = name
+			}
+			sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+		}
+	}
+
+	// Full report sections (skipped in summary mode)
+	if scope == "full" {
+		sb.WriteString("\n\n")
+
+		// Open items grouped by priority — identical to daily report
+		sb.WriteString("*These are the open items:*\n\n")
+		if ytErr != nil {
+			sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
+		} else if len(openIssues) == 0 {
+			sb.WriteString("_No open items_\n")
+		} else {
+			priorityGroups := map[string][]youtrack.Issue{
+				"P0": {}, "P1": {}, "P2": {}, "P3": {}, "Other": {},
+			}
+			priorityOrder := []string{"P0", "P1", "P2", "P3", "Other"}
+			for _, issue := range openIssues {
+				p := extractPriority(issue.Summary)
+				priorityGroups[p] = append(priorityGroups[p], issue)
+			}
+			for _, p := range priorityOrder {
+				issues := priorityGroups[p]
+				if len(issues) == 0 {
+					continue
+				}
+				label := p
+				if p == "Other" {
+					label = "Other Issues"
+				}
+				sb.WriteString(fmt.Sprintf("*%s:*\n", label))
+				for _, issue := range issues {
+					sb.WriteString(fmt.Sprintf("• %s %s\n", issue.ID, issue.Summary))
+				}
+				sb.WriteString("\n")
+			}
+		}
+
+		// Blocked section — identical to daily report
+		sb.WriteString("*Blocked:*\n\n")
+		if len(blockedIssues) == 0 {
+			sb.WriteString("_No blocked tickets_\n")
+		} else {
+			for _, issue := range blockedIssues {
+				assignee := ""
+				if u := youtrack.GetAssignee(issue); u != nil {
+					assignee = u.FullName
+					if assignee == "" {
+						assignee = u.Login
+					}
+				}
+				line := fmt.Sprintf("• %s %s", issue.ID, issue.Summary)
+				if assignee != "" {
+					line += fmt.Sprintf(" (Assignee: %s)", assignee)
+				}
+				sb.WriteString(line + "\n")
+			}
+		}
+		sb.WriteString("\n\n")
+
+		// Delayed section — identical to daily report
+		sb.WriteString("*Tickets Getting Delayed:*\n\n")
+		delayedIssues, delayErr := h.reportRepo.GetDelayedIssues(r.Context())
+		if delayErr != nil || len(delayedIssues) == 0 {
+			sb.WriteString("_No overdue tickets in progress_\n")
+		} else {
+			for _, t := range delayedIssues {
+				days := int(t.TotalHours) / 24
+				hours := int(t.TotalHours) % 24
+				durationStr := ""
+				if days > 0 {
+					durationStr = fmt.Sprintf("%dd %dh", days, hours)
+				} else {
+					durationStr = fmt.Sprintf("%dh", int(t.TotalHours))
+				}
+				line := fmt.Sprintf("• %s %s", t.IssueID, t.IssueSummary)
+				meta := fmt.Sprintf("In Progress: %s | Threshold: %.0fh", durationStr, t.ThresholdHours)
+				if t.Assignee != "" {
+					meta = fmt.Sprintf("Assignee: %s | %s", t.Assignee, meta)
+				}
+				if t.MovedBackCount > 0 {
+					meta += fmt.Sprintf(" | Moved Back: %dx", t.MovedBackCount)
+				}
+				if t.TotalStints > 1 {
+					meta += fmt.Sprintf(" | Stints: %d", t.TotalStints)
+				}
+				sb.WriteString(line + "\n")
+				sb.WriteString(fmt.Sprintf("  _%s_\n", meta))
+			}
+		}
+	}
+
+	reportText := sb.String()
+
+	// --- 4. Save — type encodes both period and scope ---
+	weeklyReportType := "weekly-" + scope // "weekly-full" or "weekly-summary"
+	savedReport, err := h.reportRepo.SavePMReport(
+		r.Context(), weekStartDate, weeklyReportType, reportText,
+		len(doneIssues), len(openIssues), len(blockedIssues),
+	)
+	if err != nil {
+		sendJSON(w, http.StatusOK, Response{
+			Success: true,
+			Data: map[string]interface{}{
+				"report_text":   reportText,
+				"done_count":    len(doneIssues),
+				"open_count":    len(openIssues),
+				"blocked_count": len(blockedIssues),
+				"date":          weekStartDate,
+				"report_type":   weeklyReportType,
+				"saved":         false,
+			},
+		})
+		return
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data: map[string]interface{}{
+			"id":            savedReport.ID,
+			"report_text":   savedReport.ReportText,
+			"report_type":   savedReport.ReportType,
+			"done_count":    savedReport.DoneCount,
+			"open_count":    savedReport.OpenCount,
+			"blocked_count": savedReport.BlockedCount,
+			"date":          savedReport.Date,
+			"generated_at":  savedReport.GeneratedAt,
+			"saved":         true,
+		},
+	})
+}
+
+// ListWeeklyReports returns all saved weekly PM reports
+// GET /api/reports/pm-reports/weekly
+func (h *ReportHandler) ListWeeklyReports(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	reports, err := h.reportRepo.ListWeeklyPMReports(r.Context())
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to list weekly reports: " + err.Error()})
+		return
+	}
+
+	if reports == nil {
+		reports = []database.PMReport{}
+	}
+
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: reports})
 }
 
 // ResetStateLog deletes all rows from issue_state_log so tracking starts fresh.

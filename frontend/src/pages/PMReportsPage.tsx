@@ -24,6 +24,7 @@ interface ChatMessage {
 interface PMReport {
   id: string
   date: string
+  report_type?: string  // e.g. "daily-full", "daily-summary", "weekly-full", "weekly-summary"
   report_text: string
   done_count: number
   open_count: number
@@ -101,7 +102,7 @@ function toISODate(d: Date): string {
 
 const TABS = [
   { id: 'tracking', label: 'Tracking', icon: Activity },
-  { id: 'daily', label: 'Daily Report', icon: FileText },
+  { id: 'daily', label: 'Reports', icon: FileText },
   { id: 'assignees', label: 'Assignee Stats', icon: Users },
   { id: 'dailyops', label: 'Daily Ops', icon: Zap },
 ] as const
@@ -383,10 +384,38 @@ function drFormatDisplay(dateStr: string) {
   return `${String(d).padStart(2,'0')}-${String(m).padStart(2,'0')}-${y}`
 }
 
+function getMondayOfWeek(d: Date): string {
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  const monday = new Date(d)
+  monday.setDate(d.getDate() + diff)
+  return monday.toISOString().slice(0, 10)
+}
+
+function getWeekEnd(mondayStr: string): string {
+  const monday = new Date(mondayStr + 'T00:00:00')
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  return sunday.toISOString().slice(0, 10)
+}
+
+function formatWeekLabel(mondayStr: string): string {
+  const monday = new Date(mondayStr + 'T00:00:00')
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  const mo = monday.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
+  const su = sunday.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
+  return `${mo} – ${su}`
+}
+
 function DailyReportTab() {
+  const [mode, setMode] = useState<'daily' | 'weekly'>('daily')
+  const [reportScope, setReportScope] = useState<'full' | 'summary'>('full')
   const [date, setDate] = useState(todayStr())
+  const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(new Date()))
   const [report, setReport] = useState<PMReport | null>(null)
   const [history, setHistory] = useState<PMReport[]>([])
+  const [weekHistory, setWeekHistory] = useState<PMReport[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -409,6 +438,12 @@ function DailyReportTab() {
 
   function drSelectDate(d: string) {
     setDate(d)
+    setReport(null)
+    setCalOpen(false)
+  }
+
+  function drSelectWeek(ds: string) {
+    setWeekStart(getMondayOfWeek(new Date(ds + 'T00:00:00')))
     setReport(null)
     setCalOpen(false)
   }
@@ -449,17 +484,35 @@ function DailyReportTab() {
     }
   }, [])
 
+  const fetchWeeklyHistory = useCallback(async () => {
+    setLoadingHistory(true)
+    try {
+      const res = await api.listWeeklyPMReports()
+      setWeekHistory(res.data || [])
+    } catch {
+      // non-fatal
+    } finally {
+      setLoadingHistory(false)
+    }
+  }, [])
+
   useEffect(() => {
     fetchHistory()
   }, [fetchHistory])
+
+  useEffect(() => {
+    if (mode === 'weekly') fetchWeeklyHistory()
+  }, [mode, fetchWeeklyHistory])
 
   const generateReport = async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.generatePMReport(date)
+      const res = mode === 'daily'
+        ? await api.generatePMReport(date, reportScope)
+        : await api.generateWeeklyPMReport(weekStart, reportScope)
       setReport(res.data)
-      fetchHistory()
+      mode === 'daily' ? fetchHistory() : fetchWeeklyHistory()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate report')
     } finally {
@@ -475,7 +528,15 @@ function DailyReportTab() {
   }
 
   const loadHistoricReport = async (r: PMReport) => {
-    setDate(r.date)
+    const rt = r.report_type ?? ''
+    if (rt.startsWith('weekly')) {
+      setWeekStart(r.date)
+      setMode('weekly')
+    } else {
+      setDate(r.date)
+      setMode('daily')
+    }
+    setReportScope(rt.includes('summary') ? 'summary' : 'full')
     setReport(r)
   }
 
@@ -505,11 +566,31 @@ function DailyReportTab() {
         {/* Left: Report Viewer */}
         <div className="pm-daily-main glass-card">
           <div className="pm-daily-toolbar">
+            <div className="pm-report-mode-toggle">
+              <button
+                className={`pm-mode-btn ${mode === 'daily' ? 'active' : ''}`}
+                onClick={() => { setMode('daily'); setReport(null) }}
+              >Daily</button>
+              <button
+                className={`pm-mode-btn ${mode === 'weekly' ? 'active' : ''}`}
+                onClick={() => { setMode('weekly'); setReport(null) }}
+              >Weekly</button>
+            </div>
+            <div className="pm-report-scope-toggle">
+              <button
+                className={`pm-scope-btn ${reportScope === 'full' ? 'active' : ''}`}
+                onClick={() => { setReportScope('full'); setReport(null) }}
+              >Full Report</button>
+              <button
+                className={`pm-scope-btn ${reportScope === 'summary' ? 'active' : ''}`}
+                onClick={() => { setReportScope('summary'); setReport(null) }}
+              >Summary</button>
+            </div>
             <div className="pm-daily-date-row">
               <div className="dr-cal-wrap" ref={calRef}>
                 <button className="dr-cal-trigger" onClick={() => setCalOpen(o => !o)}>
                   <Calendar size={14} />
-                  {drFormatDisplay(date)}
+                  {mode === 'daily' ? drFormatDisplay(date) : formatWeekLabel(weekStart)}
                   <ChevronDown size={13} style={{ marginLeft: '0.15rem', opacity: 0.6 }} />
                 </button>
                 {calOpen && (
@@ -539,12 +620,16 @@ function DailyReportTab() {
                           const day = i + 1
                           const ds = `${calDate.getFullYear()}-${String(calDate.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
                           const isFuture = ds > drTodayStr
+                          const weekEnd = getWeekEnd(weekStart)
+                          const isInWeek = mode === 'weekly' && ds >= weekStart && ds <= weekEnd
+                          const isWeekStart = mode === 'weekly' && ds === weekStart
+                          const isWeekEnd = mode === 'weekly' && ds === weekEnd
                           return (
                             <button
                               key={day}
-                              className={`calendar-day ${ds === date ? 'selected' : ''} ${ds === drTodayStr ? 'today' : ''} ${isFuture ? 'empty' : ''}`}
+                              className={`calendar-day ${mode === 'daily' && ds === date ? 'selected' : ''} ${ds === drTodayStr ? 'today' : ''} ${isFuture ? 'empty' : ''} ${isInWeek ? 'week-range' : ''} ${isWeekStart ? 'week-range-start' : ''} ${isWeekEnd ? 'week-range-end' : ''}`}
                               disabled={isFuture}
-                              onClick={() => !isFuture && drSelectDate(ds)}
+                              onClick={() => !isFuture && (mode === 'daily' ? drSelectDate(ds) : drSelectWeek(ds))}
                             >
                               {day}
                             </button>
@@ -554,10 +639,13 @@ function DailyReportTab() {
                     </div>
                     <button
                       className="btn btn-ghost btn-sm calendar-today-btn"
-                      onClick={() => { drSelectDate(drTodayStr); setCalDate(new Date()) }}
+                      onClick={() => {
+                        if (mode === 'daily') { drSelectDate(drTodayStr); setCalDate(new Date()) }
+                        else { drSelectWeek(drTodayStr); setCalDate(new Date()) }
+                      }}
                     >
                       <Calendar size={14} />
-                      Today
+                      {mode === 'daily' ? 'Today' : 'This Week'}
                     </button>
                   </div>
                 )}
@@ -585,8 +673,8 @@ function DailyReportTab() {
               </div>
             )}
 
-            {/* Carry-over checklist — shown at top when viewing today */}
-            {date === todayStr() && carryoverItems.length > 0 && (
+            {/* Carry-over checklist — shown at top when viewing today in daily mode */}
+            {mode === 'daily' && date === todayStr() && carryoverItems.length > 0 && (
               <div className="pm-carryover-block">
                 <div className="pm-carryover-header">
                   <Pin size={13} />
@@ -626,7 +714,9 @@ function DailyReportTab() {
                     <span className="chip-num">{report.blocked_count}</span> Blocked
                   </div>
                   <span className="pm-report-date-label">
-                    {new Date(report.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                    {report.report_type === 'weekly'
+                      ? `Week of ${formatWeekLabel(report.date)}`
+                      : new Date(report.date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                   </span>
                 </div>
                 <div className="pm-report-body">
@@ -636,7 +726,10 @@ function DailyReportTab() {
             ) : (
               <div className="pm-report-empty">
                 <FileText size={40} />
-                <p>Select a date and click <strong>Generate Report</strong> to create today's Slack-style PM report.</p>
+                {mode === 'daily'
+                  ? <p>Select a date and click <strong>Generate Report</strong> to create today's Slack-style PM report.</p>
+                  : <p>Select a week and click <strong>Generate Report</strong> to create a weekly PM report.</p>
+                }
               </div>
             )}
           </div>
@@ -645,19 +738,24 @@ function DailyReportTab() {
         {/* Right: History Sidebar */}
         <div className="pm-daily-sidebar glass-card">
           <div className="pm-sidebar-header">
-            <h4>Report History</h4>
-            <button className="pm-sidebar-refresh" onClick={fetchHistory} disabled={loadingHistory}>
+            <h4>{mode === 'daily' ? 'Report History' : 'Weekly History'}</h4>
+            <button className="pm-sidebar-refresh" onClick={mode === 'daily' ? fetchHistory : fetchWeeklyHistory} disabled={loadingHistory}>
               {loadingHistory ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             </button>
           </div>
           <div className="pm-history-list">
-            {history.length === 0 && !loadingHistory && (
+            {(mode === 'daily' ? history : weekHistory).length === 0 && !loadingHistory && (
               <p className="pm-history-empty">No saved reports yet.</p>
             )}
-            {history.map(r => (
+            {(mode === 'daily' ? history : weekHistory).map(r => (
               <div key={r.id} className={`pm-history-item ${report?.id === r.id ? 'active' : ''}`}>
                 <button className="pm-history-item-btn" onClick={() => loadHistoricReport(r)}>
-                  <div className="pm-history-date">{r.date}</div>
+                  <div className="pm-history-date">
+                    {mode === 'weekly' ? formatWeekLabel(r.date) : r.date}
+                    <span className={`pm-history-scope-badge ${r.report_type?.includes('summary') ? 'summary' : 'full'}`}>
+                      {r.report_type?.includes('summary') ? 'Summary' : 'Full'}
+                    </span>
+                  </div>
                   <div className="pm-history-counts">
                     <span className="hc done">{r.done_count} done</span>
                     <span className="hc blocked">{r.blocked_count} blocked</span>
@@ -672,7 +770,8 @@ function DailyReportTab() {
                         onClick={async (e) => {
                           e.stopPropagation()
                           await api.deletePMReport(r.id)
-                          setHistory(prev => prev.filter(h => h.id !== r.id))
+                          if (mode === 'daily') setHistory(prev => prev.filter(h => h.id !== r.id))
+                          else setWeekHistory(prev => prev.filter(h => h.id !== r.id))
                           if (report?.id === r.id) setReport(null)
                           setConfirmDeleteId(null)
                         }}

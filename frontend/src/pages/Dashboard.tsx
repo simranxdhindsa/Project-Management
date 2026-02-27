@@ -580,13 +580,6 @@ export default function Dashboard() {
                 <span>Daily Status</span>
               </button>
               <button
-                className={`sidebar-nav-item ${currentPage === 'reports' ? 'active' : ''}`}
-                onClick={() => setCurrentPage('reports')}
-              >
-                <BarChart3 size={20} />
-                <span>Reports</span>
-              </button>
-              <button
                 className={`sidebar-nav-item ${currentPage === 'pm-reports' ? 'active' : ''}`}
                 onClick={() => setCurrentPage('pm-reports')}
               >
@@ -682,8 +675,7 @@ export default function Dashboard() {
             {currentPage === 'daily-tasks' && 'Daily Task List'}
             {currentPage === 'calendar' && 'Calendar'}
             {currentPage === 'ai-analysis' && 'AI Task Analysis'}
-            {currentPage === 'reports' && 'Reports'}
-            {currentPage === 'pm-reports' && 'PM Reports'}
+            {currentPage === 'pm-reports' && 'Reports'}
             {currentPage === 'team' && 'Team Management'}
             {currentPage === 'bots' && 'Bot Configuration'}
             {currentPage === 'settings' && 'Access Control'}
@@ -1236,15 +1228,6 @@ export default function Dashboard() {
             <Calendar size={48} />
             <h2>Calendar View</h2>
             <p>Calendar view with task scheduling coming soon!</p>
-          </div>
-        )}
-
-        {/* Reports Placeholder */}
-        {currentPage === 'reports' && (
-          <div className="coming-soon">
-            <BarChart3 size={48} />
-            <h2>Reports</h2>
-            <p>Team productivity reports and analytics coming soon!</p>
           </div>
         )}
 

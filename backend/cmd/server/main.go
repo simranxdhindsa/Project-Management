@@ -258,6 +258,8 @@ func main() {
 	// Reports routes (protected)
 	reportRoutes := api.PathPrefix("/reports").Subrouter()
 	reportRoutes.Use(middleware.AuthMiddleware)
+	reportRoutes.HandleFunc("/pm-report/weekly/{weekStart}", reportHandler.GenerateWeeklyPMReport).Methods("GET")
+	reportRoutes.HandleFunc("/pm-reports/weekly", reportHandler.ListWeeklyReports).Methods("GET")
 	reportRoutes.HandleFunc("/pm-report/{date}/saved", reportHandler.GetSavedReport).Methods("GET")
 	reportRoutes.HandleFunc("/pm-report/{date}", reportHandler.GeneratePMReport).Methods("GET")
 	reportRoutes.HandleFunc("/pm-reports", reportHandler.ListReports).Methods("GET")

@@ -938,8 +938,8 @@ class ApiService {
   }
 
   // PM Report endpoints
-  async generatePMReport(date: string) {
-    return this.request<PMReport>(`/reports/pm-report/${date}`)
+  async generatePMReport(date: string, scope: 'full' | 'summary' = 'full') {
+    return this.request<PMReport>(`/reports/pm-report/${date}?scope=${scope}`)
   }
 
   async getSavedPMReport(date: string) {
@@ -947,11 +947,19 @@ class ApiService {
   }
 
   async listPMReports() {
-    return this.request<PMReportSummary[]>('/reports/pm-reports')
+    return this.request<PMReport[]>('/reports/pm-reports')
   }
 
   async deletePMReport(id: string) {
     return this.request<{ message: string }>(`/reports/pm-report/${id}/delete`, { method: 'DELETE' })
+  }
+
+  async generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full') {
+    return this.request<PMReport>(`/reports/pm-report/weekly/${weekStart}?scope=${scope}`)
+  }
+
+  async listWeeklyPMReports() {
+    return this.request<PMReport[]>('/reports/pm-reports/weekly')
   }
 
   async getAssigneeStats() {
@@ -1400,6 +1408,7 @@ export interface UpdateBotConfigRequest {
 export interface PMReport {
   id: string
   date: string
+  report_type?: 'daily' | 'weekly'
   report_text: string
   done_count: number
   open_count: number
