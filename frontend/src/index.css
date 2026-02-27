@@ -9213,6 +9213,8 @@ select.form-input {
   font-size: 0.85rem;
 }
 
+.pm-scope-hint { font-size: 0.8rem; color: var(--text-tertiary, var(--text-secondary)); opacity: 0.8; }
+
 /* Daily Report — calendar dropdown trigger */
 .dr-cal-wrap { position: relative; }
 .dr-cal-trigger {

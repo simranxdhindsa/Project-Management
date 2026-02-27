@@ -527,17 +527,43 @@ function DailyReportTab() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const loadHistoricReport = async (r: PMReport) => {
+  const loadHistoricReport = (r: PMReport) => {
     const rt = r.report_type ?? ''
-    if (rt.startsWith('weekly')) {
+    const isWeekly = rt.startsWith('weekly')
+    if (isWeekly) {
       setWeekStart(r.date)
       setMode('weekly')
     } else {
       setDate(r.date)
       setMode('daily')
     }
-    setReportScope(rt.includes('summary') ? 'summary' : 'full')
-    setReport(r)
+
+    // Prefer full report — if user clicked summary but full exists for same date, load full instead
+    const pool = isWeekly ? weekHistory : history
+    const prefix = isWeekly ? 'weekly' : 'daily'
+    const fullVersion = pool.find(h => h.date === r.date && h.report_type === `${prefix}-full`)
+    const summaryVersion = pool.find(h => h.date === r.date && h.report_type === `${prefix}-summary`)
+    const toLoad = fullVersion ?? summaryVersion ?? r
+    setReportScope(toLoad.report_type?.includes('summary') ? 'summary' : 'full')
+    setReport(toLoad)
+  }
+
+  // Switch scope using already-saved reports — never regenerates
+  const switchScope = (newScope: 'full' | 'summary') => {
+    if (newScope === reportScope) return
+    if (!report) { setReportScope(newScope); return }
+    const rt = report.report_type ?? ''
+    const isWeekly = rt.startsWith('weekly')
+    const pool = isWeekly ? weekHistory : history
+    const prefix = isWeekly ? 'weekly' : 'daily'
+    const target = pool.find(h => h.date === report.date && h.report_type === `${prefix}-${newScope}`)
+    setReportScope(newScope)
+    if (target) {
+      setReport(target)
+    } else {
+      // Show placeholder — user can generate this scope if desired
+      setReport(null)
+    }
   }
 
   // Format the slack-style report text for display
@@ -577,14 +603,25 @@ function DailyReportTab() {
               >Weekly</button>
             </div>
             <div className="pm-report-scope-toggle">
-              <button
-                className={`pm-scope-btn ${reportScope === 'full' ? 'active' : ''}`}
-                onClick={() => { setReportScope('full'); setReport(null) }}
-              >Full Report</button>
-              <button
-                className={`pm-scope-btn ${reportScope === 'summary' ? 'active' : ''}`}
-                onClick={() => { setReportScope('summary'); setReport(null) }}
-              >Summary</button>
+              {(() => {
+                const pool = mode === 'weekly' ? weekHistory : history
+                const prefix = mode === 'weekly' ? 'weekly' : 'daily'
+                const activeDate = mode === 'weekly' ? weekStart : date
+                const hasFullSaved = pool.some(h => h.date === activeDate && h.report_type === `${prefix}-full`)
+                const hasSummarySaved = pool.some(h => h.date === activeDate && h.report_type === `${prefix}-summary`)
+                return (
+                  <>
+                    <button
+                      className={`pm-scope-btn ${reportScope === 'full' ? 'active' : ''}`}
+                      onClick={() => report ? switchScope('full') : setReportScope('full')}
+                    >Full Report</button>
+                    <button
+                      className={`pm-scope-btn ${reportScope === 'summary' ? 'active' : ''}`}
+                      onClick={() => report ? switchScope('summary') : setReportScope('summary')}
+                    >Summary</button>
+                  </>
+                )
+              })()}
             </div>
             <div className="pm-daily-date-row">
               <div className="dr-cal-wrap" ref={calRef}>
@@ -723,15 +760,36 @@ function DailyReportTab() {
                   {renderReportText(report.report_text)}
                 </div>
               </div>
-            ) : (
-              <div className="pm-report-empty">
-                <FileText size={40} />
-                {mode === 'daily'
-                  ? <p>Select a date and click <strong>Generate Report</strong> to create today's Slack-style PM report.</p>
-                  : <p>Select a week and click <strong>Generate Report</strong> to create a weekly PM report.</p>
-                }
-              </div>
-            )}
+            ) : (() => {
+              const pool = mode === 'weekly' ? weekHistory : history
+              const activeDate = mode === 'weekly' ? weekStart : date
+              const prefix = mode === 'weekly' ? 'weekly' : 'daily'
+              const hasAnyForDate = pool.some(h => h.date === activeDate)
+              const hasSiblingScope = pool.some(h => h.date === activeDate && h.report_type === `${prefix}-${reportScope === 'full' ? 'summary' : 'full'}`)
+              if (hasAnyForDate) {
+                return (
+                  <div className="pm-report-empty pm-report-scope-missing">
+                    <FileText size={40} />
+                    <p>No <strong>{reportScope === 'full' ? 'full' : 'summary'} report</strong> generated for this {mode === 'weekly' ? 'week' : 'date'}.</p>
+                    {hasSiblingScope && (
+                      <p className="pm-scope-hint">Switch to <strong>{reportScope === 'full' ? 'Summary' : 'Full Report'}</strong> to view the saved version, or click <strong>Generate Report</strong> to create this one.</p>
+                    )}
+                    {!hasSiblingScope && (
+                      <p className="pm-scope-hint">Click <strong>Generate Report</strong> to create it.</p>
+                    )}
+                  </div>
+                )
+              }
+              return (
+                <div className="pm-report-empty">
+                  <FileText size={40} />
+                  {mode === 'daily'
+                    ? <p>Select a date and click <strong>Generate Report</strong> to create today's Slack-style PM report.</p>
+                    : <p>Select a week and click <strong>Generate Report</strong> to create a weekly PM report.</p>
+                  }
+                </div>
+              )
+            })()}
           </div>
         </div>
 
