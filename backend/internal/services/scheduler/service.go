@@ -82,6 +82,10 @@ func (s *Service) run() {
 }
 
 func (s *Service) tick() {
+	if database.GetPool() == nil {
+		return
+	}
+
 	ctx := context.Background()
 
 	// Check if scheduler is enabled
