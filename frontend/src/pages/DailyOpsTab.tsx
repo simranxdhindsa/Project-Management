@@ -393,7 +393,7 @@ function formatMorningReport(brief: DailyBrief): string {
 
   if (brief.blocked_theirs.length > 0) {
     lines.push('')
-    lines.push("Blocked from Ardoise team's side:")
+    lines.push("Blocked from Trackflow team's side:")
     for (const iss of brief.blocked_theirs) {
       const reason = iss.blocker_reason ? ` — ${iss.blocker_reason}` : ''
       lines.push(`  - ${iss.id} ${iss.summary}${reason}`)
@@ -770,7 +770,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
             <Section id="p2"   title="P2"                    icon="🟡" issues={brief.p2}                       {...sectionFilterProps} />
             <Section id="p3"   title="P3"                    icon="🔵" issues={brief.p3}                       {...sectionFilterProps} />
             <Section id="bl-ours"   title="Blocked — Our Side"    icon="🚫" issues={brief.blocked_ours}   defaultOpen {...sectionFilterProps} />
-            <Section id="bl-theirs" title="Blocked — Ardoise Side" icon="⚠️" issues={brief.blocked_theirs} defaultOpen {...sectionFilterProps} />
+            <Section id="bl-theirs" title="Blocked — Trackflow Side" icon="⚠️" issues={brief.blocked_theirs} defaultOpen {...sectionFilterProps} />
             <Section id="open"  title="Open Items (Unassigned)"    icon="📋" issues={brief.open_items}              {...sectionFilterProps} />
           </div>
         )}

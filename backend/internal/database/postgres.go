@@ -3,7 +3,10 @@ package database
 import (
 	"context"
 	"fmt"
+	"log"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,9 +17,14 @@ var pool *pgxpool.Pool
 
 // Connect establishes a connection to the PostgreSQL database
 func Connect() error {
-	databaseURL := os.Getenv("DATABASE_URL")
+	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL == "" {
 		return fmt.Errorf("DATABASE_URL environment variable is required")
+	}
+
+	// Log masked URL for debugging
+	if parsed, err := url.Parse(databaseURL); err == nil {
+		log.Printf("📡 Connecting to: %s@%s%s", parsed.User.Username(), parsed.Host, parsed.Path)
 	}
 
 	config, err := pgxpool.ParseConfig(databaseURL)

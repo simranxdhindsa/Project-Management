@@ -202,6 +202,27 @@ export default function Dashboard() {
     localStorage.setItem('theme', theme)
   }, [darkMode])
 
+  useEffect(() => {
+    const PAGE_TITLES: Record<Page, string> = {
+      'dashboard':      'Dashboard',
+      'board':          'Board View',
+      'list':           'List View',
+      'daily-tasks':    'Daily Tasks',
+      'daily-analysis': 'Daily Analysis',
+      'calendar':       'Calendar',
+      'reports':        'Reports',
+      'ai-analysis':    'AI Analysis',
+      'pm-reports':     'PM Reports',
+      'bots':           'Bot Config',
+      'team':           'Team',
+      'settings':       'Settings',
+      'integrations':   'Integrations',
+      'reminders':      'Reminders',
+      'slack':          'Slack Intelligence',
+    }
+    document.title = `${PAGE_TITLES[currentPage]} — Trackflow`
+  }, [currentPage])
+
   // YouTrack state
   const [ytIssues, setYtIssues] = useState<YTIssue[]>([])
   const [ytLoading, setYtLoading] = useState(true)
