@@ -137,7 +137,7 @@ function BotCard({
   return (
     <div className={`bot-card glass-card ${!bot.is_active ? 'bot-inactive' : ''}`}>
       <div className="bot-card-header">
-        <div className="bot-card-info">
+        <div className="bot-card-info bot-card-info-clickable" onClick={() => setExpanded(!expanded)}>
           <div className="bot-card-icon" style={{ backgroundColor: botTypeColors[bot.bot_type] ?? 'var(--color-secondary)' }}>
             <Bot size={18} />
           </div>
