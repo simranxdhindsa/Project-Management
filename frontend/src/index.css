@@ -7535,6 +7535,16 @@ select.form-input {
   gap: 0.75rem;
 }
 
+.bot-card-info-clickable {
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+
+.bot-card-info-clickable:hover .bot-card-name {
+  color: var(--color-primary);
+}
+
 .bot-card-icon {
   width: 36px;
   height: 36px;
