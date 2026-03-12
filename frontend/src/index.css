@@ -15721,3 +15721,184 @@ select.form-input {
 }
 
 /* ─── End Light Theme ───────────────────────────────────────────────── */
+
+/* ─── Reminders Page — Quick-Add + Tabs ─────────────────────────────── */
+
+.reminders-page-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.reminder-quick-add-bar {
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.reminder-quick-add-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.reminder-preset-btn {
+  padding: 0.35rem 0.9rem;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.reminder-preset-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.reminder-preset-btn.active {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.reminder-quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.reminder-quick-add .form-input {
+  flex: 1;
+  min-width: 160px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.reminder-quick-issue {
+  max-width: 140px;
+}
+
+.reminder-quick-add-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.reminder-quick-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.reminder-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.reminder-tab-content {
+  padding: 1.25rem;
+  min-height: 200px;
+}
+
+.reminder-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.reminder-empty p {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+.reminder-empty span {
+  font-size: 0.8rem;
+}
+
+.reminder-section-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.5rem 0 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.reminder-section-label:first-child {
+  margin-top: 0;
+}
+
+.reminder-slack-item {
+  border-left: 2px solid #8250df;
+}
+
+.reminder-slack-sender {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.reminder-slack-channel {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.reminder-slack-text {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.reminder-resolve-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.reminder-resolve-label:hover {
+  color: var(--color-success);
+}
+
+.reminder-resolve-check {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--color-success);
+}
+
+.reminder-issue-ref {
+  font-size: 0.75rem;
+  color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.1);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.icon-success { color: var(--color-success); }
+.icon-warning { color: var(--color-warning); }
+.icon-slack   { color: #8250df; }
