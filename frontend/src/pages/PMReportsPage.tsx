@@ -10,6 +10,7 @@ import {
   Brain, ScanSearch, BarChart2, GitBranch, Layers,
   Cpu, Database, Radar, Gauge, ListChecks,
   Workflow, Telescope, FlaskConical, Network, Compass,
+  Rocket,
 } from 'lucide-react'
 import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
 import api, { getYouTrackAvatarMap } from '../services/api'
@@ -105,10 +106,11 @@ function toISODate(d: Date): string {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'tracking', label: 'Tracking', icon: Activity },
-  { id: 'daily', label: 'Reports', icon: FileText },
-  { id: 'assignees', label: 'Assignee Stats', icon: Users },
-  { id: 'dailyops', label: 'Daily Ops', icon: Zap },
+  { id: 'tracking',    label: 'Tracking',          icon: Activity  },
+  { id: 'daily',       label: 'Reports',            icon: FileText  },
+  { id: 'assignees',   label: 'Assignee Stats',     icon: Users     },
+  { id: 'dailyops',    label: 'Daily Ops',          icon: Zap       },
+  { id: 'deployment',  label: 'Deployment Report',  icon: Rocket    },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -1839,6 +1841,139 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+// ─── Deployment Report Tab ───────────────────────────────────────────────────
+
+function DeploymentReportTab() {
+  const [columns, setColumns] = useState<string[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [generating, setGenerating] = useState(false)
+  const [report, setReport] = useState<string | null>(null)
+  const [issueCount, setIssueCount] = useState(0)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [loadingCols, setLoadingCols] = useState(true)
+
+  const fetchColumns = useCallback(async () => {
+    setLoadingCols(true)
+    try {
+      const res = await api.getStageReportColumns()
+      if (res.success && res.data) setColumns(res.data)
+    } catch {
+      setError('Failed to load columns. Check YouTrack connection.')
+    } finally {
+      setLoadingCols(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchColumns() }, [fetchColumns])
+
+  const toggleColumn = (col: string) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(col)) next.delete(col)
+      else next.add(col)
+      return next
+    })
+  }
+
+  const handleGenerate = async () => {
+    if (selected.size === 0) return
+    setGenerating(true)
+    setError(null)
+    setReport(null)
+    try {
+      const res = await api.generateStageReport([...selected])
+      if (res.success && res.data) {
+        setReport(res.data.report)
+        setIssueCount(res.data.issue_count)
+      } else {
+        setError('Generation failed. Try again.')
+      }
+    } catch {
+      setError('Generation failed. Try again.')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const handleCopy = () => {
+    if (!report) return
+    navigator.clipboard.writeText(report)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="pm-tab-content sr-panel">
+      <div className="pm-tab-header">
+        <h3 className="pm-section-title"><Rocket size={18} /> Deployment Report</h3>
+        <p className="sr-subtitle">Select YouTrack columns, generate a Slack-ready list of fixes for your stage deployment.</p>
+      </div>
+
+      <div className="sr-section">
+        <div className="sr-section-header">
+          <span className="sr-section-title">Select Columns</span>
+          <span className="sr-section-hint">Pick one or more columns to include</span>
+        </div>
+        {loadingCols ? (
+          <div className="sr-loading">
+            <div className="loading-spinner" />
+            <span>Loading columns...</span>
+          </div>
+        ) : columns.length === 0 ? (
+          <div className="sr-empty">No columns found. Ensure YouTrack is connected in Integrations.</div>
+        ) : (
+          <div className="sr-columns">
+            {columns.map(col => (
+              <button
+                key={col}
+                className={`sr-column-pill${selected.has(col) ? ' selected' : ''}`}
+                onClick={() => toggleColumn(col)}
+              >
+                {selected.has(col) && <Check size={12} />}
+                {col}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="sr-actions">
+        <button
+          className="btn btn-primary"
+          onClick={handleGenerate}
+          disabled={selected.size === 0 || generating}
+        >
+          {generating ? <RefreshCw size={15} className="sr-spin" /> : <Rocket size={15} />}
+          {generating ? 'Generating...' : 'Generate Report'}
+        </button>
+        {selected.size > 0 && (
+          <span className="sr-selected-hint">{selected.size} column{selected.size > 1 ? 's' : ''} selected</span>
+        )}
+      </div>
+
+      {error && <div className="sr-error">{error}</div>}
+
+      {report !== null && (
+        <div className="sr-result">
+          <div className="sr-result-header">
+            <span className="sr-result-meta">{issueCount} ticket{issueCount !== 1 ? 's' : ''} included</span>
+            <button className="sr-copy-btn" onClick={handleCopy}>
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          {report === '' ? (
+            <div className="sr-empty">No tickets found in the selected columns.</div>
+          ) : (
+            <pre className="sr-report-box">{report}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface PMReportsPageProps {
   initialTab?: TabId
   onTabChange?: (tab: TabId) => void
@@ -1870,10 +2005,11 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
           })}
         </div>
         <div className={`pm-tab-panel glass-card${activeTab === 'daily' ? ' pm-tab-panel--daily' : ''}`}>
-          {activeTab === 'daily'     && <DailyReportTab />}
-          {activeTab === 'assignees' && <AssigneeStatsTab />}
-          {activeTab === 'tracking'  && <TrackingTab blockerIssueIds={blockerIssueIds} />}
-          {activeTab === 'dailyops'  && <DailyOpsTab onBlockersChange={setBlockerIssueIds} />}
+          {activeTab === 'daily'      && <DailyReportTab />}
+          {activeTab === 'assignees'  && <AssigneeStatsTab />}
+          {activeTab === 'tracking'   && <TrackingTab blockerIssueIds={blockerIssueIds} />}
+          {activeTab === 'dailyops'   && <DailyOpsTab onBlockersChange={setBlockerIssueIds} />}
+          {activeTab === 'deployment' && <DeploymentReportTab />}
         </div>
       </div>
     </div>

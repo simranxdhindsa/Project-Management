@@ -7575,7 +7575,20 @@ select.form-input {
   font-size: 0.85rem;
   color: var(--text-secondary);
   line-height: 1.5;
+  margin-bottom: 0.4rem;
+}
+.bot-card-con {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  font-style: italic;
   margin-bottom: 0.75rem;
+  line-height: 1.4;
+}
+.bot-con-label {
+  font-weight: 600;
+  font-style: normal;
+  color: var(--color-danger, #ef4444);
+  margin-right: 0.2rem;
 }
 
 .bot-card-variables {
@@ -9367,6 +9380,148 @@ select.form-input {
   display: flex;
   flex-direction: column;
 }
+
+/* ── Deployment Report (sr-*) ───────────────────────────────────────── */
+.sr-panel {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  overflow-y: auto;
+}
+.sr-subtitle {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin-top: 0.25rem;
+}
+.sr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.sr-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+.sr-section-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sr-section-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.sr-columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.sr-column-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1.5px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.sr-column-pill:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.sr-column-pill.selected {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+.sr-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.sr-selected-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.sr-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.sr-empty {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  padding: 0.5rem 0;
+}
+.sr-error {
+  font-size: 0.82rem;
+  color: var(--color-danger, #ef4444);
+  padding: 0.5rem 0.75rem;
+  background: rgba(239,68,68,0.08);
+  border-radius: 6px;
+}
+.sr-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sr-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sr-result-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.sr-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1.5px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.sr-copy-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.sr-report-box {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+  max-height: 420px;
+  overflow-y: auto;
+}
+@keyframes sr-spin {
+  to { transform: rotate(360deg); }
+}
+.sr-spin {
+  animation: sr-spin 0.8s linear infinite;
+}
+
 
 /* Daily Report tab needs visible overflow for calendar dropdown */
 .pm-tab-content.pm-daily-tab {

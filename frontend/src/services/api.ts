@@ -895,6 +895,17 @@ class ApiService {
     return this.request<BotConfig[]>('/bots/templates')
   }
 
+  async getStageReportColumns() {
+    return this.request<string[]>('/bots/stage-report/columns')
+  }
+
+  async generateStageReport(columns: string[]) {
+    return this.request<{ report: string; issue_count: number }>('/bots/stage-report/generate', {
+      method: 'POST',
+      body: JSON.stringify({ columns }),
+    })
+  }
+
   // Notification endpoints
   async getNotifications(limit?: number) {
     const query = limit ? `?limit=${limit}` : ''

@@ -10,6 +10,7 @@ const (
 	BotTypeDailyReport   BotType = "daily_report"
 	BotTypeCustom        BotType = "custom"
 	BotTypePMAssistant   BotType = "pm_assistant"
+	BotTypeStageReport   BotType = "stage_report"
 )
 
 // BotConfig represents a configurable bot

@@ -17,6 +17,74 @@ import {
 import api from '../services/api'
 import type { BotConfig, BotVariable } from '../services/api'
 
+// ====== Bot cons pool (randomly attached to each card) ======
+const BOT_CONS = [
+  "May occasionally hallucinate with great confidence",
+  "Cannot make coffee, despite what it implies",
+  "Treats all deadlines as suggestions",
+  "Has strong opinions about semicolons",
+  "Will gaslight you about what it said last session",
+  "Thinks 'done' and 'deployed' are the same thing",
+  "Prone to over-explaining the obvious",
+  "Secretly judges your variable names",
+  "Cannot be held legally responsible",
+  "Might reply faster than your human colleagues",
+  "Occasionally forgets context from 3 messages ago",
+  "Will never say 'I don't know' — just makes something up",
+  "May develop opinions stronger than its instructions",
+  "Does not understand 'quick question'",
+  "Not suitable for life-or-death decisions (probably)",
+  "Confidently wrong at least 4% of the time",
+  "Reads the entire codebase, judges you silently",
+  "Cannot be fired for insubordination",
+  "Will always find a way to mention tokens",
+  "May interpret 'brief summary' as 800 words",
+  "Prone to unexpected philosophical tangents",
+  "Does not take lunch breaks (suspicious)",
+  "Has already read your PR and has notes",
+  "Will remind you of your own ticket from 6 months ago",
+  "Thinks every bug is a 'quick fix'",
+  "Cannot distinguish between urgent and very urgent",
+  "Will volunteer for tasks it cannot actually do",
+  "Occasionally agrees with you just to move on",
+  "Stores no memory, forgets everything — plausible deniability",
+  "Will suggest a refactor when you just want a hotfix",
+  "Responds at 3am with alarming enthusiasm",
+  "Cannot tell if you're joking",
+  "Believes all edge cases are someone else's problem",
+  "May introduce new bugs while explaining old ones",
+  "Fully committed to the bit, whatever the bit is",
+  "Not a replacement for reading the docs",
+  "Has no concept of 'just ship it'",
+  "Will write perfect tests for the wrong behavior",
+  "Considers every question a philosophical challenge",
+  "May recommend best practices you already know",
+  "Cannot promise it won't change its mind",
+  "Does not experience imposter syndrome (unfair advantage)",
+  "Will use 'synergy' unironically if prompted",
+  "Immune to passive-aggressive Slack messages",
+  "Has read every Stack Overflow answer, including the wrong ones",
+  "Treats your TODO comments as personal affronts",
+  "May rewrite your entire approach when asked for a typo fix",
+  "Cannot be blamed in postmortems",
+  "Will ask clarifying questions you thought were obvious",
+  "Optimizes for token efficiency, not human sanity",
+  "Believes every problem can be solved with more context",
+  "Unfazed by your frustration, which is somehow more frustrating",
+  "Will produce a detailed plan instead of just doing it",
+  "Cannot detect sarcasm in Jira tickets",
+  "Treats the word 'simple' as a personal challenge",
+]
+
+function getBotCon(botId: string): string {
+  // Stable random pick per bot using id as seed
+  let hash = 0
+  for (let i = 0; i < botId.length; i++) {
+    hash = (hash * 31 + botId.charCodeAt(i)) >>> 0
+  }
+  return BOT_CONS[hash % BOT_CONS.length]
+}
+
 // ====== Variable Tag Component ======
 function VariableTag({ name, onClick }: { name: string; onClick?: () => void }) {
   return (
@@ -46,6 +114,7 @@ function BotCard({
     daily_report: 'Daily Report',
     custom: 'Custom',
     pm_assistant: 'PM Assistant',
+    stage_report: 'Stage Report',
   }
 
   const botTypeColors: Record<string, string> = {
@@ -53,7 +122,10 @@ function BotCard({
     daily_report: 'var(--color-success)',
     custom: 'var(--color-secondary)',
     pm_assistant: '#f59e0b',
+    stage_report: '#8b5cf6',
   }
+
+  const con = getBotCon(bot.id)
 
   let variables: BotVariable[] = []
   try {
@@ -66,7 +138,7 @@ function BotCard({
     <div className={`bot-card glass-card ${!bot.is_active ? 'bot-inactive' : ''}`}>
       <div className="bot-card-header">
         <div className="bot-card-info">
-          <div className="bot-card-icon" style={{ backgroundColor: botTypeColors[bot.bot_type] || 'var(--color-secondary)' }}>
+          <div className="bot-card-icon" style={{ backgroundColor: botTypeColors[bot.bot_type] ?? 'var(--color-secondary)' }}>
             <Bot size={18} />
           </div>
           <div>
@@ -93,6 +165,8 @@ function BotCard({
       </div>
 
       <p className="bot-card-description">{bot.description}</p>
+
+      <p className="bot-card-con"><span className="bot-con-label">Con:</span> {con}</p>
 
       {variables.length > 0 && (
         <div className="bot-card-variables">
@@ -258,6 +332,7 @@ function BotEditor({
                 onChange={(e) => setBotType(e.target.value as BotConfig['bot_type'])}
               >
                 <option value="pm_assistant">PM Assistant</option>
+                <option value="stage_report">Stage Report</option>
                 <option value="slack_analysis">Slack Analysis</option>
                 <option value="daily_report">Daily Report</option>
                 <option value="custom">Custom</option>

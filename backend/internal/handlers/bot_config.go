@@ -2,23 +2,30 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
 	"github.com/dhindsa/project-management/internal/models"
+	ai "github.com/dhindsa/project-management/internal/services/ai"
+	"github.com/dhindsa/project-management/internal/services/youtrack"
 	"github.com/gorilla/mux"
 )
 
 // BotConfigHandler handles bot configuration API requests
 type BotConfigHandler struct {
-	botRepo *database.BotConfigRepository
+	botRepo      *database.BotConfigRepository
+	settingsRepo *database.SettingsRepository
 }
 
 // NewBotConfigHandler creates a new BotConfigHandler
 func NewBotConfigHandler() *BotConfigHandler {
 	return &BotConfigHandler{
-		botRepo: database.NewBotConfigRepository(),
+		botRepo:      database.NewBotConfigRepository(),
+		settingsRepo: database.NewSettingsRepository(),
 	}
 }
 
@@ -240,6 +247,222 @@ func (h *BotConfigHandler) GetTemplates(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// getYouTrackClientForBots creates a YouTrack client from settings or env
+func (h *BotConfigHandler) getYouTrackClientForBots(r *http.Request) (*youtrack.Client, error) {
+	settings, _ := h.settingsRepo.GetYouTrackSettings(r.Context())
+
+	var baseURL, token, projectID, boardID string
+	if settings != nil && settings.Configured {
+		baseURL = settings.BaseURL
+		token = settings.Token
+		projectID = settings.ProjectID
+		boardID = settings.BoardID
+	}
+	if baseURL == "" {
+		baseURL = os.Getenv("YOUTRACK_BASE_URL")
+	}
+	if token == "" {
+		token = os.Getenv("YOUTRACK_TOKEN")
+	}
+	if projectID == "" {
+		projectID = os.Getenv("YOUTRACK_PROJECT_ID")
+	}
+	if boardID == "" {
+		boardID = os.Getenv("YOUTRACK_BOARD_ID")
+	}
+	if baseURL == "" || token == "" || projectID == "" {
+		return nil, fmt.Errorf("YouTrack not configured")
+	}
+	client := youtrack.NewClient(baseURL, token, projectID)
+	if boardID != "" {
+		client.SetBoardID(boardID)
+	}
+	return client, nil
+}
+
+// GetStageColumns returns available YouTrack states/columns for the stage report
+func (h *BotConfigHandler) GetStageColumns(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	client, err := h.getYouTrackClientForBots(r)
+	if err != nil || client == nil {
+		sendJSON(w, http.StatusOK, Response{Success: true, Data: []string{}})
+		return
+	}
+
+	states, err := client.GetStates(r.Context())
+	if err != nil {
+		sendJSON(w, http.StatusOK, Response{Success: true, Data: []string{}})
+		return
+	}
+
+	names := make([]string, 0, len(states))
+	for _, s := range states {
+		names = append(names, s.Name)
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: names})
+}
+
+// stageReportRequest is the request body for GenerateStageReport
+type stageReportRequest struct {
+	Columns []string `json:"columns"`
+}
+
+// GenerateStageReport fetches tickets from selected columns and generates a Slack-style deployment report
+func (h *BotConfigHandler) GenerateStageReport(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	var req stageReportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Columns) == 0 {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Provide at least one column"})
+		return
+	}
+
+	client, err := h.getYouTrackClientForBots(r)
+	if err != nil || client == nil {
+		sendJSON(w, http.StatusServiceUnavailable, Response{Success: false, Message: "YouTrack not configured"})
+		return
+	}
+
+	issues, err := client.GetIssuesByState(r.Context(), req.Columns)
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to fetch issues: " + err.Error()})
+		return
+	}
+
+	if len(issues) == 0 {
+		sendJSON(w, http.StatusOK, Response{
+			Success: true,
+			Data:    map[string]interface{}{"report": "", "issue_count": 0},
+		})
+		return
+	}
+
+	// Load system prompt from active stage_report bot config, fall back to default
+	systemPrompt := `You are writing bullet points for a Slack deployment update.
+Write ONE short sentence (max 15 words) describing what was fixed, in past tense, from the user's perspective.
+- Be specific and direct — name the exact feature or interaction that changed
+- Vary your sentence starts naturally (can use "Fixed", "Mic no longer...", "Users can now...", etc.)
+- No internal jargon, no ticket IDs, no padding
+- Output ONLY the single sentence, nothing else`
+
+	bots, _ := h.botRepo.GetByType(r.Context(), models.BotTypeStageReport)
+	for _, b := range bots {
+		if b.IsActive && strings.TrimSpace(b.Prompt) != "" {
+			systemPrompt = b.Prompt
+			break
+		}
+	}
+
+	// Group issues by subsystem, generating AI fix descriptions
+	type fixItem struct {
+		subsystem string
+		fix       string
+	}
+	var fixes []fixItem
+
+	for _, issue := range issues {
+		subsystem := youtrack.GetSubsystem(issue)
+		if subsystem == "" {
+			subsystem = "General"
+		}
+
+		// Extract expected behavior from description, fall back to full description
+		context := extractExpectedBehavior(issue.Description)
+		if context == "" {
+			context = issue.Description
+		}
+		if len(context) > 800 {
+			context = context[:800]
+		}
+
+		userMsg := fmt.Sprintf("Ticket: %s\nContext: %s", issue.Summary, context)
+		fixText, err := ai.QueryWithContext(r.Context(), systemPrompt, userMsg)
+		if err != nil || strings.TrimSpace(fixText) == "" {
+			fixText = issue.Summary
+		}
+		fixText = strings.TrimSpace(fixText)
+
+		fixes = append(fixes, fixItem{subsystem: subsystem, fix: fixText})
+	}
+
+	// Group by subsystem preserving insertion order
+	subsystemOrder := []string{}
+	subsystemMap := map[string][]string{}
+	for _, f := range fixes {
+		if _, exists := subsystemMap[f.subsystem]; !exists {
+			subsystemOrder = append(subsystemOrder, f.subsystem)
+		}
+		subsystemMap[f.subsystem] = append(subsystemMap[f.subsystem], f.fix)
+	}
+
+	// Build Slack-style report
+	var sb strings.Builder
+	sb.WriteString("Hey team :wave: here is the list of fixes which have been deployed to STAGE today:\n")
+	for _, sub := range subsystemOrder {
+		sb.WriteString(fmt.Sprintf("\n%s\n", sub))
+		for _, fix := range subsystemMap[sub] {
+			sb.WriteString(fmt.Sprintf("• %s\n", fix))
+		}
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data: map[string]interface{}{
+			"report":      strings.TrimRight(sb.String(), "\n"),
+			"issue_count": len(issues),
+		},
+	})
+}
+
+// extractExpectedBehavior parses a YouTrack description for an "Expected Behavior" section
+func extractExpectedBehavior(description string) string {
+	if description == "" {
+		return ""
+	}
+	lower := strings.ToLower(description)
+	headings := []string{
+		"## expected behavior",
+		"**expected behavior**",
+		"expected behavior:",
+		"expected behaviour:",
+		"## expected behaviour",
+	}
+	for _, h := range headings {
+		idx := strings.Index(lower, h)
+		if idx == -1 {
+			continue
+		}
+		// Start after the heading line
+		start := idx + len(h)
+		// Skip whitespace/newline
+		for start < len(description) && (description[start] == '\n' || description[start] == '\r' || description[start] == ' ') {
+			start++
+		}
+		// Find the next heading (##, **) or end of string
+		rest := description[start:]
+		end := len(rest)
+		for _, stopMarker := range []string{"\n##", "\n**", "\n---"} {
+			if i := strings.Index(rest, stopMarker); i != -1 && i < end {
+				end = i
+			}
+		}
+		extracted := strings.TrimSpace(rest[:end])
+		if extracted != "" {
+			return extracted
+		}
+	}
+	return ""
+}
+
 // getDefaultTemplates returns the built-in bot templates
 func getDefaultTemplates() []map[string]interface{} {
 	return []map[string]interface{}{
@@ -283,6 +506,27 @@ Return a JSON response with team_members array containing name, assigned_tasks, 
 			"is_active":   true,
 			"prompt":      "Your custom prompt here. Use {{$VARIABLE_NAME$}} for variables.",
 			"variables":   `[]`,
+		},
+		{
+			"id":          "template-stage-report",
+			"name":        "Stage Deployment Report",
+			"description": "Generates a Slack-ready list of fixes for a stage deployment. The AI rewrites each ticket title into a user-facing past-tense fix description, grouped by subsystem.",
+			"bot_type":    "stage_report",
+			"is_active":   true,
+			"prompt": `You are writing bullet points for a Slack deployment update.
+Write ONE short sentence (max 15 words) describing what was fixed, in past tense, from the user's perspective.
+- Be specific and direct — name the exact feature or interaction that changed
+- Vary your sentence starts naturally (can use "Fixed", "Mic no longer...", "Users can now...", etc.)
+- No internal jargon, no ticket IDs, no padding
+- Output ONLY the single sentence, nothing else
+
+Example input:
+Ticket: FE UI: Fix mic issue when released spacebar the mic still remains activated
+Context: When user releases the spacebar the microphone should deactivate
+
+Example output:
+Mic no longer stays activated after releasing the spacebar.`,
+			"variables": `[]`,
 		},
 		{
 			"id":          "template-pm-assistant",
