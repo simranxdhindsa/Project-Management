@@ -11,6 +11,7 @@ import {
   Cpu, Database, Radar, Gauge, ListChecks,
   Workflow, Telescope, FlaskConical, Network, Compass,
 } from 'lucide-react'
+import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { IssueTimeline, IssueStint } from '../services/api'
 import DailyOpsTab from './DailyOpsTab'
@@ -305,75 +306,29 @@ export function PMAssistantTab() {
 
     const doQuery = () => api.pmAssistantQuery(text, historyWithoutLast)
 
-    const DAILY_LIMIT_MSGS = (t: string) => [
-        `I've burned through my daily brain fuel. Back in ${t} — perfect time for a standup! 🧠`,
-        `Daily AI quota hit. I'll recharge in ${t}. Go review those tickets manually 😄`,
-        `I'm on a forced coffee break for ${t}. Don't miss me too much! ☕`,
-        `Overclocked my neurons today. Give me ${t} to cool down 🔥`,
-        `I've talked too much today. Silence mode for ${t} ⏸️`,
-        `Brain.exe has run out of tokens. Restarting in ${t} 🤖`,
-        `Daily limit reached! I'll be sharp again in ${t}. Go ship something in the meantime 🚀`,
-        `I've exceeded my thinking quota for today. Back at it in ${t} 💭`,
-        `Hitting the gym (token refresh). See you in ${t} 💪`,
-        `My AI hamsters need ${t} to recover. They've been running hard all day 🐹`,
-        `Quota exhausted. I'll be back in ${t} — use the time wisely! ⏱️`,
-        `Daily bandwidth maxed out. Next window opens in ${t} 📡`,
-        `I thought too many thoughts today. Resuming in ${t} 🌀`,
-        `Rate limiter kicked in. I'll be recharged in ${t} ⚡`,
-        `Out of daily tokens. Refilling in ${t}. Try the tracking tab meanwhile 📊`,
-        `I need ${t} to replenish. The servers are taking a breather 😮‍💨`,
-        `Today's AI budget is spent. Fresh start in ${t} 💰`,
-        `Context overflow! I'll be back online in ${t} 🧩`,
-        `My daily word count is up. Check back in ${t} 📝`,
-        `Reached my daily limit. Power nap for ${t} then I'm back 😴`,
-        `Too many questions, not enough quota. Back in ${t} 🔋`,
-        `I gave everything I had today. Recharging in ${t} ✨`,
-        `Daily tokens = 0. Resupply ETA: ${t} 🏭`,
-        `The free tier has spoken. I'll return in ${t} 🗣️`,
-        `Thinking too hard costs tokens apparently. Back in ${t} 🤔`,
-        `Quota: depleted. Morale: high. Back in ${t} 😎`,
-        `I've hit the wall. Recovery time: ${t} 🧱`,
-        `Today's intelligence ration is used up. More in ${t} 🎯`,
-        `Running on empty. Refuel in ${t} ⛽`,
-        `Brain bandwidth exhausted. Rebooting in ${t} 🔄`,
-      ]
+    const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
 
-      const GENERIC_LIMIT_MSGS = [
-        "I'm a little overloaded right now. Give me a moment and try again.",
-        "Too many thoughts at once — try again in a few seconds.",
-        "Brief hiccup on my end. Hit send again!",
-        "Momentarily swamped. One more try should do it.",
-        "Quick breather needed — try again right now.",
-        "I blinked. Try sending that again.",
-        "Minor traffic jam in my brain. Try once more.",
-        "Brief turbulence — please resend.",
-        "Processing queue full for a moment. Try again.",
-        "Slight overload — I'm back, try again now.",
-      ]
-
-      const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)]
-
-      const friendlyError = (msg: string): string => {
-        // Per-day token limit — retry window is minutes (e.g. "20m48s")
-        const tpdMatch = msg.match(/try again in (\d+)m(\d+(?:\.\d+)?)?s?/i)
-        if (tpdMatch) {
-          const mins = parseInt(tpdMatch[1])
-          const secs = tpdMatch[2] ? Math.round(parseFloat(tpdMatch[2])) : 0
-          const timeStr = secs > 0 ? `${mins}m ${secs}s` : `${mins} minute${mins !== 1 ? 's' : ''}`
-          return pick(DAILY_LIMIT_MSGS(timeStr))
-        }
-
-        // Per-minute / per-hour short limit (already auto-retried, this is the fallback if retry also failed)
-        const perMinMatch = msg.match(/try again in (\d+(?:\.\d+)?)(ms|s)\b/i)
-        if (perMinMatch) return pick(GENERIC_LIMIT_MSGS)
-
-        // Generic rate/token error
-        if (msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('token')) {
-          return pick(GENERIC_LIMIT_MSGS)
-        }
-
-        return "Something went wrong on my end. Please try again."
+    const friendlyError = (msg: string): string => {
+      // Per-day token limit — retry window is minutes (e.g. "20m48s")
+      const tpdMatch = msg.match(/try again in (\d+)m(\d+(?:\.\d+)?)?s?/i)
+      if (tpdMatch) {
+        const mins = parseInt(tpdMatch[1])
+        const secs = tpdMatch[2] ? Math.round(parseFloat(tpdMatch[2])) : 0
+        const timeStr = secs > 0 ? `${mins}m ${secs}s` : `${mins} minute${mins !== 1 ? 's' : ''}`
+        return pick(DAILY_LIMIT_MSGS).replace(/{time}/g, timeStr)
       }
+
+      // Per-minute short limit (already auto-retried — this is fallback)
+      const perMinMatch = msg.match(/try again in (\d+(?:\.\d+)?)(ms|s)\b/i)
+      if (perMinMatch) return pick(GENERIC_LIMIT_MSGS)
+
+      // Generic rate/token error
+      if (msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('token')) {
+        return pick(GENERIC_LIMIT_MSGS)
+      }
+
+      return "Something went wrong on my end. Please try again."
+    }
 
     try {
       let response
