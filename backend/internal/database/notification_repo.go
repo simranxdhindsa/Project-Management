@@ -108,6 +108,20 @@ func (r *NotificationRepository) Delete(ctx context.Context, notifID, userID str
 	return err
 }
 
+// DeleteAll removes all notifications for a user
+func (r *NotificationRepository) DeleteAll(ctx context.Context, userID string) (int64, error) {
+	pool := GetPool()
+
+	result, err := pool.Exec(ctx, `
+		DELETE FROM notifications WHERE user_id = $1
+	`, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected(), nil
+}
+
 // DeleteOld removes notifications older than specified days
 func (r *NotificationRepository) DeleteOld(ctx context.Context, days int) (int64, error) {
 	pool := GetPool()

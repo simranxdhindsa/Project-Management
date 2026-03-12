@@ -184,6 +184,33 @@ func (h *NotificationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ClearAll deletes all notifications for the user
+func (h *NotificationHandler) ClearAll(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
+			"success": false,
+			"message": "Unauthorized",
+		})
+		return
+	}
+
+	deleted, err := h.repo.DeleteAll(r.Context(), userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false,
+			"message": "Failed to clear notifications: " + err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "All notifications cleared",
+		"data":    map[string]int64{"deleted": deleted},
+	})
+}
+
 // writeJSON is a helper for writing JSON responses
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")

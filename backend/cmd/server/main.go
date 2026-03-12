@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/handlers"
@@ -163,6 +165,13 @@ func main() {
 	notifRoutes.HandleFunc("/{id}/read", notifHandler.MarkAsRead).Methods("PATCH")
 	notifRoutes.HandleFunc("/{id}", notifHandler.Delete).Methods("DELETE")
 	notifRoutes.HandleFunc("/read-all", notifHandler.MarkAllAsRead).Methods("PATCH")
+	notifRoutes.HandleFunc("/clear-all", notifHandler.ClearAll).Methods("DELETE")
+
+	// Activity log routes (protected)
+	activityHandler := handlers.NewActivityHandler()
+	activityRoutes := api.PathPrefix("/activity").Subrouter()
+	activityRoutes.Use(middleware.AuthMiddleware)
+	activityRoutes.HandleFunc("", activityHandler.GetActivity).Methods("GET")
 
 	// Slack routes (protected)
 	slackHandler := handlers.NewSlackHandler(notifHandler)
@@ -335,6 +344,27 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// 30-day rolling cleanup: runs daily, deletes notifications + activity older than 30 days
+	go func() {
+		notifRepo := database.NewNotificationRepository()
+		activityRepo := database.NewActivityRepository()
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			ctx := context.Background()
+			if n, err := notifRepo.DeleteOld(ctx, 30); err != nil {
+				log.Printf("⚠️  Notification cleanup error: %v", err)
+			} else if n > 0 {
+				log.Printf("🗑️  Cleaned up %d notifications older than 30 days", n)
+			}
+			if n, err := activityRepo.DeleteOld(ctx, 30); err != nil {
+				log.Printf("⚠️  Activity log cleanup error: %v", err)
+			} else if n > 0 {
+				log.Printf("🗑️  Cleaned up %d activity entries older than 30 days", n)
+			}
+		}
+	}()
 
 	log.Printf("🚀 Project Management API server starting on port %s", port)
 	log.Printf("📍 Health check: http://localhost:%s/api/health", port)

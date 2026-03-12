@@ -16,8 +16,6 @@ import api from '@/services/api'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import CreateIssueModal from '@/components/CreateIssueModal'
 import { useYouTrackEvents } from '@/services/useYouTrackEvents'
-import { useNotifications } from '@/services/useNotifications'
-import type { NotificationItem } from '@/services/api'
 import {
   LayoutDashboard,
   KanbanSquare,
@@ -48,6 +46,7 @@ import {
   Sparkles,
   Maximize2,
   Minimize2,
+  Activity,
 } from 'lucide-react'
 import { PMAssistantTab } from './PMReportsPage'
 import { IntegrationsPage } from './IntegrationsPage'
@@ -61,9 +60,12 @@ import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
 import { RemindersPage } from './RemindersPage'
 import { SlackIntelligencePage } from './SlackIntelligencePage'
+import { ActivityPage } from './ActivityPage'
 import { JellySwitch } from '../components/JellySwitch'
+import { RightPanel } from '../components/notifications/RightPanel'
+import type { LocalNotification } from '../components/notifications/RightPanel'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'reminders' | 'slack'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'reminders' | 'slack' | 'activity'
 
 // Pages accessible by members/viewers (limited access)
 const MEMBER_PAGES: Page[] = ['dashboard', 'list', 'daily-tasks']
@@ -91,16 +93,7 @@ const COLUMN_ORDER: Record<string, number> = {
   dev: 2,
 }
 
-interface DashboardNotification {
-  id: string
-  type: 'backward_move' | 'sync_issue'
-  issueId: string
-  summary: string
-  fromState: string
-  toState: string
-  timestamp: Date
-  read: boolean
-}
+type DashboardNotification = LocalNotification
 
 // Droppable column wrapper
 function DroppableColumn({ id, children }: { id: string; children: React.ReactNode }) {
@@ -158,6 +151,7 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'integrations': 'integrations',
   'reminders': 'reminders',
   'slack': 'slack',
+  'activity': 'activity',
 }
 
 const PM_REPORTS_TABS = ['tracking', 'daily', 'assignees', 'dailyops'] as const
@@ -219,6 +213,7 @@ export default function Dashboard() {
       'integrations':   'Integrations',
       'reminders':      'Reminders',
       'slack':          'Slack Intelligence',
+      'activity':       'Activity',
     }
     document.title = `${PAGE_TITLES[currentPage]} — Trackflow`
   }, [currentPage])
@@ -234,16 +229,6 @@ export default function Dashboard() {
   // New task modal state
   const [showNewTask, setShowNewTask] = useState(false)
 
-  const [showClearConfirm, setShowClearConfirm] = useState(false)
-
-  // Real server-side notifications
-  const {
-    notifications: serverNotifs,
-    unreadCount: serverUnreadCount,
-    markAsRead: markServerNotifRead,
-    markAllAsRead: markAllServerNotifsRead,
-    deleteNotification: deleteServerNotif,
-  } = useNotifications()
 
   // Role-based access
   const isFullAccess = user?.role === 'admin' || user?.role === 'project_manager'
@@ -267,10 +252,23 @@ export default function Dashboard() {
   const [chatOpen, setChatOpen] = useState(false)
   const [chatFullscreen, setChatFullscreen] = useState(false)
   const chatPanelRef = useRef<HTMLDivElement>(null)
+  const notifRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     sessionStorage.setItem('pm_notifications', JSON.stringify(notifications))
   }, [notifications])
+
+  // Close notification panel on outside click
+  useEffect(() => {
+    if (!showNotifications) return
+    const handler = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setShowNotifications(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showNotifications])
 
   // Guard: redirect members to allowed pages
   useEffect(() => {
@@ -279,8 +277,7 @@ export default function Dashboard() {
     }
   }, [currentPage, isFullAccess, navigate])
 
-  const localUnreadCount = notifications.filter(n => !n.read).length
-  const unreadCount = localUnreadCount + serverUnreadCount
+  const unreadCount = notifications.filter(n => !n.read).length
 
   const addNotification = (notif: Omit<DashboardNotification, 'id' | 'timestamp' | 'read'>) => {
     setNotifications(prev => [{
@@ -308,11 +305,6 @@ export default function Dashboard() {
       setToast({ message: `Failed to move ${notif.issueId} to Blocked`, type: 'warning' })
       setTimeout(() => setToast(null), 3000)
     }
-  }
-
-  const markAllRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
-    markAllServerNotifsRead()
   }
 
   const sensors = useSensors(
@@ -573,6 +565,13 @@ export default function Dashboard() {
                   <span>Reminders</span>
                 </button>
                 <button
+                  className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
+                  onClick={() => setCurrentPage('activity')}
+                >
+                  <Activity size={20} />
+                  <span>Activity</span>
+                </button>
+                <button
                   className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
                   onClick={() => setCurrentPage('calendar')}
                 >
@@ -703,6 +702,7 @@ export default function Dashboard() {
             {currentPage === 'integrations' && 'Integrations'}
             {currentPage === 'reminders' && 'Reminders'}
             {currentPage === 'slack' && 'Slack Intelligence'}
+            {currentPage === 'activity' && 'Activity'}
           </h1>
         </div>
         <div className="header-actions">
@@ -737,137 +737,25 @@ export default function Dashboard() {
             onChange={setDarkMode}
             label="Dark Mode"
           />
-          <div style={{ position: 'relative' }}>
+          <div className="notification-bell-container" ref={notifRef}>
             <button
-              className="icon-button tooltip"
-              data-tooltip="Notifications"
+              className={`notification-bell ${showNotifications ? 'active' : ''}`}
               onClick={() => setShowNotifications(!showNotifications)}
+              aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
             >
               <Bell size={20} />
               {unreadCount > 0 && (
-                <span className="notification-badge">{unreadCount}</span>
+                <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
               )}
             </button>
-
             {showNotifications && (
-              <>
-                <div
-                  style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    zIndex: 999
-                  }}
-                  onClick={() => setShowNotifications(false)}
-                />
-                <div className="notification-dropdown">
-                  <div className="notification-header">
-                    <h3>Notifications</h3>
-                    <button className="btn-ghost btn-sm" onClick={markAllRead}>
-                      Mark all as read
-                    </button>
-                  </div>
-                  <div className="notification-list">
-                    {notifications.length === 0 && serverNotifs.length === 0 ? (
-                      <div className="notification-empty-state">
-                        No notifications
-                      </div>
-                    ) : (
-                      <>
-                        {/* Server-side notifications (reminders, follow-ups, blockers) */}
-                        {serverNotifs.map((notif: NotificationItem) => (
-                          <div
-                            key={`server-${notif.id}`}
-                            className={`notification-item ${!notif.read ? 'unread' : ''}`}
-                            onClick={() => !notif.read && markServerNotifRead(notif.id)}
-                          >
-                            <div className={`notification-icon ${
-                              notif.type === 'task_overdue' ? 'notification-icon-backward' :
-                              notif.type === 'task_completed' ? 'notification-icon-success' :
-                              'notification-icon-info'
-                            }`}>
-                              {notif.type === 'task_overdue' ? (
-                                <AlertTriangle size={16} color="var(--color-danger)" />
-                              ) : notif.type === 'task_completed' ? (
-                                <CheckCircle size={16} color="var(--color-success)" />
-                              ) : notif.type === 'mentioned' ? (
-                                <MessageSquare size={16} color="var(--color-primary)" />
-                              ) : (
-                                <Bell size={16} color="var(--color-warning)" />
-                              )}
-                            </div>
-                            <div className="notification-content">
-                              <p className="notification-text">
-                                <strong>{notif.title}</strong>
-                              </p>
-                              <p className="notification-summary">
-                                {notif.message}
-                              </p>
-                              <div className="notification-actions">
-                                <button
-                                  className="btn btn-ghost btn-sm btn-notification-sm"
-                                  onClick={(e) => { e.stopPropagation(); deleteServerNotif(notif.id) }}
-                                >
-                                  Dismiss
-                                </button>
-                              </div>
-                              <span className="notification-time">
-                                {new Date(notif.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-
-                        {/* Local YouTrack backward-move notifications */}
-                        {notifications.map(notif => (
-                          <div key={notif.id} className={`notification-item ${!notif.read ? 'unread' : ''}`}>
-                            <div className="notification-icon notification-icon-backward">
-                              <AlertTriangle size={16} color="var(--color-danger)" />
-                            </div>
-                            <div className="notification-content">
-                              <p className="notification-text">
-                                <strong>{notif.issueId}</strong> moved backward: {notif.fromState} → {notif.toState}
-                              </p>
-                              <p className="notification-summary">
-                                {notif.summary}
-                              </p>
-                              <div className="notification-actions">
-                                <button
-                                  className="btn btn-sm btn-notification-danger"
-                                  onClick={(e) => { e.stopPropagation(); handleMoveToBlocked(notif) }}
-                                >
-                                  Move to Blocked
-                                </button>
-                                <button
-                                  className="btn btn-ghost btn-sm btn-notification-sm"
-                                  onClick={(e) => { e.stopPropagation(); dismissNotification(notif.id) }}
-                                >
-                                  Dismiss
-                                </button>
-                              </div>
-                              <span className="notification-time">
-                                {notif.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                  {(notifications.length > 0 || serverNotifs.length > 0) && (
-                    <div className="notification-footer">
-                      <button
-                        className="btn-ghost btn-sm notification-clear-btn"
-                        onClick={() => setShowClearConfirm(true)}
-                      >
-                        Clear all notifications
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </>
+              <RightPanel
+                onClose={() => setShowNotifications(false)}
+                initialTab="notifications"
+                localNotifications={notifications}
+                onMoveToBlocked={handleMoveToBlocked}
+                onDismissLocal={dismissNotification}
+              />
             )}
           </div>
           <button
@@ -887,6 +775,7 @@ export default function Dashboard() {
         {currentPage === 'integrations' && <IntegrationsPage />}
         {currentPage === 'settings' && <SettingsPage />}
         {currentPage === 'reminders' && <RemindersPage />}
+        {currentPage === 'activity' && <ActivityPage />}
         {currentPage === 'slack' && (
           <SlackIntelligencePage
             initialTab={slackTab}
@@ -1278,18 +1167,6 @@ export default function Dashboard() {
         />
       )}
 
-      <ConfirmModal
-        open={showClearConfirm}
-        title="Clear Notifications"
-        message="Clear all notifications? This action cannot be undone."
-        confirmLabel="Clear All"
-        variant="warning"
-        onConfirm={() => {
-          setNotifications([])
-          setShowClearConfirm(false)
-        }}
-        onCancel={() => setShowClearConfirm(false)}
-      />
 
       {/* Toast Notification */}
       {toast && (

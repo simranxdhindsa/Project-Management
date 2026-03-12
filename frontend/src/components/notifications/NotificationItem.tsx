@@ -1,11 +1,12 @@
-import type { Notification } from '../../services/api'
+import type { NotificationItem as NotificationData } from '../../services/api'
 
 interface NotificationItemProps {
-  notification: Notification
+  notification: NotificationData
   onMarkAsRead: (id: string) => void
+  onDelete?: (id: string) => void
 }
 
-export function NotificationItem({ notification, onMarkAsRead }: NotificationItemProps) {
+export function NotificationItem({ notification, onMarkAsRead, onDelete }: NotificationItemProps) {
   const getIcon = () => {
     switch (notification.type) {
       case 'task_assigned':
@@ -114,9 +115,20 @@ export function NotificationItem({ notification, onMarkAsRead }: NotificationIte
       <div className="notification-icon">{getIcon()}</div>
       <div className="notification-content">
         <p className="notification-message">{notification.message}</p>
-        <span className="notification-time">{formatTime(notification.time)}</span>
+        <span className="notification-time">{formatTime(notification.created_at)}</span>
       </div>
       {!notification.read && <div className="unread-indicator" />}
+      {onDelete && (
+        <button
+          className="notif-delete-btn"
+          onClick={e => { e.stopPropagation(); onDelete(notification.id) }}
+          aria-label="Delete notification"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      )}
     </div>
   )
 }

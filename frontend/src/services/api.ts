@@ -917,6 +917,19 @@ class ApiService {
     return this.request(`/notifications/${notifId}`, { method: 'DELETE' })
   }
 
+  async clearAllNotifications() {
+    return this.request('/notifications/clear-all', { method: 'DELETE' })
+  }
+
+  // Activity endpoints
+  async getActivity(limit?: number, offset?: number) {
+    const params = new URLSearchParams()
+    if (limit) params.set('limit', String(limit))
+    if (offset) params.set('offset', String(offset))
+    const query = params.toString() ? `?${params.toString()}` : ''
+    return this.request<ActivityItem[]>(`/activity${query}`)
+  }
+
   // Reminder endpoints
   async getReminders() {
     return this.request<ReminderItem[]>('/reminders')
@@ -1282,6 +1295,19 @@ export interface NotificationItem {
   message: string
   task_id?: string
   read: boolean
+  created_at: string
+}
+
+export interface ActivityItem {
+  id: string
+  user_id: string
+  actor_name?: string
+  type: string
+  title: string
+  description?: string
+  entity_type?: string
+  entity_id?: string
+  metadata?: Record<string, unknown>
   created_at: string
 }
 

@@ -359,6 +359,21 @@ func RunMigrations() error {
 			UNIQUE(user_id, date)
 		)`,
 
+		// Activity log — chronological feed of all user actions, retained 30 days
+		`CREATE TABLE IF NOT EXISTS activity_log (
+			id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id TEXT NOT NULL,
+			actor_name VARCHAR(255),
+			type VARCHAR(80) NOT NULL,
+			title VARCHAR(500) NOT NULL,
+			description TEXT,
+			entity_type VARCHAR(50),
+			entity_id TEXT,
+			metadata JSONB,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_activity_log_user_id ON activity_log(user_id, created_at DESC)`,
+
 		// Weekly reports — add report_type column to pm_reports so daily and weekly
 		// reports can coexist for the same date (e.g. Monday appears in both daily and weekly)
 		`ALTER TABLE pm_reports ADD COLUMN IF NOT EXISTS report_type VARCHAR(10) NOT NULL DEFAULT 'daily'`,
