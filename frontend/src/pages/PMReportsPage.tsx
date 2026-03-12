@@ -239,27 +239,27 @@ function renderMarkdown(text: string): string {
 
 // ─── Tab: PM Assistant ────────────────────────────────────────────────────────
 
-const THINKING_PHRASES: { text: string; Icon: React.ElementType; anim: string }[] = [
-  { text: 'Thinking…',                    Icon: Brain,        anim: 'pm-anim-pulse' },
-  { text: 'Analyzing your tickets…',      Icon: ScanSearch,   anim: 'pm-anim-scan' },
-  { text: 'Checking workload data…',      Icon: BarChart2,    anim: 'pm-anim-bounce' },
-  { text: 'Scanning issue history…',      Icon: Radar,        anim: 'pm-anim-spin-slow' },
-  { text: 'Crunching the numbers…',       Icon: Cpu,          anim: 'pm-anim-flicker' },
-  { text: 'Looking through state logs…',  Icon: Database,     anim: 'pm-anim-bounce' },
-  { text: 'Reviewing assignee activity…', Icon: Users,        anim: 'pm-anim-pulse' },
-  { text: 'Checking for blockers…',       Icon: AlertTriangle,anim: 'pm-anim-shake' },
-  { text: 'Fetching live data…',          Icon: Network,      anim: 'pm-anim-spin-slow' },
-  { text: 'Correlating timelines…',       Icon: GitBranch,    anim: 'pm-anim-scan' },
-  { text: 'Inspecting ticket flow…',      Icon: Workflow,     anim: 'pm-anim-bounce' },
-  { text: 'Reading sprint context…',      Icon: Layers,       anim: 'pm-anim-flicker' },
-  { text: 'Identifying patterns…',        Icon: TrendingUp,   anim: 'pm-anim-pulse' },
-  { text: 'Pulling YouTrack data…',       Icon: Telescope,    anim: 'pm-anim-spin-slow' },
-  { text: 'Cross-referencing issues…',    Icon: ListChecks,   anim: 'pm-anim-bounce' },
-  { text: 'Running diagnostics…',         Icon: FlaskConical, anim: 'pm-anim-shake' },
-  { text: 'Processing context…',          Icon: Compass,      anim: 'pm-anim-spin-slow' },
-  { text: 'Reviewing open items…',        Icon: FileText,     anim: 'pm-anim-pulse' },
-  { text: 'Checking delayed tickets…',    Icon: Timer,        anim: 'pm-anim-flicker' },
-  { text: 'Almost there…',               Icon: Gauge,        anim: 'pm-anim-bounce' },
+const THINKING_PHRASES: { text: string; Icon: React.ElementType; key: string }[] = [
+  { text: 'Thinking…',                    Icon: Brain,         key: 'brain' },
+  { text: 'Analyzing your tickets…',      Icon: ScanSearch,    key: 'scan-search' },
+  { text: 'Checking workload data…',      Icon: BarChart2,     key: 'bar-chart' },
+  { text: 'Scanning issue history…',      Icon: Radar,         key: 'radar' },
+  { text: 'Crunching the numbers…',       Icon: Cpu,           key: 'cpu' },
+  { text: 'Looking through state logs…',  Icon: Database,      key: 'database' },
+  { text: 'Reviewing assignee activity…', Icon: Users,         key: 'users' },
+  { text: 'Checking for blockers…',       Icon: AlertTriangle, key: 'alert' },
+  { text: 'Fetching live data…',          Icon: Network,       key: 'network' },
+  { text: 'Correlating timelines…',       Icon: GitBranch,     key: 'git-branch' },
+  { text: 'Inspecting ticket flow…',      Icon: Workflow,      key: 'workflow' },
+  { text: 'Reading sprint context…',      Icon: Layers,        key: 'layers' },
+  { text: 'Identifying patterns…',        Icon: TrendingUp,    key: 'trending-up' },
+  { text: 'Pulling YouTrack data…',       Icon: Telescope,     key: 'telescope' },
+  { text: 'Cross-referencing issues…',    Icon: ListChecks,    key: 'list-checks' },
+  { text: 'Running diagnostics…',         Icon: FlaskConical,  key: 'flask' },
+  { text: 'Processing context…',          Icon: Compass,       key: 'compass' },
+  { text: 'Reviewing open items…',        Icon: FileText,      key: 'file-text' },
+  { text: 'Checking delayed tickets…',    Icon: Timer,         key: 'timer' },
+  { text: 'Almost there…',               Icon: Gauge,         key: 'gauge' },
 ]
 
 export function PMAssistantTab() {
@@ -305,20 +305,94 @@ export function PMAssistantTab() {
 
     const doQuery = () => api.pmAssistantQuery(text, historyWithoutLast)
 
+    const DAILY_LIMIT_MSGS = (t: string) => [
+        `I've burned through my daily brain fuel. Back in ${t} — perfect time for a standup! 🧠`,
+        `Daily AI quota hit. I'll recharge in ${t}. Go review those tickets manually 😄`,
+        `I'm on a forced coffee break for ${t}. Don't miss me too much! ☕`,
+        `Overclocked my neurons today. Give me ${t} to cool down 🔥`,
+        `I've talked too much today. Silence mode for ${t} ⏸️`,
+        `Brain.exe has run out of tokens. Restarting in ${t} 🤖`,
+        `Daily limit reached! I'll be sharp again in ${t}. Go ship something in the meantime 🚀`,
+        `I've exceeded my thinking quota for today. Back at it in ${t} 💭`,
+        `Hitting the gym (token refresh). See you in ${t} 💪`,
+        `My AI hamsters need ${t} to recover. They've been running hard all day 🐹`,
+        `Quota exhausted. I'll be back in ${t} — use the time wisely! ⏱️`,
+        `Daily bandwidth maxed out. Next window opens in ${t} 📡`,
+        `I thought too many thoughts today. Resuming in ${t} 🌀`,
+        `Rate limiter kicked in. I'll be recharged in ${t} ⚡`,
+        `Out of daily tokens. Refilling in ${t}. Try the tracking tab meanwhile 📊`,
+        `I need ${t} to replenish. The servers are taking a breather 😮‍💨`,
+        `Today's AI budget is spent. Fresh start in ${t} 💰`,
+        `Context overflow! I'll be back online in ${t} 🧩`,
+        `My daily word count is up. Check back in ${t} 📝`,
+        `Reached my daily limit. Power nap for ${t} then I'm back 😴`,
+        `Too many questions, not enough quota. Back in ${t} 🔋`,
+        `I gave everything I had today. Recharging in ${t} ✨`,
+        `Daily tokens = 0. Resupply ETA: ${t} 🏭`,
+        `The free tier has spoken. I'll return in ${t} 🗣️`,
+        `Thinking too hard costs tokens apparently. Back in ${t} 🤔`,
+        `Quota: depleted. Morale: high. Back in ${t} 😎`,
+        `I've hit the wall. Recovery time: ${t} 🧱`,
+        `Today's intelligence ration is used up. More in ${t} 🎯`,
+        `Running on empty. Refuel in ${t} ⛽`,
+        `Brain bandwidth exhausted. Rebooting in ${t} 🔄`,
+      ]
+
+      const GENERIC_LIMIT_MSGS = [
+        "I'm a little overloaded right now. Give me a moment and try again.",
+        "Too many thoughts at once — try again in a few seconds.",
+        "Brief hiccup on my end. Hit send again!",
+        "Momentarily swamped. One more try should do it.",
+        "Quick breather needed — try again right now.",
+        "I blinked. Try sending that again.",
+        "Minor traffic jam in my brain. Try once more.",
+        "Brief turbulence — please resend.",
+        "Processing queue full for a moment. Try again.",
+        "Slight overload — I'm back, try again now.",
+      ]
+
+      const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)]
+
+      const friendlyError = (msg: string): string => {
+        // Per-day token limit — retry window is minutes (e.g. "20m48s")
+        const tpdMatch = msg.match(/try again in (\d+)m(\d+(?:\.\d+)?)?s?/i)
+        if (tpdMatch) {
+          const mins = parseInt(tpdMatch[1])
+          const secs = tpdMatch[2] ? Math.round(parseFloat(tpdMatch[2])) : 0
+          const timeStr = secs > 0 ? `${mins}m ${secs}s` : `${mins} minute${mins !== 1 ? 's' : ''}`
+          return pick(DAILY_LIMIT_MSGS(timeStr))
+        }
+
+        // Per-minute / per-hour short limit (already auto-retried, this is the fallback if retry also failed)
+        const perMinMatch = msg.match(/try again in (\d+(?:\.\d+)?)(ms|s)\b/i)
+        if (perMinMatch) return pick(GENERIC_LIMIT_MSGS)
+
+        // Generic rate/token error
+        if (msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('token')) {
+          return pick(GENERIC_LIMIT_MSGS)
+        }
+
+        return "Something went wrong on my end. Please try again."
+      }
+
     try {
       let response
       try {
         response = await doQuery()
       } catch (firstErr) {
-        // Check if it's a Groq rate-limit error with a retry delay
         const errMsg = firstErr instanceof Error ? firstErr.message : ''
-        const retryMatch = errMsg.match(/try again in (\d+(?:\.\d+)?)(\w+)/i)
+        // Per-minute limit with short delay — auto retry silently
+        const retryMatch = errMsg.match(/try again in (\d+(?:\.\d+)?)(ms|s)\b/i)
         if (retryMatch) {
           const value = parseFloat(retryMatch[1])
           const unit = retryMatch[2].toLowerCase()
-          const delayMs = unit.startsWith('s') ? value * 1000 : value // ms or seconds
-          await new Promise(resolve => setTimeout(resolve, Math.ceil(delayMs) + 100))
-          response = await doQuery() // single retry — let it throw if it fails again
+          const delayMs = unit === 'ms' ? value : value * 1000
+          if (delayMs <= 5000) {
+            await new Promise(resolve => setTimeout(resolve, Math.ceil(delayMs) + 100))
+            response = await doQuery()
+          } else {
+            throw firstErr
+          }
         } else {
           throw firstErr
         }
@@ -331,10 +405,11 @@ export function PMAssistantTab() {
       }
       setMessages(prev => [...prev, assistantMsg])
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : ''
       const errorMsg: ChatMessage = {
         id: `msg-${Date.now()}-error`,
         role: 'assistant',
-        content: `Error: ${err instanceof Error ? err.message : 'Failed to get response'}`,
+        content: friendlyError(errMsg),
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, errorMsg])
@@ -400,7 +475,7 @@ export function PMAssistantTab() {
             <div className="pm-chat-message pm-chat-assistant">
               <div className="pm-chat-avatar"><Bot size={16} /></div>
               <div className="pm-chat-bubble pm-chat-loading">
-                <span className={`pm-thinking-icon${thinkingVisible ? ' pm-thinking-visible' : ''} ${phrase.anim}`}>
+                <span className={`pm-thinking-icon pm-ti-${phrase.key}${thinkingVisible ? ' pm-thinking-visible' : ''}`}>
                   <PhIcon size={15} />
                 </span>
                 <span className={`pm-thinking-text${thinkingVisible ? ' pm-thinking-visible' : ''}`}>
