@@ -7,6 +7,9 @@ import {
   Search, RotateCcw, ArrowDownUp, ArrowUpNarrowWide,
   ArrowDownNarrowWide, Star, Activity, X, TriangleAlert,
   CheckCircle2, Timer, Zap, Filter, Trash2,
+  Brain, ScanSearch, BarChart2, GitBranch, Layers,
+  Cpu, Database, Radar, Gauge, ListChecks,
+  Workflow, Telescope, FlaskConical, Network, Compass,
 } from 'lucide-react'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { IssueTimeline, IssueStint } from '../services/api'
@@ -236,16 +239,56 @@ function renderMarkdown(text: string): string {
 
 // ─── Tab: PM Assistant ────────────────────────────────────────────────────────
 
+const THINKING_PHRASES: { text: string; Icon: React.ElementType; anim: string }[] = [
+  { text: 'Thinking…',                    Icon: Brain,        anim: 'pm-anim-pulse' },
+  { text: 'Analyzing your tickets…',      Icon: ScanSearch,   anim: 'pm-anim-scan' },
+  { text: 'Checking workload data…',      Icon: BarChart2,    anim: 'pm-anim-bounce' },
+  { text: 'Scanning issue history…',      Icon: Radar,        anim: 'pm-anim-spin-slow' },
+  { text: 'Crunching the numbers…',       Icon: Cpu,          anim: 'pm-anim-flicker' },
+  { text: 'Looking through state logs…',  Icon: Database,     anim: 'pm-anim-bounce' },
+  { text: 'Reviewing assignee activity…', Icon: Users,        anim: 'pm-anim-pulse' },
+  { text: 'Checking for blockers…',       Icon: AlertTriangle,anim: 'pm-anim-shake' },
+  { text: 'Fetching live data…',          Icon: Network,      anim: 'pm-anim-spin-slow' },
+  { text: 'Correlating timelines…',       Icon: GitBranch,    anim: 'pm-anim-scan' },
+  { text: 'Inspecting ticket flow…',      Icon: Workflow,     anim: 'pm-anim-bounce' },
+  { text: 'Reading sprint context…',      Icon: Layers,       anim: 'pm-anim-flicker' },
+  { text: 'Identifying patterns…',        Icon: TrendingUp,   anim: 'pm-anim-pulse' },
+  { text: 'Pulling YouTrack data…',       Icon: Telescope,    anim: 'pm-anim-spin-slow' },
+  { text: 'Cross-referencing issues…',    Icon: ListChecks,   anim: 'pm-anim-bounce' },
+  { text: 'Running diagnostics…',         Icon: FlaskConical, anim: 'pm-anim-shake' },
+  { text: 'Processing context…',          Icon: Compass,      anim: 'pm-anim-spin-slow' },
+  { text: 'Reviewing open items…',        Icon: FileText,     anim: 'pm-anim-pulse' },
+  { text: 'Checking delayed tickets…',    Icon: Timer,        anim: 'pm-anim-flicker' },
+  { text: 'Almost there…',               Icon: Gauge,        anim: 'pm-anim-bounce' },
+]
+
 export function PMAssistantTab() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [thinkingIdx, setThinkingIdx] = useState(0)
+  const [thinkingVisible, setThinkingVisible] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const thinkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    if (!loading) { setThinkingIdx(0); setThinkingVisible(true); return }
+    const cycle = () => {
+      setThinkingVisible(false)
+      thinkingTimerRef.current = setTimeout(() => {
+        setThinkingIdx(i => (i + 1) % THINKING_PHRASES.length)
+        setThinkingVisible(true)
+        thinkingTimerRef.current = setTimeout(cycle, 2200)
+      }, 350)
+    }
+    thinkingTimerRef.current = setTimeout(cycle, 2200)
+    return () => { if (thinkingTimerRef.current) clearTimeout(thinkingTimerRef.current) }
+  }, [loading])
 
   const handleSend = async (query?: string) => {
     const text = query || input.trim()
@@ -350,15 +393,23 @@ export function PMAssistantTab() {
           </div>
         ))}
 
-        {loading && (
-          <div className="pm-chat-message pm-chat-assistant">
-            <div className="pm-chat-avatar"><Bot size={16} /></div>
-            <div className="pm-chat-bubble pm-chat-loading">
-              <Loader2 size={16} className="animate-spin" />
-              <span>Thinking…</span>
+        {loading && (() => {
+          const phrase = THINKING_PHRASES[thinkingIdx]
+          const PhIcon = phrase.Icon
+          return (
+            <div className="pm-chat-message pm-chat-assistant">
+              <div className="pm-chat-avatar"><Bot size={16} /></div>
+              <div className="pm-chat-bubble pm-chat-loading">
+                <span className={`pm-thinking-icon${thinkingVisible ? ' pm-thinking-visible' : ''} ${phrase.anim}`}>
+                  <PhIcon size={15} />
+                </span>
+                <span className={`pm-thinking-text${thinkingVisible ? ' pm-thinking-visible' : ''}`}>
+                  {phrase.text}
+                </span>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         <div ref={messagesEndRef} />
       </div>
