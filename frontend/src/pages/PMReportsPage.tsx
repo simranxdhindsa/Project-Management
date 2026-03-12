@@ -257,12 +257,29 @@ export function PMAssistantTab() {
     setInput('')
     setLoading(true)
 
+    const history = updatedMessages.map(m => ({ role: m.role, content: m.content }))
+    const historyWithoutLast = history.slice(0, -1)
+
+    const doQuery = () => api.pmAssistantQuery(text, historyWithoutLast)
+
     try {
-      // Send full conversation history for multi-turn memory
-      const history = updatedMessages.map(m => ({ role: m.role, content: m.content }))
-      // The last message (current user query) is sent separately as `query`
-      const historyWithoutLast = history.slice(0, -1)
-      const response = await api.pmAssistantQuery(text, historyWithoutLast)
+      let response
+      try {
+        response = await doQuery()
+      } catch (firstErr) {
+        // Check if it's a Groq rate-limit error with a retry delay
+        const errMsg = firstErr instanceof Error ? firstErr.message : ''
+        const retryMatch = errMsg.match(/try again in (\d+(?:\.\d+)?)(\w+)/i)
+        if (retryMatch) {
+          const value = parseFloat(retryMatch[1])
+          const unit = retryMatch[2].toLowerCase()
+          const delayMs = unit.startsWith('s') ? value * 1000 : value // ms or seconds
+          await new Promise(resolve => setTimeout(resolve, Math.ceil(delayMs) + 100))
+          response = await doQuery() // single retry — let it throw if it fails again
+        } else {
+          throw firstErr
+        }
+      }
       const assistantMsg: ChatMessage = {
         id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
