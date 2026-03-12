@@ -88,6 +88,12 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 		doneIssues = nil // non-fatal
 	}
 
+	// --- 1b. Hotfix tickets (moved directly to STAGE/PROD from Backlog/In Progress yesterday) ---
+	hotfixIssues, err := h.reportRepo.GetHotfixIssues(r.Context(), yesterday)
+	if err != nil {
+		hotfixIssues = nil // non-fatal
+	}
+
 	// --- 2. Open + Blocked tickets from YouTrack live (full scope only) ---
 	var openIssues []youtrack.Issue
 	var blockedIssues []youtrack.Issue
@@ -155,6 +161,26 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 			for _, issue := range doneIssues {
 				sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
 			}
+		}
+	}
+
+	// Hotfix section — always included (shown in both summary and full)
+	sb.WriteString("\n\n")
+	sb.WriteString("*Hotfixes deployed to STAGE/PROD:*\n\n")
+	if len(hotfixIssues) == 0 {
+		sb.WriteString("_No hotfixes deployed_\n")
+	} else {
+		for _, issue := range hotfixIssues {
+			destLabels := map[string]string{"ready for stage": "Ready for Stage", "stage": "STAGE", "ready for prod": "Ready for PROD", "prod": "PROD"}
+			dest := destLabels[strings.ToLower(issue.ToState)]
+			if dest == "" {
+				dest = issue.ToState
+			}
+			line := fmt.Sprintf("• %s %s _(→ %s)_", issue.IssueID, issue.IssueSummary, dest)
+			if issue.Assignee != "" {
+				line += fmt.Sprintf(" (Assignee: %s)", issue.Assignee)
+			}
+			sb.WriteString(line + "\n")
 		}
 	}
 
@@ -1027,6 +1053,12 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 		doneIssues = nil
 	}
 
+	// --- 1b. Hotfix tickets for the full week ---
+	hotfixIssues, err := h.reportRepo.GetHotfixIssuesForWeek(r.Context(), weekStartDate, weekEndDate)
+	if err != nil {
+		hotfixIssues = nil
+	}
+
 	// --- 2. Open + Blocked tickets from YouTrack live (full scope only) ---
 	var openIssues []youtrack.Issue
 	var blockedIssues []youtrack.Issue
@@ -1075,6 +1107,34 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 				currentAssignee = name
 			}
 			sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+		}
+	}
+
+	// Hotfix section — always included (shown in both summary and full)
+	sb.WriteString("\n\n")
+	sb.WriteString("*Hotfixes deployed to STAGE/PROD:*\n\n")
+	if len(hotfixIssues) == 0 {
+		sb.WriteString("_No hotfixes deployed this week_\n")
+	} else {
+		currentHotfixAssignee := ""
+		for _, issue := range hotfixIssues {
+			name := issue.Assignee
+			if name == "" {
+				name = "Unassigned"
+			}
+			if name != currentHotfixAssignee {
+				if currentHotfixAssignee != "" {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(fmt.Sprintf("@%s\n", name))
+				currentHotfixAssignee = name
+			}
+			destLabels := map[string]string{"ready for stage": "Ready for Stage", "stage": "STAGE", "ready for prod": "Ready for PROD", "prod": "PROD"}
+			dest := destLabels[strings.ToLower(issue.ToState)]
+			if dest == "" {
+				dest = issue.ToState
+			}
+			sb.WriteString(fmt.Sprintf("• %s %s _(→ %s)_\n", issue.IssueID, issue.IssueSummary, dest))
 		}
 	}
 

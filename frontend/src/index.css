@@ -8501,6 +8501,7 @@ select.form-input {
   display: flex;
   gap: 0.6rem;
   max-width: 85%;
+  min-width: 0;
 }
 
 .pm-chat-user {
@@ -8533,6 +8534,9 @@ select.form-input {
   padding: 0.75rem 1rem;
   border-radius: 12px;
   position: relative;
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .pm-chat-user .pm-chat-bubble {
@@ -8550,6 +8554,9 @@ select.form-input {
 .pm-chat-content {
   font-size: 0.85rem;
   line-height: 1.6;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .pm-chat-content h2,
@@ -14926,7 +14933,7 @@ select.form-input {
 
 /* ─── Floating PM Assistant Bubble ─────────────────────────────────────────── */
 
-.pm-chat-bubble {
+.pm-float-bubble {
   position: fixed;
   bottom: 28px;
   right: 28px;
@@ -14946,18 +14953,18 @@ select.form-input {
   overflow: visible;
 }
 
-.pm-chat-bubble:hover {
+.pm-float-bubble:hover {
   transform: scale(1.08);
   box-shadow: 0 6px 32px rgba(99, 102, 241, 0.65), 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 
-.pm-chat-bubble--open {
+.pm-float-bubble--open {
   background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
   transform: scale(0.96);
 }
 
 /* Animated glow ring */
-.pm-chat-bubble-glow {
+.pm-float-bubble-glow {
   position: absolute;
   inset: -4px;
   border-radius: 50%;
@@ -14983,9 +14990,7 @@ select.form-input {
   height: 580px;
   max-height: calc(100vh - 120px);
   border-radius: 16px;
-  background: rgba(15, 23, 42, 0.92);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  background: rgb(15, 23, 42);
   border: 1px solid rgba(139, 92, 246, 0.3);
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04), 0 0 40px rgba(99, 102, 241, 0.12);
   display: flex;

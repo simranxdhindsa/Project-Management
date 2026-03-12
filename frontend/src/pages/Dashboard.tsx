@@ -1330,11 +1330,11 @@ export default function Dashboard() {
       )}
 
       <button
-        className={`pm-chat-bubble${chatOpen ? ' pm-chat-bubble--open' : ''}`}
+        className={`pm-float-bubble${chatOpen ? ' pm-float-bubble--open' : ''}`}
         onClick={() => setChatOpen(v => !v)}
         aria-label="PM Assistant"
       >
-        <span className="pm-chat-bubble-glow" />
+        <span className="pm-float-bubble-glow" />
         {chatOpen ? <X size={22} /> : <Sparkles size={22} />}
       </button>
     </div>

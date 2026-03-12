@@ -285,6 +285,71 @@ func (r *ReportRepository) GetDoneIssuesForWeek(ctx context.Context, weekStart, 
 	return logs, nil
 }
 
+// GetHotfixIssues returns tickets deployed directly to STAGE or PROD on a specific date,
+// where the previous state was Backlog or In Progress (i.e. skipped DEV — these are hotfixes).
+func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string) ([]IssueStateLog, error) {
+	pool := GetPool()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, issue_id, issue_summary,
+		       COALESCE(assignee,''), COALESCE(moved_by,''),
+		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		FROM issue_state_log
+		WHERE LOWER(to_state) IN ('ready for stage', 'stage', 'ready for prod', 'prod')
+		  AND LOWER(from_state) IN ('backlog', 'in progress')
+		  AND date(transitioned_at) = $1::date
+		ORDER BY transitioned_at DESC
+	`, date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []IssueStateLog
+	for rows.Next() {
+		l, err := scanStateLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
+// GetHotfixIssuesForWeek returns hotfix tickets deployed to STAGE/PROD during a week,
+// sorted by assignee.
+func (r *ReportRepository) GetHotfixIssuesForWeek(ctx context.Context, weekStart, weekEnd string) ([]IssueStateLog, error) {
+	pool := GetPool()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, issue_id, issue_summary,
+		       COALESCE(assignee,''), COALESCE(moved_by,''),
+		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		FROM issue_state_log
+		WHERE LOWER(to_state) IN ('ready for stage', 'stage', 'ready for prod', 'prod')
+		  AND LOWER(from_state) IN ('backlog', 'in progress')
+		  AND date(transitioned_at) >= $1::date
+		  AND date(transitioned_at) <= $2::date
+		ORDER BY assignee ASC, transitioned_at DESC
+	`, weekStart, weekEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []IssueStateLog
+	for rows.Next() {
+		l, err := scanStateLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
 // TimeTrackingParams holds optional filters for the time tracking query.
 // nil/zero values mean "no filter".
 type TimeTrackingParams struct {
