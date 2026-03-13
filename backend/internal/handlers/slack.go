@@ -110,11 +110,13 @@ func (h *SlackHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"connected":    integration.Connected,
-		"team_id":      integration.TeamID,
-		"team_name":    integration.TeamName,
-		"channel_id":   integration.ChannelID,
-		"channel_name": integration.ChannelName,
+		"connected":           integration.Connected,
+		"team_id":             integration.TeamID,
+		"team_name":           integration.TeamName,
+		"channel_id":          integration.ChannelID,
+		"channel_name":        integration.ChannelName,
+		"monitor_channel_id":  integration.MonitorChannelID,
+		"monitor_channel_name": integration.MonitorChannelName,
 	})
 }
 

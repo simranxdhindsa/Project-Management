@@ -43,8 +43,9 @@ function truncate(text: string, max = 140) {
 
 function cleanSlackText(text: string): string {
   return text
-    .replace(/<@U[A-Z0-9]+>/g, '@mention')
+    .replace(/<@U[A-Z0-9]+>/g, '@user')
     .replace(/<#C[A-Z0-9]+\|([^>]+)>/g, '#$1')
+    .replace(/<#C[A-Z0-9]+>/g, '#channel')
     .replace(/<([^|>]+)\|([^>]+)>/g, '$2')
     .replace(/<https?:[^>]+>/g, '[link]')
     .replace(/\n+/g, ' ')
@@ -104,6 +105,7 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
   const [slackTeamId, setSlackTeamId] = useState('T03Q9638YJJ')
   const [monitorChannelId, setMonitorChannelId] = useState('')
   const [monitorChannelName, setMonitorChannelName] = useState('')
+  const [resolvedMonitorChannelName, setResolvedMonitorChannelName] = useState('')
   const [savingChannel, setSavingChannel] = useState(false)
   const [channelMsg, setChannelMsg] = useState<string | null>(null)
 
@@ -153,6 +155,11 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
     fetchAll()
     api.getSlackStatus().then((res: any) => {
       if (res.team_id) setSlackTeamId(res.team_id)
+      if (res.monitor_channel_id) setMonitorChannelId(res.monitor_channel_id)
+      if (res.monitor_channel_name) {
+        setMonitorChannelName(res.monitor_channel_name)
+        setResolvedMonitorChannelName(res.monitor_channel_name)
+      }
     }).catch(() => {})
   }, [fetchAll])
 
@@ -441,7 +448,7 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
                       <div className="si-card-meta">
                         {renderUrgencyDot(m)}
                         <span className="si-sender">{m.sender_name}</span>
-                        <span className="si-channel"><Hash size={11} />ardoise-platform</span>
+                        <span className="si-channel"><Hash size={11} />{resolvedMonitorChannelName || 'slack'}</span>
                         <span className="si-time">{timeAgo(m.created_at)}</span>
                         {snoozed && m.snoozed_until && (
                           <span className="si-snooze-label">
@@ -505,7 +512,7 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
                       onClick={() => openSlack(t.channel_id, t.thread_ts)}
                     >
                       <div className="si-card-meta">
-                        <span className="si-channel"><Hash size={11} />ardoise-platform</span>
+                        <span className="si-channel"><Hash size={11} />{resolvedMonitorChannelName || 'slack'}</span>
                         <span className="si-time">{timeAgo(t.created_at)}</span>
                         <span className={`si-reply-chip ${t.has_reply ? 'has-reply' : 'no-reply'}`}>
                           {t.reply_count === 0 ? 'No replies' : `${t.reply_count} repl${t.reply_count === 1 ? 'y' : 'ies'}`}
@@ -590,7 +597,7 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
               <div className="si-settings-section">
                 <h4 className="si-settings-title"><Hash size={15} /> Monitor Channel</h4>
                 <p className="si-settings-desc">
-                  Channel scanned for your @mentions (e.g. <code>ardoise-platform</code>).
+                  Channel scanned for your @mentions. Enter the channel ID and name.
                   The Slack bot must be invited to this channel.
                 </p>
                 <div className="si-settings-row">
@@ -602,7 +609,7 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
                   />
                   <input
                     className="si-modal-input"
-                    placeholder="Channel name (e.g. ardoise-platform)"
+                    placeholder="Channel name (e.g. general)"
                     value={monitorChannelName}
                     onChange={e => setMonitorChannelName(e.target.value)}
                   />
@@ -634,7 +641,7 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
               <div className="si-settings-section">
                 <h4 className="si-settings-title"><MessageSquare size={15} /> Connected Channels</h4>
                 <p className="si-settings-desc">
-                  Your bot must be in both <code>ardoise-platform</code> and <code>ardoise-pm</code>.
+                  Your bot must be in both the monitor channel and the digest channel.
                   Configure the full connection in{' '}
                   <span className="si-inline-link" onClick={() => navigate('/integrations')}>Integrations →</span>
                 </p>

@@ -43,6 +43,17 @@ const PRESET_LABELS: Record<Preset, string> = {
   in1week: 'In 1 week',
 }
 
+function cleanSlackText(text: string): string {
+  return text
+    .replace(/<@U[A-Z0-9]+>/g, '@user')
+    .replace(/<#C[A-Z0-9]+\|([^>]+)>/g, '#$1')
+    .replace(/<#C[A-Z0-9]+>/g, '#channel')
+    .replace(/<([^|>]+)\|([^>]+)>/g, '$2')
+    .replace(/<https?:[^>]+>/g, '[link]')
+    .replace(/\n+/g, ' ')
+    .trim()
+}
+
 function getTypeLabel(type: string) {
   switch (type) {
     case 'task_followup': return 'Follow-up'
@@ -372,10 +383,9 @@ export function RemindersPage() {
                         <div>
                           <p className="reminder-title">
                             <span className="reminder-slack-sender">@{m.sender_name}</span>
-                            {m.channel_id && <span className="reminder-slack-channel"> · #{m.channel_id}</span>}
                           </p>
                           <p className="reminder-message reminder-slack-text">
-                            {m.message_text.length > 120 ? m.message_text.slice(0, 120) + '…' : m.message_text}
+                            {cleanSlackText(m.message_text.length > 120 ? m.message_text.slice(0, 120) + '…' : m.message_text)}
                           </p>
                           <div className="reminder-meta">
                             <span>{formatRelDate(m.created_at)}</span>

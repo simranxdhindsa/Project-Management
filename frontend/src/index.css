@@ -4775,7 +4775,7 @@ select.form-input {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  max-width: 900px;
+  width: 100%;
 }
 
 .activity-page-header {
@@ -6649,7 +6649,8 @@ select.form-input {
 
 /* Reminders Page */
 .reminders-page {
-  max-width: 1200px;
+  width: 100%;
+  padding: 1.5rem;
 }
 
 .reminders-grid {
