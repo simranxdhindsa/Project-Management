@@ -13523,6 +13523,98 @@ select.form-input {
   border-left: 3px solid rgba(130, 80, 223, 0.4);
 }
 
+.si-reminders-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.si-quick-add-bar {
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.si-quick-add-presets {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.si-preset-btn {
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.si-preset-btn.active,
+.si-preset-btn:hover {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+.si-quick-add-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.si-quick-add-date {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.si-quick-issue-input {
+  max-width: 120px;
+}
+
+.si-reminder-subtabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.25rem;
+}
+
+.si-reminder-subtab {
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.15s;
+}
+
+.si-reminder-subtab.active {
+  color: var(--color-primary);
+  border-bottom: 2px solid var(--color-primary);
+  font-weight: 600;
+}
+
+.si-reminder-card {
+  border-left: 3px solid rgba(99, 102, 241, 0.35);
+}
+
+.si-reminder-icon {
+  color: var(--text-muted);
+}
+
 .si-manage-link {
   display: inline-flex;
   align-items: center;
@@ -15336,6 +15428,24 @@ select.form-input {
 [data-theme="light"] .si-tab-bar {
   background: rgba(255, 255, 255, 0.5);
   border-color: var(--border-color);
+}
+
+/* SI cards — light mode visibility */
+[data-theme="light"] .si-card {
+  background: rgba(255, 255, 255, 0.75);
+  border-color: rgba(99, 102, 241, 0.2);
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.08);
+}
+[data-theme="light"] .si-card:hover {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+[data-theme="light"] .si-card-thread code {
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--text-secondary);
+}
+[data-theme="light"] .si-card-link:hover {
+  background: rgba(99, 102, 241, 0.05);
 }
 
 /* Active tab button */

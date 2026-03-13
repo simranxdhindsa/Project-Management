@@ -58,14 +58,13 @@ import { BotConfigPage } from './BotConfigPage'
 import { AIAnalysisPage } from './AIAnalysisPage'
 import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
-import { RemindersPage } from './RemindersPage'
 import { SlackIntelligencePage } from './SlackIntelligencePage'
 import { ActivityPage } from './ActivityPage'
 import { JellySwitch } from '../components/JellySwitch'
 import { RightPanel } from '../components/notifications/RightPanel'
 import type { LocalNotification } from '../components/notifications/RightPanel'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'reminders' | 'slack' | 'activity'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity'
 
 // Pages accessible by members/viewers (limited access)
 const MEMBER_PAGES: Page[] = ['dashboard', 'list', 'daily-tasks']
@@ -149,7 +148,6 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'team': 'team',
   'settings': 'settings',
   'integrations': 'integrations',
-  'reminders': 'reminders',
   'slack': 'slack',
   'activity': 'activity',
 }
@@ -157,7 +155,7 @@ const PATH_TO_PAGE: Record<string, Page> = {
 const PM_REPORTS_TABS = ['tracking', 'daily', 'assignees', 'dailyops', 'deployment'] as const
 type PMReportsTab = typeof PM_REPORTS_TABS[number]
 
-const SLACK_TABS = ['inbox', 'threads', 'followups', 'settings'] as const
+const SLACK_TABS = ['inbox', 'threads', 'reminders', 'settings'] as const
 type SlackTab = typeof SLACK_TABS[number]
 
 export default function Dashboard() {
@@ -558,13 +556,6 @@ export default function Dashboard() {
             {isFullAccess && (
               <>
                 <button
-                  className={`sidebar-nav-item ${currentPage === 'reminders' ? 'active' : ''}`}
-                  onClick={() => setCurrentPage('reminders')}
-                >
-                  <Bell size={20} />
-                  <span>Reminders</span>
-                </button>
-                <button
                   className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
                   onClick={() => setCurrentPage('activity')}
                 >
@@ -700,7 +691,6 @@ export default function Dashboard() {
             {currentPage === 'bots' && 'Bot Configuration'}
             {currentPage === 'settings' && 'Access Control'}
             {currentPage === 'integrations' && 'Integrations'}
-            {currentPage === 'reminders' && 'Reminders'}
             {currentPage === 'slack' && 'Slack Intelligence'}
             {currentPage === 'activity' && 'Activity'}
           </h1>
@@ -774,7 +764,6 @@ export default function Dashboard() {
         {/* Render page based on currentPage */}
         {currentPage === 'integrations' && <IntegrationsPage />}
         {currentPage === 'settings' && <SettingsPage />}
-        {currentPage === 'reminders' && <RemindersPage />}
         {currentPage === 'activity' && <ActivityPage />}
         {currentPage === 'slack' && (
           <SlackIntelligencePage

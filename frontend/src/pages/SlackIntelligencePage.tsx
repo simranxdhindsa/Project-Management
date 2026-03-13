@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   RefreshCw, CheckCircle, Clock, Bell, Hash,
-  ArrowRight, Settings, AlertCircle, MessageSquare,
-  ExternalLink, Moon, ChevronDown, Filter, Zap
+  Settings, AlertCircle, MessageSquare,
+  ExternalLink, Moon, ChevronDown, Filter, Zap,
+  Trash2, X, Calendar, Plus
 } from 'lucide-react'
 import api from '../services/api'
 import type { SlackMention, SlackThread, ReminderItem } from '../services/api'
@@ -71,8 +72,37 @@ function isSnoozed(snoozedUntil?: string): boolean {
   return new Date(snoozedUntil) > new Date()
 }
 
-type Tab = 'inbox' | 'threads' | 'followups' | 'settings'
-type Filter = 'all' | 'unread' | 'snoozed'
+type Tab = 'inbox' | 'threads' | 'reminders' | 'settings'
+type Filter = 'all' | 'unread' | 'snoozed' | 'resolved'
+type ReminderSubTab = 'upcoming' | 'sent' | 'auto'
+type Preset = 'tomorrow' | 'in2days' | 'nextmon' | 'in1week'
+
+const PRESET_LABELS: Record<Preset, string> = {
+  tomorrow: 'Tomorrow',
+  in2days: 'In 2 days',
+  nextmon: 'Next Monday',
+  in1week: 'In 1 week',
+}
+
+function getPresetDate(preset: Preset): string {
+  const d = new Date()
+  if (preset === 'tomorrow') d.setDate(d.getDate() + 1)
+  else if (preset === 'in2days') d.setDate(d.getDate() + 2)
+  else if (preset === 'nextmon') { const day = d.getDay(); d.setDate(d.getDate() + (day === 0 ? 1 : 8 - day)) }
+  else if (preset === 'in1week') d.setDate(d.getDate() + 7)
+  return d.toISOString().split('T')[0]
+}
+
+function getReminderTypeLabel(type: string) {
+  switch (type) {
+    case 'task_followup': return 'Follow-up'
+    case 'blocked_issue': return 'Blocker'
+    case 'update_check': return 'Update Check'
+    case 'daily_digest': return 'Daily Digest'
+    case 'slack_followup': return 'Slack Follow-up'
+    default: return 'Custom'
+  }
+}
 
 interface SlackIntelligencePageProps {
   initialTab?: Tab
@@ -91,8 +121,15 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
   // ── Data state ──────────────────────────────────────────────────────────
   const [mentions, setMentions] = useState<SlackMention[]>([])
   const [threads, setThreads] = useState<SlackThread[]>([])
-  const [followups, setFollowups] = useState<ReminderItem[]>([])
+  const [remindersAll, setRemindersAll] = useState<ReminderItem[]>([])
   const [loading, setLoading] = useState(false)
+
+  // ── Reminders sub-tab state ──────────────────────────────────────────────
+  const [reminderSubTab, setReminderSubTab] = useState<ReminderSubTab>('upcoming')
+  const [activePreset, setActivePreset] = useState<Preset | null>(null)
+  const [quickTitle, setQuickTitle] = useState('')
+  const [quickIssueId, setQuickIssueId] = useState('')
+  const [creatingReminder, setCreatingReminder] = useState(false)
 
   // ── Auto-scan state ─────────────────────────────────────────────────────
   const [scanning, setScanning] = useState(false)
@@ -136,20 +173,20 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
     } catch {}
   }, [])
 
-  const fetchFollowups = useCallback(async () => {
+  const fetchReminders = useCallback(async () => {
     try {
       const res = await api.getReminders()
       if (res.success && res.data) {
-        setFollowups(res.data.filter((r: ReminderItem) => r.type === 'slack_followup'))
+        setRemindersAll(res.data)
       }
     } catch {}
   }, [])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    await Promise.all([fetchMentions(), fetchThreads(), fetchFollowups()])
+    await Promise.all([fetchMentions(), fetchThreads(), fetchReminders()])
     setLoading(false)
-  }, [fetchMentions, fetchThreads, fetchFollowups])
+  }, [fetchMentions, fetchThreads, fetchReminders])
 
   useEffect(() => {
     fetchAll()
@@ -275,12 +312,56 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
     setSavingChannel(false)
   }
 
+  // ── Reminder CRUD ────────────────────────────────────────────────────────
+  const handleQuickAdd = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!activePreset || !quickTitle.trim()) return
+    setCreatingReminder(true)
+    try {
+      const res = await api.createReminder({
+        title: quickTitle.trim(),
+        target_date: getPresetDate(activePreset),
+        type: 'custom',
+        related_issue_id: quickIssueId.trim() || undefined,
+      })
+      if (res.success) {
+        setActivePreset(null); setQuickTitle(''); setQuickIssueId('')
+        setReminderSubTab('upcoming')
+        fetchReminders()
+      }
+    } catch {}
+    setCreatingReminder(false)
+  }
+
+  const handleDismissReminder = async (id: string) => {
+    await api.dismissReminder(id).catch(() => {})
+    setRemindersAll(prev => prev.filter(r => r.id !== id))
+  }
+
+  const handleDeleteReminder = async (id: string) => {
+    await api.deleteReminder(id).catch(() => {})
+    setRemindersAll(prev => prev.filter(r => r.id !== id))
+  }
+
   // ── Filtered lists ───────────────────────────────────────────────────────
   const visibleMentions = mentions.filter(m => {
     if (filter === 'unread') return !m.replied && !isSnoozed(m.snoozed_until)
     if (filter === 'snoozed') return isSnoozed(m.snoozed_until)
+    if (filter === 'resolved') return m.replied
     return true
   })
+
+  // Reminders derived lists
+  const upcomingReminders = remindersAll
+    .filter(r => r.status === 'pending' && r.type === 'custom')
+    .sort((a, b) => a.target_date.localeCompare(b.target_date))
+  const sentReminders = remindersAll
+    .filter(r => r.status === 'sent' && r.type === 'custom')
+    .sort((a, b) => b.target_date.localeCompare(a.target_date))
+    .slice(0, 30)
+  const autoReminders = remindersAll
+    .filter(r => r.type !== 'custom')
+    .sort((a, b) => b.target_date.localeCompare(a.target_date))
 
   // Sort: unreplied first, then by urgency, then by recency
   const sortedMentions = [...visibleMentions].sort((a, b) => {
@@ -388,11 +469,11 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
             </span>
           )}
         </button>
-        <button className={`si-tab ${tab === 'followups' ? 'active' : ''}`} onClick={() => handleTabChange('followups')}>
+        <button className={`si-tab ${tab === 'reminders' ? 'active' : ''}`} onClick={() => handleTabChange('reminders')}>
           <Bell size={14} />
-          Follow-ups
-          {followups.filter(f => f.status === 'pending').length > 0 && (
-            <span className="si-tab-badge">{followups.filter(f => f.status === 'pending').length}</span>
+          Reminders
+          {upcomingReminders.length > 0 && (
+            <span className="si-tab-badge">{upcomingReminders.length}</span>
           )}
         </button>
         <button className={`si-tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => handleTabChange('settings')}>
@@ -405,13 +486,16 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
       {(tab === 'inbox' || tab === 'threads') && (
         <div className="si-filter-bar">
           <Filter size={13} className="si-filter-icon" />
-          {(['unread', 'all', 'snoozed'] as Filter[]).map(f => (
+          {(tab === 'inbox'
+            ? ['unread', 'all', 'snoozed', 'resolved'] as Filter[]
+            : ['unread', 'all', 'snoozed'] as Filter[]
+          ).map(f => (
             <button
               key={f}
               className={`si-filter-btn ${filter === f ? 'active' : ''}`}
               onClick={() => setFilter(f)}
             >
-              {f === 'unread' ? 'Needs Action' : f === 'all' ? 'All' : 'Snoozed'}
+              {f === 'unread' ? 'Needs Action' : f === 'all' ? 'All' : f === 'snoozed' ? 'Snoozed' : 'Resolved'}
             </button>
           ))}
         </div>
@@ -553,45 +637,140 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
           )
         )}
 
-        {/* ── FOLLOW-UPS TAB ── */}
-        {tab === 'followups' && (
-          loading ? (
-            <div className="si-loading"><RefreshCw size={16} className="spin" /> Loading…</div>
-          ) : followups.length === 0 ? (
-            <div className="si-empty">
-              <Bell size={36} />
-              <p>No follow-up reminders yet.</p>
-              <p className="si-empty-sub">Use the "Remind" button on any mention or thread.</p>
-            </div>
-          ) : (
-            <>
-              <div className="si-card-list">
-                {followups.map(r => (
-                  <div key={r.id} className={`si-card si-followup-card ${r.status !== 'pending' ? 'si-card-done' : ''}`}>
-                    <div className="si-card-body">
-                      <div className="si-card-meta">
-                        <span className="si-time"><Clock size={11} /> {r.target_date}</span>
-                        <span className={`si-status-chip status-${r.status}`}>{r.status}</span>
-                      </div>
-                      <p className="si-card-text">{r.title}</p>
-                      {r.message && <p className="si-card-note">{r.message}</p>}
-                      {r.related_issue_id && (
-                        <div className="si-issue-chips">
-                          <span className="si-issue-chip">
-                            <MessageSquare size={10} />
-                            {r.related_issue_id.slice(0, 18)}…
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+        {/* ── REMINDERS TAB ── */}
+        {tab === 'reminders' && (
+          <div className="si-reminders-panel">
+            {/* Quick-add bar */}
+            <div className="si-quick-add-bar glass-card">
+              <div className="si-quick-add-presets">
+                {(Object.keys(PRESET_LABELS) as Preset[]).map(p => (
+                  <button
+                    key={p}
+                    className={`si-preset-btn${activePreset === p ? ' active' : ''}`}
+                    onClick={() => { setActivePreset(activePreset === p ? null : p); setQuickTitle(''); setQuickIssueId('') }}
+                  >
+                    {PRESET_LABELS[p]}
+                  </button>
                 ))}
               </div>
-              <button className="si-manage-link" onClick={() => navigate('/reminders')}>
-                <ArrowRight size={13} /> Manage in Reminders
+              {activePreset && (
+                <form className="si-quick-add-form" onSubmit={handleQuickAdd}>
+                  <span className="si-quick-add-date"><Clock size={12} /> {getPresetDate(activePreset)}</span>
+                  <input
+                    className="si-modal-input"
+                    placeholder="Reminder title…"
+                    value={quickTitle}
+                    onChange={e => setQuickTitle(e.target.value)}
+                    autoFocus
+                    required
+                  />
+                  <input
+                    className="si-modal-input si-quick-issue-input"
+                    placeholder="Issue ID (optional)"
+                    value={quickIssueId}
+                    onChange={e => setQuickIssueId(e.target.value)}
+                  />
+                  <button type="submit" className="si-btn si-btn-save" disabled={creatingReminder || !quickTitle.trim()}>
+                    <Plus size={12} /> {creatingReminder ? 'Adding…' : 'Add'}
+                  </button>
+                  <button type="button" className="si-btn si-btn-cancel" onClick={() => { setActivePreset(null); setQuickTitle(''); setQuickIssueId('') }}>
+                    Cancel
+                  </button>
+                </form>
+              )}
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="si-reminder-subtabs">
+              <button className={`si-reminder-subtab${reminderSubTab === 'upcoming' ? ' active' : ''}`} onClick={() => setReminderSubTab('upcoming')}>
+                Upcoming {upcomingReminders.length > 0 && <span className="si-tab-badge">{upcomingReminders.length}</span>}
               </button>
-            </>
-          )
+              <button className={`si-reminder-subtab${reminderSubTab === 'sent' ? ' active' : ''}`} onClick={() => setReminderSubTab('sent')}>
+                Sent
+              </button>
+              <button className={`si-reminder-subtab${reminderSubTab === 'auto' ? ' active' : ''}`} onClick={() => setReminderSubTab('auto')}>
+                Auto-alerts {autoReminders.filter(r => r.status === 'pending').length > 0 && <span className="si-tab-badge">{autoReminders.filter(r => r.status === 'pending').length}</span>}
+              </button>
+            </div>
+
+            {/* Upcoming */}
+            {reminderSubTab === 'upcoming' && (
+              upcomingReminders.length === 0 ? (
+                <div className="si-empty"><Clock size={32} /><p>No upcoming reminders</p><p className="si-empty-sub">Use the preset buttons above to add one</p></div>
+              ) : (
+                <div className="si-card-list">
+                  {upcomingReminders.map(r => (
+                    <div key={r.id} className="si-card si-reminder-card">
+                      <div className="si-card-body">
+                        <div className="si-card-meta">
+                          <Clock size={11} className="si-reminder-icon" />
+                          <span className="si-time"><Calendar size={11} /> {r.target_date}</span>
+                          {r.related_issue_id && <span className="si-issue-chip"><ExternalLink size={10} />{r.related_issue_id}</span>}
+                        </div>
+                        <p className="si-card-text">{r.title}</p>
+                        {r.message && <p className="si-card-note">{r.message}</p>}
+                      </div>
+                      <div className="si-card-actions" onClick={e => e.stopPropagation()}>
+                        <button className="si-btn si-btn-done" onClick={() => handleDismissReminder(r.id)} title="Dismiss"><X size={12} /></button>
+                        <button className="si-btn si-btn-cancel" onClick={() => handleDeleteReminder(r.id)} title="Delete"><Trash2 size={12} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+
+            {/* Sent */}
+            {reminderSubTab === 'sent' && (
+              sentReminders.length === 0 ? (
+                <div className="si-empty"><CheckCircle size={32} /><p>No sent reminders</p></div>
+              ) : (
+                <div className="si-card-list">
+                  {sentReminders.map(r => (
+                    <div key={r.id} className="si-card si-reminder-card si-card-done">
+                      <div className="si-card-body">
+                        <div className="si-card-meta">
+                          <CheckCircle size={11} className="si-reminder-icon" />
+                          <span className="si-time"><Calendar size={11} /> {r.target_date}</span>
+                        </div>
+                        <p className="si-card-text">{r.title}</p>
+                      </div>
+                      <div className="si-card-actions" onClick={e => e.stopPropagation()}>
+                        <button className="si-btn si-btn-cancel" onClick={() => handleDeleteReminder(r.id)} title="Delete"><Trash2 size={12} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+
+            {/* Auto-alerts */}
+            {reminderSubTab === 'auto' && (
+              autoReminders.length === 0 ? (
+                <div className="si-empty"><Bell size={32} /><p>No auto-alerts</p><p className="si-empty-sub">Scheduler-generated alerts appear here</p></div>
+              ) : (
+                <div className="si-card-list">
+                  {autoReminders.map(r => (
+                    <div key={r.id} className={`si-card si-reminder-card ${r.status === 'sent' ? 'si-card-done' : ''}`}>
+                      <div className="si-card-body">
+                        <div className="si-card-meta">
+                          <span className={`si-status-chip status-${r.status}`}>{getReminderTypeLabel(r.type)}</span>
+                          <span className="si-time"><Calendar size={11} /> {r.target_date}</span>
+                          {r.related_issue_id && <span className="si-issue-chip"><ExternalLink size={10} />{r.related_issue_id}</span>}
+                        </div>
+                        <p className="si-card-text">{r.title}</p>
+                        {r.message && <p className="si-card-note">{r.message}</p>}
+                      </div>
+                      <div className="si-card-actions" onClick={e => e.stopPropagation()}>
+                        {r.status === 'pending' && <button className="si-btn si-btn-done" onClick={() => handleDismissReminder(r.id)} title="Dismiss"><X size={12} /></button>}
+                        <button className="si-btn si-btn-cancel" onClick={() => handleDeleteReminder(r.id)} title="Delete"><Trash2 size={12} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+          </div>
         )}
 
         {/* ── SETTINGS TAB ── */}
