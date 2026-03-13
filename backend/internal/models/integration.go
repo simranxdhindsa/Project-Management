@@ -52,6 +52,7 @@ type SlackMention struct {
 	ChannelID       string     `json:"channel_id" db:"channel_id"`
 	MessageText     string     `json:"message_text" db:"message_text"`
 	SenderName      string     `json:"sender_name" db:"sender_name"`
+	SenderAvatar    string     `json:"sender_avatar" db:"sender_avatar"`
 	RequiresReply   bool       `json:"requires_reply" db:"requires_reply"`
 	Replied         bool       `json:"replied" db:"replied"`
 	ReplyCheckedAt  *time.Time `json:"reply_checked_at,omitempty" db:"reply_checked_at"`

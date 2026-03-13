@@ -13222,6 +13222,24 @@ select.form-input {
   margin-bottom: 0.3rem;
 }
 
+.si-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.si-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
 .si-sender {
   font-size: 0.78rem;
   font-weight: 600;
@@ -16017,6 +16035,36 @@ select.form-input {
 
 .reminder-slack-item {
   border-left: 2px solid #8250df;
+}
+
+.reminder-slack-clickable {
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+
+.reminder-slack-clickable:hover .reminder-slack-sender {
+  color: var(--color-primary);
+}
+
+.reminder-slack-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  margin-right: 0.5rem;
+}
+
+.reminder-slack-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #8250df;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-right: 0.5rem;
 }
 
 .reminder-slack-sender {

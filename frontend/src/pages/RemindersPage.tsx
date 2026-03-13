@@ -79,6 +79,7 @@ export function RemindersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('upcoming')
+  const [slackTeamId, setSlackTeamId] = useState('')
 
   // Quick-add state
   const [activePreset, setActivePreset] = useState<Preset | null>(null)
@@ -109,7 +110,18 @@ export function RemindersPage() {
 
   useEffect(() => {
     fetchAll()
+    api.getSlackStatus().then((res: any) => {
+      if (res.team_id) setSlackTeamId(res.team_id)
+    }).catch(() => {})
   }, [fetchAll])
+
+  const openSlack = (channelId: string, messageTs: string) => {
+    const ts = messageTs.replace('.', '')
+    const appUrl = `slack://channel?team=${slackTeamId}&id=${channelId}&message=${ts}`
+    const webUrl = `https://app.slack.com/client/${slackTeamId}/${channelId}/p${ts}`
+    window.location.href = appUrl
+    setTimeout(() => window.open(webUrl, '_blank', 'noopener,noreferrer'), 1500)
+  }
 
   const handlePresetClick = (preset: Preset) => {
     if (activePreset === preset) {
@@ -378,8 +390,15 @@ export function RemindersPage() {
                   </div>
                   {mentions.map(m => (
                     <div key={m.message_ts} className="reminder-item reminder-slack-item">
-                      <div className="reminder-item-left">
-                        <MessageSquare size={14} className="icon-slack" />
+                      <div
+                        className="reminder-item-left reminder-slack-clickable"
+                        onClick={() => openSlack(m.channel_id, m.message_ts)}
+                        title="Open in Slack"
+                      >
+                        {m.sender_avatar
+                          ? <img src={m.sender_avatar} alt={m.sender_name} className="reminder-slack-avatar" />
+                          : <span className="reminder-slack-avatar reminder-slack-avatar-fallback">{m.sender_name.charAt(0).toUpperCase()}</span>
+                        }
                         <div>
                           <p className="reminder-title">
                             <span className="reminder-slack-sender">@{m.sender_name}</span>

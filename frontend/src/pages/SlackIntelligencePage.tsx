@@ -205,9 +205,9 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
 
   // ── Actions ──────────────────────────────────────────────────────────────
   const openSlack = (channelId: string, messageTs: string, threadTs?: string | null) => {
-    const ts = (threadTs || messageTs).replace('.', '')
+    const ts = messageTs.replace('.', '')
     const appUrl = `slack://channel?team=${slackTeamId}&id=${channelId}&message=${ts}`
-    const webUrl = `https://apyhuddle.slack.com/archives/${channelId}/p${ts}`
+    const webUrl = `https://app.slack.com/client/${slackTeamId}/${channelId}/p${ts}`
     window.location.href = appUrl
     setTimeout(() => window.open(webUrl, '_blank', 'noopener,noreferrer'), 1500)
   }
@@ -446,6 +446,10 @@ export function SlackIntelligencePage({ initialTab = 'inbox', onTabChange }: Sla
                       onClick={() => openSlack(m.channel_id, m.message_ts, m.thread_ts)}
                     >
                       <div className="si-card-meta">
+                        {m.sender_avatar
+                          ? <img src={m.sender_avatar} alt={m.sender_name} className="si-avatar" />
+                          : <span className="si-avatar si-avatar-fallback">{m.sender_name.charAt(0).toUpperCase()}</span>
+                        }
                         {renderUrgencyDot(m)}
                         <span className="si-sender">{m.sender_name}</span>
                         <span className="si-channel"><Hash size={11} />{resolvedMonitorChannelName || 'slack'}</span>

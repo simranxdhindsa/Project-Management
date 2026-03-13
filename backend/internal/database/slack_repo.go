@@ -22,11 +22,14 @@ func (r *SlackRepository) SaveMention(ctx context.Context, mention *models.Slack
 	pool := GetPool()
 
 	_, err := pool.Exec(ctx, `
-		INSERT INTO slack_mentions (user_id, slack_user_id, message_ts, thread_ts, channel_id, message_text, sender_name, requires_reply, replied, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-		ON CONFLICT (user_id, message_ts) DO NOTHING
+		INSERT INTO slack_mentions (user_id, slack_user_id, message_ts, thread_ts, channel_id, message_text, sender_name, sender_avatar, requires_reply, replied, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+		ON CONFLICT (user_id, message_ts) DO UPDATE SET
+			message_text = EXCLUDED.message_text,
+			sender_name = EXCLUDED.sender_name,
+			sender_avatar = EXCLUDED.sender_avatar
 	`, mention.UserID, mention.SlackUserID, mention.MessageTS, mention.ThreadTS,
-		mention.ChannelID, mention.MessageText, mention.SenderName,
+		mention.ChannelID, mention.MessageText, mention.SenderName, mention.SenderAvatar,
 		mention.RequiresReply, mention.Replied)
 
 	return err
@@ -38,7 +41,7 @@ func (r *SlackRepository) GetUnrepliedMentions(ctx context.Context, userID strin
 
 	rows, err := pool.Query(ctx, `
 		SELECT id, user_id, slack_user_id, message_ts, thread_ts, channel_id, message_text,
-		       sender_name, requires_reply, replied, reply_checked_at, snoozed_until, created_at
+		       sender_name, COALESCE(sender_avatar, ''), requires_reply, replied, reply_checked_at, snoozed_until, created_at
 		FROM slack_mentions
 		WHERE user_id = $1 AND replied = FALSE
 		ORDER BY created_at DESC
@@ -53,7 +56,7 @@ func (r *SlackRepository) GetUnrepliedMentions(ctx context.Context, userID strin
 	for rows.Next() {
 		var m models.SlackMention
 		err := rows.Scan(&m.ID, &m.UserID, &m.SlackUserID, &m.MessageTS, &m.ThreadTS,
-			&m.ChannelID, &m.MessageText, &m.SenderName, &m.RequiresReply,
+			&m.ChannelID, &m.MessageText, &m.SenderName, &m.SenderAvatar, &m.RequiresReply,
 			&m.Replied, &m.ReplyCheckedAt, &m.SnoozedUntil, &m.CreatedAt)
 		if err != nil {
 			return nil, err
@@ -73,7 +76,7 @@ func (r *SlackRepository) GetAllMentions(ctx context.Context, userID string, lim
 
 	rows, err := pool.Query(ctx, `
 		SELECT id, user_id, slack_user_id, message_ts, thread_ts, channel_id, message_text,
-		       sender_name, requires_reply, replied, reply_checked_at, snoozed_until, created_at
+		       sender_name, COALESCE(sender_avatar, ''), requires_reply, replied, reply_checked_at, snoozed_until, created_at
 		FROM slack_mentions
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -88,7 +91,7 @@ func (r *SlackRepository) GetAllMentions(ctx context.Context, userID string, lim
 	for rows.Next() {
 		var m models.SlackMention
 		err := rows.Scan(&m.ID, &m.UserID, &m.SlackUserID, &m.MessageTS, &m.ThreadTS,
-			&m.ChannelID, &m.MessageText, &m.SenderName, &m.RequiresReply,
+			&m.ChannelID, &m.MessageText, &m.SenderName, &m.SenderAvatar, &m.RequiresReply,
 			&m.Replied, &m.ReplyCheckedAt, &m.SnoozedUntil, &m.CreatedAt)
 		if err != nil {
 			return nil, err

@@ -3,6 +3,7 @@ package slack
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -273,8 +274,32 @@ func (s *Service) ScanMentions(ctx context.Context, userID, email string) ([]mod
 		return nil, fmt.Errorf("failed to fetch messages: %w", err)
 	}
 
-	// User cache
-	userCache := make(map[string]string)
+	// User cache: slack user ID -> {name, avatar}
+	type cachedUser struct {
+		name   string
+		avatar string
+	}
+	userCache := make(map[string]cachedUser)
+
+	resolveUser := func(slackID string) cachedUser {
+		if c, ok := userCache[slackID]; ok {
+			return c
+		}
+		cu := cachedUser{name: slackID}
+		if u, err := client.GetUser(ctx, slackID); err == nil {
+			name := u.RealName
+			if name == "" {
+				name = u.Profile.DisplayName
+			}
+			cu.name = name
+			cu.avatar = u.Profile.Image48
+		}
+		userCache[slackID] = cu
+		return cu
+	}
+
+	// Regex to find <@UXXX> mentions in message text
+	mentionRe := regexp.MustCompile(`<@([A-Z0-9]+)>`)
 
 	var newMentions []models.SlackMention
 	for _, msg := range messages {
@@ -285,18 +310,18 @@ func (s *Service) ScanMentions(ctx context.Context, userID, email string) ([]mod
 			continue
 		}
 
-		// Resolve sender name
-		senderName := msg.User
-		if cached, ok := userCache[msg.User]; ok {
-			senderName = cached
-		} else if u, err := client.GetUser(ctx, msg.User); err == nil {
-			name := u.RealName
-			if name == "" {
-				name = u.Profile.DisplayName
+		// Resolve sender
+		sender := resolveUser(msg.User)
+
+		// Resolve all <@UXXX> in message text to real names
+		resolvedText := mentionRe.ReplaceAllStringFunc(msg.Text, func(match string) string {
+			sub := mentionRe.FindStringSubmatch(match)
+			if len(sub) < 2 {
+				return match
 			}
-			userCache[msg.User] = name
-			senderName = name
-		}
+			u := resolveUser(sub[1])
+			return "@" + u.name
+		})
 
 		ts, err := parseSlackTimestamp(msg.TS)
 		if err != nil {
@@ -314,8 +339,9 @@ func (s *Service) ScanMentions(ctx context.Context, userID, email string) ([]mod
 			MessageTS:     msg.TS,
 			ThreadTS:      threadTS,
 			ChannelID:     monitorChannelID,
-			MessageText:   msg.Text,
-			SenderName:    senderName,
+			MessageText:   resolvedText,
+			SenderName:    sender.name,
+			SenderAvatar:  sender.avatar,
 			RequiresReply: true,
 			Replied:       false,
 			CreatedAt:     ts,

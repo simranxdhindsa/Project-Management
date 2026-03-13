@@ -317,6 +317,7 @@ func RunMigrations() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_slack_mentions_user_id ON slack_mentions(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_slack_mentions_replied ON slack_mentions(user_id, replied)`,
+		`ALTER TABLE slack_mentions ADD COLUMN IF NOT EXISTS sender_avatar TEXT`,
 
 		// Slack threads started by the user — track if they received replies
 		`CREATE TABLE IF NOT EXISTS slack_user_threads (

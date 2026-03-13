@@ -1190,6 +1190,7 @@ export interface SlackMention {
   channel_id: string
   message_text: string
   sender_name: string
+  sender_avatar?: string
   requires_reply: boolean
   replied: boolean
   reply_checked_at?: string
