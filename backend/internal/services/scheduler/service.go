@@ -23,6 +23,7 @@ type Service struct {
 	dailyRepo    *database.DailyTaskRepository
 	reportRepo   *database.ReportRepository
 	slackRepo    *database.SlackRepository
+	configRepo   *database.WorkflowConfigRepository
 	slackService *slacksvc.Service
 	stop         chan struct{}
 	// Track which one-per-day checks have fired today (reset at midnight)
@@ -45,6 +46,7 @@ func NewService(notifHandler *handlers.NotificationHandler) *Service {
 		dailyRepo:         database.NewDailyTaskRepository(),
 		reportRepo:        database.NewReportRepository(),
 		slackRepo:         database.NewSlackRepository(),
+		configRepo:        database.NewWorkflowConfigRepository(),
 		slackService:      slacksvc.NewService(),
 		stop:              make(chan struct{}),
 		firedToday:        make(map[string]bool),
@@ -377,6 +379,9 @@ func (s *Service) checkBlockedIssues(ctx context.Context) {
 //
 // Thresholds: P0=4h, P1=24h, P2=48h, P3/Other=72h
 func (s *Service) checkOverdueInProgress(ctx context.Context) {
+	// Load system default config for SLA thresholds
+	sysCfg, _ := s.configRepo.GetSystemDefault(ctx)
+
 	// Query the lowest threshold so we catch all overdue tickets in one pass.
 	// We check all tickets older than 4h and then filter by their specific threshold.
 	overdueIssues, err := s.reportRepo.GetInProgressOlderThan(ctx, 4.0)
@@ -391,8 +396,22 @@ func (s *Service) checkOverdueInProgress(ctx context.Context) {
 			continue
 		}
 
-		// Compute the threshold for this ticket's priority
+		// Compute the threshold for this ticket's priority using config (falls back to hardcoded)
 		threshold := overdueThresholdForPriority(issue.Priority)
+		if sysCfg != nil {
+			for _, tag := range sysCfg.PriorityTags {
+				if strings.EqualFold(tag.Label, issue.Priority) {
+					threshold = tag.SLAHours
+					break
+				}
+				for _, yt := range tag.YTMappings {
+					if strings.EqualFold(yt, issue.Priority) {
+						threshold = tag.SLAHours
+						break
+					}
+				}
+			}
+		}
 
 		// Check elapsed hours
 		elapsed := 0.0

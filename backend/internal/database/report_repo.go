@@ -209,10 +209,21 @@ func (r *ReportRepository) GetStateLogForIssue(ctx context.Context, issueID stri
 	return logs, nil
 }
 
-// GetDoneIssues returns issues that moved to DEV on a specific date
-// and have NOT been moved back out of DEV since (i.e. still in DEV or beyond).
-func (r *ReportRepository) GetDoneIssues(ctx context.Context, date string) ([]IssueStateLog, error) {
+// GetDoneIssues returns issues that moved to a "done" state on a specific date.
+// doneStates is a list of state names that count as "done" (e.g. ["DEV", "dev"]).
+// Falls back to ["dev"] if doneStates is empty.
+func (r *ReportRepository) GetDoneIssues(ctx context.Context, date string, doneStates []string) ([]IssueStateLog, error) {
 	pool := GetPool()
+
+	if len(doneStates) == 0 {
+		doneStates = []string{"dev"}
+	}
+
+	// Build lowercase version for comparison
+	lowerStates := make([]string, len(doneStates))
+	for i, s := range doneStates {
+		lowerStates[i] = strings.ToLower(s)
+	}
 
 	rows, err := pool.Query(ctx, `
 		SELECT id, issue_id, issue_summary,
@@ -220,16 +231,16 @@ func (r *ReportRepository) GetDoneIssues(ctx context.Context, date string) ([]Is
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
 		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
 		FROM issue_state_log isl
-		WHERE LOWER(to_state) = 'dev'
+		WHERE LOWER(to_state) = ANY($2::text[])
 		  AND date(transitioned_at) = $1::date
 		  AND NOT EXISTS (
 		      SELECT 1 FROM issue_state_log later
 		      WHERE later.issue_id = isl.issue_id
-		        AND LOWER(later.from_state) = 'dev'
+		        AND LOWER(later.from_state) = ANY($2::text[])
 		        AND later.transitioned_at > isl.transitioned_at
 		  )
 		ORDER BY transitioned_at DESC
-	`, date)
+	`, date, lowerStates)
 	if err != nil {
 		return nil, err
 	}
@@ -246,11 +257,18 @@ func (r *ReportRepository) GetDoneIssues(ctx context.Context, date string) ([]Is
 	return logs, nil
 }
 
-// GetDoneIssuesForWeek returns issues that moved to DEV during a Mon–Sun week,
-// sorted by assignee for easy grouping in the weekly report.
-// Excludes tickets that were subsequently moved back out of DEV (e.g. QA rejected).
-func (r *ReportRepository) GetDoneIssuesForWeek(ctx context.Context, weekStart, weekEnd string) ([]IssueStateLog, error) {
+// GetDoneIssuesForWeek returns issues that moved to a "done" state during a Mon–Sun week,
+// sorted by assignee. doneStates defaults to ["dev"] if empty.
+func (r *ReportRepository) GetDoneIssuesForWeek(ctx context.Context, weekStart, weekEnd string, doneStates []string) ([]IssueStateLog, error) {
 	pool := GetPool()
+
+	if len(doneStates) == 0 {
+		doneStates = []string{"dev"}
+	}
+	lowerStates := make([]string, len(doneStates))
+	for i, s := range doneStates {
+		lowerStates[i] = strings.ToLower(s)
+	}
 
 	rows, err := pool.Query(ctx, `
 		SELECT id, issue_id, issue_summary,
@@ -258,17 +276,17 @@ func (r *ReportRepository) GetDoneIssuesForWeek(ctx context.Context, weekStart, 
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
 		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
 		FROM issue_state_log isl
-		WHERE LOWER(to_state) = 'dev'
+		WHERE LOWER(to_state) = ANY($3::text[])
 		  AND date(transitioned_at) >= $1::date
 		  AND date(transitioned_at) <= $2::date
 		  AND NOT EXISTS (
 		      SELECT 1 FROM issue_state_log later
 		      WHERE later.issue_id = isl.issue_id
-		        AND LOWER(later.from_state) = 'dev'
+		        AND LOWER(later.from_state) = ANY($3::text[])
 		        AND later.transitioned_at > isl.transitioned_at
 		  )
 		ORDER BY assignee ASC, transitioned_at DESC
-	`, weekStart, weekEnd)
+	`, weekStart, weekEnd, lowerStates)
 	if err != nil {
 		return nil, err
 	}
@@ -285,10 +303,25 @@ func (r *ReportRepository) GetDoneIssuesForWeek(ctx context.Context, weekStart, 
 	return logs, nil
 }
 
-// GetHotfixIssues returns tickets deployed directly to STAGE or PROD on a specific date,
-// where the previous state was Backlog or In Progress (i.e. skipped DEV — these are hotfixes).
-func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string) ([]IssueStateLog, error) {
+// GetHotfixIssues returns tickets that jumped directly from fromStates to toStates on a date.
+// fromStates defaults to ["backlog","in progress"], toStates to ["ready for stage","stage","ready for prod","prod"].
+func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string, fromStates, toStates []string) ([]IssueStateLog, error) {
 	pool := GetPool()
+
+	if len(fromStates) == 0 {
+		fromStates = []string{"backlog", "in progress"}
+	}
+	if len(toStates) == 0 {
+		toStates = []string{"ready for stage", "stage", "ready for prod", "prod"}
+	}
+	lowerFrom := make([]string, len(fromStates))
+	for i, s := range fromStates {
+		lowerFrom[i] = strings.ToLower(s)
+	}
+	lowerTo := make([]string, len(toStates))
+	for i, s := range toStates {
+		lowerTo[i] = strings.ToLower(s)
+	}
 
 	rows, err := pool.Query(ctx, `
 		SELECT id, issue_id, issue_summary,
@@ -296,11 +329,11 @@ func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string) ([]
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
 		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
 		FROM issue_state_log
-		WHERE LOWER(to_state) IN ('ready for stage', 'stage', 'ready for prod', 'prod')
-		  AND LOWER(from_state) IN ('backlog', 'in progress')
+		WHERE LOWER(to_state) = ANY($2::text[])
+		  AND LOWER(from_state) = ANY($3::text[])
 		  AND date(transitioned_at) = $1::date
 		ORDER BY transitioned_at DESC
-	`, date)
+	`, date, lowerTo, lowerFrom)
 	if err != nil {
 		return nil, err
 	}
@@ -317,10 +350,25 @@ func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string) ([]
 	return logs, nil
 }
 
-// GetHotfixIssuesForWeek returns hotfix tickets deployed to STAGE/PROD during a week,
-// sorted by assignee.
-func (r *ReportRepository) GetHotfixIssuesForWeek(ctx context.Context, weekStart, weekEnd string) ([]IssueStateLog, error) {
+// GetHotfixIssuesForWeek returns hotfix tickets deployed to toStates during a week.
+// fromStates/toStates default to backlog/active → stage/prod if empty.
+func (r *ReportRepository) GetHotfixIssuesForWeek(ctx context.Context, weekStart, weekEnd string, fromStates, toStates []string) ([]IssueStateLog, error) {
 	pool := GetPool()
+
+	if len(fromStates) == 0 {
+		fromStates = []string{"backlog", "in progress"}
+	}
+	if len(toStates) == 0 {
+		toStates = []string{"ready for stage", "stage", "ready for prod", "prod"}
+	}
+	lowerFrom := make([]string, len(fromStates))
+	for i, s := range fromStates {
+		lowerFrom[i] = strings.ToLower(s)
+	}
+	lowerTo := make([]string, len(toStates))
+	for i, s := range toStates {
+		lowerTo[i] = strings.ToLower(s)
+	}
 
 	rows, err := pool.Query(ctx, `
 		SELECT id, issue_id, issue_summary,
@@ -328,12 +376,12 @@ func (r *ReportRepository) GetHotfixIssuesForWeek(ctx context.Context, weekStart
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
 		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
 		FROM issue_state_log
-		WHERE LOWER(to_state) IN ('ready for stage', 'stage', 'ready for prod', 'prod')
-		  AND LOWER(from_state) IN ('backlog', 'in progress')
+		WHERE LOWER(to_state) = ANY($3::text[])
+		  AND LOWER(from_state) = ANY($4::text[])
 		  AND date(transitioned_at) >= $1::date
 		  AND date(transitioned_at) <= $2::date
 		ORDER BY assignee ASC, transitioned_at DESC
-	`, weekStart, weekEnd)
+	`, weekStart, weekEnd, lowerTo, lowerFrom)
 	if err != nil {
 		return nil, err
 	}

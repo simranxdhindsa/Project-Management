@@ -12,6 +12,7 @@ import (
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
+	"github.com/dhindsa/project-management/internal/models"
 	"github.com/dhindsa/project-management/internal/services/youtrack"
 	"github.com/gorilla/mux"
 )
@@ -19,6 +20,7 @@ import (
 // ReportHandler handles PM reporting endpoints
 type ReportHandler struct {
 	reportRepo   *database.ReportRepository
+	configRepo   *database.WorkflowConfigRepository
 	notifHandler *NotificationHandler
 }
 
@@ -26,6 +28,7 @@ type ReportHandler struct {
 func NewReportHandler(notifHandler *NotificationHandler) *ReportHandler {
 	return &ReportHandler{
 		reportRepo:   database.NewReportRepository(),
+		configRepo:   database.NewWorkflowConfigRepository(),
 		notifHandler: notifHandler,
 	}
 }
@@ -41,7 +44,8 @@ func (h *ReportHandler) getYouTrackClient(ctx context.Context) (*youtrack.Client
 	return youtrack.NewClient(baseURL, token, projectID), nil
 }
 
-// extractPriority extracts P0/P1/P2/P3 from a ticket summary prefix
+// extractPriority extracts priority from a ticket summary using the P0/P1/P2/P3 prefix convention.
+// Kept as fallback; prefer extractPriorityFromConfig when config is available.
 func extractPriority(summary string) string {
 	for _, p := range []string{"P0 ", "P1 ", "P2 ", "P3 "} {
 		if strings.HasPrefix(summary, p) {
@@ -49,6 +53,18 @@ func extractPriority(summary string) string {
 		}
 	}
 	return "Other"
+}
+
+// loadWorkflowConfig loads the effective workflow config for a user, with graceful fallback.
+func (h *ReportHandler) loadWorkflowConfig(ctx context.Context, userID string) *models.WorkflowConfig {
+	if h.configRepo == nil {
+		return nil
+	}
+	cfg, err := h.configRepo.GetEffective(ctx, userID)
+	if err != nil {
+		return nil
+	}
+	return cfg
 }
 
 // GeneratePMReport generates a Slack-style PM report for a given date and saves it
@@ -82,14 +98,35 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 	// Yesterday for "done" tickets
 	yesterday := parsedDate.AddDate(0, 0, -1).Format("2006-01-02")
 
-	// --- 1. Done tickets (moved to DEV yesterday) ---
-	doneIssues, err := h.reportRepo.GetDoneIssues(r.Context(), yesterday)
+	// Load workflow config for this user (drives done states, hotfix rules, priority tags, open states)
+	wfCfg := h.loadWorkflowConfig(r.Context(), user.ID)
+	doneStates := []string{"dev"}
+	hotfixFromStates := []string{"backlog", "in progress"}
+	hotfixToStates := []string{"ready for stage", "stage", "ready for prod", "prod"}
+	openStates := []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"}
+	blockedStates := []string{"Blocked"}
+	priorityTags := []models.PriorityTag{}
+	if wfCfg != nil {
+		doneStates = getDoneStates(wfCfg)
+		hotfixFromStates = getHotfixFromStates(wfCfg)
+		hotfixToStates = getHotfixToStates(wfCfg)
+		if len(wfCfg.ReportConfig.OpenStates) > 0 {
+			openStates = wfCfg.ReportConfig.OpenStates
+		}
+		if len(wfCfg.ReportConfig.BlockedStates) > 0 {
+			blockedStates = wfCfg.ReportConfig.BlockedStates
+		}
+		priorityTags = wfCfg.PriorityTags
+	}
+
+	// --- 1. Done tickets ---
+	doneIssues, err := h.reportRepo.GetDoneIssues(r.Context(), yesterday, doneStates)
 	if err != nil {
 		doneIssues = nil // non-fatal
 	}
 
-	// --- 1b. Hotfix tickets (moved directly to STAGE/PROD from Backlog/In Progress yesterday) ---
-	hotfixIssues, err := h.reportRepo.GetHotfixIssues(r.Context(), yesterday)
+	// --- 1b. Hotfix tickets ---
+	hotfixIssues, err := h.reportRepo.GetHotfixIssues(r.Context(), yesterday, hotfixFromStates, hotfixToStates)
 	if err != nil {
 		hotfixIssues = nil // non-fatal
 	}
@@ -103,11 +140,11 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 		var ytClient *youtrack.Client
 		ytClient, ytErr = h.getYouTrackClient(r.Context())
 		if ytErr == nil {
-			open, err := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
+			open, err := ytClient.GetIssuesByState(r.Context(), openStates)
 			if err == nil {
 				openIssues = open
 			}
-			blocked, err := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
+			blocked, err := ytClient.GetIssuesByState(r.Context(), blockedStates)
 			if err == nil {
 				blockedIssues = blocked
 			}
@@ -197,19 +234,28 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 		} else if len(openIssues) == 0 {
 			sb.WriteString("_No open items_\n")
 		} else {
-			// Group by priority
-			priorityGroups := map[string][]youtrack.Issue{
-				"P0":    {},
-				"P1":    {},
-				"P2":    {},
-				"P3":    {},
-				"Other": {},
+			// Group by priority using config tags (falls back to P0-P3/Other if no config)
+			priorityOrder := buildPriorityOrder(priorityTags)
+			if len(priorityOrder) == 0 {
+				priorityOrder = []string{"P0", "P1", "P2", "P3", "Other"}
 			}
-			priorityOrder := []string{"P0", "P1", "P2", "P3", "Other"}
+			priorityGroups := make(map[string][]youtrack.Issue)
+			for _, p := range priorityOrder {
+				priorityGroups[p] = []youtrack.Issue{}
+			}
 
 			for _, issue := range openIssues {
-				p := extractPriority(issue.Summary)
-				priorityGroups[p] = append(priorityGroups[p], issue)
+				var p string
+				if len(priorityTags) > 0 {
+					p = extractPriorityFromConfig(issue.Summary, priorityTags)
+				} else {
+					p = extractPriority(issue.Summary)
+				}
+				if _, ok := priorityGroups[p]; !ok {
+					priorityGroups["Other"] = append(priorityGroups["Other"], issue)
+				} else {
+					priorityGroups[p] = append(priorityGroups[p], issue)
+				}
 			}
 
 			for _, p := range priorityOrder {
@@ -538,6 +584,9 @@ func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) 
 		logs = []database.IssueStateLog{}
 	}
 
+	// Load config for threshold lookups
+	ttCfg := h.loadWorkflowConfig(r.Context(), user.ID)
+
 	// Enrich with overdue flag and pinned flag
 	type TimeTrackingRow struct {
 		database.IssueStateLog
@@ -553,7 +602,12 @@ func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) 
 
 	var rows []TimeTrackingRow
 	for _, l := range logs {
-		threshold := overdueThresholdHoursForPriority(l.Priority)
+		var threshold float64
+		if ttCfg != nil && len(ttCfg.PriorityTags) > 0 {
+			threshold = overdueThresholdFromConfig(l.Priority, ttCfg.PriorityTags)
+		} else {
+			threshold = overdueThresholdHoursForPriority(l.Priority)
+		}
 		overdue := l.DurationInPrevStateHours != nil && *l.DurationInPrevStateHours > threshold
 		rows = append(rows, TimeTrackingRow{
 			IssueStateLog:  l,
@@ -1047,14 +1101,35 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 	weekStartDate := monday.Format("2006-01-02")
 	weekEndDate := sunday.Format("2006-01-02")
 
+	// Load workflow config for this user
+	wfCfgW := h.loadWorkflowConfig(r.Context(), user.ID)
+	wDoneStates := []string{"dev"}
+	wHotfixFrom := []string{"backlog", "in progress"}
+	wHotfixTo := []string{"ready for stage", "stage", "ready for prod", "prod"}
+	wOpenStates := []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"}
+	wBlockedStates := []string{"Blocked"}
+	wPriorityTags := []models.PriorityTag{}
+	if wfCfgW != nil {
+		wDoneStates = getDoneStates(wfCfgW)
+		wHotfixFrom = getHotfixFromStates(wfCfgW)
+		wHotfixTo = getHotfixToStates(wfCfgW)
+		if len(wfCfgW.ReportConfig.OpenStates) > 0 {
+			wOpenStates = wfCfgW.ReportConfig.OpenStates
+		}
+		if len(wfCfgW.ReportConfig.BlockedStates) > 0 {
+			wBlockedStates = wfCfgW.ReportConfig.BlockedStates
+		}
+		wPriorityTags = wfCfgW.PriorityTags
+	}
+
 	// --- 1. Done tickets for the full week ---
-	doneIssues, err := h.reportRepo.GetDoneIssuesForWeek(r.Context(), weekStartDate, weekEndDate)
+	doneIssues, err := h.reportRepo.GetDoneIssuesForWeek(r.Context(), weekStartDate, weekEndDate, wDoneStates)
 	if err != nil {
 		doneIssues = nil
 	}
 
 	// --- 1b. Hotfix tickets for the full week ---
-	hotfixIssues, err := h.reportRepo.GetHotfixIssuesForWeek(r.Context(), weekStartDate, weekEndDate)
+	hotfixIssues, err := h.reportRepo.GetHotfixIssuesForWeek(r.Context(), weekStartDate, weekEndDate, wHotfixFrom, wHotfixTo)
 	if err != nil {
 		hotfixIssues = nil
 	}
@@ -1068,11 +1143,11 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 		var ytClient *youtrack.Client
 		ytClient, ytErr = h.getYouTrackClient(r.Context())
 		if ytErr == nil {
-			open, err := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
+			open, err := ytClient.GetIssuesByState(r.Context(), wOpenStates)
 			if err == nil {
 				openIssues = open
 			}
-			blocked, err := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
+			blocked, err := ytClient.GetIssuesByState(r.Context(), wBlockedStates)
 			if err == nil {
 				blockedIssues = blocked
 			}
@@ -1149,13 +1224,26 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 		} else if len(openIssues) == 0 {
 			sb.WriteString("_No open items_\n")
 		} else {
-			priorityGroups := map[string][]youtrack.Issue{
-				"P0": {}, "P1": {}, "P2": {}, "P3": {}, "Other": {},
+			priorityOrder := buildPriorityOrder(wPriorityTags)
+			if len(priorityOrder) == 0 {
+				priorityOrder = []string{"P0", "P1", "P2", "P3", "Other"}
 			}
-			priorityOrder := []string{"P0", "P1", "P2", "P3", "Other"}
+			priorityGroups := make(map[string][]youtrack.Issue)
+			for _, p := range priorityOrder {
+				priorityGroups[p] = []youtrack.Issue{}
+			}
 			for _, issue := range openIssues {
-				p := extractPriority(issue.Summary)
-				priorityGroups[p] = append(priorityGroups[p], issue)
+				var p string
+				if len(wPriorityTags) > 0 {
+					p = extractPriorityFromConfig(issue.Summary, wPriorityTags)
+				} else {
+					p = extractPriority(issue.Summary)
+				}
+				if _, ok := priorityGroups[p]; !ok {
+					priorityGroups["Other"] = append(priorityGroups["Other"], issue)
+				} else {
+					priorityGroups[p] = append(priorityGroups[p], issue)
+				}
 			}
 			for _, p := range priorityOrder {
 				issues := priorityGroups[p]

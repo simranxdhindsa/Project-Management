@@ -28,6 +28,7 @@ type YouTrackHandler struct {
 	settingsRepo *database.SettingsRepository
 	sectionRepo  *database.SectionRepository
 	reportRepo   *database.ReportRepository
+	configRepo   *database.WorkflowConfigRepository
 	notifHandler *NotificationHandler
 	sseHub       *SSEHub
 }
@@ -40,6 +41,7 @@ func NewYouTrackHandler(sseHub ...*SSEHub) *YouTrackHandler {
 		settingsRepo: database.NewSettingsRepository(),
 		sectionRepo:  database.NewSectionRepository(),
 		reportRepo:   database.NewReportRepository(),
+		configRepo:   database.NewWorkflowConfigRepository(),
 	}
 	if len(sseHub) > 0 {
 		h.sseHub = sseHub[0]
@@ -1605,6 +1607,9 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	// Substitute {{DATE}} variable
 	customInstructions = strings.ReplaceAll(customInstructions, "{{DATE}}", time.Now().Format("2006-01-02"))
 
+	// Load workflow config for priority/threshold lookups
+	pmCfg, _ := h.configRepo.GetEffective(r.Context(), userID)
+
 	// ── 2. Fetch live YouTrack issues ────────────────────────────────────────
 	var issueSection strings.Builder
 	issueSection.WriteString("\n\n---\n## Live YouTrack Issues (current state)\n")
@@ -1621,11 +1626,18 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 				if assignee != nil && assignee.FullName != "" {
 					assigneeName = assignee.FullName
 				}
-				priority := ""
-				for _, p := range []string{"P0", "P1", "P2", "P3"} {
-					if strings.HasPrefix(issue.Summary, p+" ") {
-						priority = p
-						break
+				var priority string
+				if pmCfg != nil && len(pmCfg.PriorityTags) > 0 {
+					priority = extractPriorityFromConfig(issue.Summary, pmCfg.PriorityTags)
+					if priority == "Other" {
+						priority = ""
+					}
+				} else {
+					for _, p := range []string{"P0", "P1", "P2", "P3"} {
+						if strings.HasPrefix(issue.Summary, p+" ") {
+							priority = p
+							break
+						}
 					}
 				}
 				issueSection.WriteString(fmt.Sprintf("- %s | %s | %s | %s | %s\n",
@@ -1650,6 +1662,7 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		pinnedSet[id] = true
 	}
 
+
 	trackingLogs, trackErr := reportRepo.GetTimeTracking(r.Context(), database.TimeTrackingParams{})
 	if trackErr == nil && len(trackingLogs) > 0 {
 		for _, row := range trackingLogs {
@@ -1657,7 +1670,12 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 			if row.DurationInPrevStateHours != nil {
 				hours = *row.DurationInPrevStateHours
 			}
-			threshold := pmOverdueThreshold(row.Priority)
+			var threshold float64
+			if pmCfg != nil && len(pmCfg.PriorityTags) > 0 {
+				threshold = overdueThresholdFromConfig(row.Priority, pmCfg.PriorityTags)
+			} else {
+				threshold = pmOverdueThreshold(row.Priority)
+			}
 			overdue := hours > threshold && row.DurationInPrevStateHours != nil
 			overdueStr := "No"
 			if overdue {

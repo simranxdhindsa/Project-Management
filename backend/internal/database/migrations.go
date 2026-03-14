@@ -341,9 +341,10 @@ func RunMigrations() error {
 		`ALTER TABLE slack_user_threads ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE`,
 
 		// Workflow configuration — user-customizable priority tags, column hierarchy, hotfix rules, report config
+		// No FK on user_id — avoids type mismatch issues (same pattern as reminders, pinned_issues, etc.)
 		`CREATE TABLE IF NOT EXISTS workflow_config (
 			id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-			user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
+			user_id TEXT,
 			priority_tags JSONB NOT NULL DEFAULT '[]',
 			column_hierarchy JSONB NOT NULL DEFAULT '[]',
 			hotfix_rules JSONB NOT NULL DEFAULT '{}',
