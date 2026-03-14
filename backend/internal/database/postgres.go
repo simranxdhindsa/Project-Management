@@ -52,15 +52,17 @@ func Connect() error {
 
 	// Test the connection with retries
 	maxRetries := 3
+	var pingErr error
 	for i := 0; i < maxRetries; i++ {
-		if err := pool.Ping(ctx); err == nil {
+		pingErr = pool.Ping(ctx)
+		if pingErr == nil {
 			return nil
 		}
 		if i < maxRetries-1 {
 			fmt.Printf("Database ping attempt %d failed, retrying in 2 seconds...\n", i+1)
 			time.Sleep(2 * time.Second)
 		} else {
-			return fmt.Errorf("failed to ping database after %d attempts: %w", maxRetries, err)
+			return fmt.Errorf("failed to ping database after %d attempts: %w", maxRetries, pingErr)
 		}
 	}
 
