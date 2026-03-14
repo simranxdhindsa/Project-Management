@@ -54,21 +54,36 @@ func (h *YouTrackHandler) SetNotificationHandler(notifHandler *NotificationHandl
 	h.notifHandler = notifHandler
 }
 
-// getYouTrackClient creates a YouTrack client from settings or environment
+// getYouTrackClient creates a YouTrack client — checks per-user DB first, then
+// global settings DB, then environment variables as last resort.
 func (h *YouTrackHandler) getYouTrackClient(ctx context.Context) (*youtrack.Client, error) {
-	// Try to get credentials from database first
-	settings, _ := h.settingsRepo.GetYouTrackSettings(ctx)
+	return h.getYouTrackClientForUser(ctx, middleware.GetUserID(ctx))
+}
 
+func (h *YouTrackHandler) getYouTrackClientForUser(ctx context.Context, userID string) (*youtrack.Client, error) {
 	var baseURL, token, projectID, boardID string
 
-	if settings != nil && settings.Configured {
-		baseURL = settings.BaseURL
-		token = settings.Token
-		projectID = settings.ProjectID
-		boardID = settings.BoardID
+	// 1. Per-user DB integration
+	if userID != "" {
+		if integration, err := h.settingsRepo.GetYouTrackIntegration(ctx, userID); err == nil && integration != nil && integration.Connected {
+			baseURL = integration.BaseURL
+			token = integration.Token
+			projectID = integration.ProjectID
+			boardID = integration.BoardID
+		}
 	}
 
-	// Fallback to environment variables if DB not configured
+	// 2. Global settings DB (org-wide fallback)
+	if baseURL == "" {
+		if settings, err := h.settingsRepo.GetYouTrackSettings(ctx); err == nil && settings != nil && settings.Configured {
+			baseURL = settings.BaseURL
+			token = settings.Token
+			projectID = settings.ProjectID
+			boardID = settings.BoardID
+		}
+	}
+
+	// 3. Environment variables (last resort)
 	if baseURL == "" {
 		baseURL = os.Getenv("YOUTRACK_BASE_URL")
 	}
@@ -90,16 +105,44 @@ func (h *YouTrackHandler) getYouTrackClient(ctx context.Context) (*youtrack.Clie
 	if boardID != "" {
 		client.SetBoardID(boardID)
 	}
-
 	return client, nil
 }
 
-// GetStatus returns the current YouTrack connection status
+// GetStatus returns the current YouTrack connection status including non-sensitive config
 func (h *YouTrackHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
+	}
+
+	// Collect the resolved config values (for display, no token)
+	var baseURL, projectID, boardID string
+	var source string // "user_db" | "global_db" | "env"
+
+	if userID != "" {
+		if integration, err := h.settingsRepo.GetYouTrackIntegration(r.Context(), userID); err == nil && integration != nil && integration.Connected {
+			baseURL = integration.BaseURL
+			projectID = integration.ProjectID
+			boardID = integration.BoardID
+			source = "user_db"
+		}
+	}
+	if baseURL == "" {
+		if settings, err := h.settingsRepo.GetYouTrackSettings(r.Context()); err == nil && settings != nil && settings.Configured {
+			baseURL = settings.BaseURL
+			projectID = settings.ProjectID
+			boardID = settings.BoardID
+			source = "global_db"
+		}
+	}
+	if baseURL == "" {
+		baseURL = os.Getenv("YOUTRACK_BASE_URL")
+		projectID = os.Getenv("YOUTRACK_PROJECT_ID")
+		boardID = os.Getenv("YOUTRACK_BOARD_ID")
+		if baseURL != "" {
+			source = "env"
+		}
 	}
 
 	client, err := h.getYouTrackClient(r.Context())
@@ -115,12 +158,20 @@ func (h *YouTrackHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	// Test connection
 	err = client.TestConnection(r.Context())
 	connected := err == nil
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"connected":  connected,
 		"configured": true,
-		"error":      func() string { if err != nil { return err.Error() }; return "" }(),
+		"error":      errMsg,
+		"base_url":   baseURL,
+		"project_id": projectID,
+		"board_id":   boardID,
+		"source":     source, // "user_db" | "global_db" | "env"
 	})
 }
 
@@ -238,6 +289,33 @@ func (h *YouTrackHandler) GetStates(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data":    states,
+	})
+}
+
+// GetPriorities returns the Priority field values from YouTrack
+func (h *YouTrackHandler) GetPriorities(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	priorities, err := client.GetPriorities(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get priorities: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    priorities,
 	})
 }
 

@@ -45,3 +45,24 @@ type UpdateYouTrackSettingsRequest struct {
 	ProjectID string `json:"project_id,omitempty"`
 	BoardID   string `json:"board_id,omitempty"`
 }
+
+// YouTrackIntegration represents a per-user YouTrack connection stored in DB
+type YouTrackIntegration struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	BaseURL   string    `json:"base_url"`
+	Token     string    `json:"token,omitempty"` // masked on read
+	ProjectID string    `json:"project_id"`
+	BoardID   string    `json:"board_id,omitempty"`
+	Connected bool      `json:"connected"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// SaveYouTrackIntegrationRequest is the request body for saving
+type SaveYouTrackIntegrationRequest struct {
+	BaseURL   string `json:"base_url"`
+	Token     string `json:"token"`
+	ProjectID string `json:"project_id"`
+	BoardID   string `json:"board_id,omitempty"`
+}

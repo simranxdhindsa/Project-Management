@@ -311,6 +311,44 @@ func (c *Client) GetStates(ctx context.Context) ([]State, error) {
 	return states, nil
 }
 
+// GetPriorities returns the Priority field values from YouTrack custom fields
+func (c *Client) GetPriorities(ctx context.Context) ([]string, error) {
+	path := fmt.Sprintf("/api/admin/projects/%s/customFields?fields=field(name,fieldType(id)),bundle(values(name))",
+		c.projectID)
+
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var customFields []map[string]interface{}
+	if err := json.Unmarshal(body, &customFields); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal custom fields: %w", err)
+	}
+
+	for _, field := range customFields {
+		if fieldInfo, ok := field["field"].(map[string]interface{}); ok {
+			if fieldName, ok := fieldInfo["name"].(string); ok && fieldName == "Priority" {
+				if bundle, ok := field["bundle"].(map[string]interface{}); ok {
+					if values, ok := bundle["values"].([]interface{}); ok {
+						var priorities []string
+						for _, val := range values {
+							if valMap, ok := val.(map[string]interface{}); ok {
+								if name, ok := valMap["name"].(string); ok {
+									priorities = append(priorities, name)
+								}
+							}
+						}
+						return priorities, nil
+					}
+				}
+			}
+		}
+	}
+
+	return []string{}, nil
+}
+
 // GetIssues returns all issues from the project
 func (c *Client) GetIssues(ctx context.Context) ([]Issue, error) {
 	query := url.QueryEscape(fmt.Sprintf("project: %s", c.projectID))

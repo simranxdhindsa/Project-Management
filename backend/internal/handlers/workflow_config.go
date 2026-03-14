@@ -84,11 +84,14 @@ func (h *WorkflowConfigHandler) UpdatePriorities(w http.ResponseWriter, r *http.
 		return
 	}
 
-	var tags []models.PriorityTag
-	if err := json.NewDecoder(r.Body).Decode(&tags); err != nil {
+	var body struct {
+		PriorityTags []models.PriorityTag `json:"priority_tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Invalid request body"})
 		return
 	}
+	tags := body.PriorityTags
 
 	if err := h.configRepo.UpsertPriorityTags(r.Context(), userID, tags); err != nil {
 		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to save priority tags"})
@@ -107,11 +110,14 @@ func (h *WorkflowConfigHandler) UpdateColumns(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var columns []models.ColumnState
-	if err := json.NewDecoder(r.Body).Decode(&columns); err != nil {
+	var body struct {
+		ColumnHierarchy []models.ColumnState `json:"column_hierarchy"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "Invalid request body"})
 		return
 	}
+	columns := body.ColumnHierarchy
 
 	if err := h.configRepo.UpsertColumnHierarchy(r.Context(), userID, columns); err != nil {
 		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to save column hierarchy"})

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import {
   MessageSquare, Send, User, Bot, Loader2,
   FileText, Users, Clock, Copy, Check,
@@ -1143,7 +1144,8 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   const [togglingPin, setTogglingPin] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('entered_at')
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
-  const sortDropdownRef = useRef<HTMLDivElement>(null)
+  const sortDropdownRef = useRef<HTMLButtonElement>(null)
+  const [sortDropdownRect, setSortDropdownRect] = useState<DOMRect | null>(null)
   const [filterMismatch, setFilterMismatch] = useState(false)
 
   // ── Summary state ─────────────────────────────────────────────────────────
@@ -1164,7 +1166,8 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   const [filterPriorities, setFilterPriorities] = useState<string[]>([])
   const [searchIssue, setSearchIssue] = useState('')
   const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false)
-  const assigneeDropdownRef = useRef<HTMLDivElement>(null)
+  const assigneeDropdownRef = useRef<HTMLButtonElement>(null)
+  const [assigneeDropdownRect, setAssigneeDropdownRect] = useState<DOMRect | null>(null)
 
   // ── Data fetching ─────────────────────────────────────────────────────────
   const fetchRows = useCallback(async (week: Date, skipWeek: boolean) => {
@@ -1500,8 +1503,12 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
           />
         </div>
 
-        <div className="pm-custom-dropdown" ref={assigneeDropdownRef}>
-          <button className="pm-custom-dropdown-trigger" onClick={() => setAssigneeDropdownOpen(o => !o)}>
+        <div className="pm-custom-dropdown">
+          <button ref={assigneeDropdownRef} className="pm-custom-dropdown-trigger" onClick={() => {
+            const rect = assigneeDropdownRef.current?.getBoundingClientRect() ?? null
+            setAssigneeDropdownRect(rect)
+            setAssigneeDropdownOpen(o => !o)
+          }}>
             {filterAssignee ? (
               <>
                 {avatarMap[filterAssignee]
@@ -1514,8 +1521,8 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
             )}
             <ChevronDown size={12} className={`dropdown-chevron ${assigneeDropdownOpen ? 'open' : ''}`} />
           </button>
-          {assigneeDropdownOpen && (
-            <div className="pm-custom-dropdown-menu">
+          {assigneeDropdownOpen && assigneeDropdownRect && createPortal(
+            <div className="pm-custom-dropdown-menu" style={{ position: 'fixed', top: assigneeDropdownRect.bottom + 4, left: assigneeDropdownRect.left, minWidth: assigneeDropdownRect.width, zIndex: 9999 }}>
               <button className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`} onClick={() => { setFilterAssignee(''); setAssigneeDropdownOpen(false) }}>
                 <Users size={14} /><span>All Assignees</span>
               </button>
@@ -1525,7 +1532,8 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
                   <span>{a}</span>
                 </button>
               ))}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
 
@@ -1539,8 +1547,12 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
         </div>
 
         {mode === 'logbook' && (
-          <div className="pm-custom-dropdown" ref={sortDropdownRef}>
-            <button className="pm-custom-dropdown-trigger" onClick={() => setSortDropdownOpen(o => !o)}>
+          <div className="pm-custom-dropdown">
+            <button ref={sortDropdownRef} className="pm-custom-dropdown-trigger" onClick={() => {
+              const rect = sortDropdownRef.current?.getBoundingClientRect() ?? null
+              setSortDropdownRect(rect)
+              setSortDropdownOpen(o => !o)
+            }}>
               {sortKey === 'entered_at'  && <><ArrowDownUp size={14} /><span>Newest First</span></>}
               {sortKey === 'time_asc'    && <><ArrowUpNarrowWide size={14} /><span>Time ↑</span></>}
               {sortKey === 'time_desc'   && <><ArrowDownNarrowWide size={14} /><span>Time ↓</span></>}
@@ -1548,8 +1560,8 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
               {sortKey === 'status'      && <><Activity size={14} /><span>Status</span></>}
               <ChevronDown size={12} className={`dropdown-chevron ${sortDropdownOpen ? 'open' : ''}`} />
             </button>
-            {sortDropdownOpen && (
-              <div className="pm-custom-dropdown-menu">
+            {sortDropdownOpen && sortDropdownRect && createPortal(
+              <div className="pm-custom-dropdown-menu" style={{ position: 'fixed', top: sortDropdownRect.bottom + 4, left: sortDropdownRect.left, minWidth: sortDropdownRect.width, zIndex: 9999 }}>
                 {([
                   { key: 'entered_at', label: 'Newest First',              Icon: ArrowDownUp },
                   { key: 'status',     label: 'Status (Overdue→Live→Done)', Icon: Activity },
@@ -1562,7 +1574,8 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
                     <Icon size={14} /><span>{label}</span>
                   </button>
                 ))}
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         )}

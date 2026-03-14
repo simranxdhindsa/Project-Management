@@ -420,6 +420,21 @@ func RunMigrations() error {
 
 		// Weekly reports — add report_type column to pm_reports so daily and weekly
 		// reports can coexist for the same date (e.g. Monday appears in both daily and weekly)
+		// Per-user YouTrack integration settings — token stored in DB, ENV is fallback only
+		`CREATE TABLE IF NOT EXISTS youtrack_integrations (
+			id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id TEXT NOT NULL,
+			base_url TEXT NOT NULL,
+			token TEXT NOT NULL,
+			project_id TEXT NOT NULL,
+			board_id TEXT,
+			connected BOOLEAN DEFAULT TRUE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE(user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_youtrack_integrations_user_id ON youtrack_integrations(user_id)`,
+
 		`ALTER TABLE pm_reports ADD COLUMN IF NOT EXISTS report_type VARCHAR(10) NOT NULL DEFAULT 'daily'`,
 		`ALTER TABLE pm_reports DROP CONSTRAINT IF EXISTS pm_reports_date_key`,
 		// ADD CONSTRAINT IF NOT EXISTS is not valid PG syntax — use DO block instead

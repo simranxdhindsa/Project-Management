@@ -130,6 +130,7 @@ func main() {
 	youtrackRoutes.HandleFunc("/boards", youtrackHandler.GetBoards).Methods("GET")
 	youtrackRoutes.HandleFunc("/boards/{board_id}/columns", youtrackHandler.GetBoardColumns).Methods("GET")
 	youtrackRoutes.HandleFunc("/states", youtrackHandler.GetStates).Methods("GET")
+	youtrackRoutes.HandleFunc("/priorities", youtrackHandler.GetPriorities).Methods("GET")
 	youtrackRoutes.HandleFunc("/users", youtrackHandler.GetUsers).Methods("GET")
 	youtrackRoutes.HandleFunc("/issues", youtrackHandler.GetIssues).Methods("GET")
 	youtrackRoutes.HandleFunc("/issues", youtrackHandler.CreateIssue).Methods("POST")
@@ -330,7 +331,7 @@ func main() {
 	integrationStatusRoutes.Use(middleware.AuthMiddleware)
 	integrationStatusRoutes.HandleFunc("/asana/status", settingsHandler.GetAsanaConfigStatus).Methods("GET")
 
-	// Admin-only routes for managing settings
+	// Admin-only routes for managing Asana settings
 	integrationSettingsRoutes := api.PathPrefix("/settings/integrations").Subrouter()
 	integrationSettingsRoutes.Use(middleware.AuthMiddleware)
 	integrationSettingsRoutes.Use(middleware.AdminOnly)
@@ -338,6 +339,13 @@ func main() {
 	integrationSettingsRoutes.HandleFunc("/asana", settingsHandler.UpdateAsanaSettings).Methods("PUT")
 	integrationSettingsRoutes.HandleFunc("/asana/test", settingsHandler.TestAsanaConnection).Methods("POST")
 	integrationSettingsRoutes.HandleFunc("/asana/projects", settingsHandler.GetAsanaProjects).Methods("GET")
+
+	// Per-user YouTrack integration routes (any authenticated user)
+	ytIntegrationRoutes := api.PathPrefix("/settings/integrations").Subrouter()
+	ytIntegrationRoutes.Use(middleware.AuthMiddleware)
+	ytIntegrationRoutes.HandleFunc("/youtrack", settingsHandler.GetYouTrackIntegration).Methods("GET")
+	ytIntegrationRoutes.HandleFunc("/youtrack", settingsHandler.SaveYouTrackIntegration).Methods("PUT")
+	ytIntegrationRoutes.HandleFunc("/youtrack/disconnect", settingsHandler.DisconnectYouTrackIntegration).Methods("POST")
 
 	// CORS configuration
 	frontendURL := os.Getenv("FRONTEND_URL")

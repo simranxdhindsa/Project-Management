@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/dhindsa/project-management/internal/models"
 )
 
@@ -191,4 +193,60 @@ func (r *SettingsRepository) UpdateYouTrackSettings(ctx context.Context, setting
 	}
 
 	return nil
+}
+
+// ── Per-user YouTrack integration ──────────────────────────────────────────
+
+// GetYouTrackIntegration retrieves a user's YouTrack integration from DB
+func (r *SettingsRepository) GetYouTrackIntegration(ctx context.Context, userID string) (*models.YouTrackIntegration, error) {
+	pool := GetPool()
+	if pool == nil {
+		return nil, nil
+	}
+
+	var i models.YouTrackIntegration
+	err := pool.QueryRow(ctx, `
+		SELECT id, user_id, base_url, token, project_id, COALESCE(board_id, ''), connected, created_at, updated_at
+		FROM youtrack_integrations WHERE user_id = $1
+	`, userID).Scan(&i.ID, &i.UserID, &i.BaseURL, &i.Token, &i.ProjectID, &i.BoardID, &i.Connected, &i.CreatedAt, &i.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
+// SaveYouTrackIntegration upserts a user's YouTrack integration
+func (r *SettingsRepository) SaveYouTrackIntegration(ctx context.Context, userID string, req *models.SaveYouTrackIntegrationRequest) error {
+	pool := GetPool()
+	if pool == nil {
+		return nil
+	}
+
+	_, err := pool.Exec(ctx, `
+		INSERT INTO youtrack_integrations (user_id, base_url, token, project_id, board_id, connected, updated_at)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), TRUE, NOW())
+		ON CONFLICT (user_id) DO UPDATE SET
+			base_url   = $2,
+			token      = $3,
+			project_id = $4,
+			board_id   = NULLIF($5, ''),
+			connected  = TRUE,
+			updated_at = NOW()
+	`, userID, req.BaseURL, req.Token, req.ProjectID, req.BoardID)
+	return err
+}
+
+// DisconnectYouTrackIntegration marks the integration as disconnected
+func (r *SettingsRepository) DisconnectYouTrackIntegration(ctx context.Context, userID string) error {
+	pool := GetPool()
+	if pool == nil {
+		return nil
+	}
+	_, err := pool.Exec(ctx, `
+		UPDATE youtrack_integrations SET connected = FALSE, updated_at = NOW() WHERE user_id = $1
+	`, userID)
+	return err
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/dhindsa/project-management/internal/middleware"
 	"github.com/dhindsa/project-management/internal/models"
 	"github.com/dhindsa/project-management/internal/services/asana"
+	"github.com/dhindsa/project-management/internal/services/youtrack"
 )
 
 // SettingsHandler handles settings API requests
@@ -203,5 +204,108 @@ func (h *SettingsHandler) GetAsanaProjects(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data":    projects,
+	})
+}
+
+// ── Per-user YouTrack integration ──────────────────────────────────────────
+
+// GetYouTrackIntegration returns the calling user's YouTrack settings (token masked)
+func (h *SettingsHandler) GetYouTrackIntegration(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	integration, err := h.settingsRepo.GetYouTrackIntegration(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "Failed to get settings: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if integration == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"data":    map[string]interface{}{"configured": false},
+		})
+		return
+	}
+
+	// Mask token — show only last 4 chars
+	masked := integration.Token
+	if len(masked) > 4 {
+		masked = "****" + masked[len(masked)-4:]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"configured": integration.Connected,
+			"base_url":   integration.BaseURL,
+			"token":      masked,
+			"project_id": integration.ProjectID,
+			"board_id":   integration.BoardID,
+			"connected":  integration.Connected,
+		},
+	})
+}
+
+// SaveYouTrackIntegration saves or updates the calling user's YouTrack credentials
+func (h *SettingsHandler) SaveYouTrackIntegration(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req models.SaveYouTrackIntegrationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.BaseURL == "" || req.Token == "" || req.ProjectID == "" {
+		http.Error(w, "base_url, token, and project_id are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate credentials before saving
+	client := youtrack.NewClient(req.BaseURL, req.Token, req.ProjectID)
+	if err := client.TestConnection(r.Context()); err != nil {
+		http.Error(w, "YouTrack connection failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.settingsRepo.SaveYouTrackIntegration(r.Context(), userID, &req); err != nil {
+		http.Error(w, "Failed to save settings: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "YouTrack connected successfully",
+	})
+}
+
+// DisconnectYouTrackIntegration marks the user's YouTrack integration as disconnected
+func (h *SettingsHandler) DisconnectYouTrackIntegration(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if err := h.settingsRepo.DisconnectYouTrackIntegration(r.Context(), userID); err != nil {
+		http.Error(w, "Failed to disconnect: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "YouTrack disconnected",
 	})
 }

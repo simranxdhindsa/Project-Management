@@ -206,6 +206,29 @@ class ApiService {
     }>('/youtrack/status')
   }
 
+  // Per-user YouTrack integration (saved in DB)
+  async getYouTrackIntegration() {
+    return this.request<{
+      configured: boolean
+      connected: boolean
+      base_url?: string
+      token?: string
+      project_id?: string
+      board_id?: string
+    }>('/settings/integrations/youtrack')
+  }
+
+  async saveYouTrackIntegration(data: { base_url: string; token: string; project_id: string; board_id?: string }) {
+    return this.request('/settings/integrations/youtrack', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async disconnectYouTrackIntegration() {
+    return this.request('/settings/integrations/youtrack/disconnect', { method: 'POST' })
+  }
+
   async testYouTrackConnection(baseUrl: string, token: string, projectId: string) {
     return this.request<{ success: boolean; error?: string }>('/youtrack/test', {
       method: 'POST',
@@ -227,6 +250,10 @@ class ApiService {
 
   async getYouTrackStates() {
     return this.request<YouTrackState[]>('/youtrack/states')
+  }
+
+  async getYouTrackPriorities() {
+    return this.request<string[]>('/youtrack/priorities')
   }
 
   async getYouTrackUsers() {
