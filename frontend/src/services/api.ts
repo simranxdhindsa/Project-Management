@@ -1049,6 +1049,56 @@ class ApiService {
       method: 'POST',
     })
   }
+
+  // ── Workflow Config ────────────────────────────────────────────────────────
+  async getWorkflowConfig() {
+    return this.request<WorkflowConfig>('/workflow-config')
+  }
+
+  async updateWorkflowConfig(config: Partial<WorkflowConfig>) {
+    return this.request<WorkflowConfig>('/workflow-config', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    })
+  }
+
+  async updatePriorityTags(tags: PriorityTag[]) {
+    return this.request<WorkflowConfig>('/workflow-config/priorities', {
+      method: 'PUT',
+      body: JSON.stringify({ priority_tags: tags }),
+    })
+  }
+
+  async updateColumnHierarchy(columns: ColumnState[]) {
+    return this.request<WorkflowConfig>('/workflow-config/columns', {
+      method: 'PUT',
+      body: JSON.stringify({ column_hierarchy: columns }),
+    })
+  }
+
+  async updateHotfixRules(rules: HotfixRules) {
+    return this.request<WorkflowConfig>('/workflow-config/hotfix-rules', {
+      method: 'PUT',
+      body: JSON.stringify({ hotfix_rules: rules }),
+    })
+  }
+
+  async updateReportConfig(config: ReportConfig) {
+    return this.request<WorkflowConfig>('/workflow-config/report', {
+      method: 'PUT',
+      body: JSON.stringify({ report_config: config }),
+    })
+  }
+
+  async resetWorkflowConfig() {
+    return this.request<{ message: string }>('/workflow-config/reset', {
+      method: 'POST',
+    })
+  }
+
+  async getWorkflowDefaults() {
+    return this.request<WorkflowConfig>('/workflow-config/defaults')
+  }
 }
 
 // Types
@@ -1521,6 +1571,46 @@ export interface TimeTrackingRow {
   overdue: boolean
   threshold_hours: number
   pinned: boolean
+}
+
+// ── Workflow Config API ───────────────────────────────────────────────────
+export interface PriorityTag {
+  label: string
+  color: string
+  display_order: number
+  sla_hours: number
+  prefixes: string[]
+  yt_mappings: string[]
+}
+
+export interface ColumnState {
+  state: string
+  rank: number
+  aliases: string[]
+  role: string   // backlog | active | blocked | findings | dev_done | verified | deployed | closed
+  is_lateral: boolean
+}
+
+export interface HotfixRules {
+  from_states: string[]
+  to_states: string[]
+}
+
+export interface ReportConfig {
+  done_role: string
+  blocked_states: string[]
+  open_states: string[]
+  priority_filters: string[]
+  sections: string[]
+}
+
+export interface WorkflowConfig {
+  id: string
+  user_id: string | null
+  priority_tags: PriorityTag[]
+  column_hierarchy: ColumnState[]
+  hotfix_rules: HotfixRules
+  report_config: ReportConfig
 }
 
 // Export singleton instance

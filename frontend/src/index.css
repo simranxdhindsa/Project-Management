@@ -6647,6 +6647,255 @@ select.form-input {
   opacity: 1;
 }
 
+/* ── Workflow Config (wc-*) ──────────────────────────────────────────────── */
+.wc-header-icon {
+  color: var(--color-primary);
+  opacity: 0.85;
+}
+
+.wc-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--glass-border);
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.wc-tab {
+  padding: 0.5rem 1rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+
+.wc-tab:hover {
+  color: var(--text-primary);
+}
+
+.wc-tab-active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+.wc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.wc-tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.wc-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.wc-color-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.wc-color-input {
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+}
+
+.wc-text-input {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.wc-text-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.wc-label-input {
+  width: 6rem;
+}
+
+.wc-sla-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.wc-sla-input {
+  width: 4.5rem;
+}
+
+.wc-unit {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.wc-prefix-input,
+.wc-yt-input,
+.wc-alias-input {
+  flex: 1;
+  min-width: 8rem;
+}
+
+.wc-remove-btn {
+  background: none;
+  border: none;
+  color: var(--color-danger, #ef4444);
+  cursor: pointer;
+  padding: 0.3rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.wc-remove-btn:hover {
+  opacity: 1;
+}
+
+.wc-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.wc-col-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.wc-col-header {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr 8rem 1fr 4rem;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+.wc-col-row {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr 8rem 1fr 4rem;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.wc-col-order {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.wc-arrow-btn {
+  background: none;
+  border: 1px solid var(--glass-border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.65rem;
+  padding: 0 0.3rem;
+  line-height: 1.4;
+  transition: color 0.15s;
+}
+
+.wc-arrow-btn:hover:not(:disabled) {
+  color: var(--color-primary);
+}
+
+.wc-arrow-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.wc-select {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.wc-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.wc-checkbox {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+  margin: 0 auto;
+  display: block;
+}
+
+.wc-hotfix-grid,
+.wc-report-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.wc-section-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.wc-chip-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.wc-chip-label:has(input:checked) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.wc-footer {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--glass-border);
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* Reminders Page */
 .reminders-page {
   width: 100%;
