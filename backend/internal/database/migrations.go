@@ -340,6 +340,48 @@ func RunMigrations() error {
 		// Snooze support for slack_user_threads
 		`ALTER TABLE slack_user_threads ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMP WITH TIME ZONE`,
 
+		// Workflow configuration — user-customizable priority tags, column hierarchy, hotfix rules, report config
+		`CREATE TABLE IF NOT EXISTS workflow_config (
+			id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
+			priority_tags JSONB NOT NULL DEFAULT '[]',
+			column_hierarchy JSONB NOT NULL DEFAULT '[]',
+			hotfix_rules JSONB NOT NULL DEFAULT '{}',
+			report_config JSONB NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE(user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_workflow_config_user_id ON workflow_config(user_id)`,
+
+		// Seed system default workflow config (user_id IS NULL = global default)
+		`INSERT INTO workflow_config (id, user_id, priority_tags, column_hierarchy, hotfix_rules, report_config)
+		SELECT
+			gen_random_uuid()::text,
+			NULL,
+			'[
+				{"label":"P0","color":"#ef4444","display_order":0,"sla_hours":4,"prefixes":["P0"],"yt_mappings":["Critical","Show-stopper","Blocker"]},
+				{"label":"P1","color":"#f97316","display_order":1,"sla_hours":24,"prefixes":["P1"],"yt_mappings":["Major"]},
+				{"label":"P2","color":"#eab308","display_order":2,"sla_hours":48,"prefixes":["P2"],"yt_mappings":["Normal","Medium"]},
+				{"label":"P3","color":"#6366f1","display_order":3,"sla_hours":72,"prefixes":["P3"],"yt_mappings":["Minor","Cosmetic","Low"]},
+				{"label":"Other","color":"#94a3b8","display_order":4,"sla_hours":72,"prefixes":[],"yt_mappings":[]}
+			]'::jsonb,
+			'[
+				{"state":"Backlog","rank":0,"aliases":["Open","Submitted"],"role":"backlog","is_lateral":false},
+				{"state":"In Progress","rank":1,"aliases":[],"role":"active","is_lateral":false},
+				{"state":"Blocked","rank":1,"aliases":[],"role":"blocked","is_lateral":true},
+				{"state":"Findings","rank":1,"aliases":[],"role":"findings","is_lateral":true},
+				{"state":"DEV","rank":2,"aliases":[],"role":"dev_done","is_lateral":false},
+				{"state":"Ready for Stage","rank":3,"aliases":[],"role":"verified","is_lateral":false},
+				{"state":"STAGE","rank":4,"aliases":[],"role":"deployed","is_lateral":false},
+				{"state":"Ready for PROD","rank":5,"aliases":["Ready for PRD"],"role":"verified","is_lateral":false},
+				{"state":"PROD","rank":6,"aliases":["Mobile DONE"],"role":"deployed","is_lateral":false},
+				{"state":"Done","rank":7,"aliases":["Fixed","Closed","Won''t Fix","Duplicate"],"role":"closed","is_lateral":false}
+			]'::jsonb,
+			'{"from_states":[],"to_states":[]}'::jsonb,
+			'{"done_role":"dev_done","blocked_states":["Blocked"],"open_states":["In Progress","Backlog","Ready for Stage","STAGE","Ready for PROD","PROD","Findings","Mobile DONE"],"priority_filters":["P0","P1","P2","P3","Other"],"sections":["done","hotfixes","open","blocked","overdue"]}'::jsonb
+		WHERE NOT EXISTS (SELECT 1 FROM workflow_config WHERE user_id IS NULL)`,
+
 		// Blocker analysis cache — AI-extracted blocker reasons, cached per issue
 		`CREATE TABLE IF NOT EXISTS blocker_analysis_cache (
 			issue_id      VARCHAR(255) PRIMARY KEY,
