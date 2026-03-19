@@ -46,8 +46,20 @@ interface YouTrackStatus {
 
 type MainTab = 'youtrack' | 'slack' | 'workflow'
 
-export function IntegrationsPage() {
-  const [mainTab, setMainTab] = useState<MainTab>('youtrack')
+interface IntegrationsPageProps {
+  initialTab?: MainTab
+  onTabChange?: (tab: MainTab) => void
+}
+
+export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: IntegrationsPageProps = {}) {
+  const [mainTab, setMainTab] = useState<MainTab>(initialTab)
+
+  useEffect(() => {
+    if (initialTab && initialTab !== mainTab) {
+      setMainTab(initialTab)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab])
   const [loading, setLoading] = useState(true)
 
   // ── YouTrack ────────────────────────────────────────────────────────────────
@@ -113,16 +125,15 @@ export function IntegrationsPage() {
     return () => document.removeEventListener('mousedown', close)
   }, [ytMappingOpen])
 
-  // Fetch YT metadata (priorities + states) once YT is confirmed connected
+  // Fetch YT metadata (priorities + states) — try on mount and again once YT is confirmed connected
   useEffect(() => {
-    if (!ytConnected) return
     api.getYouTrackPriorities().then(res => {
       if (res.success && res.data) setYtPriorities(res.data as unknown as string[])
     }).catch(() => {})
     api.getYouTrackStates().then(res => {
       if (res.success && res.data) setYtStates((res.data as unknown as Array<{ name: string }>).map(s => s.name))
     }).catch(() => {})
-  }, [ytConnected])
+  }, [])
 
   // ── YouTrack ────────────────────────────────────────────────────────────────
   const fetchYtIntegration = async () => {
@@ -311,7 +322,11 @@ export function IntegrationsPage() {
     try {
       setWcSaving(true); setWcError(null)
       const res = await api.updatePriorityTags(editTags)
-      if (res.success && res.data) { setWorkflowConfig(res.data); setWcSuccess('Priority tags saved!'); setTimeout(() => setWcSuccess(null), 3000) }
+      if (res.success) {
+        if (res.data) setWorkflowConfig(res.data)
+        else await fetchWorkflowConfig()
+        setWcSuccess('Priority tags saved!'); setTimeout(() => setWcSuccess(null), 3000)
+      }
     } catch (e) { setWcError(e instanceof Error ? e.message : 'Save failed') }
     finally { setWcSaving(false) }
   }
@@ -321,7 +336,11 @@ export function IntegrationsPage() {
     try {
       setWcSaving(true); setWcError(null)
       const res = await api.updateColumnHierarchy(withRanks)
-      if (res.success && res.data) { setWorkflowConfig(res.data); setEditColumns(res.data.column_hierarchy); setWcSuccess('Columns saved!'); setTimeout(() => setWcSuccess(null), 3000) }
+      if (res.success) {
+        if (res.data) { setWorkflowConfig(res.data); setEditColumns(res.data.column_hierarchy) }
+        else await fetchWorkflowConfig()
+        setWcSuccess('Columns saved!'); setTimeout(() => setWcSuccess(null), 3000)
+      }
     } catch (e) { setWcError(e instanceof Error ? e.message : 'Save failed') }
     finally { setWcSaving(false) }
   }
@@ -339,7 +358,11 @@ export function IntegrationsPage() {
     try {
       setWcSaving(true); setWcError(null)
       const res = await api.updateReportConfig(editReport)
-      if (res.success && res.data) { setWorkflowConfig(res.data); setWcSuccess('Report config saved!'); setTimeout(() => setWcSuccess(null), 3000) }
+      if (res.success) {
+        if (res.data) { setWorkflowConfig(res.data); setEditReport(res.data.report_config ?? editReport) }
+        else { await fetchWorkflowConfig() }
+        setWcSuccess('Report config saved!'); setTimeout(() => setWcSuccess(null), 3000)
+      }
     } catch (e) { setWcError(e instanceof Error ? e.message : 'Save failed') }
     finally { setWcSaving(false) }
   }
@@ -406,7 +429,7 @@ export function IntegrationsPage() {
 
       {/* Tab bar */}
       <div className="int-tabs">
-        <button className={`int-tab ${mainTab === 'youtrack' ? 'int-tab-active' : ''}`} onClick={() => setMainTab('youtrack')}>
+        <button className={`int-tab ${mainTab === 'youtrack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('youtrack'); onTabChange?.('youtrack') }}>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none">
             <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/>
             <path d="M8 12l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -414,12 +437,12 @@ export function IntegrationsPage() {
           YouTrack
           {ytStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
         </button>
-        <button className={`int-tab ${mainTab === 'slack' ? 'int-tab-active' : ''}`} onClick={() => setMainTab('slack')}>
+        <button className={`int-tab ${mainTab === 'slack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('slack'); onTabChange?.('slack') }}>
           <MessageSquare size={14} />
           Slack
           {slackStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
         </button>
-        <button className={`int-tab ${mainTab === 'workflow' ? 'int-tab-active' : ''}`} onClick={() => setMainTab('workflow')}>
+        <button className={`int-tab ${mainTab === 'workflow' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('workflow'); onTabChange?.('workflow') }}>
           <Sliders size={14} />
           Workflow
         </button>
@@ -900,15 +923,16 @@ export function IntegrationsPage() {
                       <div className="wc-report-block-title">Priority Filters <span className="int-label-hint">(empty = all)</span></div>
                       <p className="int-label-hint">Which priority tags to include in reports.</p>
                       <div className="wc-chip-group">
-                        {(editTags.length > 0 ? editTags : workflowConfig?.priority_tags ?? []).map(tag => (
+                        {[...(editTags.length > 0 ? editTags : workflowConfig?.priority_tags ?? []), { label: 'Other', color: '#94a3b8' }].map(tag => (
                           <label key={tag.label} className="wc-chip-label">
                             <input
                               type="checkbox"
-                              checked={editReport.priority_filters.length === 0 || editReport.priority_filters.includes(tag.label)}
+                              checked={(editReport.priority_filters ?? []).length === 0 || (editReport.priority_filters ?? []).includes(tag.label)}
                               onChange={e => setEditReport(r => {
-                                const all = (editTags.length > 0 ? editTags : workflowConfig?.priority_tags ?? []).map(t => t.label)
-                                const current = r.priority_filters.length === 0 ? all : r.priority_filters
-                                return { ...r, priority_filters: e.target.checked ? [...current.filter(x => x !== tag.label), tag.label] : current.filter(x => x !== tag.label) }
+                                const all = [...(editTags.length > 0 ? editTags : workflowConfig?.priority_tags ?? []), { label: 'Other' }].map(t => t.label)
+                                const current = (r.priority_filters ?? []).length === 0 ? all : (r.priority_filters ?? [])
+                                const next = e.target.checked ? [...current.filter(x => x !== tag.label), tag.label] : current.filter(x => x !== tag.label)
+                                return { ...r, priority_filters: next.length === all.length ? [] : next }
                               })}
                             />
                             <span className="wc-chip-dot" style={{ background: tag.color }} />
@@ -928,9 +952,9 @@ export function IntegrationsPage() {
                             <label key={s} className="wc-chip-label">
                               <input
                                 type="checkbox"
-                                checked={editReport.open_states.includes(s)}
+                                checked={(editReport.open_states ?? []).includes(s)}
                                 onChange={e => setEditReport(r => ({
-                                  ...r, open_states: e.target.checked ? [...r.open_states, s] : r.open_states.filter(x => x !== s)
+                                  ...r, open_states: e.target.checked ? [...(r.open_states ?? []), s] : (r.open_states ?? []).filter(x => x !== s)
                                 }))}
                               />
                               {s}
@@ -938,7 +962,7 @@ export function IntegrationsPage() {
                           ))}
                         </div>
                       ) : (
-                        <input type="text" value={editReport.open_states.join(', ')} onChange={e => setEditReport(r => ({ ...r, open_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="wc-input wc-input-full" placeholder="In Progress, Backlog, STAGE…" />
+                        <input type="text" value={(editReport.open_states ?? []).join(', ')} onChange={e => setEditReport(r => ({ ...r, open_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="wc-input wc-input-full" placeholder="In Progress, Backlog, STAGE…" />
                       )}
                     </div>
 
@@ -952,9 +976,9 @@ export function IntegrationsPage() {
                             <label key={s} className="wc-chip-label">
                               <input
                                 type="checkbox"
-                                checked={editReport.blocked_states.includes(s)}
+                                checked={(editReport.blocked_states ?? []).includes(s)}
                                 onChange={e => setEditReport(r => ({
-                                  ...r, blocked_states: e.target.checked ? [...r.blocked_states, s] : r.blocked_states.filter(x => x !== s)
+                                  ...r, blocked_states: e.target.checked ? [...(r.blocked_states ?? []), s] : (r.blocked_states ?? []).filter(x => x !== s)
                                 }))}
                               />
                               {s}
@@ -962,7 +986,7 @@ export function IntegrationsPage() {
                           ))}
                         </div>
                       ) : (
-                        <input type="text" value={editReport.blocked_states.join(', ')} onChange={e => setEditReport(r => ({ ...r, blocked_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="wc-input wc-input-full" placeholder="Blocked" />
+                        <input type="text" value={(editReport.blocked_states ?? []).join(', ')} onChange={e => setEditReport(r => ({ ...r, blocked_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="wc-input wc-input-full" placeholder="Blocked" />
                       )}
                     </div>
 
@@ -975,9 +999,9 @@ export function IntegrationsPage() {
                           <label key={s} className="wc-chip-label">
                             <input
                               type="checkbox"
-                              checked={editReport.sections.length === 0 || editReport.sections.includes(s)}
+                              checked={(editReport.sections ?? []).length === 0 || (editReport.sections ?? []).includes(s)}
                               onChange={e => setEditReport(r => {
-                                const current = r.sections.length === 0 ? REPORT_SECTIONS : r.sections
+                                const current = (r.sections ?? []).length === 0 ? REPORT_SECTIONS : (r.sections ?? [])
                                 return { ...r, sections: e.target.checked ? [...current.filter(x => x !== s), s] : current.filter(x => x !== s) }
                               })}
                             />

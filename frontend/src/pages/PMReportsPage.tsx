@@ -5,7 +5,7 @@ import {
   FileText, Users, Clock, Copy, Check,
   RefreshCw, ChevronDown, AlertTriangle, TrendingUp,
   Calendar, Pin, PinOff, ChevronLeft, ChevronRight,
-  Search, RotateCcw, ArrowDownUp, ArrowUpNarrowWide,
+  Search, RotateCcw, Save, ArrowDownUp, ArrowUpNarrowWide,
   ArrowDownNarrowWide, Star, Activity, X, TriangleAlert,
   CheckCircle2, Timer, Zap, Filter, Trash2,
   Brain, ScanSearch, BarChart2, GitBranch, Layers,
@@ -523,6 +523,37 @@ function DailyReportTab() {
   const [error, setError] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
+  // Report config overrides
+  const [configOpen, setConfigOpen] = useState(false)
+  const [cfgPriorities, setCfgPriorities] = useState<string[]>([])
+  const [cfgSections, setCfgSections] = useState<string[]>(['done', 'hotfixes', 'open', 'blocked', 'overdue'])
+  const [cfgOpenStates, setCfgOpenStates] = useState<string[]>([])
+  const [wfConfig, setWfConfig] = useState<{ priority_tags?: { label: string; color: string }[]; report_config?: { open_states?: string[]; sections?: string[]; priority_filters?: string[] } } | null>(null)
+  const [ytStatesList, setYtStatesList] = useState<string[]>([])
+  const [cfgSaveState, setCfgSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  // snapshot of what's currently saved in DB — used to detect unsaved changes
+  const [savedSnapshot, setSavedSnapshot] = useState<{ priorities: string[]; sections: string[]; openStates: string[] } | null>(null)
+
+  useEffect(() => {
+    api.getWorkflowConfig().then(res => {
+      if (res.success && res.data) {
+        const cfg = res.data as typeof wfConfig
+        setWfConfig(cfg)
+        const rc = cfg?.report_config
+        const p = rc?.priority_filters ?? []
+        const s = rc?.sections ?? ['done','hotfixes','open','blocked','overdue']
+        const o = rc?.open_states ?? []
+        if (o.length) setCfgOpenStates(o)
+        if (rc?.sections?.length) setCfgSections(s)
+        if (rc?.priority_filters?.length) setCfgPriorities(p)
+        setSavedSnapshot({ priorities: p, sections: s, openStates: o })
+      }
+    }).catch(() => {})
+    api.getYouTrackStates().then(res => {
+      if (res.success && res.data) setYtStatesList((res.data as unknown as Array<{ name: string }>).map(s => s.name))
+    }).catch(() => {})
+  }, [])
+
   // Calendar dropdown state
   const [calOpen, setCalOpen] = useState(false)
   const [calDate, setCalDate] = useState(() => new Date())
@@ -608,9 +639,14 @@ function DailyReportTab() {
   const generateReport = async () => {
     setLoading(true)
     setError(null)
+    const overrides = {
+      priorities: cfgPriorities.length ? cfgPriorities : undefined,
+      open_states: cfgOpenStates.length ? cfgOpenStates : undefined,
+      sections: cfgSections.length > 0 ? cfgSections : undefined,
+    }
     try {
       const res = mode === 'daily'
-        ? await api.generatePMReport(date, reportScope)
+        ? await api.generatePMReport(date, reportScope, overrides)
         : await api.generateWeeklyPMReport(weekStart, reportScope)
       setReport(res.data)
       mode === 'daily' ? fetchHistory() : fetchWeeklyHistory()
@@ -790,9 +826,9 @@ function DailyReportTab() {
               </div>
             </div>
             <div className="pm-daily-actions">
-              <button className="btn-primary pm-generate-btn" onClick={generateReport} disabled={loading}>
-                {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-                {loading ? 'Generating...' : 'Generate Report'}
+              <button className="btn-primary pm-generate-btn" onClick={() => setConfigOpen(o => !o)} disabled={loading}>
+                <Filter size={15} />
+                Generate Report{cfgPriorities.length || cfgSections.length < 5 ? ' •' : ''}
               </button>
               {report && (
                 <button className="btn-secondary pm-copy-btn" onClick={copyReport}>
@@ -801,6 +837,117 @@ function DailyReportTab() {
                 </button>
               )}
             </div>
+
+            {/* Config + Generate panel */}
+            {configOpen && (() => {
+              const allSections = ['done','hotfixes','open','blocked','overdue']
+              const basePriorities = (wfConfig?.priority_tags ?? [{label:'P0',color:'#ef4444'},{label:'P1',color:'#f97316'},{label:'P2',color:'#eab308'},{label:'P3',color:'#6366f1'}])
+              // Always include "Other" for unassigned issues
+              const allPriorities = [...basePriorities, { label: 'Other', color: '#94a3b8' }]
+              const allPriorityLabels = allPriorities.map(t => t.label)
+              const allSectionsOn = cfgSections.length === allSections.length
+              // "All" means cfgPriorities is empty (backend default = all) OR every label is included
+              const allPrioritiesOn = cfgPriorities.length === 0 || allPriorityLabels.every(l => cfgPriorities.includes(l))
+              return (
+                <div className="pm-config-panel">
+                  <div className="pm-config-row">
+                    <span className="pm-config-label">Sections</span>
+                    <label className="cfg-chip" style={{ gap: '0.35rem' }}>
+                      <input type="checkbox" checked={allSectionsOn} onChange={() => setCfgSections(allSectionsOn ? [] : [...allSections])} style={{ accentColor: 'var(--color-primary)', margin: 0 }} />
+                      All
+                    </label>
+                    {allSections.map(s => (
+                      <button key={s} className={`cfg-chip${cfgSections.includes(s) ? ' on' : ''}`}
+                        onClick={() => setCfgSections(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="pm-config-row">
+                    <span className="pm-config-label">Priorities</span>
+                    <label className="cfg-chip" style={{ gap: '0.35rem' }}>
+                      <input type="checkbox" checked={allPrioritiesOn}
+                        onChange={() => {
+                          if (allPrioritiesOn) {
+                            // deselect all → keep none selected means filter nothing sent, so explicitly set all then remove one to trigger
+                            setCfgPriorities([...allPriorityLabels])
+                          } else {
+                            setCfgPriorities([]) // empty = all
+                          }
+                        }}
+                        style={{ accentColor: 'var(--color-primary)', margin: 0 }} />
+                      All
+                    </label>
+                    {allPriorities.map(t => {
+                      const isOn = cfgPriorities.length === 0 || cfgPriorities.includes(t.label)
+                      return (
+                        <button key={t.label} className={`cfg-chip${isOn ? ' on' : ''}`}
+                          onClick={() => setCfgPriorities(prev => {
+                            // if currently "all" (empty), switching to explicit list minus this one
+                            const effective = prev.length === 0 ? allPriorityLabels : prev
+                            const next = effective.includes(t.label) ? effective.filter(x => x !== t.label) : [...effective, t.label]
+                            // if all selected again, collapse back to empty (= all)
+                            return next.length === allPriorityLabels.length ? [] : next
+                          })}>
+                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.color, display: 'inline-block', flexShrink: 0 }} />
+                          {t.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {(wfConfig?.report_config?.open_states ?? []).length > 0 && (
+                    <div className="pm-config-row">
+                      <span className="pm-config-label">Open States</span>
+                      {(wfConfig?.report_config?.open_states ?? []).map(s => (
+                        <button key={s} className={`cfg-chip${cfgOpenStates.includes(s) ? ' on' : ''}`}
+                          onClick={() => setCfgOpenStates(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
+                          {s}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <div className="pm-config-actions">
+                    <button className="btn-primary pm-generate-btn" disabled={loading} onClick={() => { setConfigOpen(false); generateReport() }}>
+                      {loading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                      {loading ? 'Generating...' : 'Generate'}
+                    </button>
+                    <div className="pm-config-actions-right">
+                      <button className="btn-ghost btn-sm" onClick={() => {
+                        const snap = savedSnapshot
+                        setCfgPriorities(snap?.priorities ?? [])
+                        setCfgSections(snap?.sections?.length ? snap.sections : [...allSections])
+                        setCfgOpenStates(snap?.openStates ?? [])
+                        setCfgSaveState('idle')
+                      }}>
+                        <RotateCcw size={13} /> Reset
+                      </button>
+                      {(() => {
+                        const isDirty = savedSnapshot && (
+                          JSON.stringify([...cfgPriorities].sort()) !== JSON.stringify([...(savedSnapshot.priorities)].sort()) ||
+                          JSON.stringify([...cfgSections].sort()) !== JSON.stringify([...(savedSnapshot.sections)].sort()) ||
+                          JSON.stringify([...cfgOpenStates].sort()) !== JSON.stringify([...(savedSnapshot.openStates)].sort())
+                        )
+                        return (
+                          <button
+                            className={`btn-sm ${cfgSaveState === 'saved' ? 'btn-success' : 'btn-primary'}`}
+                            disabled={cfgSaveState === 'saving' || !isDirty}
+                            onClick={async () => {
+                              setCfgSaveState('saving')
+                              await api.updateReportConfig({ done_role: wfConfig?.report_config ? 'dev_done' : 'dev_done', blocked_states: [], open_states: cfgOpenStates, priority_filters: cfgPriorities, sections: cfgSections })
+                              setSavedSnapshot({ priorities: cfgPriorities, sections: cfgSections, openStates: cfgOpenStates })
+                              setCfgSaveState('saved')
+                              setTimeout(() => setCfgSaveState('idle'), 2500)
+                            }}>
+                            {cfgSaveState === 'saving' ? <Loader2 size={13} className="animate-spin" /> : cfgSaveState === 'saved' ? <Check size={13} /> : <Save size={13} />}
+                            {cfgSaveState === 'saving' ? 'Saving…' : cfgSaveState === 'saved' ? 'Saved!' : 'Save as Default'}
+                          </button>
+                        )
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
 
           <div className="pm-report-scroll">

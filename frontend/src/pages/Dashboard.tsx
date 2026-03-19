@@ -158,6 +158,9 @@ type PMReportsTab = typeof PM_REPORTS_TABS[number]
 const SLACK_TABS = ['inbox', 'threads', 'reminders', 'settings'] as const
 type SlackTab = typeof SLACK_TABS[number]
 
+const INTEGRATIONS_TABS = ['youtrack', 'slack', 'workflow'] as const
+type IntegrationsTab = typeof INTEGRATIONS_TABS[number]
+
 export default function Dashboard() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -177,6 +180,11 @@ export default function Dashboard() {
   const slackTab: SlackTab = (SLACK_TABS as readonly string[]).includes(subTab ?? '')
     ? (subTab as SlackTab)
     : 'inbox'
+
+  // Derived sub-tab for integrations (with validation)
+  const integrationsTab: IntegrationsTab = (INTEGRATIONS_TABS as readonly string[]).includes(subTab ?? '')
+    ? (subTab as IntegrationsTab)
+    : 'youtrack'
 
   // Navigate wrapper — updates URL and syncs page state
   const setCurrentPage = (page: Page) => {
@@ -762,7 +770,12 @@ export default function Dashboard() {
       {/* Main Content */}
       <main className="main-content">
         {/* Render page based on currentPage */}
-        {currentPage === 'integrations' && <IntegrationsPage />}
+        {currentPage === 'integrations' && (
+          <IntegrationsPage
+            initialTab={integrationsTab}
+            onTabChange={(tab) => navigate(`/integrations/${tab}`)}
+          />
+        )}
         {currentPage === 'settings' && <SettingsPage />}
         {currentPage === 'activity' && <ActivityPage />}
         {currentPage === 'slack' && (

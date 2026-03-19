@@ -10490,6 +10490,81 @@ select.form-input {
   padding: 0.45rem 0.85rem;
 }
 
+.pm-config-panel {
+  border-top: 1px solid var(--glass-border);
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: rgba(30, 27, 75, 0.6);
+}
+
+.pm-config-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.pm-config-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-primary);
+  min-width: 6.5rem;
+  flex-shrink: 0;
+}
+
+.cfg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 9999px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.06);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.cfg-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--text-primary);
+}
+
+.cfg-chip.on {
+  border-color: var(--color-primary);
+  background: rgba(99,102,241,0.2);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+.pm-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  margin-top: 0.15rem;
+}
+
+.pm-config-actions .pm-generate-btn {
+  margin-right: auto;
+  padding: 0.45rem 1.1rem;
+}
+
+.pm-config-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
 .pm-report-scroll {
   flex: 1;
   overflow-y: auto;
@@ -16831,3 +16906,128 @@ select.form-input {
 .icon-success { color: var(--color-success); }
 .icon-warning { color: var(--color-warning); }
 .icon-slack   { color: #8250df; }
+
+/* ─── Light mode overrides ──────────────────────────────────────────── */
+
+/* Report config panel */
+[data-theme="light"] .pm-config-panel {
+  background: rgba(240, 240, 255, 0.7);
+  border-top-color: rgba(99, 102, 241, 0.2);
+}
+
+/* cfg-chip (report config chips) */
+[data-theme="light"] .cfg-chip {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--text-secondary);
+}
+[data-theme="light"] .cfg-chip:hover {
+  border-color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.07);
+}
+[data-theme="light"] .cfg-chip.on {
+  border-color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--color-primary);
+}
+
+/* Custom dropdown trigger + menu (pm-custom-dropdown) */
+[data-theme="light"] .pm-custom-dropdown-trigger {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--text-primary);
+}
+[data-theme="light"] .pm-custom-dropdown-trigger:hover {
+  background: rgba(240, 240, 255, 0.95);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+[data-theme="light"] .pm-custom-dropdown-menu {
+  background: rgba(255, 255, 255, 0.97) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] .pm-dropdown-item {
+  color: var(--text-secondary);
+}
+[data-theme="light"] .pm-dropdown-item:hover {
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--text-primary);
+}
+[data-theme="light"] .pm-dropdown-item.active {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--color-primary);
+}
+
+/* Workflow config (int-* / wc-*) */
+[data-theme="light"] .int-content {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(99, 102, 241, 0.15);
+}
+[data-theme="light"] .int-section-box {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .int-input,
+[data-theme="light"] .int-select {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--text-primary);
+}
+[data-theme="light"] .wc-tabs {
+  border-bottom-color: rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .wc-tab {
+  color: var(--text-secondary);
+}
+[data-theme="light"] .wc-tab-active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+[data-theme="light"] .wc-tag-list {
+  border-color: rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .wc-tag-header {
+  background: rgba(99, 102, 241, 0.07);
+  color: var(--text-secondary);
+}
+[data-theme="light"] .wc-tag-row {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+[data-theme="light"] .wc-tag-row:hover {
+  background: rgba(99, 102, 241, 0.04);
+}
+[data-theme="light"] .wc-input,
+[data-theme="light"] .wc-select {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--text-primary);
+}
+[data-theme="light"] .wc-select option,
+[data-theme="light"] .wc-mapping-dropdown option,
+[data-theme="light"] .wc-sla-unit option {
+  background: #fff;
+  color: #1e1b4b;
+}
+[data-theme="light"] .wc-section {
+  background: transparent;
+}
+[data-theme="light"] .wc-report-block {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+[data-theme="light"] .cfg-chip,
+[data-theme="light"] .wc-chip-label {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--text-secondary);
+}
+[data-theme="light"] .wc-chip-label:has(input:checked) {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+[data-theme="light"] .pm-custom-dropdown-trigger {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--text-primary);
+}

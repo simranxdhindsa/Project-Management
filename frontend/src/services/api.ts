@@ -989,8 +989,12 @@ class ApiService {
   }
 
   // PM Report endpoints
-  async generatePMReport(date: string, scope: 'full' | 'summary' = 'full') {
-    return this.request<PMReport>(`/reports/pm-report/${date}?scope=${scope}`)
+  async generatePMReport(date: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }) {
+    const params = new URLSearchParams({ scope })
+    if (overrides?.priorities?.length) params.set('priorities', overrides.priorities.join(','))
+    if (overrides?.open_states?.length) params.set('open_states', overrides.open_states.join(','))
+    if (overrides?.sections?.length) params.set('sections', overrides.sections.join(','))
+    return this.request<PMReport>(`/reports/pm-report/${date}?${params}`)
   }
 
   async getSavedPMReport(date: string) {

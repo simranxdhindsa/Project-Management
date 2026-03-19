@@ -98,7 +98,12 @@ func (h *WorkflowConfigHandler) UpdatePriorities(w http.ResponseWriter, r *http.
 		return
 	}
 
-	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Priority tags saved"})
+	updated, err := h.configRepo.GetEffective(r.Context(), userID)
+	if err != nil {
+		sendJSON(w, http.StatusOK, Response{Success: true, Message: "Priority tags saved"})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: updated})
 }
 
 // UpdateColumns updates only the column hierarchy
@@ -124,7 +129,12 @@ func (h *WorkflowConfigHandler) UpdateColumns(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Column hierarchy saved"})
+	updated, err := h.configRepo.GetEffective(r.Context(), userID)
+	if err != nil {
+		sendJSON(w, http.StatusOK, Response{Success: true, Message: "Column hierarchy saved"})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: updated})
 }
 
 // UpdateHotfixRules updates only the hotfix rules
@@ -147,7 +157,12 @@ func (h *WorkflowConfigHandler) UpdateHotfixRules(w http.ResponseWriter, r *http
 		return
 	}
 
-	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Hotfix rules saved"})
+	updated, err := h.configRepo.GetEffective(r.Context(), userID)
+	if err != nil {
+		sendJSON(w, http.StatusOK, Response{Success: true, Message: "Hotfix rules saved"})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: updated})
 }
 
 // UpdateReportConfig updates only the report configuration
@@ -170,7 +185,12 @@ func (h *WorkflowConfigHandler) UpdateReportConfig(w http.ResponseWriter, r *htt
 		return
 	}
 
-	sendJSON(w, http.StatusOK, Response{Success: true, Message: "Report config saved"})
+	updated, err := h.configRepo.GetEffective(r.Context(), userID)
+	if err != nil {
+		sendJSON(w, http.StatusOK, Response{Success: true, Message: "Report config saved"})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: updated})
 }
 
 // Reset deletes the user's config, falling back to the global default

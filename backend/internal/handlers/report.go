@@ -106,6 +106,7 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 	openStates := []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"}
 	blockedStates := []string{"Blocked"}
 	priorityTags := []models.PriorityTag{}
+	activeSections := map[string]bool{"done": true, "hotfixes": true, "open": true, "blocked": true, "overdue": true}
 	if wfCfg != nil {
 		doneStates = getDoneStates(wfCfg)
 		hotfixFromStates = getHotfixFromStates(wfCfg)
@@ -117,6 +118,48 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 			blockedStates = wfCfg.ReportConfig.BlockedStates
 		}
 		priorityTags = wfCfg.PriorityTags
+		if len(wfCfg.ReportConfig.Sections) > 0 {
+			activeSections = map[string]bool{}
+			for _, s := range wfCfg.ReportConfig.Sections {
+				activeSections[s] = true
+			}
+		}
+	}
+
+	// One-time overrides from query params (override saved config for this generation only)
+	if qp := r.URL.Query().Get("priorities"); qp != "" {
+		requested := strings.Split(qp, ",")
+		var filtered []models.PriorityTag
+		for _, tag := range priorityTags {
+			for _, req := range requested {
+				if strings.EqualFold(strings.TrimSpace(req), tag.Label) {
+					filtered = append(filtered, tag)
+					break
+				}
+			}
+		}
+		if len(filtered) > 0 {
+			priorityTags = filtered
+		}
+	}
+	if qp := r.URL.Query().Get("open_states"); qp != "" {
+		var states []string
+		for _, s := range strings.Split(qp, ",") {
+			if t := strings.TrimSpace(s); t != "" {
+				states = append(states, t)
+			}
+		}
+		if len(states) > 0 {
+			openStates = states
+		}
+	}
+	if qp := r.URL.Query().Get("sections"); qp != "" {
+		activeSections = map[string]bool{}
+		for _, s := range strings.Split(qp, ",") {
+			if t := strings.TrimSpace(s); t != "" {
+				activeSections[t] = true
+			}
+		}
 	}
 
 	// --- 1. Done tickets ---
@@ -154,179 +197,179 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 	// --- 3. Build Slack-style message ---
 	var sb strings.Builder
 
-	// Done section — always included
+	// Done section
 	doneLabel := parsedDate.AddDate(0, 0, -1).Format("Mon, Jan 2")
-	if scope == "summary" {
-		sb.WriteString(fmt.Sprintf("*Summary — Tickets Done %s:*\n\n", doneLabel))
-	} else {
-		sb.WriteString(fmt.Sprintf("*Tickets Done %s:*\n\n", doneLabel))
-	}
-
-	if len(doneIssues) == 0 {
-		sb.WriteString("_No tickets moved to DEV yesterday_\n")
-	} else {
+	if activeSections["done"] {
 		if scope == "summary" {
-			// Group by assignee for summary view
-			type assigneeGroup struct {
-				name   string
-				issues []database.IssueStateLog
-			}
-			var groups []assigneeGroup
-			assigneeIdx := map[string]int{}
-			for _, issue := range doneIssues {
-				name := issue.Assignee
-				if name == "" {
-					name = "Unassigned"
+			sb.WriteString(fmt.Sprintf("*Summary — Tickets Done %s:*\n\n", doneLabel))
+		} else {
+			sb.WriteString(fmt.Sprintf("*Tickets Done %s:*\n\n", doneLabel))
+		}
+		if len(doneIssues) == 0 {
+			sb.WriteString("_No tickets moved to DEV yesterday_\n")
+		} else {
+			if scope == "summary" {
+				type assigneeGroup struct {
+					name   string
+					issues []database.IssueStateLog
 				}
-				if idx, ok := assigneeIdx[name]; ok {
-					groups[idx].issues = append(groups[idx].issues, issue)
-				} else {
-					assigneeIdx[name] = len(groups)
-					groups = append(groups, assigneeGroup{name: name, issues: []database.IssueStateLog{issue}})
+				var groups []assigneeGroup
+				assigneeIdx := map[string]int{}
+				for _, issue := range doneIssues {
+					name := issue.Assignee
+					if name == "" {
+						name = "Unassigned"
+					}
+					if idx, ok := assigneeIdx[name]; ok {
+						groups[idx].issues = append(groups[idx].issues, issue)
+					} else {
+						assigneeIdx[name] = len(groups)
+						groups = append(groups, assigneeGroup{name: name, issues: []database.IssueStateLog{issue}})
+					}
 				}
-			}
-			for i, g := range groups {
-				if i > 0 {
-					sb.WriteString("\n")
+				for i, g := range groups {
+					if i > 0 {
+						sb.WriteString("\n")
+					}
+					sb.WriteString(fmt.Sprintf("@%s\n", g.name))
+					for _, issue := range g.issues {
+						sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+					}
 				}
-				sb.WriteString(fmt.Sprintf("@%s\n", g.name))
-				for _, issue := range g.issues {
+			} else {
+				for _, issue := range doneIssues {
 					sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
 				}
-			}
-		} else {
-			for _, issue := range doneIssues {
-				sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
 			}
 		}
 	}
 
-	// Hotfix section — always included (shown in both summary and full)
-	sb.WriteString("\n\n")
-	sb.WriteString("*Hotfixes deployed to STAGE/PROD:*\n\n")
-	if len(hotfixIssues) == 0 {
-		sb.WriteString("_No hotfixes deployed_\n")
-	} else {
-		for _, issue := range hotfixIssues {
-			destLabels := map[string]string{"ready for stage": "Ready for Stage", "stage": "STAGE", "ready for prod": "Ready for PROD", "prod": "PROD"}
-			dest := destLabels[strings.ToLower(issue.ToState)]
-			if dest == "" {
-				dest = issue.ToState
+	// Hotfix section
+	if activeSections["hotfixes"] {
+		sb.WriteString("\n\n")
+		sb.WriteString("*Hotfixes deployed to STAGE/PROD:*\n\n")
+		if len(hotfixIssues) == 0 {
+			sb.WriteString("_No hotfixes deployed_\n")
+		} else {
+			for _, issue := range hotfixIssues {
+				destLabels := map[string]string{"ready for stage": "Ready for Stage", "stage": "STAGE", "ready for prod": "Ready for PROD", "prod": "PROD"}
+				dest := destLabels[strings.ToLower(issue.ToState)]
+				if dest == "" {
+					dest = issue.ToState
+				}
+				line := fmt.Sprintf("• %s %s _(→ %s)_", issue.IssueID, issue.IssueSummary, dest)
+				if issue.Assignee != "" {
+					line += fmt.Sprintf(" (Assignee: %s)", issue.Assignee)
+				}
+				sb.WriteString(line + "\n")
 			}
-			line := fmt.Sprintf("• %s %s _(→ %s)_", issue.IssueID, issue.IssueSummary, dest)
-			if issue.Assignee != "" {
-				line += fmt.Sprintf(" (Assignee: %s)", issue.Assignee)
-			}
-			sb.WriteString(line + "\n")
 		}
 	}
 
 	// Full report sections (skipped in summary mode)
 	if scope == "full" {
-		sb.WriteString("\n\n")
-
 		// Open items grouped by priority
-		sb.WriteString("*These are the open items today:*\n")
-		sb.WriteString("\n")
-
-		if ytErr != nil {
-			sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
-		} else if len(openIssues) == 0 {
-			sb.WriteString("_No open items_\n")
-		} else {
-			// Group by priority using config tags (falls back to P0-P3/Other if no config)
-			priorityOrder := buildPriorityOrder(priorityTags)
-			if len(priorityOrder) == 0 {
-				priorityOrder = []string{"P0", "P1", "P2", "P3", "Other"}
-			}
-			priorityGroups := make(map[string][]youtrack.Issue)
-			for _, p := range priorityOrder {
-				priorityGroups[p] = []youtrack.Issue{}
-			}
-
-			for _, issue := range openIssues {
-				var p string
-				if len(priorityTags) > 0 {
-					p = extractPriorityFromConfig(issue.Summary, priorityTags)
-				} else {
-					p = extractPriority(issue.Summary)
+		if activeSections["open"] {
+			sb.WriteString("\n\n")
+			sb.WriteString("*These are the open items today:*\n\n")
+			if ytErr != nil {
+				sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
+			} else if len(openIssues) == 0 {
+				sb.WriteString("_No open items_\n")
+			} else {
+				priorityOrder := buildPriorityOrder(priorityTags)
+				if len(priorityOrder) == 0 {
+					priorityOrder = []string{"P0", "P1", "P2", "P3", "Other"}
 				}
-				if _, ok := priorityGroups[p]; !ok {
-					priorityGroups["Other"] = append(priorityGroups["Other"], issue)
-				} else {
-					priorityGroups[p] = append(priorityGroups[p], issue)
+				priorityGroups := make(map[string][]youtrack.Issue)
+				for _, p := range priorityOrder {
+					priorityGroups[p] = []youtrack.Issue{}
 				}
-			}
-
-			for _, p := range priorityOrder {
-				issues := priorityGroups[p]
-				if len(issues) == 0 {
-					continue
+				for _, issue := range openIssues {
+					var p string
+					if len(priorityTags) > 0 {
+						p = extractPriorityFromConfig(issue.Summary, priorityTags)
+					} else {
+						p = extractPriority(issue.Summary)
+					}
+					if _, ok := priorityGroups[p]; !ok {
+						priorityGroups["Other"] = append(priorityGroups["Other"], issue)
+					} else {
+						priorityGroups[p] = append(priorityGroups[p], issue)
+					}
 				}
-				label := p
-				if p == "Other" {
-					label = "Other Issues"
+				for _, p := range priorityOrder {
+					issues := priorityGroups[p]
+					if len(issues) == 0 {
+						continue
+					}
+					label := p
+					if p == "Other" {
+						label = "Other Issues"
+					}
+					sb.WriteString(fmt.Sprintf("*%s:*\n", label))
+					for _, issue := range issues {
+						sb.WriteString(fmt.Sprintf("• %s %s\n", issue.ID, issue.Summary))
+					}
+					sb.WriteString("\n")
 				}
-				sb.WriteString(fmt.Sprintf("*%s:*\n", label))
-				for _, issue := range issues {
-					sb.WriteString(fmt.Sprintf("• %s %s\n", issue.ID, issue.Summary))
-				}
-				sb.WriteString("\n")
 			}
 		}
 
 		// Blocked section
-		sb.WriteString("*Blocked:*\n")
-		sb.WriteString("\n")
-		if len(blockedIssues) == 0 {
-			sb.WriteString("_No blocked tickets_\n")
-		} else {
-			for _, issue := range blockedIssues {
-				assignee := ""
-				if u := youtrack.GetAssignee(issue); u != nil {
-					assignee = u.FullName
-					if assignee == "" {
-						assignee = u.Login
+		if activeSections["blocked"] {
+			sb.WriteString("*Blocked:*\n\n")
+			if len(blockedIssues) == 0 {
+				sb.WriteString("_No blocked tickets_\n")
+			} else {
+				for _, issue := range blockedIssues {
+					assignee := ""
+					if u := youtrack.GetAssignee(issue); u != nil {
+						assignee = u.FullName
+						if assignee == "" {
+							assignee = u.Login
+						}
 					}
+					line := fmt.Sprintf("• %s %s", issue.ID, issue.Summary)
+					if assignee != "" {
+						line += fmt.Sprintf(" (Assignee: %s)", assignee)
+					}
+					sb.WriteString(line + "\n")
 				}
-				line := fmt.Sprintf("• %s %s", issue.ID, issue.Summary)
-				if assignee != "" {
-					line += fmt.Sprintf(" (Assignee: %s)", assignee)
-				}
-				sb.WriteString(line + "\n")
 			}
+			sb.WriteString("\n")
 		}
-		sb.WriteString("\n\n")
 
-		// --- Delayed / Overdue tickets section ---
-		sb.WriteString("*Tickets Getting Delayed:*\n")
-		sb.WriteString("\n")
-		delayedIssues, delayErr := h.reportRepo.GetDelayedIssues(r.Context())
-		if delayErr != nil || len(delayedIssues) == 0 {
-			sb.WriteString("_No overdue tickets in progress_\n")
-		} else {
-			for _, t := range delayedIssues {
-				days := int(t.TotalHours) / 24
-				hours := int(t.TotalHours) % 24
-				durationStr := ""
-				if days > 0 {
-					durationStr = fmt.Sprintf("%dd %dh", days, hours)
-				} else {
-					durationStr = fmt.Sprintf("%dh", int(t.TotalHours))
+		// Overdue / delayed section
+		if activeSections["overdue"] {
+			sb.WriteString("*Tickets Getting Delayed:*\n\n")
+			delayedIssues, delayErr := h.reportRepo.GetDelayedIssues(r.Context())
+			if delayErr != nil || len(delayedIssues) == 0 {
+				sb.WriteString("_No overdue tickets in progress_\n")
+			} else {
+				for _, t := range delayedIssues {
+					days := int(t.TotalHours) / 24
+					hours := int(t.TotalHours) % 24
+					durationStr := ""
+					if days > 0 {
+						durationStr = fmt.Sprintf("%dd %dh", days, hours)
+					} else {
+						durationStr = fmt.Sprintf("%dh", int(t.TotalHours))
+					}
+					line := fmt.Sprintf("• %s %s", t.IssueID, t.IssueSummary)
+					meta := fmt.Sprintf("In Progress: %s | Threshold: %.0fh", durationStr, t.ThresholdHours)
+					if t.Assignee != "" {
+						meta = fmt.Sprintf("Assignee: %s | %s", t.Assignee, meta)
+					}
+					if t.MovedBackCount > 0 {
+						meta += fmt.Sprintf(" | Moved Back: %dx", t.MovedBackCount)
+					}
+					if t.TotalStints > 1 {
+						meta += fmt.Sprintf(" | Stints: %d", t.TotalStints)
+					}
+					sb.WriteString(line + "\n")
+					sb.WriteString(fmt.Sprintf("  _%s_\n", meta))
 				}
-				line := fmt.Sprintf("• %s %s", t.IssueID, t.IssueSummary)
-				meta := fmt.Sprintf("In Progress: %s | Threshold: %.0fh", durationStr, t.ThresholdHours)
-				if t.Assignee != "" {
-					meta = fmt.Sprintf("Assignee: %s | %s", t.Assignee, meta)
-				}
-				if t.MovedBackCount > 0 {
-					meta += fmt.Sprintf(" | Moved Back: %dx", t.MovedBackCount)
-				}
-				if t.TotalStints > 1 {
-					meta += fmt.Sprintf(" | Stints: %d", t.TotalStints)
-				}
-				sb.WriteString(line + "\n")
-				sb.WriteString(fmt.Sprintf("  _%s_\n", meta))
 			}
 		}
 	}
