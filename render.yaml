@@ -3,7 +3,7 @@ services:
     name: ardoise-backend
     runtime: go
     rootDir: backend
-    buildCommand: go build -o server ./cmd/server
+    buildCommand: go build -o server .
     startCommand: ./server
     envVars:
       - key: PORT
