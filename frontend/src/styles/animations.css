@@ -1,0 +1,212 @@
+/* ============================================================
+   ANIMATIONS & KEYFRAMES
+   All @keyframes definitions and .animate-* utility classes
+   ============================================================ */
+
+/* ── Core keyframes ─────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-6px); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(99,102,241,0.3); }
+  50%       { box-shadow: 0 0 22px rgba(99,102,241,0.65); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-8px); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInToast {
+  from { opacity: 0; transform: translateY(16px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes confirmSlideIn {
+  from { opacity: 0; transform: scale(0.9) translateY(-16px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(0.88); }
+}
+
+@keyframes lv-bar-slide-in {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+/* ── PM Reports icon animations ─────────────────────────── */
+
+@keyframes pm-ti-sparkle {
+  0%, 100% { opacity: 0.7; transform: scale(1) rotate(0deg); }
+  50%       { opacity: 1;   transform: scale(1.15) rotate(5deg); }
+}
+
+@keyframes pm-ti-wave {
+  0%, 100% { transform: rotate(-8deg); }
+  50%       { transform: rotate(8deg); }
+}
+
+@keyframes pm-ti-bounce {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-4px); }
+}
+
+@keyframes pm-ti-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes pm-ti-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.7; transform: scale(0.92); }
+}
+
+@keyframes pm-ti-shake {
+  0%, 100% { transform: translateX(0); }
+  25%       { transform: translateX(-3px); }
+  75%       { transform: translateX(3px); }
+}
+
+@keyframes pm-ti-pop {
+  0%   { transform: scale(0.8); opacity: 0.5; }
+  60%  { transform: scale(1.1); }
+  100% { transform: scale(1);   opacity: 1; }
+}
+
+@keyframes pm-ti-tick {
+  0%   { stroke-dashoffset: 40; }
+  100% { stroke-dashoffset: 0; }
+}
+
+@keyframes pm-ti-flip {
+  0%   { transform: rotateY(0deg); }
+  100% { transform: rotateY(180deg); }
+}
+
+@keyframes pm-bubble-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%       { opacity: 0;   transform: scale(1.35); }
+}
+
+@keyframes pm-panel-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Slack Intelligence ──────────────────────────────────── */
+
+@keyframes si-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes si-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── Missing keyframes ───────────────────────────────────── */
+
+@keyframes modalScaleIn {
+  from { opacity: 0; transform: scale(0.92) translateY(16px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95) translateY(-6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes isoFloat {
+  0%, 100% { transform: translateY(-50%) translateZ(0); }
+  50%       { transform: translateY(calc(-50% - 14px)) translateZ(0); }
+}
+
+@keyframes isoCardPulse {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 1; }
+}
+
+/* ── Utility animation classes ───────────────────────────── */
+
+.animate-fadeIn      { animation: fadeIn 0.3s ease both; }
+.animate-fade-in-up  { animation: fadeInUp 0.4s ease both; }
+.animate-fade-in-down { animation: fadeInDown 0.4s ease both; }
+.animate-fadeInUp    { animation: fadeInUp 0.4s ease both; }
+.animate-fadeInDown  { animation: fadeInDown 0.4s ease both; }
+.animate-scaleIn     { animation: scaleIn 0.3s ease both; }
+.animate-slideLeft   { animation: slideInLeft 0.4s ease both; }
+.animate-slideRight  { animation: slideInRight 0.4s ease both; }
+.animate-bounce      { animation: bounce 1.2s ease-in-out infinite; }
+.animate-pulse       { animation: pulse 1.8s ease-in-out infinite; }
+.animate-spin        { animation: spin 1s linear infinite; }
+.animate-float       { animation: float 3s ease-in-out infinite; }
+.animate-shimmer     { animation: shimmer 1.5s linear infinite; }
+
+.spin { animation: si-spin 1s linear infinite; }
+
+/* ── Stagger delays ─────────────────────────────────────── */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.10s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.20s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.30s; }
+.stagger-7 { animation-delay: 0.35s; }
+.stagger-8 { animation-delay: 0.40s; }

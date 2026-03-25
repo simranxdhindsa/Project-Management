@@ -3,14 +3,12 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
 import ThemePreviewPage from '@/pages/ThemePreviewPage'
-import DemoPage from '@/pages/DemoPage'
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth()
   const location = useLocation()
 
   if (location.pathname === '/theme-preview') return <ThemePreviewPage />
-  if (location.pathname === '/demo') return <DemoPage />
 
   if (isLoading) {
     return (

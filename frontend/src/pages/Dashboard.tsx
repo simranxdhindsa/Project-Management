@@ -757,8 +757,7 @@ export default function Dashboard() {
             )}
           </div>
           <button
-            className="btn-primary btn-md"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', whiteSpace: 'nowrap' }}
+            className="btn-primary btn-md btn-new-task"
             onClick={() => setShowNewTask(true)}
           >
             <Plus size={18} />

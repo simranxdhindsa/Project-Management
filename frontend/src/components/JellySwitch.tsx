@@ -27,6 +27,7 @@ export function JellySwitch({ checked = false, onChange, label, disabled = false
         onChange={handleToggle}
         disabled={disabled}
       />
+      {label && <span className="jelly-switch-label">{label}</span>}
       <div className={`jelly-switch ${isChecked ? 'checked' : ''}`}>
         <div className="jelly-switch-track">
           <div className="jelly-switch-thumb">
@@ -34,7 +35,6 @@ export function JellySwitch({ checked = false, onChange, label, disabled = false
           </div>
         </div>
       </div>
-      {label && <span className="jelly-switch-label">{label}</span>}
     </label>
   )
 }

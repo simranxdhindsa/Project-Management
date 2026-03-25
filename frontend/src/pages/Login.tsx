@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { KanbanSquare, CheckCircle, Zap, Shield } from 'lucide-react'
+import { KanbanSquare, CheckCircle, Zap, Shield, Sun, Moon } from 'lucide-react'
 
 // Declare Google global type
 declare global {
@@ -33,6 +33,16 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 export default function Login() {
   const { login, isLoading } = useAuth()
   const [rememberMe, setRememberMe] = useState(true) // Default to checked
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    return document.documentElement.getAttribute('data-theme') !== 'light'
+  })
+
+  const toggleTheme = () => {
+    const next = !isDark
+    setIsDark(next)
+    document.documentElement.setAttribute('data-theme', next ? 'dark' : 'light')
+    localStorage.setItem('theme', next ? 'dark' : 'light')
+  }
   const [showDevLogin, setShowDevLogin] = useState(false)
   const [devEmail, setDevEmail] = useState('')
   const [devPassword, setDevPassword] = useState('')
@@ -126,6 +136,10 @@ export default function Login() {
 
   return (
     <div className="login-container">
+      {/* Theme toggle — top right */}
+      <button className="login-theme-toggle" onClick={toggleTheme} title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>
+        {isDark ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
       <div className="login-content animate-fade-in-up">
         {/* Logo and Title */}
         <div className="login-header">
@@ -250,6 +264,29 @@ export default function Login() {
       {/* Background decorations */}
       <div className="login-bg-decoration login-bg-decoration-1"></div>
       <div className="login-bg-decoration login-bg-decoration-2"></div>
+
+      {/* 3D Isometric Board — decorative hero element */}
+      <div className="iso-board-wrap">
+        <div className="iso-board">
+          <div className="iso-col">
+            <div className="iso-col-header">Backlog</div>
+            <div className="iso-card red" />
+            <div className="iso-card yellow" />
+            <div className="iso-card indigo" />
+          </div>
+          <div className="iso-col">
+            <div className="iso-col-header">In Progress</div>
+            <div className="iso-card yellow" />
+            <div className="iso-card purple" />
+          </div>
+          <div className="iso-col">
+            <div className="iso-col-header">Done</div>
+            <div className="iso-card green" />
+            <div className="iso-card green" />
+            <div className="iso-card indigo" />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
