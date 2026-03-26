@@ -839,21 +839,20 @@
 .wc-col-row:last-child { border-bottom: none; }
 .wc-col-row:hover { background: rgba(255,255,255,0.025); }
 
-.wc-col-order { display: flex; flex-direction: column; gap: 2px; }
-
-.wc-arrow-btn {
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: var(--radius-sm);
+.wc-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   color: var(--text-muted);
-  font-size: 0.6rem;
-  line-height: 1;
-  padding: 0.1rem 0.3rem;
-  cursor: pointer;
-  transition: all 0.12s;
+  cursor: grab;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
 }
-.wc-arrow-btn:hover:not(:disabled) { background: rgba(255,255,255,0.12); color: var(--text-primary); }
-.wc-arrow-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.wc-drag-handle:hover { color: var(--text-secondary); background: rgba(255,255,255,0.08); }
+.wc-drag-handle:active { cursor: grabbing; }
 
 /* Icon buttons */
 .wc-icon-btn {
@@ -1045,15 +1044,8 @@
   border-color: rgba(99,102,241,0.15);
 }
 
-[data-theme="light"] .wc-arrow-btn {
-  background: rgba(255,255,255,0.8);
-  border-color: rgba(99,102,241,0.15);
-  color: #64748b;
-}
-[data-theme="light"] .wc-arrow-btn:hover:not(:disabled) {
-  background: rgba(255,255,255,1);
-  color: #0f172a;
-}
+[data-theme="light"] .wc-drag-handle { color: #94a3b8; }
+[data-theme="light"] .wc-drag-handle:hover { color: #334155; background: rgba(99,102,241,0.08); }
 
 [data-theme="light"] .wc-icon-btn {
   background: rgba(255,255,255,0.8);

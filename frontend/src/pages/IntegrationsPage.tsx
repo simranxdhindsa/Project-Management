@@ -1,12 +1,20 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../services/api'
 import type { WorkflowConfig, PriorityTag, ColumnState, HotfixRules, ReportConfig } from '../services/api'
 import {
   RefreshCw, CheckCircle, AlertCircle, ExternalLink,
   Settings, Save, MessageSquare, Download, Clock, User, Sliders,
-  Plus, Trash2, RotateCcw, ChevronDown, ChevronUp, Link2, Unlink
+  Plus, Trash2, RotateCcw, ChevronDown, ChevronUp, Link2, Unlink, GripVertical
 } from 'lucide-react'
+import {
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+} from '@dnd-kit/core'
+import type { DragEndEvent } from '@dnd-kit/core'
+import {
+  SortableContext, verticalListSortingStrategy, useSortable, arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 interface SlackStatus {
   connected: boolean
@@ -49,6 +57,65 @@ type MainTab = 'youtrack' | 'slack' | 'workflow'
 interface IntegrationsPageProps {
   initialTab?: MainTab
   onTabChange?: (tab: MainTab) => void
+}
+
+interface SortableColumnRowProps {
+  col: ColumnState
+  i: number
+  updateColumn: (i: number, field: keyof ColumnState, value: string | number | boolean | string[]) => void
+  COLUMN_ROLES: string[]
+}
+
+function SortableColumnRow({ col, i, updateColumn, COLUMN_ROLES }: SortableColumnRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: col.state })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+  return (
+    <div ref={setNodeRef} style={style} className="wc-col-row">
+      <div className="wc-drag-handle" {...attributes} {...listeners}>
+        <GripVertical size={14} />
+      </div>
+      <input type="text" value={col.state} onChange={e => updateColumn(i, 'state', e.target.value)} className="wc-input" />
+      <select value={col.role} onChange={e => updateColumn(i, 'role', e.target.value)} className="wc-select">
+        {COLUMN_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+      </select>
+      <input type="text" value={(col.aliases ?? []).join(', ')} onChange={e => updateColumn(i, 'aliases', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} className="wc-input wc-input-grow" placeholder="alias1, alias2" />
+      <input type="checkbox" checked={col.is_lateral} onChange={e => updateColumn(i, 'is_lateral', e.target.checked)} className="wc-checkbox" />
+    </div>
+  )
+}
+
+interface ColumnDndListProps {
+  editColumns: ColumnState[]
+  setEditColumns: React.Dispatch<React.SetStateAction<ColumnState[]>>
+  updateColumn: (i: number, field: keyof ColumnState, value: string | number | boolean | string[]) => void
+  COLUMN_ROLES: string[]
+}
+
+function ColumnDndList({ editColumns, setEditColumns, updateColumn, COLUMN_ROLES }: ColumnDndListProps) {
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      setEditColumns(prev => {
+        const oldIndex = prev.findIndex(c => c.state === active.id)
+        const newIndex = prev.findIndex(c => c.state === over.id)
+        return arrayMove(prev, oldIndex, newIndex)
+      })
+    }
+  }
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={editColumns.map(c => c.state)} strategy={verticalListSortingStrategy}>
+        {editColumns.map((col, i) => (
+          <SortableColumnRow key={col.state} col={col} i={i} updateColumn={updateColumn} COLUMN_ROLES={COLUMN_ROLES} />
+        ))}
+      </SortableContext>
+    </DndContext>
+  )
 }
 
 export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: IntegrationsPageProps = {}) {
@@ -858,20 +925,12 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                     <div className="wc-col-header">
                       <span></span><span>State</span><span>Role</span><span>Aliases</span><span>Lateral</span>
                     </div>
-                    {editColumns.map((col, i) => (
-                      <div key={i} className="wc-col-row">
-                        <div className="wc-col-order">
-                          <button className="wc-arrow-btn" onClick={() => moveColumn(i, -1)} disabled={i === 0}>▲</button>
-                          <button className="wc-arrow-btn" onClick={() => moveColumn(i, 1)} disabled={i === editColumns.length - 1}>▼</button>
-                        </div>
-                        <input type="text" value={col.state} onChange={e => updateColumn(i, 'state', e.target.value)} className="wc-input" />
-                        <select value={col.role} onChange={e => updateColumn(i, 'role', e.target.value)} className="wc-select">
-                          {COLUMN_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                        <input type="text" value={(col.aliases ?? []).join(', ')} onChange={e => updateColumn(i, 'aliases', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} className="wc-input wc-input-grow" placeholder="alias1, alias2" />
-                        <input type="checkbox" checked={col.is_lateral} onChange={e => updateColumn(i, 'is_lateral', e.target.checked)} className="wc-checkbox" />
-                      </div>
-                    ))}
+                    <ColumnDndList
+                      editColumns={editColumns}
+                      setEditColumns={setEditColumns}
+                      updateColumn={updateColumn}
+                      COLUMN_ROLES={COLUMN_ROLES}
+                    />
                   </div>
                   <div className="wc-actions">
                     <button className="int-btn int-btn-primary int-btn-sm" onClick={handleSaveColumns} disabled={wcSaving}>
