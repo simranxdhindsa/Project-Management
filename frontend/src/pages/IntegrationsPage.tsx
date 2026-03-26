@@ -59,6 +59,54 @@ interface IntegrationsPageProps {
   onTabChange?: (tab: MainTab) => void
 }
 
+// Reusable compact custom dropdown for string option lists
+interface WcSelectDropdownProps {
+  value: string
+  options: string[]
+  onChange: (val: string) => void
+  className?: string
+}
+function WcSelectDropdown({ value, options, onChange, className = '' }: WcSelectDropdownProps) {
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.wc-sel-dropdown')) {
+        setOpen(false); setRect(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+  return (
+    <div className={`pm-custom-dropdown wc-sel-dropdown ${className}`}>
+      <button
+        type="button"
+        className="pm-custom-dropdown-trigger wc-sel-trigger"
+        onClick={(e) => {
+          const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+          setRect(r); setOpen(o => !o)
+        }}
+      >
+        <span>{value}</span>
+        <ChevronDown size={11} className={`dropdown-chevron ${open ? 'open' : ''}`} />
+      </button>
+      {open && rect && createPortal(
+        <div className="pm-custom-dropdown-menu" style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, minWidth: rect.width, zIndex: 9999 }}>
+          {options.map(opt => (
+            <button key={opt} type="button" className={`pm-dropdown-item ${value === opt ? 'active' : ''}`}
+              onClick={() => { onChange(opt); setOpen(false); setRect(null) }}>
+              <span>{opt}</span>
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
 interface SortableColumnRowProps {
   col: ColumnState
   i: number
@@ -79,9 +127,7 @@ function SortableColumnRow({ col, i, updateColumn, COLUMN_ROLES }: SortableColum
         <GripVertical size={14} />
       </div>
       <input type="text" value={col.state} onChange={e => updateColumn(i, 'state', e.target.value)} className="wc-input" />
-      <select value={col.role} onChange={e => updateColumn(i, 'role', e.target.value)} className="wc-select">
-        {COLUMN_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-      </select>
+      <WcSelectDropdown value={col.role} options={COLUMN_ROLES} onChange={val => updateColumn(i, 'role', val)} className="wc-sel-col-role" />
       <input type="text" value={(col.aliases ?? []).join(', ')} onChange={e => updateColumn(i, 'aliases', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} className="wc-input wc-input-grow" placeholder="alias1, alias2" />
       <input type="checkbox" checked={col.is_lateral} onChange={e => updateColumn(i, 'is_lateral', e.target.checked)} className="wc-checkbox" />
     </div>
@@ -174,6 +220,10 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const [ytMappingOpen, setYtMappingOpen] = useState<number | null>(null)
   const [ytMappingRect, setYtMappingRect] = useState<DOMRect | null>(null)
   const ytMappingRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const [channelDropdownOpen, setChannelDropdownOpen] = useState(false)
+  const [channelDropdownRect, setChannelDropdownRect] = useState<DOMRect | null>(null)
+  const [doneRoleOpen, setDoneRoleOpen] = useState(false)
+  const [doneRoleRect, setDoneRoleRect] = useState<DOMRect | null>(null)
   const [editColumns, setEditColumns] = useState<ColumnState[]>([])
   const [editHotfix, setEditHotfix] = useState<HotfixRules>({ from_states: [], to_states: [] })
   const [editReport, setEditReport] = useState<ReportConfig>({
@@ -692,17 +742,39 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                 <div className="int-field">
                   <label>Digest / Report Channel</label>
                   <div className="int-input-row">
-                    <select
-                      value={selectedChannel || slackStatus.channel_id || ''}
-                      onChange={e => setSelectedChannel(e.target.value)}
-                      className="int-input int-select"
-                      disabled={loadingChannels}
-                    >
-                      <option value="">Select a channel…</option>
-                      {slackChannels.map(c => (
-                        <option key={c.id} value={c.id}>#{c.name}{c.is_private ? ' 🔒' : ''}</option>
-                      ))}
-                    </select>
+                    <div className="pm-custom-dropdown wc-sel-dropdown int-channel-dropdown">
+                      <button
+                        type="button"
+                        className="pm-custom-dropdown-trigger int-channel-trigger"
+                        disabled={loadingChannels}
+                        onClick={(e) => {
+                          const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                          setChannelDropdownRect(r); setChannelDropdownOpen(o => !o)
+                        }}
+                      >
+                        <span>
+                          {selectedChannel
+                            ? (() => { const c = slackChannels.find(c => c.id === selectedChannel); return c ? `#${c.name}` : selectedChannel })()
+                            : slackStatus.channel_id
+                              ? (() => { const c = slackChannels.find(c => c.id === slackStatus.channel_id); return c ? `#${c.name}` : `#${slackStatus.channel_name ?? slackStatus.channel_id}` })()
+                              : 'Select a channel…'
+                          }
+                        </span>
+                        <ChevronDown size={11} className={`dropdown-chevron ${channelDropdownOpen ? 'open' : ''}`} />
+                      </button>
+                      {channelDropdownOpen && channelDropdownRect && createPortal(
+                        <div className="pm-custom-dropdown-menu int-channel-menu" style={{ position: 'fixed', top: channelDropdownRect.bottom + 4, left: channelDropdownRect.left, minWidth: channelDropdownRect.width, zIndex: 9999 }}>
+                          {slackChannels.map(c => (
+                            <button key={c.id} type="button"
+                              className={`pm-dropdown-item ${(selectedChannel || slackStatus.channel_id) === c.id ? 'active' : ''}`}
+                              onClick={() => { setSelectedChannel(c.id); setChannelDropdownOpen(false); setChannelDropdownRect(null) }}>
+                              <span>#{c.name}{c.is_private ? ' 🔒' : ''}</span>
+                            </button>
+                          ))}
+                        </div>,
+                        document.body
+                      )}
+                    </div>
                     <button className="int-btn int-btn-primary int-btn-sm" onClick={handleSetChannel} disabled={!selectedChannel || loadingChannels}>
                       <Save size={13} /> Set
                     </button>
@@ -972,9 +1044,7 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                     <div className="wc-report-block">
                       <div className="wc-report-block-title">Done Role</div>
                       <p className="int-label-hint">Columns with this role count as "done" in reports.</p>
-                      <select value={editReport.done_role} onChange={e => setEditReport(r => ({ ...r, done_role: e.target.value }))} className="wc-select wc-select-full">
-                        {COLUMN_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                      </select>
+                      <WcSelectDropdown value={editReport.done_role} options={COLUMN_ROLES} onChange={val => setEditReport(r => ({ ...r, done_role: val }))} className="wc-sel-full" />
                     </div>
 
                     {/* Priority Filters */}

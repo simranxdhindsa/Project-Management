@@ -395,6 +395,23 @@
   padding: 0.5rem 0.75rem !important;
 }
 
+/* ── Inline role edit trigger (table row) ─────────────────── */
+.admin-edit-role-trigger {
+  padding: 0.3rem 0.6rem !important;
+  font-size: 0.8rem !important;
+  border-radius: var(--radius-sm) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  background: rgba(255,255,255,0.06) !important;
+  color: var(--text-primary) !important;
+  gap: 0.35rem !important;
+}
+
+[data-theme="light"] .admin-edit-role-trigger {
+  background: rgba(255,255,255,0.9) !important;
+  border-color: rgba(99,102,241,0.2) !important;
+  color: #0f172a !important;
+}
+
 /* Light mode overrides for role dropdown */
 [data-theme="light"] .admin-role-trigger {
   background: rgba(255,255,255,0.9) !important;

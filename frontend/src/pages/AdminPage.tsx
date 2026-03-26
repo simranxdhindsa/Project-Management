@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, Shield, Briefcase, User as UserIcon, Eye } from 'lucide-react'
 import api from '../services/api'
 import type { User } from '../services/api'
@@ -37,6 +38,7 @@ export function AdminPage() {
   const [inviteRole, setInviteRole] = useState<UserRole>('member')
   const [inviting, setInviting] = useState(false)
   const [editingUser, setEditingUser] = useState<string | null>(null)
+  const [editDropdownRect, setEditDropdownRect] = useState<DOMRect | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false)
   const roleDropdownRef = useRef<HTMLDivElement>(null)
@@ -55,6 +57,19 @@ export function AdminPage() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [roleDropdownOpen])
+
+  useEffect(() => {
+    if (!editDropdownRect) return
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.pm-custom-dropdown') && !target.closest('.pm-custom-dropdown-menu')) {
+        setEditingUser(null)
+        setEditDropdownRect(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [editDropdownRect])
 
   const fetchUsers = async () => {
     try {
@@ -96,6 +111,7 @@ export function AdminPage() {
         prev.map(u => (u.id === userId ? { ...u, role: newRole } : u))
       )
       setEditingUser(null)
+      setEditDropdownRect(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update role')
     }
@@ -222,22 +238,51 @@ export function AdminPage() {
                 </div>
                 <div className="col-role">
                   {editingUser === user.id ? (
-                    <select
-                      value={user.role}
-                      onChange={(e) => handleUpdateRole(user.id, e.target.value as UserRole)}
-                      onBlur={() => setEditingUser(null)}
-                      autoFocus
-                    >
-                      {ROLES.map(role => (
-                        <option key={role.value} value={role.value}>
-                          {role.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="pm-custom-dropdown">
+                      <button
+                        className="pm-custom-dropdown-trigger admin-edit-role-trigger"
+                        onClick={(e) => {
+                          const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                          setEditDropdownRect(r => r ? null : rect)
+                        }}
+                      >
+                        {user.role === 'admin'           && <Shield size={13} />}
+                        {user.role === 'project_manager' && <Briefcase size={13} />}
+                        {user.role === 'member'          && <UserIcon size={13} />}
+                        {user.role === 'viewer'          && <Eye size={13} />}
+                        <span>{ROLES.find(r => r.value === user.role)?.label}</span>
+                        <ChevronDown size={11} className="dropdown-chevron open" />
+                      </button>
+                      {editDropdownRect && createPortal(
+                        <div
+                          className="pm-custom-dropdown-menu"
+                          style={{ position: 'fixed', top: editDropdownRect.bottom + 4, left: editDropdownRect.left, minWidth: editDropdownRect.width, zIndex: 9999 }}
+                        >
+                          {ROLES.map(role => (
+                            <button
+                              key={role.value}
+                              className={`pm-dropdown-item ${user.role === role.value ? 'active' : ''}`}
+                              onClick={() => { handleUpdateRole(user.id, role.value); setEditDropdownRect(null) }}
+                            >
+                              {role.value === 'admin'           && <Shield size={13} />}
+                              {role.value === 'project_manager' && <Briefcase size={13} />}
+                              {role.value === 'member'          && <UserIcon size={13} />}
+                              {role.value === 'viewer'          && <Eye size={13} />}
+                              <span>{role.label}</span>
+                            </button>
+                          ))}
+                        </div>,
+                        document.body
+                      )}
+                    </div>
                   ) : (
                     <span
                       className={`role-badge ${getRoleBadgeClass(user.role)}`}
-                      onClick={() => setEditingUser(user.id)}
+                      onClick={(e) => {
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                        setEditingUser(user.id)
+                        setEditDropdownRect(rect)
+                      }}
                       title="Click to edit"
                     >
                       {user.role.replace('_', ' ')}

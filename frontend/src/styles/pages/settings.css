@@ -147,6 +147,41 @@
   color: var(--text-muted);
 }
 
+/* ── Settings role custom dropdown ─────────────────── */
+.settings-role-dropdown { position: relative; }
+
+.settings-role-trigger {
+  padding: 0.65rem 0.875rem !important;
+  font-size: 0.875rem !important;
+  border-radius: var(--radius-md) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  background: rgba(0,0,0,0.3) !important;
+  color: var(--text-primary) !important;
+  width: 100% !important;
+  justify-content: flex-start !important;
+  gap: 0.4rem !important;
+  white-space: nowrap;
+}
+
+.settings-role-trigger .dropdown-chevron {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.settings-role-trigger .dropdown-chevron.open { transform: rotate(180deg); }
+
+[data-theme="light"] .settings-role-trigger {
+  background: rgba(255,255,255,0.9) !important;
+  border-color: rgba(99,102,241,0.15) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .settings-role-trigger:hover {
+  background: rgba(255,255,255,1) !important;
+  border-color: rgba(99,102,241,0.3) !important;
+}
+
 .input-with-prefix {
   display: flex;
   align-items: center;

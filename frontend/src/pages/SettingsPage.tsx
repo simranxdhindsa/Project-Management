@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Download, Loader2 } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Download, Loader2, ChevronDown, Shield, Briefcase, User as UserIcon, Eye } from 'lucide-react'
 import api from '../services/api'
 import type { AllowedEmail, AllowedDomain, AccessSettings, YouTrackUser } from '../services/api'
 import { ConfirmModal } from '../components/ConfirmModal'
@@ -26,6 +27,10 @@ export function SettingsPage() {
   const [newDomainRole, setNewDomainRole] = useState<UserRole>('member')
   const [addingEmail, setAddingEmail] = useState(false)
   const [addingDomain, setAddingDomain] = useState(false)
+  const [emailRoleOpen, setEmailRoleOpen] = useState(false)
+  const [emailRoleRect, setEmailRoleRect] = useState<DOMRect | null>(null)
+  const [domainRoleOpen, setDomainRoleOpen] = useState(false)
+  const [domainRoleRect, setDomainRoleRect] = useState<DOMRect | null>(null)
 
   // Confirm modal state
   const [confirmAction, setConfirmAction] = useState<{
@@ -306,16 +311,46 @@ export function SettingsPage() {
               />
             </div>
             <div className="form-group">
-              <select
-                value={newEmailRole}
-                onChange={(e) => setNewEmailRole(e.target.value as UserRole)}
-              >
-                {ROLES.map((role) => (
-                  <option key={role.value} value={role.value}>
-                    {role.label}
-                  </option>
-                ))}
-              </select>
+              <div className="pm-custom-dropdown settings-role-dropdown">
+                <button
+                  type="button"
+                  className="pm-custom-dropdown-trigger settings-role-trigger"
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                    setEmailRoleRect(r => r ? null : rect)
+                    setEmailRoleOpen(o => !o)
+                  }}
+                >
+                  {newEmailRole === 'admin'           && <Shield size={13} />}
+                  {newEmailRole === 'project_manager' && <Briefcase size={13} />}
+                  {newEmailRole === 'member'          && <UserIcon size={13} />}
+                  {newEmailRole === 'viewer'          && <Eye size={13} />}
+                  <span>{ROLES.find(r => r.value === newEmailRole)?.label}</span>
+                  <ChevronDown size={11} className={`dropdown-chevron ${emailRoleOpen ? 'open' : ''}`} />
+                </button>
+                {emailRoleOpen && emailRoleRect && createPortal(
+                  <div
+                    className="pm-custom-dropdown-menu"
+                    style={{ position: 'fixed', top: emailRoleRect.bottom + 4, left: emailRoleRect.left, minWidth: emailRoleRect.width, zIndex: 9999 }}
+                  >
+                    {ROLES.map(role => (
+                      <button
+                        key={role.value}
+                        type="button"
+                        className={`pm-dropdown-item ${newEmailRole === role.value ? 'active' : ''}`}
+                        onClick={() => { setNewEmailRole(role.value); setEmailRoleOpen(false); setEmailRoleRect(null) }}
+                      >
+                        {role.value === 'admin'           && <Shield size={13} />}
+                        {role.value === 'project_manager' && <Briefcase size={13} />}
+                        {role.value === 'member'          && <UserIcon size={13} />}
+                        {role.value === 'viewer'          && <Eye size={13} />}
+                        <span>{role.label}</span>
+                      </button>
+                    ))}
+                  </div>,
+                  document.body
+                )}
+              </div>
             </div>
             <button
               type="submit"
@@ -388,16 +423,46 @@ export function SettingsPage() {
               </div>
             </div>
             <div className="form-group">
-              <select
-                value={newDomainRole}
-                onChange={(e) => setNewDomainRole(e.target.value as UserRole)}
-              >
-                {ROLES.map((role) => (
-                  <option key={role.value} value={role.value}>
-                    {role.label}
-                  </option>
-                ))}
-              </select>
+              <div className="pm-custom-dropdown settings-role-dropdown">
+                <button
+                  type="button"
+                  className="pm-custom-dropdown-trigger settings-role-trigger"
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                    setDomainRoleRect(r => r ? null : rect)
+                    setDomainRoleOpen(o => !o)
+                  }}
+                >
+                  {newDomainRole === 'admin'           && <Shield size={13} />}
+                  {newDomainRole === 'project_manager' && <Briefcase size={13} />}
+                  {newDomainRole === 'member'          && <UserIcon size={13} />}
+                  {newDomainRole === 'viewer'          && <Eye size={13} />}
+                  <span>{ROLES.find(r => r.value === newDomainRole)?.label}</span>
+                  <ChevronDown size={11} className={`dropdown-chevron ${domainRoleOpen ? 'open' : ''}`} />
+                </button>
+                {domainRoleOpen && domainRoleRect && createPortal(
+                  <div
+                    className="pm-custom-dropdown-menu"
+                    style={{ position: 'fixed', top: domainRoleRect.bottom + 4, left: domainRoleRect.left, minWidth: domainRoleRect.width, zIndex: 9999 }}
+                  >
+                    {ROLES.map(role => (
+                      <button
+                        key={role.value}
+                        type="button"
+                        className={`pm-dropdown-item ${newDomainRole === role.value ? 'active' : ''}`}
+                        onClick={() => { setNewDomainRole(role.value); setDomainRoleOpen(false); setDomainRoleRect(null) }}
+                      >
+                        {role.value === 'admin'           && <Shield size={13} />}
+                        {role.value === 'project_manager' && <Briefcase size={13} />}
+                        {role.value === 'member'          && <UserIcon size={13} />}
+                        {role.value === 'viewer'          && <Eye size={13} />}
+                        <span>{role.label}</span>
+                      </button>
+                    ))}
+                  </div>,
+                  document.body
+                )}
+              </div>
             </div>
             <button
               type="submit"
