@@ -19,30 +19,32 @@
 
 /* ── Task cards ──────────────────────────────────────────── */
 .task-card {
-  background: rgba(255,255,255,0.04);
-  backdrop-filter: blur(8px) saturate(160%);
-  -webkit-backdrop-filter: blur(8px) saturate(160%);
-  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.05);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.09);
   border-radius: var(--radius-lg);
   padding: 0.875rem 1rem;
   margin-bottom: 0.5rem;
   cursor: grab;
-  transition: all var(--transition-normal);
+  transition: all 0.2s ease;
   user-select: none; -webkit-user-select: none;
   position: relative; overflow: hidden;
   display: flex; flex-direction: column; gap: 0.5rem;
 }
+
+/* Glowing top edge line */
 .task-card::before {
   content: ''; position: absolute;
-  top: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+  top: 0; left: 10%; right: 10%; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
   pointer-events: none;
+  transition: opacity 0.2s ease;
 }
+
 .task-card:hover {
-  background: rgba(255,255,255,0.07);
-  border-color: rgba(99,102,241,0.22);
-  transform: translateY(-3px) scale(1.005);
-  box-shadow: var(--shadow-lg), 0 0 16px rgba(99,102,241,0.12);
+  transform: translateY(-2px);
+  border-color: rgba(255,255,255,0.15);
 }
 .task-card:active { cursor: grabbing; }
 .task-card.dragging {
@@ -52,18 +54,69 @@
   border-color: rgba(99,102,241,0.5); z-index: 1000;
 }
 
-/* Priority borders with glow */
-.priority-high   { border-left: 3px solid var(--color-danger);  box-shadow: inset 3px 0 8px rgba(239,68,68,0.12); }
-.priority-medium { border-left: 3px solid var(--color-warning); box-shadow: inset 3px 0 8px rgba(245,158,11,0.12); }
-.priority-low    { border-left: 3px solid var(--color-success); box-shadow: inset 3px 0 8px rgba(16,185,129,0.12); }
-.priority-high:hover   { box-shadow: inset 3px 0 12px rgba(239,68,68,0.28),   var(--shadow-lg); }
-.priority-medium:hover { box-shadow: inset 3px 0 12px rgba(245,158,11,0.28),  var(--shadow-lg); }
-.priority-low:hover    { box-shadow: inset 3px 0 12px rgba(16,185,129,0.28),  var(--shadow-lg); }
+/* ── Priority-tinted cards (Aurora approach) ─────────────── */
 
-.task-card.priority-critical,
-.task-card.priority-high   { border-left: 3px solid var(--color-danger); }
-.task-card.priority-medium { border-left: 3px solid var(--color-warning); }
-.task-card.priority-low    { border-left: 3px solid var(--color-success); }
+/* High / Critical — red tint */
+.task-card.priority-high,
+.task-card.priority-critical {
+  background: linear-gradient(135deg, rgba(239,68,68,0.1) 0%, rgba(220,38,38,0.06) 50%, rgba(255,255,255,0.03) 100%);
+  border-color: rgba(239,68,68,0.25);
+  border-left: 2px solid rgba(239,68,68,0.7);
+  box-shadow: 0 0 20px rgba(239,68,68,0.08), inset 0 1px 0 rgba(239,68,68,0.12);
+}
+.task-card.priority-high::before,
+.task-card.priority-critical::before {
+  background: linear-gradient(90deg, transparent, rgba(239,68,68,0.4), transparent);
+}
+.task-card.priority-high:hover,
+.task-card.priority-critical:hover {
+  background: linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(220,38,38,0.09) 50%, rgba(255,255,255,0.04) 100%);
+  border-color: rgba(239,68,68,0.4);
+  box-shadow: 0 4px 24px rgba(239,68,68,0.18), inset 0 1px 0 rgba(239,68,68,0.18);
+}
+
+/* Medium / Major — amber/orange tint */
+.task-card.priority-medium {
+  background: linear-gradient(135deg, rgba(245,158,11,0.1) 0%, rgba(217,119,6,0.06) 50%, rgba(255,255,255,0.03) 100%);
+  border-color: rgba(245,158,11,0.25);
+  border-left: 2px solid rgba(245,158,11,0.7);
+  box-shadow: 0 0 20px rgba(245,158,11,0.08), inset 0 1px 0 rgba(245,158,11,0.12);
+}
+.task-card.priority-medium::before {
+  background: linear-gradient(90deg, transparent, rgba(245,158,11,0.4), transparent);
+}
+.task-card.priority-medium:hover {
+  background: linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(217,119,6,0.09) 50%, rgba(255,255,255,0.04) 100%);
+  border-color: rgba(245,158,11,0.4);
+  box-shadow: 0 4px 24px rgba(245,158,11,0.18), inset 0 1px 0 rgba(245,158,11,0.18);
+}
+
+/* Low / Minor — emerald tint */
+.task-card.priority-low {
+  background: linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(5,150,105,0.05) 50%, rgba(255,255,255,0.03) 100%);
+  border-color: rgba(16,185,129,0.2);
+  border-left: 2px solid rgba(16,185,129,0.6);
+  box-shadow: 0 0 20px rgba(16,185,129,0.07), inset 0 1px 0 rgba(16,185,129,0.1);
+}
+.task-card.priority-low::before {
+  background: linear-gradient(90deg, transparent, rgba(16,185,129,0.35), transparent);
+}
+.task-card.priority-low:hover {
+  background: linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(5,150,105,0.08) 50%, rgba(255,255,255,0.04) 100%);
+  border-color: rgba(16,185,129,0.35);
+  box-shadow: 0 4px 24px rgba(16,185,129,0.15), inset 0 1px 0 rgba(16,185,129,0.15);
+}
+
+/* Default (no priority) — indigo tint */
+.task-card:not(.priority-high):not(.priority-critical):not(.priority-medium):not(.priority-low) {
+  background: linear-gradient(135deg, rgba(99,102,241,0.07) 0%, rgba(139,92,246,0.04) 50%, rgba(255,255,255,0.03) 100%);
+  border-color: rgba(99,102,241,0.15);
+}
+.task-card:not(.priority-high):not(.priority-critical):not(.priority-medium):not(.priority-low):hover {
+  background: linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.07) 50%, rgba(255,255,255,0.04) 100%);
+  border-color: rgba(99,102,241,0.28);
+  box-shadow: 0 4px 20px rgba(99,102,241,0.15);
+}
 
 .task-title      { font-size: 0.875rem; font-weight: 500; line-height: 1.4; color: var(--text-primary); }
 .task-card-title { font-size: 0.8375rem; font-weight: 500; line-height: 1.4; color: var(--text-secondary); }

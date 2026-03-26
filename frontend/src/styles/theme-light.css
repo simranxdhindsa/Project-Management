@@ -161,7 +161,28 @@
 /* ── Task cards ───────────────────────────────────────────── */
 [data-theme="light"] .task-card {
   background: rgba(255,255,255,0.85);
-  border-color: rgba(99,102,241,0.1);
+  border-color: rgba(99,102,241,0.12);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="light"] .task-card.priority-high,
+[data-theme="light"] .task-card.priority-critical {
+  background: linear-gradient(135deg, rgba(239,68,68,0.06) 0%, rgba(255,255,255,0.9) 100%);
+  border-color: rgba(239,68,68,0.25);
+  border-left: 2px solid rgba(239,68,68,0.6);
+  box-shadow: 0 2px 12px rgba(239,68,68,0.1);
+}
+[data-theme="light"] .task-card.priority-medium {
+  background: linear-gradient(135deg, rgba(245,158,11,0.07) 0%, rgba(255,255,255,0.9) 100%);
+  border-color: rgba(245,158,11,0.25);
+  border-left: 2px solid rgba(245,158,11,0.6);
+  box-shadow: 0 2px 12px rgba(245,158,11,0.1);
+}
+[data-theme="light"] .task-card.priority-low {
+  background: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(255,255,255,0.9) 100%);
+  border-color: rgba(16,185,129,0.2);
+  border-left: 2px solid rgba(16,185,129,0.5);
+  box-shadow: 0 2px 12px rgba(16,185,129,0.08);
 }
 
 [data-theme="light"] .task-card:hover {
