@@ -779,7 +779,7 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                   <p className="int-help-text">Define tags like P0, B1, A0 with custom colors and SLA thresholds.</p>
                   <div className="wc-tag-list">
                     <div className="wc-tag-header">
-                      <span>Color</span><span>Label</span><span>SLA</span>
+                      <span>Color</span><span>Label</span><span>SLA</span><span>Unit</span>
                       <span>Prefixes</span><span>YT Mappings</span><span></span>
                     </div>
                     {editTags.map((tag, i) => (

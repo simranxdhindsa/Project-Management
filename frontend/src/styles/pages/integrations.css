@@ -703,7 +703,7 @@
 .wc-input::placeholder { color: var(--text-muted); }
 .wc-input-grow { flex: 1; }
 .wc-input-full { width: 100%; }
-.wc-input-label { width: 80px; }
+.wc-input-label { width: 100%; }
 
 /* Select */
 .wc-select {
@@ -789,6 +789,7 @@
   padding: 0.4rem 0.35rem;
   cursor: pointer;
   outline: none;
+  width: 100%;
 }
 
 .wc-yt-mapping-cell { display: flex; align-items: center; gap: 0.35rem; }
