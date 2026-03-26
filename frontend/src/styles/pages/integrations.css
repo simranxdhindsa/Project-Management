@@ -671,8 +671,10 @@
 }
 .wc-tab:hover { color: var(--text-primary); }
 .wc-tab.wc-tab-active {
-  color: var(--color-primary);
+  color: #fff;
+  background: rgba(99,102,241,0.25);
   border-bottom-color: var(--color-primary);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 /* Section */
