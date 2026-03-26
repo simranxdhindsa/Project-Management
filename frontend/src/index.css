@@ -38,6 +38,7 @@
 @import "./styles/pages/settings.css";
 @import "./styles/pages/admin.css";
 @import "./styles/pages/reports.css";
+@import "./styles/pages/bot-config.css";
 
 /* ── Light mode theme overrides (must be last) ── */
 @import "./styles/theme-light.css";
