@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { ChevronDown, Shield, Briefcase, User as UserIcon, Eye } from 'lucide-react'
 import api from '../services/api'
 import type { User } from '../services/api'
 
@@ -37,10 +38,23 @@ export function AdminPage() {
   const [inviting, setInviting] = useState(false)
   const [editingUser, setEditingUser] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false)
+  const roleDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     fetchUsers()
   }, [])
+
+  useEffect(() => {
+    if (!roleDropdownOpen) return
+    const handler = (e: MouseEvent) => {
+      if (roleDropdownRef.current && !roleDropdownRef.current.contains(e.target as Node)) {
+        setRoleDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [roleDropdownOpen])
 
   const fetchUsers = async () => {
     try {
@@ -315,18 +329,39 @@ export function AdminPage() {
                 />
               </div>
               <div className="form-group">
-                <label htmlFor="invite-role">Role</label>
-                <select
-                  id="invite-role"
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value as UserRole)}
-                >
-                  {ROLES.map(role => (
-                    <option key={role.value} value={role.value}>
-                      {role.label}
-                    </option>
-                  ))}
-                </select>
+                <label>Role</label>
+                <div className="pm-custom-dropdown admin-role-dropdown" ref={roleDropdownRef}>
+                  <button
+                    type="button"
+                    className="pm-custom-dropdown-trigger admin-role-trigger"
+                    onClick={() => setRoleDropdownOpen(o => !o)}
+                  >
+                    {inviteRole === 'admin'           && <Shield size={14} />}
+                    {inviteRole === 'project_manager' && <Briefcase size={14} />}
+                    {inviteRole === 'member'          && <UserIcon size={14} />}
+                    {inviteRole === 'viewer'          && <Eye size={14} />}
+                    <span>{ROLES.find(r => r.value === inviteRole)?.label}</span>
+                    <ChevronDown size={12} className={`dropdown-chevron ${roleDropdownOpen ? 'open' : ''}`} />
+                  </button>
+                  {roleDropdownOpen && (
+                    <div className="pm-custom-dropdown-menu admin-role-menu">
+                      {ROLES.map(role => (
+                        <button
+                          key={role.value}
+                          type="button"
+                          className={`pm-dropdown-item ${inviteRole === role.value ? 'active' : ''}`}
+                          onClick={() => { setInviteRole(role.value); setRoleDropdownOpen(false) }}
+                        >
+                          {role.value === 'admin'           && <Shield size={14} />}
+                          {role.value === 'project_manager' && <Briefcase size={14} />}
+                          {role.value === 'member'          && <UserIcon size={14} />}
+                          {role.value === 'viewer'          && <Eye size={14} />}
+                          <span>{role.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <p className="form-hint">
                   {ROLES.find(r => r.value === inviteRole)?.description}
                 </p>

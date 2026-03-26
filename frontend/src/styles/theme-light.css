@@ -557,21 +557,109 @@
 
 /* ── Create Issue modal (ci-* light) ──────────────────────── */
 [data-theme="light"] .ci-modal {
-  background: rgba(255,255,255,0.99);
-  border-color: rgba(99,102,241,0.12);
+  background: #ffffff;
+  border-color: rgba(99,102,241,0.15);
+  box-shadow: 0 32px 80px rgba(0,0,0,0.12);
 }
 
-[data-theme="light"] .ci-sidebar {
-  background: rgba(248,250,252,0.9);
-  border-left-color: rgba(0,0,0,0.06);
+[data-theme="light"] .ci-left {
+  border-right-color: rgba(0,0,0,0.07);
 }
 
 [data-theme="light"] .ci-summary-input {
   color: #0f172a;
-  border-bottom-color: rgba(99,102,241,0.25);
+  border-bottom-color: rgba(99,102,241,0.35);
+}
+[data-theme="light"] .ci-summary-input:focus { border-bottom-color: #7c3aed; }
+[data-theme="light"] .ci-summary-input::placeholder { color: #94a3b8; }
+
+[data-theme="light"] .ci-toolbar {
+  background: rgba(241,245,249,0.8);
+  border-color: rgba(99,102,241,0.1);
+}
+[data-theme="light"] .ci-tb-btn { color: #64748b; }
+[data-theme="light"] .ci-tb-btn:hover { background: rgba(99,102,241,0.08); color: #0f172a; }
+[data-theme="light"] .ci-tb-sep { background: rgba(0,0,0,0.1); }
+
+[data-theme="light"] .ci-mode-tabs { background: rgba(0,0,0,0.05); }
+[data-theme="light"] .ci-mode-tab { color: #64748b; }
+[data-theme="light"] .ci-mode-tab.active { background: rgba(99,102,241,0.15); color: #4f46e5; }
+
+[data-theme="light"] .ci-desc-input {
+  color: #0f172a;
+  border-color: rgba(0,0,0,0.1);
+  background: rgba(248,250,252,0.6);
+}
+[data-theme="light"] .ci-desc-input:focus { border-color: rgba(99,102,241,0.35); }
+[data-theme="light"] .ci-desc-input::placeholder { color: #94a3b8; }
+[data-theme="light"] .ci-desc-pre { color: #1e293b; }
+[data-theme="light"] .ci-desc-placeholder { color: #94a3b8; }
+
+[data-theme="light"] .ci-attach-row { border-color: rgba(0,0,0,0.12); color: #94a3b8; }
+[data-theme="light"] .ci-actions { border-top-color: rgba(0,0,0,0.07); }
+
+[data-theme="light"] .ci-btn-cancel {
+  border-color: rgba(0,0,0,0.15);
+  color: #475569;
+}
+[data-theme="light"] .ci-btn-cancel:hover { background: rgba(0,0,0,0.05); color: #0f172a; }
+
+[data-theme="light"] .ci-sidebar {
+  background: rgba(248,250,252,0.8);
+  border-left-color: rgba(0,0,0,0.07);
 }
 
-[data-theme="light"] .ci-summary-input::placeholder { color: #94a3b8; }
+[data-theme="light"] .ci-close-btn { color: #64748b; }
+[data-theme="light"] .ci-close-btn:hover { background: rgba(0,0,0,0.06); color: #0f172a; }
+
+[data-theme="light"] .ci-sidebar-field { border-bottom-color: rgba(0,0,0,0.07); }
+[data-theme="light"] .ci-sidebar-label { color: #64748b; }
+[data-theme="light"] .ci-sidebar-val-text { color: #0f172a; }
+[data-theme="light"] .ci-sidebar-val-placeholder { color: #94a3b8; }
+
+[data-theme="light"] .ci-dropdown-field:hover .ci-clickable {
+  background: rgba(99,102,241,0.06);
+  border-color: rgba(99,102,241,0.15);
+}
+[data-theme="light"] .ci-chevron { color: #94a3b8; }
+
+[data-theme="light"] .ci-dropdown-menu {
+  background: #ffffff;
+  border-color: rgba(99,102,241,0.15);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+}
+[data-theme="light"] .ci-dropdown-item { color: #334155; }
+[data-theme="light"] .ci-dropdown-item:hover { background: rgba(99,102,241,0.08); color: #0f172a; }
+[data-theme="light"] .ci-dropdown-item.active { background: rgba(99,102,241,0.12); color: #4f46e5; }
+
+[data-theme="light"] .ci-assignee-search {
+  background: rgba(255,255,255,0.9);
+  border-color: rgba(99,102,241,0.15);
+  color: #0f172a;
+}
+[data-theme="light"] .ci-assignee-search::placeholder { color: #94a3b8; }
+[data-theme="light"] .ci-assignee-search:focus { border-color: rgba(99,102,241,0.4); }
+
+[data-theme="light"] .ci-sidebar-input {
+  background: rgba(255,255,255,0.9);
+  border-color: rgba(99,102,241,0.15);
+  color: #0f172a;
+}
+[data-theme="light"] .ci-sidebar-input:focus { border-color: rgba(99,102,241,0.4); }
+[data-theme="light"] .ci-sidebar-input::placeholder { color: #94a3b8; }
+[data-theme="light"] .ci-date-input::-webkit-calendar-picker-indicator { filter: none; }
+
+[data-theme="light"] .ci-project-badge {
+  color: #4f46e5;
+  background: rgba(99,102,241,0.1);
+  border-color: rgba(99,102,241,0.2);
+}
+
+[data-theme="light"] .ci-error {
+  background: rgba(239,68,68,0.07);
+  border-color: rgba(239,68,68,0.2);
+  color: #b91c1c;
+}
 
 /* ── PM tab bar ───────────────────────────────────────────── */
 [data-theme="light"] .pm-report-mode-toggle,
@@ -597,6 +685,47 @@
 
 [data-theme="light"] .users-table .table-row {
   border-bottom-color: rgba(0,0,0,0.05);
+}
+
+/* ── Admin / Access Control ───────────────────────────────── */
+[data-theme="light"] .admin-toolbar .search-box {
+  background: rgba(255,255,255,0.9);
+  border: 1px solid rgba(99,102,241,0.15);
+}
+
+[data-theme="light"] .users-table .table-header {
+  background: rgba(241,245,249,0.9);
+  color: #475569;
+}
+
+[data-theme="light"] .users-table .table-row {
+  border-bottom-color: rgba(0,0,0,0.06);
+}
+
+[data-theme="light"] .users-table .table-row:hover {
+  background: rgba(99,102,241,0.04);
+}
+
+[data-theme="light"] .permission-card {
+  background: rgba(241,245,249,0.8);
+  border: 1px solid rgba(99,102,241,0.1);
+}
+
+[data-theme="light"] .col-role select {
+  background: rgba(255,255,255,0.9);
+  border-color: rgba(99,102,241,0.15);
+  color: #0f172a;
+}
+
+[data-theme="light"] .admin-page .alert-error {
+  background: rgba(239,68,68,0.07);
+  border-color: rgba(239,68,68,0.2);
+  color: #b91c1c;
+}
+
+[data-theme="light"] .admin-content {
+  background: rgba(255,255,255,0.92);
+  border-color: rgba(99,102,241,0.1);
 }
 
 /* ── Skeleton ─────────────────────────────────────────────── */
