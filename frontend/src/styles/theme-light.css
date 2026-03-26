@@ -359,11 +359,116 @@
 [data-theme="light"] .badge-done     { background: rgba(16,185,129,0.1);   color: #065f46; border-color: rgba(16,185,129,0.2); }
 [data-theme="light"] .badge-blocked  { background: rgba(239,68,68,0.1);    color: #991b1b; border-color: rgba(239,68,68,0.2); }
 
-/* ── Section box (integrations) ───────────────────────────── */
-[data-theme="light"] .int-section-box {
-  background: rgba(255,255,255,0.7);
+/* ── Integrations page ────────────────────────────────────── */
+
+/* Tab bar pill */
+[data-theme="light"] .int-tabs {
+  background: rgba(241,245,249,0.9);
   border-color: rgba(99,102,241,0.12);
 }
+
+[data-theme="light"] .int-tab:hover {
+  background: rgba(99,102,241,0.06);
+  color: #0f172a;
+}
+
+/* Main content card */
+[data-theme="light"] .int-content {
+  background: rgba(255,255,255,0.92);
+  border-color: rgba(99,102,241,0.1);
+  box-shadow: var(--shadow-md);
+}
+
+/* Service header divider */
+[data-theme="light"] .int-service-header {
+  border-bottom-color: rgba(0,0,0,0.07);
+}
+
+/* Service logo */
+[data-theme="light"] .int-service-logo {
+  background: rgba(241,245,249,0.9);
+  border: 1px solid rgba(99,102,241,0.1);
+}
+[data-theme="light"] .int-yt-logo {
+  background: rgba(8,124,250,0.08);
+}
+[data-theme="light"] .int-slack-logo {
+  background: rgba(74,21,75,0.08);
+}
+[data-theme="light"] .int-workflow-logo {
+  background: rgba(99,102,241,0.08);
+}
+
+/* Detail cards (BASE_URL, PROJECT_ID, CREDENTIALS) */
+[data-theme="light"] .int-detail-card {
+  background: rgba(241,245,249,0.8);
+  border-color: rgba(99,102,241,0.1);
+}
+
+[data-theme="light"] .int-detail-label {
+  color: #64748b;
+}
+
+[data-theme="light"] .int-detail-value {
+  color: #0f172a;
+}
+
+/* Section boxes */
+[data-theme="light"] .int-section-box {
+  background: rgba(248,250,252,0.9);
+  border-color: rgba(99,102,241,0.1);
+}
+
+[data-theme="light"] .int-section-box-warn {
+  background: rgba(245,158,11,0.05);
+  border-color: rgba(245,158,11,0.2);
+}
+
+/* Ghost buttons */
+[data-theme="light"] .int-btn-ghost {
+  background: rgba(255,255,255,0.9);
+  border-color: rgba(99,102,241,0.15);
+  color: #334155;
+}
+[data-theme="light"] .int-btn-ghost:hover:not(:disabled) {
+  background: rgba(255,255,255,1);
+  border-color: rgba(99,102,241,0.3);
+  color: #0f172a;
+}
+
+/* Badges */
+[data-theme="light"] .int-badge-green {
+  background: rgba(16,185,129,0.1);
+  color: #059669;
+  border-color: rgba(16,185,129,0.25);
+}
+[data-theme="light"] .int-badge-gray {
+  background: rgba(100,116,139,0.08);
+  color: #475569;
+  border-color: rgba(100,116,139,0.18);
+}
+[data-theme="light"] .int-badge-yellow {
+  background: rgba(245,158,11,0.1);
+  color: #b45309;
+  border-color: rgba(245,158,11,0.25);
+}
+
+/* Alert colours */
+[data-theme="light"] .int-alert-error {
+  background: rgba(239,68,68,0.07);
+  border-color: rgba(239,68,68,0.2);
+  color: #b91c1c;
+}
+[data-theme="light"] .int-alert-success {
+  background: rgba(16,185,129,0.07);
+  border-color: rgba(16,185,129,0.2);
+  color: #047857;
+}
+
+/* Env list */
+[data-theme="light"] .int-env-item code { color: #4f46e5; }
+[data-theme="light"] .int-env-item span  { color: #475569; }
+[data-theme="light"] .int-text-warn      { color: #b45309; }
 
 /* ── Login ────────────────────────────────────────────────── */
 [data-theme="light"] .login-container {
