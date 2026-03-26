@@ -375,9 +375,9 @@
   border-radius: 3px;
 }
 
-.priority-high { background-color: var(--color-danger); }
-.priority-medium { background-color: var(--color-warning); }
-.priority-low { background-color: var(--color-success); }
+.priority-tag.priority-high { background-color: var(--color-danger); }
+.priority-tag.priority-medium { background-color: var(--color-warning); }
+.priority-tag.priority-low { background-color: var(--color-success); }
 
 .carried-over-tag {
   font-size: 0.6rem;
