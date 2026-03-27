@@ -1855,51 +1855,43 @@ func (h *AsanaPMHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request)
 		logs = []database.IssueStateLog{}
 	}
 
-	// Live fallback: if log is empty (no webhook history yet), synthesize rows from
-	// live Asana tasks. When a week filter is set, only include tasks modified within
-	// that week so results are scoped to the requested period.
+	// Live fallback: if asana_task_log is empty (no webhook history yet), synthesize
+	// rows from live Asana tasks. Week filter is intentionally ignored here — when
+	// there is no log data we show current task state regardless of the week param.
 	if len(logs) == 0 {
-		if client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID); clientErr == nil && projectGID != "" {
-			if tasks, tasksErr := client.GetProjectTasksPaginated(r.Context(), projectGID); tasksErr == nil {
-				now := time.Now()
-				for _, task := range tasks {
-					if task.Completed {
+		if liveClient, liveProjectGID, _, liveClientErr := h.getAsanaClient(r.Context(), userID); liveClientErr == nil && liveProjectGID != "" {
+			liveTasks, _ := liveClient.GetProjectTasksPaginated(r.Context(), liveProjectGID)
+			now := time.Now()
+			for _, task := range liveTasks {
+				if task.Completed {
+					continue
+				}
+				assigneeName := ""
+				if task.Assignee != nil {
+					assigneeName = task.Assignee.Name
+				}
+				if len(params.Assignees) > 0 {
+					matched := false
+					for _, a := range params.Assignees {
+						if strings.EqualFold(a, assigneeName) {
+							matched = true
+							break
+						}
+					}
+					if !matched {
 						continue
 					}
-					// Week filter: only include tasks modified within the requested week
-					if params.WeekStart != nil && params.WeekEnd != nil {
-						if task.ModifiedAt.Before(*params.WeekStart) || task.ModifiedAt.After(*params.WeekEnd) {
-							continue
-						}
-					}
-					assigneeName := ""
-					if task.Assignee != nil {
-						assigneeName = task.Assignee.Name
-					}
-					// Apply assignee filter
-					if len(params.Assignees) > 0 {
-						matched := false
-						for _, a := range params.Assignees {
-							if strings.EqualFold(a, assigneeName) {
-								matched = true
-								break
-							}
-						}
-						if !matched {
-							continue
-						}
-					}
-					section := taskSectionName(task)
-					hoursInState := now.Sub(task.ModifiedAt).Hours()
-					logs = append(logs, database.IssueStateLog{
-						IssueID:                  task.GID,
-						IssueSummary:             task.Name,
-						Assignee:                 assigneeName,
-						ToState:                  section,
-						TransitionedAt:           task.ModifiedAt,
-						DurationInPrevStateHours: &hoursInState,
-					})
 				}
+				section := taskSectionName(task)
+				hoursInState := now.Sub(task.ModifiedAt).Hours()
+				logs = append(logs, database.IssueStateLog{
+					IssueID:                  task.GID,
+					IssueSummary:             task.Name,
+					Assignee:                 assigneeName,
+					ToState:                  section,
+					TransitionedAt:           task.ModifiedAt,
+					DurationInPrevStateHours: &hoursInState,
+				})
 			}
 		}
 	}
