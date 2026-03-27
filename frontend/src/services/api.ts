@@ -1130,6 +1130,168 @@ class ApiService {
   async getWorkflowDefaults() {
     return this.request<WorkflowConfig>('/workflow-config/defaults')
   }
+
+  // ── User data source preference ─────────────────────────────────────────
+  async getDataSource() {
+    return this.request<{ source: string }>('/user/data-source')
+  }
+
+  async setDataSource(source: 'youtrack' | 'asana') {
+    return this.request<{ source: string }>('/user/data-source', {
+      method: 'PUT',
+      body: JSON.stringify({ source }),
+    })
+  }
+
+  // ── Asana PM endpoints (mirror /youtrack/* with same response shapes) ───
+  async getAsanaPMStatus() {
+    return this.request<{ connected: boolean; configured: boolean; error?: string }>('/asana/pm/status')
+  }
+
+  async getAsanaPMProjects() {
+    return this.request<YouTrackProject[]>('/asana/pm/projects')
+  }
+
+  async getAsanaPMBoards() {
+    return this.request<YouTrackBoard[]>('/asana/pm/boards')
+  }
+
+  async getAsanaPMBoardColumns(boardId: string) {
+    return this.request<YouTrackColumn[]>(`/asana/pm/boards/${boardId}/columns`)
+  }
+
+  async getAsanaPMStates() {
+    return this.request<YouTrackState[]>('/asana/pm/states')
+  }
+
+  async getAsanaPMPriorities() {
+    return this.request<string[]>('/asana/pm/priorities')
+  }
+
+  async getAsanaPMUsers() {
+    return this.request<YouTrackUser[]>('/asana/pm/users')
+  }
+
+  async getAsanaPMIssues() {
+    return this.request<YouTrackIssue[]>('/asana/pm/issues')
+  }
+
+  async getAsanaPMIssue(issueId: string) {
+    return this.request<YouTrackIssue>(`/asana/pm/issues/${issueId}`)
+  }
+
+  async createAsanaPMIssue(params: {
+    summary: string
+    description?: string
+    state?: string
+    priority?: string
+    assignee_login?: string
+    due_date?: number
+    estimation_minutes?: number
+  }) {
+    return this.request<YouTrackIssue>('/asana/pm/issues', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    })
+  }
+
+  async updateAsanaPMIssue(issueId: string, summary?: string, description?: string, state?: string) {
+    return this.request<YouTrackIssue>(`/asana/pm/issues/${issueId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ summary, description, state }),
+    })
+  }
+
+  async updateAsanaPMIssueState(issueId: string, state: string) {
+    return this.request(`/asana/pm/issues/${issueId}/state`, {
+      method: 'PATCH',
+      body: JSON.stringify({ state }),
+    })
+  }
+
+  async deleteAsanaPMIssue(issueId: string) {
+    return this.request(`/asana/pm/issues/${issueId}`, { method: 'DELETE' })
+  }
+
+  async importFromAsanaPM() {
+    return this.request<{ tasks_synced: number; tasks_created: number; tasks_updated: number; errors?: string[] }>(
+      '/asana/pm/import',
+      { method: 'POST' }
+    )
+  }
+
+  async getAsanaPMSections() {
+    return this.request<YouTrackState[]>('/asana/pm/sections')
+  }
+
+  async matchAnalysisWithAsana(personBreakdown: any[], analysis: any[]) {
+    return this.request<{
+      matches: {
+        task_title: string
+        person: string
+        status: string
+        youtrack_issue: { id: string; summary: string; current_state: string }
+        proposed_state: string
+        confidence: number
+      }[]
+      unmatched_tasks: { task_title: string; person: string; status: string }[]
+      unmatched_issues: { id: string; summary: string; current_state: string }[]
+    }>('/asana/pm/match-analysis', {
+      method: 'POST',
+      body: JSON.stringify({ person_breakdown: personBreakdown, analysis }),
+    })
+  }
+
+  async asanaPMAssistantQuery(query: string, history: { role: string; content: string }[] = []) {
+    return this.request<{ response: string }>('/asana/pm/pm-query', {
+      method: 'POST',
+      body: JSON.stringify({ query, history }),
+    })
+  }
+
+  async getAsanaPMDailyBrief() {
+    return this.request<DailyBrief>('/asana/pm/daily-brief')
+  }
+
+  async getAsanaPMEODSummary() {
+    return this.request<EODSummary>('/asana/pm/eod-summary')
+  }
+
+  async getAsanaPMDeveloperLoad() {
+    return this.request<DeveloperLoad[]>('/asana/pm/developer-load')
+  }
+
+  async getAsanaPMBlockerReasons(issueIds: string[]) {
+    return this.request<Record<string, string>>(`/asana/pm/blocker-reasons?ids=${issueIds.join(',')}`)
+  }
+
+  async saveAsanaPMCarryoverPlan(items: CarryoverItem[]) {
+    return this.request<{ success: boolean }>('/asana/pm/save-plan', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    })
+  }
+
+  async getAsanaPMCarryover() {
+    return this.request<CarryoverData>('/asana/pm/carryover')
+  }
+
+  async getAsanaPMIssuesGroupedByAssignee() {
+    return this.request<{
+      assignments: {
+        user_name: string
+        slack_handle: string
+        issues: {
+          id: string
+          summary: string
+          priority_tag: string
+          clean_title: string
+          status: string
+          selected: boolean
+        }[]
+      }[]
+    }>('/asana/pm/issues/grouped-by-assignee')
+  }
 }
 
 // Types

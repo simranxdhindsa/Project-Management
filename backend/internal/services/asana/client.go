@@ -342,3 +342,86 @@ func (c *Client) DeleteTask(ctx context.Context, taskGID string) error {
 	_, err := c.doRequest(ctx, http.MethodDelete, path, nil)
 	return err
 }
+
+// GetWorkspaceUsers returns all users in a workspace
+func (c *Client) GetWorkspaceUsers(ctx context.Context, workspaceGID string) ([]User, error) {
+	path := fmt.Sprintf("/workspaces/%s/users?opt_fields=gid,name,email", workspaceGID)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp ListResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	var users []User
+	if err := json.Unmarshal(resp.Data, &users); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal users: %w", err)
+	}
+	return users, nil
+}
+
+// Story represents an Asana task story (comment/activity)
+type Story struct {
+	GID       string `json:"gid"`
+	Text      string `json:"text"`
+	Type      string `json:"type"`
+	CreatedAt string `json:"created_at"`
+}
+
+// GetTaskStories returns all stories (comments + activity) for a task
+func (c *Client) GetTaskStories(ctx context.Context, taskGID string) ([]Story, error) {
+	path := fmt.Sprintf("/tasks/%s/stories?opt_fields=gid,text,type,created_at", taskGID)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp ListResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	var stories []Story
+	if err := json.Unmarshal(resp.Data, &stories); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal stories: %w", err)
+	}
+	return stories, nil
+}
+
+// GetProjectTasksPaginated fetches all tasks from a project with pagination support (handles >100 tasks)
+func (c *Client) GetProjectTasksPaginated(ctx context.Context, projectGID string) ([]Task, error) {
+	fields := "gid,name,notes,completed,completed_at,due_on,assignee,assignee.name,assignee.email,memberships,memberships.project,memberships.section,memberships.section.name,created_at,modified_at,permalink_url,custom_fields,custom_fields.name,custom_fields.display_value,custom_fields.enum_value"
+	baseURL := fmt.Sprintf("/projects/%s/tasks?opt_fields=%s&limit=100", projectGID, fields)
+
+	var allTasks []Task
+	nextURL := baseURL
+	maxPages := 50
+
+	for page := 0; page < maxPages && nextURL != ""; page++ {
+		body, err := c.doRequest(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return allTasks, err
+		}
+		var resp ListResponse
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return allTasks, fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+		var tasks []Task
+		if err := json.Unmarshal(resp.Data, &tasks); err != nil {
+			return allTasks, fmt.Errorf("failed to unmarshal tasks: %w", err)
+		}
+		allTasks = append(allTasks, tasks...)
+
+		if resp.NextPage != nil && resp.NextPage.URI != "" {
+			uri := resp.NextPage.URI
+			// Convert relative URI to path only (strip https://app.asana.com/api/1.0)
+			if len(uri) > len(BaseURL) && uri[:len(BaseURL)] == BaseURL {
+				nextURL = uri[len(BaseURL):]
+			} else {
+				nextURL = uri
+			}
+		} else {
+			nextURL = ""
+		}
+	}
+	return allTasks, nil
+}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Brain, Sparkles, TrendingUp, AlertCircle, CheckCircle, Clock, XCircle, Save, Link2, RefreshCw, ArrowRight, AlertTriangle, FilePlus, MessageSquare } from 'lucide-react'
 import api from '../services/api'
+import { matchAnalysis } from '../services/pmDataService'
 import { MatchConfirmationModal } from '../components/MatchConfirmationModal'
 
 interface AnalysisResult {
@@ -273,7 +274,7 @@ export function AIAnalysisPage({ onNavigateToDailyAnalysis }: AIAnalysisPageProp
     try {
       setMatching(true)
       setError(null)
-      const response = await api.matchAnalysisWithYouTrack(
+      const response = await matchAnalysis(
         results.person_breakdown,
         results.analysis
       )

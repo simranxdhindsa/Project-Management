@@ -435,6 +435,38 @@ func RunMigrations() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_youtrack_integrations_user_id ON youtrack_integrations(user_id)`,
 
+		// ── Asana PM: per-user active data source preference ──────────────────
+		`CREATE TABLE IF NOT EXISTS user_data_source (
+			user_id    TEXT PRIMARY KEY,
+			source     TEXT NOT NULL DEFAULT 'youtrack',
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+
+		// ── Asana PM: section transition log (mirrors issue_state_log) ────────
+		`CREATE TABLE IF NOT EXISTS asana_task_log (
+			id                              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			task_gid                        TEXT NOT NULL,
+			task_name                       TEXT NOT NULL,
+			project_gid                     TEXT NOT NULL DEFAULT '',
+			assignee                        TEXT,
+			from_section                    TEXT,
+			to_section                      TEXT NOT NULL,
+			priority                        TEXT,
+			transitioned_at                 TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			duration_in_prev_section_hours  DOUBLE PRECISION
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_asana_task_log_task_gid ON asana_task_log(task_gid)`,
+		`CREATE INDEX IF NOT EXISTS idx_asana_task_log_transitioned_at ON asana_task_log(transitioned_at)`,
+
+		// ── Asana PM: cached blocker reasons (mirrors blocker_analysis_cache) ─
+		`CREATE TABLE IF NOT EXISTS asana_blocker_cache (
+			task_gid      TEXT PRIMARY KEY,
+			reason        TEXT NOT NULL,
+			story_count   INT NOT NULL DEFAULT 0,
+			last_section  TEXT,
+			analyzed_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+
 		`ALTER TABLE pm_reports ADD COLUMN IF NOT EXISTS report_type VARCHAR(10) NOT NULL DEFAULT 'daily'`,
 		`ALTER TABLE pm_reports DROP CONSTRAINT IF EXISTS pm_reports_date_key`,
 		// ADD CONSTRAINT IF NOT EXISTS is not valid PG syntax — use DO block instead

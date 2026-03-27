@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import type { DailyBrief, EODSummary, DeveloperLoad, DailyOpsIssue, CarryoverItem, CarryoverData } from '../services/api'
+import { getDailyBrief, getEODSummary, getDeveloperLoad, getBlockerReasons, saveCarryoverPlan, getCarryover } from '../services/pmDataService'
 
 interface Props {
   onBlockersChange: (ids: Set<string>) => void
@@ -516,7 +517,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
     setBriefLoading(true)
     setBriefError('')
     try {
-      const res = await api.getDailyBrief()
+      const res = await getDailyBrief()
       if (res.data) {
         const rawBrief = res.data
         setBriefRefreshedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
@@ -530,7 +531,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
         let enrichedBrief = rawBrief
         if (blockerIds.length > 0) {
           try {
-            const reasonsRes = await api.getBlockerReasons(blockerIds)
+            const reasonsRes = await getBlockerReasons(blockerIds)
             if (reasonsRes.data) {
               const reasons = reasonsRes.data
               const enrich = (issues: typeof rawBrief.blocked_ours) =>
@@ -560,7 +561,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
     setEodLoading(true)
     setEodError('')
     try {
-      const res = await api.getEODSummary()
+      const res = await getEODSummary()
       if (res.data) setEod(res.data)
     } catch (e: any) {
       setEodError(e.message || 'Failed to load EOD summary')
@@ -572,7 +573,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
   const loadDevLoad = useCallback(async () => {
     setDevLoading(true)
     try {
-      const res = await api.getDeveloperLoad()
+      const res = await getDeveloperLoad()
       if (res.data) setDevLoad(res.data)
     } catch {
       // non-critical
@@ -583,7 +584,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
 
   const loadCarryover = useCallback(async () => {
     try {
-      const res = await api.getCarryover()
+      const res = await getCarryover()
       if (res.data) {
         setCarryover(res.data)
         setTodayItems(res.data.today)
@@ -604,7 +605,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
     const updated = todayItems.map((item, i) => i === idx ? { ...item, done: !item.done } : item)
     setTodayItems(updated)
     try {
-      await api.saveCarryoverPlan(updated)
+      await saveCarryoverPlan(updated)
     } catch {
       // revert on failure
       setTodayItems(todayItems)
@@ -619,7 +620,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
     // Persist carry-over done state as today's items (seed today from yesterday if today is empty)
     const baseItems = todayItems.length > 0 ? todayItems : updated
     try {
-      await api.saveCarryoverPlan(baseItems)
+      await saveCarryoverPlan(baseItems)
     } catch { /* non-critical */ }
   }
 
@@ -649,7 +650,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
 
     setSaveItemsStatus('Saving…')
     try {
-      await api.saveCarryoverPlan(items)
+      await saveCarryoverPlan(items)
       setTodayItems(items)
       setSaveItemsStatus('Saved ✓ — appears in tomorrow\'s Morning Brief')
       setTimeout(() => setSaveItemsStatus(''), 4000)

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../services/api'
 import type { WorkflowConfig, PriorityTag, ColumnState, HotfixRules, ReportConfig } from '../services/api'
+import { getActiveSource, loadActiveSourceFromDB, setActiveSource } from '../services/pmDataService'
+import type { DataSource } from '../services/pmDataService'
 import {
   RefreshCw, CheckCircle, AlertCircle, ExternalLink,
   Settings, Save, MessageSquare, Download, Clock, User, Sliders,
@@ -52,7 +54,7 @@ interface YouTrackStatus {
   source?: 'user_db' | 'global_db' | 'env'
 }
 
-type MainTab = 'youtrack' | 'slack' | 'workflow'
+type MainTab = 'youtrack' | 'asana' | 'slack' | 'workflow'
 
 interface IntegrationsPageProps {
   initialTab?: MainTab
@@ -175,6 +177,23 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   }, [initialTab])
   const [loading, setLoading] = useState(true)
 
+  // ── Data source preference ───────────────────────────────────────────────────
+  const [activeSource, setActiveSrc] = useState<DataSource>(getActiveSource())
+  const [sourceMsg, setSourceMsg] = useState<string | null>(null)
+
+  const handleSourceChange = async (src: DataSource) => {
+    if (src === activeSource) return
+    try {
+      await setActiveSource(src)
+      setActiveSrc(src)
+      setSourceMsg(`Switched to ${src === 'asana' ? 'Asana' : 'YouTrack'}. All views now use ${src === 'asana' ? 'Asana' : 'YouTrack'} data.`)
+      setTimeout(() => setSourceMsg(null), 4000)
+    } catch {
+      setSourceMsg('Failed to update data source')
+      setTimeout(() => setSourceMsg(null), 3000)
+    }
+  }
+
   // ── YouTrack ────────────────────────────────────────────────────────────────
   const [ytStatus, setYtStatus] = useState<YouTrackStatus | null>(null)
   const [ytChecking, setYtChecking] = useState(false)
@@ -188,6 +207,17 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const [ytBoardID, setYtBoardID] = useState('')
   const [ytConnected, setYtConnected] = useState(false)
   const [showYtForm, setShowYtForm] = useState(false)
+
+  // ── Asana ────────────────────────────────────────────────────────────────────
+  const [asanaConnected, setAsanaConnected] = useState(false)
+  const [asanaWorkspaceName, setAsanaWorkspaceName] = useState('')
+  const [asanaHasProject, setAsanaHasProject] = useState(false)
+  const [asanaPAT, setAsanaPAT] = useState('')
+  const [asanaWorkspaceID, setAsanaWorkspaceID] = useState('')
+  const [asanaSaving, setAsanaSaving] = useState(false)
+  const [asanaError, setAsanaError] = useState<string | null>(null)
+  const [asanaSuccess, setAsanaSuccess] = useState<string | null>(null)
+  const [showAsanaForm, setShowAsanaForm] = useState(false)
 
   // ── Slack ───────────────────────────────────────────────────────────────────
   const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null)
@@ -231,7 +261,8 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   })
 
   useEffect(() => {
-    Promise.all([fetchYtIntegration(), fetchSlackStatus(), fetchWorkflowConfig()])
+    loadActiveSourceFromDB().then(setActiveSrc).catch(() => {})
+    Promise.all([fetchYtIntegration(), fetchAsanaStatus(), fetchSlackStatus(), fetchWorkflowConfig()])
       .finally(() => setLoading(false))
   }, [])
 
@@ -336,6 +367,56 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
     } catch {
       setYtStatus({ connected: false, configured: false })
     } finally { setYtChecking(false) }
+  }
+
+  // ── Asana ────────────────────────────────────────────────────────────────────
+  const fetchAsanaStatus = async () => {
+    try {
+      const [statusRes, configRes] = await Promise.all([
+        api.getAsanaStatus(),
+        api.getAsanaConfigStatus().catch(() => null),
+      ])
+      const status = statusRes as unknown as { connected: boolean; workspace_name?: string }
+      setAsanaConnected(status.connected ?? false)
+      setAsanaWorkspaceName(status.workspace_name ?? '')
+      setAsanaHasProject(!!(configRes as any)?.data?.has_project)
+    } catch {
+      setAsanaConnected(false)
+    }
+  }
+
+  const handleConnectAsana = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!asanaPAT.trim()) { setAsanaError('Personal Access Token is required'); return }
+    try {
+      setAsanaSaving(true); setAsanaError(null)
+      const res = await api.connectAsana(asanaPAT.trim(), asanaWorkspaceID.trim() || undefined)
+      const data = (res as any)
+      if (data?.success || data?.user) {
+        setAsanaSuccess('Asana connected!')
+        setAsanaPAT('')
+        setShowAsanaForm(false)
+        await fetchAsanaStatus()
+        setTimeout(() => setAsanaSuccess(null), 3000)
+      } else {
+        setAsanaError(data?.message || 'Failed to connect')
+      }
+    } catch (err) {
+      setAsanaError(err instanceof Error ? err.message : 'Failed to connect Asana')
+    } finally { setAsanaSaving(false) }
+  }
+
+  const handleDisconnectAsana = async () => {
+    if (!confirm('Disconnect Asana?')) return
+    try {
+      setAsanaError(null)
+      await api.disconnectAsana()
+      setAsanaConnected(false); setAsanaWorkspaceName('')
+      setAsanaSuccess('Asana disconnected')
+      setTimeout(() => setAsanaSuccess(null), 3000)
+    } catch (err) {
+      setAsanaError(err instanceof Error ? err.message : 'Failed to disconnect')
+    }
   }
 
   // ── Slack ───────────────────────────────────────────────────────────────────
@@ -544,6 +625,28 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
         <p className="int-subtitle">Connected tools and workflow configuration</p>
       </div>
 
+      {/* Data source switcher */}
+      <div className="ds-switcher">
+        <div className="ds-switcher__label">Active PM Data Source</div>
+        <div className="ds-switcher__options">
+          <button
+            className={`ds-switcher__option ${activeSource === 'youtrack' ? 'ds-switcher__option--active' : ''}`}
+            onClick={() => handleSourceChange('youtrack')}
+          >
+            <span className="ds-switcher__badge">YouTrack</span>
+            {ytStatus?.connected && <span className="ds-switcher__dot ds-switcher__dot--green" />}
+          </button>
+          <button
+            className={`ds-switcher__option ${activeSource === 'asana' ? 'ds-switcher__option--active' : ''}`}
+            onClick={() => handleSourceChange('asana')}
+          >
+            <span className="ds-switcher__badge">Asana</span>
+            {asanaConnected && <span className="ds-switcher__dot ds-switcher__dot--green" />}
+          </button>
+        </div>
+        {sourceMsg && <p className="ds-switcher__msg">{sourceMsg}</p>}
+      </div>
+
       {/* Tab bar */}
       <div className="int-tabs">
         <button className={`int-tab ${mainTab === 'youtrack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('youtrack'); onTabChange?.('youtrack') }}>
@@ -553,6 +656,15 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
           </svg>
           YouTrack
           {ytStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
+        </button>
+        <button className={`int-tab ${mainTab === 'asana' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('asana'); onTabChange?.('asana') }}>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none">
+            <circle cx="12" cy="7" r="3.5" fill="currentColor"/>
+            <circle cx="6" cy="16" r="3.5" fill="currentColor"/>
+            <circle cx="18" cy="16" r="3.5" fill="currentColor"/>
+          </svg>
+          Asana
+          {asanaConnected && <span className="int-tab-dot int-tab-dot-green" />}
         </button>
         <button className={`int-tab ${mainTab === 'slack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('slack'); onTabChange?.('slack') }}>
           <MessageSquare size={14} />
@@ -677,6 +789,114 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                 )}
                 <button type="submit" className="int-btn int-btn-primary" disabled={ytSaving}>
                   {ytSaving ? 'Connecting…' : <><Link2 size={14} /> {ytConfigured ? 'Update' : 'Connect YouTrack'}</>}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════ ASANA ══════════════ */}
+      {mainTab === 'asana' && (
+        <div className="int-content">
+          <div className="int-service-header">
+            <div className="int-service-logo int-asana-logo">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="white">
+                <circle cx="12" cy="7" r="3.5"/>
+                <circle cx="6" cy="16" r="3.5"/>
+                <circle cx="18" cy="16" r="3.5"/>
+              </svg>
+            </div>
+            <div className="int-service-info">
+              <h2>Asana</h2>
+              <p>Alternative PM data source — boards, reports, PM assistant</p>
+            </div>
+            <div>
+              {asanaConnected
+                ? <span className="int-badge int-badge-green"><CheckCircle size={12} /> Connected</span>
+                : <span className="int-badge int-badge-gray">Not connected</span>
+              }
+            </div>
+          </div>
+
+          {asanaError && (
+            <div className="int-alert int-alert-error">
+              <AlertCircle size={14} /><span>{asanaError}</span>
+              <button className="int-alert-close" onClick={() => setAsanaError(null)}>&times;</button>
+            </div>
+          )}
+          {asanaSuccess && (
+            <div className="int-alert int-alert-success"><CheckCircle size={14} /><span>{asanaSuccess}</span></div>
+          )}
+
+          {asanaConnected && !showAsanaForm && (
+            <>
+              <div className="int-details-grid">
+                {asanaWorkspaceName && (
+                  <div className="int-detail-card">
+                    <span className="int-detail-label">Workspace</span>
+                    <span className="int-detail-value">{asanaWorkspaceName}</span>
+                  </div>
+                )}
+                <div className="int-detail-card">
+                  <span className="int-detail-label">Project configured</span>
+                  <span className="int-detail-value">{asanaHasProject ? 'Yes' : 'Not set — ask admin'}</span>
+                </div>
+              </div>
+
+              {!asanaHasProject && (
+                <div className="int-section-box int-section-box-warn">
+                  <div className="int-section-box-header"><AlertCircle size={15} className="int-icon-warn" /><span>Project ID not configured</span></div>
+                  <p className="int-help-text">An admin needs to set the Asana Project ID in Settings &gt; Integrations &gt; Asana (admin panel) or via the <code>ASANA_PROJECT_ID</code> environment variable.</p>
+                </div>
+              )}
+
+              <div className="int-row-actions">
+                <button className="int-btn int-btn-ghost int-btn-sm" onClick={() => setShowAsanaForm(true)}>
+                  <Settings size={13} /> Update Token
+                </button>
+                <button className="int-btn int-btn-danger-ghost int-btn-sm" onClick={handleDisconnectAsana}>
+                  <Unlink size={13} /> Disconnect
+                </button>
+              </div>
+            </>
+          )}
+
+          {(!asanaConnected || showAsanaForm) && (
+            <form onSubmit={handleConnectAsana} className="int-form">
+              <p className="int-help-text">
+                Enter your Asana Personal Access Token. Create one at <strong>Asana &gt; Profile &gt; Apps &gt; Personal access tokens</strong>.
+                Your token is stored securely and only used for your account.
+              </p>
+              <div className="int-field">
+                <label>Personal Access Token</label>
+                <input
+                  type="password"
+                  value={asanaPAT}
+                  onChange={e => setAsanaPAT(e.target.value)}
+                  placeholder={asanaConnected ? 'Enter new token to update' : '1/xxxxxxxxxxxxxxxx…'}
+                  className="int-input int-mono"
+                  autoComplete="new-password"
+                  required={!asanaConnected}
+                />
+              </div>
+              <div className="int-field">
+                <label>Workspace ID <span className="int-label-hint">optional — uses first workspace if blank</span></label>
+                <input
+                  type="text"
+                  value={asanaWorkspaceID}
+                  onChange={e => setAsanaWorkspaceID(e.target.value)}
+                  placeholder="1234567890"
+                  className="int-input"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="int-form-actions">
+                {showAsanaForm && (
+                  <button type="button" className="int-btn int-btn-ghost" onClick={() => { setShowAsanaForm(false); setAsanaError(null) }}>Cancel</button>
+                )}
+                <button type="submit" className="int-btn int-btn-primary" disabled={asanaSaving}>
+                  {asanaSaving ? 'Connecting…' : <><Link2 size={14} /> {asanaConnected ? 'Update Token' : 'Connect Asana'}</>}
                 </button>
               </div>
             </form>

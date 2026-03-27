@@ -1137,3 +1137,102 @@
   border-color: rgba(99,102,241,0.15);
   color: #0f172a;
 }
+
+/* ── Data Source Switcher (ds-switcher) ──────────────────────────────────── */
+.ds-switcher {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: rgba(99,102,241,0.06);
+  border: 1px solid rgba(99,102,241,0.15);
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.ds-switcher__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.ds-switcher__options {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ds-switcher__option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 6px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ds-switcher__option:hover {
+  background: rgba(99,102,241,0.08);
+  color: var(--text-primary);
+}
+
+.ds-switcher__option--active {
+  background: rgba(99,102,241,0.14);
+  border-color: rgba(99,102,241,0.4);
+  color: #818cf8;
+  font-weight: 600;
+}
+
+.ds-switcher__badge {
+  font-size: 0.81rem;
+}
+
+.ds-switcher__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ds-switcher__dot--green {
+  background: #22c55e;
+}
+
+.ds-switcher__msg {
+  width: 100%;
+  font-size: 0.78rem;
+  color: #818cf8;
+  margin: 0;
+  padding-top: 0.25rem;
+}
+
+[data-theme="light"] .ds-switcher {
+  background: rgba(99,102,241,0.05);
+  border-color: rgba(99,102,241,0.12);
+}
+
+[data-theme="light"] .ds-switcher__option--active {
+  background: rgba(99,102,241,0.1);
+  border-color: rgba(99,102,241,0.3);
+  color: #4f46e5;
+}
+
+/* Asana logo */
+.int-asana-logo {
+  background: linear-gradient(135deg, #f06a6a 0%, #e8384f 100%);
+  border-radius: 10px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}

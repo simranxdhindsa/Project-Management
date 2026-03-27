@@ -26,6 +26,7 @@ type AsanaHandler struct {
 	sectionRepo     *database.SectionRepository
 	syncService     *asana.SyncService
 	webhookService  *asana.WebhookService
+	asanaPMRepo     *database.AsanaPMRepository
 }
 
 // NewAsanaHandler creates a new Asana handler
@@ -38,6 +39,7 @@ func NewAsanaHandler() *AsanaHandler {
 		sectionRepo:     database.NewSectionRepository(),
 		syncService:     asana.NewSyncService(),
 		webhookService:  asana.NewWebhookService(),
+		asanaPMRepo:     database.NewAsanaPMRepository(),
 	}
 }
 
@@ -366,14 +368,93 @@ func (h *AsanaHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Process events asynchronously
 	go func() {
-		if err := h.webhookService.HandleWebhook(r.Context(), payload.Events); err != nil {
-			// Log error but don't fail the webhook
-			println("Webhook processing error:", err.Error())
+		ctx := context.Background()
+		if err := h.webhookService.HandleWebhook(ctx, payload.Events); err != nil {
+			log.Printf("Webhook processing error: %v", err)
 		}
+		// Log section transitions for PM tracking
+		h.logWebhookSectionChanges(ctx, payload.Events)
 	}()
 
 	// Always respond with 200 OK quickly to Asana
 	w.WriteHeader(http.StatusOK)
+}
+
+// logWebhookSectionChanges detects task section changes from webhook events
+// and records them in asana_task_log for PM analytics.
+func (h *AsanaHandler) logWebhookSectionChanges(ctx context.Context, events []asana.WebhookEvent) {
+	// Resolve Asana credentials (global settings → env vars)
+	settings, _ := h.settingsRepo.GetAsanaSettings(ctx)
+	var pat, projectGID string
+	if settings != nil {
+		pat = settings.PAT
+		projectGID = settings.ProjectID
+	}
+	if pat == "" {
+		pat = os.Getenv("ASANA_PAT")
+	}
+	if projectGID == "" {
+		projectGID = os.Getenv("ASANA_PROJECT_ID")
+	}
+	if pat == "" {
+		return // no credentials, skip
+	}
+
+	client := asana.NewClient(pat)
+
+	for _, event := range events {
+		if event.Resource == nil || event.Resource.ResourceType != "task" || event.Action != "changed" {
+			continue
+		}
+		taskGID := event.Resource.GID
+		task, err := client.GetTask(ctx, taskGID)
+		if err != nil {
+			log.Printf("asana webhook: failed to fetch task %s: %v", taskGID, err)
+			continue
+		}
+
+		// Determine current section for this project
+		currentSection := ""
+		for _, m := range task.Memberships {
+			if projectGID == "" || m.Project.GID == projectGID {
+				if m.Section != nil {
+					currentSection = m.Section.Name
+				}
+				break
+			}
+		}
+		if currentSection == "" {
+			continue
+		}
+
+		// Check last logged section
+		lastLog, _ := h.asanaPMRepo.GetLastTransitionForTask(ctx, taskGID)
+		fromSection := ""
+		if lastLog != nil {
+			if lastLog.ToSection == currentSection {
+				continue // no change
+			}
+			fromSection = lastLog.ToSection
+		}
+
+		assignee := ""
+		if task.Assignee != nil {
+			assignee = task.Assignee.Name
+		}
+
+		entry := &database.AsanaTaskLog{
+			TaskGID:        taskGID,
+			TaskName:       task.Name,
+			ProjectGID:     projectGID,
+			Assignee:       assignee,
+			FromSection:    fromSection,
+			ToSection:      currentSection,
+			TransitionedAt: time.Now(),
+		}
+		if err := h.asanaPMRepo.LogTaskTransition(ctx, entry); err != nil {
+			log.Printf("asana webhook: failed to log transition for task %s: %v", taskGID, err)
+		}
+	}
 }
 
 // ImportFromEnv imports tasks from Asana using credentials from database (or env fallback)

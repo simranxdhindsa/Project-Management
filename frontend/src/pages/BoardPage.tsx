@@ -7,6 +7,7 @@ import {
 import { KanbanBoard } from '../components/board'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { YouTrackIssue } from '../services/api'
+import { getPMIssues, updatePMIssueState, getPMStates } from '../services/pmDataService'
 
 // ── Priority helpers (same as PMReportsPage pattern) ─────────────────────────
 
@@ -128,8 +129,8 @@ export function BoardPage() {
     setError(null)
     try {
       const [issuesRes, statesRes] = await Promise.all([
-        api.getYouTrackIssues(),
-        api.getYouTrackStates(),
+        getPMIssues(),
+        getPMStates(),
       ])
       if (issuesRes.data) setIssues(issuesRes.data as YouTrackIssue[])
       if (statesRes.data) {
@@ -190,7 +191,7 @@ export function BoardPage() {
   const handleIssueMove = useCallback(async (issueId: string, newState: string) => {
     setIssues(prev => prev.map(i => i.id === issueId ? { ...i, status: newState } : i))
     try {
-      await api.updateYouTrackIssueState(issueId, newState)
+      await updatePMIssueState(issueId, newState)
     } catch {
       fetchBoard(true)
     }

@@ -16,6 +16,7 @@ import {
 import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { IssueTimeline, IssueStint } from '../services/api'
+import { pmAssistantQuery, getCarryover, saveCarryoverPlan } from '../services/pmDataService'
 import DailyOpsTab from './DailyOpsTab'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -307,7 +308,7 @@ export function PMAssistantTab() {
     const history = updatedMessages.map(m => ({ role: m.role, content: m.content }))
     const historyWithoutLast = history.slice(0, -1)
 
-    const doQuery = () => api.pmAssistantQuery(text, historyWithoutLast)
+    const doQuery = () => pmAssistantQuery(text, historyWithoutLast)
 
     const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
 
@@ -593,7 +594,7 @@ function DailyReportTab() {
 
   useEffect(() => {
     if (date !== todayStr()) { setCarryoverItems([]); return }
-    api.getCarryover().then(res => {
+    getCarryover().then(res => {
       if (res.data?.yesterday?.length) setCarryoverItems(res.data.yesterday)
     }).catch(() => {})
   }, [date])
@@ -601,7 +602,7 @@ function DailyReportTab() {
   async function handleCarryoverToggle(idx: number) {
     const updated = carryoverItems.map((item, i) => i === idx ? { ...item, done: !item.done } : item)
     setCarryoverItems(updated)
-    try { await api.saveCarryoverPlan(updated) } catch { setCarryoverItems(carryoverItems) }
+    try { await saveCarryoverPlan(updated) } catch { setCarryoverItems(carryoverItems) }
   }
 
   const fetchHistory = useCallback(async () => {

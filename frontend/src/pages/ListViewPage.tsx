@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Search, ExternalLink, ArrowUpDown, ChevronUp, ChevronDown, X, Copy, CheckCheck } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import api from '@/services/api'
 import type { YouTrackIssue } from '@/services/api'
+import { getPMIssues } from '@/services/pmDataService'
 
 type SortField = 'id' | 'summary' | 'status' | 'priority' | 'assignee' | 'updated'
 type SortDir = 'asc' | 'desc'
@@ -60,7 +60,7 @@ export function ListViewPage({ showMyTasks }: ListViewPageProps) {
   const fetchIssues = async () => {
     try {
       setLoading(true)
-      const response = await api.getYouTrackIssues()
+      const response = await getPMIssues()
       if (response.success && response.data) {
         setIssues(response.data as YouTrackIssue[])
       }

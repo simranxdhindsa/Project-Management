@@ -239,6 +239,39 @@ func (r *SettingsRepository) SaveYouTrackIntegration(ctx context.Context, userID
 	return err
 }
 
+// ── Per-user active data source ────────────────────────────────────────────
+
+// GetUserDataSource returns 'youtrack' or 'asana' for the given user (default: 'youtrack')
+func (r *SettingsRepository) GetUserDataSource(ctx context.Context, userID string) (string, error) {
+	pool := GetPool()
+	if pool == nil {
+		return "youtrack", nil
+	}
+	var source string
+	err := pool.QueryRow(ctx, `SELECT source FROM user_data_source WHERE user_id = $1`, userID).Scan(&source)
+	if err != nil {
+		return "youtrack", nil // default
+	}
+	return source, nil
+}
+
+// SetUserDataSource upserts the user's active data source preference
+func (r *SettingsRepository) SetUserDataSource(ctx context.Context, userID, source string) error {
+	pool := GetPool()
+	if pool == nil {
+		return nil
+	}
+	if source != "youtrack" && source != "asana" {
+		source = "youtrack"
+	}
+	_, err := pool.Exec(ctx, `
+		INSERT INTO user_data_source (user_id, source, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (user_id) DO UPDATE SET source = $2, updated_at = NOW()
+	`, userID, source)
+	return err
+}
+
 // DisconnectYouTrackIntegration marks the integration as disconnected
 func (r *SettingsRepository) DisconnectYouTrackIntegration(ctx context.Context, userID string) error {
 	pool := GetPool()
