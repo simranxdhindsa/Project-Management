@@ -14,9 +14,16 @@ import {
   Rocket,
 } from 'lucide-react'
 import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
-import api, { getYouTrackAvatarMap } from '../services/api'
+import api from '../services/api'
 import type { IssueTimeline, IssueStint } from '../services/api'
-import { pmAssistantQuery, getCarryover, saveCarryoverPlan } from '../services/pmDataService'
+import {
+  pmAssistantQuery, getCarryover, saveCarryoverPlan,
+  getAssigneeStats, getAvatarMap,
+  getTimeTracking, getIssueTimelines,
+  generatePMReport, generateWeeklyPMReport, listPMReports, listWeeklyPMReports, deletePMReport,
+  getStageReportColumns, generateStageReport,
+  getActiveSource,
+} from '../services/pmDataService'
 import DailyOpsTab from './DailyOpsTab'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -550,9 +557,13 @@ function DailyReportTab() {
         setSavedSnapshot({ priorities: p, sections: s, openStates: o })
       }
     }).catch(() => {})
-    api.getYouTrackStates().then(res => {
-      if (res.success && res.data) setYtStatesList((res.data as unknown as Array<{ name: string }>).map(s => s.name))
-    }).catch(() => {})
+    // States dropdown (for open_states config) — use source-aware getPMStates
+    import('../services/pmDataService').then(({ getPMStates }) => {
+      getPMStates().then(res => {
+        if ((res as any).success && (res as any).data)
+          setYtStatesList(((res as any).data as Array<{ name: string }>).map((s: { name: string }) => s.name))
+      }).catch(() => {})
+    })
   }, [])
 
   // Calendar dropdown state
@@ -608,8 +619,8 @@ function DailyReportTab() {
   const fetchHistory = useCallback(async () => {
     setLoadingHistory(true)
     try {
-      const res = await api.listPMReports()
-      setHistory(res.data || [])
+      const res = await listPMReports()
+      setHistory((res as any).data || [])
     } catch {
       // non-fatal
     } finally {
@@ -620,8 +631,8 @@ function DailyReportTab() {
   const fetchWeeklyHistory = useCallback(async () => {
     setLoadingHistory(true)
     try {
-      const res = await api.listWeeklyPMReports()
-      setWeekHistory(res.data || [])
+      const res = await listWeeklyPMReports()
+      setWeekHistory((res as any).data || [])
     } catch {
       // non-fatal
     } finally {
@@ -647,9 +658,9 @@ function DailyReportTab() {
     }
     try {
       const res = mode === 'daily'
-        ? await api.generatePMReport(date, reportScope, overrides)
-        : await api.generateWeeklyPMReport(weekStart, reportScope)
-      setReport(res.data)
+        ? await generatePMReport(date, reportScope, overrides)
+        : await generateWeeklyPMReport(weekStart, reportScope)
+      setReport((res as any).data)
       mode === 'daily' ? fetchHistory() : fetchWeeklyHistory()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate report')
@@ -1076,7 +1087,7 @@ function DailyReportTab() {
                         title="Confirm delete"
                         onClick={async (e) => {
                           e.stopPropagation()
-                          await api.deletePMReport(r.id)
+                          await deletePMReport(r.id)
                           if (mode === 'daily') setHistory(prev => prev.filter(h => h.id !== r.id))
                           else setWeekHistory(prev => prev.filter(h => h.id !== r.id))
                           if (report?.id === r.id) setReport(null)
@@ -1125,8 +1136,8 @@ function AssigneeStatsTab() {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.getAssigneeStats()
-      setStats(res.data || [])
+      const res = await getAssigneeStats()
+      setStats((res as any).data || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load stats')
     } finally {
@@ -1135,7 +1146,7 @@ function AssigneeStatsTab() {
   }, [])
 
   useEffect(() => { fetchStats() }, [fetchStats])
-  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
+  useEffect(() => { getAvatarMap().then(setAvatarMap) }, [])
 
   const maxTotal = Math.max(...stats.map(s => s.open + s.in_progress + s.done + s.blocked), 1)
 
@@ -1154,7 +1165,7 @@ function AssigneeStatsTab() {
       {loading && stats.length === 0 ? (
         <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading stats...</span></div>
       ) : stats.length === 0 ? (
-        <div className="pm-empty-state"><Users size={40} /><p>No assignee data yet. Stats populate from YouTrack webhook events.</p></div>
+        <div className="pm-empty-state"><Users size={40} /><p>No assignee data yet. Stats populate from webhook events or after a Backfill.</p></div>
       ) : (
         <div className="pm-card-list glass-card">
           <div className="pm-list-summary">
@@ -1324,8 +1335,8 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
     try {
       const params: { week?: string } = {}
       if (!skipWeek) params.week = toISODate(week)
-      const res = await api.getTimeTracking(params)
-      setRows(res.data || [])
+      const res = await getTimeTracking(params)
+      setRows((res as any).data || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load time tracking')
     } finally {
@@ -1337,8 +1348,8 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
     setTlLoading(true)
     setTlError(null)
     try {
-      const res = await api.getIssueTimelines()
-      setTimelines(res.data || [])
+      const res = await getIssueTimelines()
+      setTimelines((res as any).data || [])
     } catch (err) {
       setTlError(err instanceof Error ? err.message : 'Failed to load timelines')
     } finally {
@@ -1352,7 +1363,7 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
     const id = setInterval(() => { fetchTimelines() }, 2 * 60 * 1000)
     return () => clearInterval(id)
   }, [fetchTimelines])
-  useEffect(() => { getYouTrackAvatarMap().then(setAvatarMap) }, [])
+  useEffect(() => { getAvatarMap().then(setAvatarMap) }, [])
 
   // ── Close dropdowns on outside click ─────────────────────────────────────
   useEffect(() => {
@@ -2017,10 +2028,11 @@ function DeploymentReportTab() {
   const fetchColumns = useCallback(async () => {
     setLoadingCols(true)
     try {
-      const res = await api.getStageReportColumns()
-      if (res.success && res.data) setColumns(res.data)
+      const res = await getStageReportColumns()
+      if ((res as any).success && (res as any).data) setColumns((res as any).data)
     } catch {
-      setError('Failed to load columns. Check YouTrack connection.')
+      const src = getActiveSource()
+      setError(`Failed to load columns. Check ${src === 'asana' ? 'Asana' : 'YouTrack'} connection.`)
     } finally {
       setLoadingCols(false)
     }
@@ -2043,10 +2055,10 @@ function DeploymentReportTab() {
     setError(null)
     setReport(null)
     try {
-      const res = await api.generateStageReport([...selected])
-      if (res.success && res.data) {
-        setReport(res.data.report)
-        setIssueCount(res.data.issue_count)
+      const res = await generateStageReport([...selected])
+      if ((res as any).success && (res as any).data) {
+        setReport((res as any).data.report)
+        setIssueCount((res as any).data.issue_count)
       } else {
         setError('Generation failed. Try again.')
       }

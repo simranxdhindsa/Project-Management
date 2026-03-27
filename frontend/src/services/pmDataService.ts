@@ -6,11 +6,20 @@
  * (synced to DB on change via setActiveSource).
  */
 
-import api from './api'
+import api, { getYouTrackAvatarMap } from './api'
 
 export type DataSource = 'youtrack' | 'asana'
 
 const SOURCE_KEY = 'pm_active_source'
+
+// ── Issue cache (2-minute TTL, keyed by source) ───────────────────────────────
+const CACHE_TTL = 2 * 60 * 1000
+interface CacheEntry { data: unknown; ts: number }
+const _issueCache = new Map<string, CacheEntry>()
+
+export function invalidatePMCache() {
+  _issueCache.clear()
+}
 
 export function getActiveSource(): DataSource {
   return (localStorage.getItem(SOURCE_KEY) as DataSource) || 'youtrack'
@@ -86,10 +95,19 @@ export function getPMSections() {
 
 // ── Issues / tasks ────────────────────────────────────────────────────────────
 
-export function getPMIssues() {
-  return getActiveSource() === 'asana'
-    ? api.getAsanaPMIssues()
-    : api.getYouTrackIssues()
+export async function getPMIssues(forceRefresh = false): Promise<{ success: boolean; data: unknown; message?: string }> {
+  const key = getActiveSource()
+  const hit = _issueCache.get(key)
+  if (!forceRefresh && hit && Date.now() - hit.ts < CACHE_TTL) {
+    return { success: true, data: hit.data }
+  }
+  const res = getActiveSource() === 'asana'
+    ? await api.getAsanaPMIssues()
+    : await api.getYouTrackIssues()
+  if ((res as any).success && (res as any).data) {
+    _issueCache.set(key, { data: (res as any).data, ts: Date.now() })
+  }
+  return res as { success: boolean; data: unknown; message?: string }
 }
 
 export function getPMIssue(id: string) {
@@ -98,7 +116,7 @@ export function getPMIssue(id: string) {
     : api.getYouTrackIssue(id)
 }
 
-export function createPMIssue(params: {
+export async function createPMIssue(params: {
   summary: string
   description?: string
   state?: string
@@ -107,27 +125,35 @@ export function createPMIssue(params: {
   due_date?: number
   estimation_minutes?: number
 }) {
-  return getActiveSource() === 'asana'
-    ? api.createAsanaPMIssue(params)
-    : api.createYouTrackIssue(params)
+  const res = getActiveSource() === 'asana'
+    ? await api.createAsanaPMIssue(params)
+    : await api.createYouTrackIssue(params)
+  invalidatePMCache()
+  return res
 }
 
-export function updatePMIssue(id: string, summary?: string, description?: string, state?: string) {
-  return getActiveSource() === 'asana'
-    ? api.updateAsanaPMIssue(id, summary, description, state)
-    : api.updateYouTrackIssue(id, summary, description, state)
+export async function updatePMIssue(id: string, summary?: string, description?: string, state?: string) {
+  const res = getActiveSource() === 'asana'
+    ? await api.updateAsanaPMIssue(id, summary, description, state)
+    : await api.updateYouTrackIssue(id, summary, description, state)
+  invalidatePMCache()
+  return res
 }
 
-export function updatePMIssueState(id: string, state: string) {
-  return getActiveSource() === 'asana'
-    ? api.updateAsanaPMIssueState(id, state)
-    : api.updateYouTrackIssueState(id, state)
+export async function updatePMIssueState(id: string, state: string) {
+  const res = getActiveSource() === 'asana'
+    ? await api.updateAsanaPMIssueState(id, state)
+    : await api.updateYouTrackIssueState(id, state)
+  invalidatePMCache()
+  return res
 }
 
-export function deletePMIssue(id: string) {
-  return getActiveSource() === 'asana'
-    ? api.deleteAsanaPMIssue(id)
-    : api.deleteYouTrackIssue(id)
+export async function deletePMIssue(id: string) {
+  const res = getActiveSource() === 'asana'
+    ? await api.deleteAsanaPMIssue(id)
+    : await api.deleteYouTrackIssue(id)
+  invalidatePMCache()
+  return res
 }
 
 export function getPMIssuesGroupedByAssignee() {
@@ -186,4 +212,73 @@ export function getCarryover() {
   return getActiveSource() === 'asana'
     ? api.getAsanaPMCarryover()
     : api.getCarryover()
+}
+
+// ── PM Reports ────────────────────────────────────────────────────────────────
+
+export function getAssigneeStats() {
+  return getActiveSource() === 'asana'
+    ? api.getAsanaAssigneeStats()
+    : api.getAssigneeStats()
+}
+
+export function getAvatarMap(): Promise<Record<string, string>> {
+  if (getActiveSource() === 'asana') {
+    return api.getAsanaUserAvatars().then(res => (res as any).data || {})
+  }
+  return getYouTrackAvatarMap()
+}
+
+export function getTimeTracking(params?: { week?: string; assignee?: string; priority?: string }) {
+  return getActiveSource() === 'asana'
+    ? api.getAsanaTimeTracking(params)
+    : api.getTimeTracking(params)
+}
+
+export function getIssueTimelines() {
+  return getActiveSource() === 'asana'
+    ? api.getAsanaIssueTimelines()
+    : api.getIssueTimelines()
+}
+
+export function generatePMReport(date: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }) {
+  return getActiveSource() === 'asana'
+    ? api.generateAsanaPMReport(date, scope)
+    : api.generatePMReport(date, scope, overrides)
+}
+
+export function generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full') {
+  return getActiveSource() === 'asana'
+    ? api.generateAsanaWeeklyPMReport(weekStart, scope)
+    : api.generateWeeklyPMReport(weekStart, scope)
+}
+
+export function listPMReports() {
+  return api.listPMReports()
+}
+
+export function listWeeklyPMReports() {
+  return api.listWeeklyPMReports()
+}
+
+export function deletePMReport(id: string) {
+  return api.deletePMReport(id)
+}
+
+export function getStageReportColumns() {
+  return getActiveSource() === 'asana'
+    ? api.getAsanaStageReportColumns()
+    : api.getStageReportColumns()
+}
+
+export function generateStageReport(columns: string[]) {
+  return getActiveSource() === 'asana'
+    ? api.generateAsanaStageReport(columns)
+    : api.generateStageReport(columns)
+}
+
+export function backfillLog() {
+  return getActiveSource() === 'asana'
+    ? api.backfillAsanaLog()
+    : api.backfillStateLog()
 }

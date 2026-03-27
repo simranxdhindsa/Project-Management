@@ -1299,6 +1299,56 @@ class ApiService {
       }[]
     }>('/asana/pm/issues/grouped-by-assignee')
   }
+
+  // ── PM Report endpoints (Asana) ───────────────────────────────────────────
+
+  async getAsanaAssigneeStats() {
+    return this.request<AssigneeStat[]>('/asana/pm/assignee-stats')
+  }
+
+  async getAsanaUserAvatars() {
+    return this.request<Record<string, string>>('/asana/pm/users/avatars')
+  }
+
+  async getAsanaTimeTracking(params?: { week?: string; assignee?: string; priority?: string }) {
+    const qs = new URLSearchParams()
+    if (params?.week) qs.set('week', params.week)
+    if (params?.assignee) qs.set('assignee', params.assignee)
+    if (params?.priority) qs.set('priority', params.priority)
+    const query = qs.toString() ? `?${qs.toString()}` : ''
+    return this.request<TimeTrackingRow[]>(`/asana/pm/time-tracking${query}`)
+  }
+
+  async getAsanaIssueTimelines() {
+    return this.request<IssueTimeline[]>('/asana/pm/issue-timelines')
+  }
+
+  async generateAsanaPMReport(date: string, scope: 'full' | 'summary' = 'full') {
+    const params = new URLSearchParams({ scope })
+    return this.request<PMReport>(`/asana/pm/report/${date}?${params.toString()}`)
+  }
+
+  async generateAsanaWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full') {
+    const params = new URLSearchParams({ scope })
+    return this.request<PMReport>(`/asana/pm/report/weekly/${weekStart}?${params.toString()}`)
+  }
+
+  async getAsanaStageReportColumns() {
+    return this.request<string[]>('/asana/pm/stage-report/columns')
+  }
+
+  async generateAsanaStageReport(columns: string[]) {
+    return this.request<{ report: string; issue_count: number }>('/asana/pm/stage-report/generate', {
+      method: 'POST',
+      body: JSON.stringify({ columns }),
+    })
+  }
+
+  async backfillAsanaLog() {
+    return this.request<{ message: string; inserted: number; skipped: number }>('/asana/pm/backfill', {
+      method: 'POST',
+    })
+  }
 }
 
 // Types
@@ -1391,6 +1441,9 @@ export interface YouTrackIssue {
   created: number
   updated: number
   attachments?: YouTrackAttachment[]
+  permalink?: string
+  section?: string
+  due_date?: number
 }
 
 export interface YouTrackAttachment {

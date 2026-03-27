@@ -425,3 +425,25 @@ func (c *Client) GetProjectTasksPaginated(ctx context.Context, projectGID string
 	}
 	return allTasks, nil
 }
+
+// GetUserPhoto returns the photo URL for an Asana user (empty string if none).
+// Asana API: GET /users/{user_gid}/photo
+func (c *Client) GetUserPhoto(ctx context.Context, userGID string) string {
+	body, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/users/%s/photo", userGID), nil)
+	if err != nil {
+		return ""
+	}
+	var resp struct {
+		Data *struct {
+			Image60x60 string `json:"image_60x60"`
+			Image128x128 string `json:"image_128x128"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || resp.Data == nil {
+		return ""
+	}
+	if resp.Data.Image60x60 != "" {
+		return resp.Data.Image60x60
+	}
+	return resp.Data.Image128x128
+}
