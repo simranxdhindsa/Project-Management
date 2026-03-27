@@ -109,6 +109,61 @@ function WcSelectDropdown({ value, options, onChange, className = '' }: WcSelect
   )
 }
 
+// Dropdown for object option lists (id + label pairs)
+interface WcObjDropdownProps {
+  value: string
+  placeholder?: string
+  options: Array<{ id: string; name: string }>
+  onChange: (id: string) => void
+  className?: string
+  disabled?: boolean
+}
+function WcObjDropdown({ value, placeholder = '— Select —', options, onChange, className = '', disabled = false }: WcObjDropdownProps) {
+  const [open, setOpen] = useState(false)
+  const [rect, setRect] = useState<DOMRect | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.wc-obj-dropdown')) {
+        setOpen(false); setRect(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+  const label = options.find(o => o.id === value)?.name ?? placeholder
+  return (
+    <div className={`pm-custom-dropdown wc-obj-dropdown ${className}`}>
+      <button
+        type="button"
+        className="pm-custom-dropdown-trigger"
+        disabled={disabled}
+        onClick={(e) => {
+          const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+          setRect(r); setOpen(o => !o)
+        }}
+      >
+        <span>{label}</span>
+        <ChevronDown size={11} className={`dropdown-chevron ${open ? 'open' : ''}`} />
+      </button>
+      {open && rect && createPortal(
+        <div className="pm-custom-dropdown-menu" style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, minWidth: rect.width, zIndex: 9999 }}>
+          {options.map(opt => (
+            <button key={opt.id} type="button" className={`pm-dropdown-item ${value === opt.id ? 'active' : ''}`}
+              onClick={() => { onChange(opt.id); setOpen(false); setRect(null) }}>
+              <span>{opt.name}</span>
+            </button>
+          ))}
+          {options.length === 0 && (
+            <div className="pm-dropdown-item" style={{ opacity: 0.5, cursor: 'default' }}>No projects found</div>
+          )}
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
 interface SortableColumnRowProps {
   col: ColumnState
   i: number
@@ -218,6 +273,11 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const [asanaError, setAsanaError] = useState<string | null>(null)
   const [asanaSuccess, setAsanaSuccess] = useState<string | null>(null)
   const [showAsanaForm, setShowAsanaForm] = useState(false)
+  const [asanaProjects, setAsanaProjects] = useState<Array<{ id: string; name: string }>>([])
+  const [asanaSelectedProject, setAsanaSelectedProject] = useState('')
+  const [asanaProjectName, setAsanaProjectName] = useState('')
+  const [asanaLoadingProjects, setAsanaLoadingProjects] = useState(false)
+  const [asanaSavingProject, setAsanaSavingProject] = useState(false)
 
   // ── Slack ───────────────────────────────────────────────────────────────────
   const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null)
@@ -372,16 +432,57 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   // ── Asana ────────────────────────────────────────────────────────────────────
   const fetchAsanaStatus = async () => {
     try {
-      const [statusRes, configRes] = await Promise.all([
+      const [statusRes, pmStatusRes] = await Promise.all([
         api.getAsanaStatus(),
-        api.getAsanaConfigStatus().catch(() => null),
+        api.getAsanaPMStatus().catch(() => null),
       ])
-      const status = statusRes as unknown as { connected: boolean; workspace_name?: string }
+      const status = statusRes as unknown as { connected: boolean; workspace_name?: string; project_gid?: string; project_name?: string }
       setAsanaConnected(status.connected ?? false)
       setAsanaWorkspaceName(status.workspace_name ?? '')
-      setAsanaHasProject(!!(configRes as any)?.data?.has_project)
+      const pmData = (pmStatusRes as any)?.data
+      const hasProject = !!(status.project_gid || pmData?.project_id || pmData?.configured)
+      setAsanaHasProject(hasProject)
+      if (status.project_gid) {
+        setAsanaSelectedProject(status.project_gid)
+        setAsanaProjectName(status.project_name ?? status.project_gid)
+      }
+      // Load projects list if connected
+      if (status.connected) {
+        fetchAsanaProjects()
+      }
     } catch {
       setAsanaConnected(false)
+    }
+  }
+
+  const fetchAsanaProjects = async () => {
+    setAsanaLoadingProjects(true)
+    try {
+      const res = await api.getAsanaPMProjects()
+      const projects = (res as any)?.data ?? res ?? []
+      setAsanaProjects(Array.isArray(projects) ? projects : [])
+    } catch {
+      // silently ignore — projects dropdown just won't populate
+    } finally {
+      setAsanaLoadingProjects(false)
+    }
+  }
+
+  const handleSaveAsanaProject = async (projectGID: string) => {
+    if (!projectGID) return
+    setAsanaSavingProject(true)
+    try {
+      await api.saveAsanaPMProject(projectGID)
+      const proj = asanaProjects.find(p => p.id === projectGID)
+      setAsanaSelectedProject(projectGID)
+      setAsanaProjectName(proj?.name ?? projectGID)
+      setAsanaHasProject(true)
+      setAsanaSuccess('Project saved! Board and reports will now use this project.')
+      setTimeout(() => setAsanaSuccess(null), 4000)
+    } catch (err) {
+      setAsanaError(err instanceof Error ? err.message : 'Failed to save project')
+    } finally {
+      setAsanaSavingProject(false)
     }
   }
 
@@ -839,17 +940,35 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                   </div>
                 )}
                 <div className="int-detail-card">
-                  <span className="int-detail-label">Project configured</span>
-                  <span className="int-detail-value">{asanaHasProject ? 'Yes' : 'Not set — ask admin'}</span>
+                  <span className="int-detail-label">Active project</span>
+                  <span className="int-detail-value">{asanaProjectName || (asanaHasProject ? 'Configured' : 'None selected')}</span>
                 </div>
               </div>
 
-              {!asanaHasProject && (
-                <div className="int-section-box int-section-box-warn">
-                  <div className="int-section-box-header"><AlertCircle size={15} className="int-icon-warn" /><span>Project ID not configured</span></div>
-                  <p className="int-help-text">An admin needs to set the Asana Project ID in Settings &gt; Integrations &gt; Asana (admin panel) or via the <code>ASANA_PROJECT_ID</code> environment variable.</p>
+              <div className="int-section-box">
+                <div className="int-section-box-header"><Settings size={15} /><span>Select Asana Project</span></div>
+                <p className="int-help-text">Choose which Asana project to use for board view, PM reports, daily brief, and assistant queries.</p>
+                <div className="int-field">
+                  <label>Project</label>
+                  <div className="int-project-select-row">
+                    <WcObjDropdown
+                      value={asanaSelectedProject}
+                      placeholder={asanaLoadingProjects ? 'Loading projects…' : '— Select a project —'}
+                      options={asanaProjects}
+                      onChange={setAsanaSelectedProject}
+                      disabled={asanaLoadingProjects}
+                      className="int-project-dropdown"
+                    />
+                    <button
+                      className="int-btn int-btn-primary int-btn-sm"
+                      onClick={() => handleSaveAsanaProject(asanaSelectedProject)}
+                      disabled={!asanaSelectedProject || asanaSavingProject}
+                    >
+                      {asanaSavingProject ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
                 </div>
-              )}
+              </div>
 
               <div className="int-row-actions">
                 <button className="int-btn int-btn-ghost int-btn-sm" onClick={() => setShowAsanaForm(true)}>

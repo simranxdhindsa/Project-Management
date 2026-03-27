@@ -265,8 +265,8 @@ export default function Login() {
       <div className="login-bg-decoration login-bg-decoration-1"></div>
       <div className="login-bg-decoration login-bg-decoration-2"></div>
 
-      {/* 3D Isometric Board — decorative hero element */}
-      <div className="iso-board-wrap">
+      {/* 3D Isometric Board — left: Backlog + In Progress */}
+      <div className="iso-board-left">
         <div className="iso-board">
           <div className="iso-col">
             <div className="iso-col-header">Backlog</div>
@@ -278,6 +278,19 @@ export default function Login() {
             <div className="iso-col-header">In Progress</div>
             <div className="iso-card yellow" />
             <div className="iso-card purple" />
+            <div className="iso-card indigo" />
+          </div>
+        </div>
+      </div>
+
+      {/* 3D Isometric Board — right: Blocked + Done */}
+      <div className="iso-board-right">
+        <div className="iso-board">
+          <div className="iso-col">
+            <div className="iso-col-header">Blocked</div>
+            <div className="iso-card red" />
+            <div className="iso-card red" />
+            <div className="iso-card yellow" />
           </div>
           <div className="iso-col">
             <div className="iso-col-header">Done</div>

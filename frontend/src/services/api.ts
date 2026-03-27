@@ -1152,6 +1152,13 @@ class ApiService {
     return this.request<YouTrackProject[]>('/asana/pm/projects')
   }
 
+  async saveAsanaPMProject(projectGID: string) {
+    return this.request<{ project_gid: string }>('/asana/pm/project', {
+      method: 'PATCH',
+      body: JSON.stringify({ project_gid: projectGID }),
+    })
+  }
+
   async getAsanaPMBoards() {
     return this.request<YouTrackBoard[]>('/asana/pm/boards')
   }

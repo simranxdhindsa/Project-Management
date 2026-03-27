@@ -7,7 +7,7 @@ import {
 import { KanbanBoard } from '../components/board'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { YouTrackIssue } from '../services/api'
-import { getPMIssues, updatePMIssueState, getPMStates } from '../services/pmDataService'
+import { getPMIssues, updatePMIssueState, getPMStates, getActiveSource } from '../services/pmDataService'
 
 // ── Priority helpers (same as PMReportsPage pattern) ─────────────────────────
 
@@ -135,7 +135,10 @@ export function BoardPage() {
       if (issuesRes.data) setIssues(issuesRes.data as YouTrackIssue[])
       if (statesRes.data) {
         const states = statesRes.data as { name: string }[]
-        setColumns(sortColumns(states.map(s => s.name)))
+        // For Asana, preserve the API order (matches the actual board column order).
+        // For YouTrack, apply the canonical sort.
+        const cols = states.map(s => s.name)
+        setColumns(getActiveSource() === 'asana' ? cols : sortColumns(cols))
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load board')

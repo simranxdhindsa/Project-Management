@@ -27,18 +27,19 @@ func (r *IntegrationRepository) SaveAsanaIntegration(ctx context.Context, integr
 	}
 
 	_, err := pool.Exec(ctx, `
-		INSERT INTO asana_integrations (user_id, access_token, refresh_token, workspace_id, workspace_name, connected, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO asana_integrations (user_id, access_token, refresh_token, workspace_id, workspace_name, project_gid, connected, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (user_id) DO UPDATE SET
 			access_token = $2,
 			refresh_token = $3,
 			workspace_id = $4,
 			workspace_name = $5,
-			connected = $6,
-			updated_at = $8
+			project_gid = $6,
+			connected = $7,
+			updated_at = $9
 	`, integration.UserID, integration.AccessToken, integration.RefreshToken,
-		integration.WorkspaceID, integration.WorkspaceName, integration.Connected,
-		integration.CreatedAt, integration.UpdatedAt)
+		integration.WorkspaceID, integration.WorkspaceName, integration.ProjectID,
+		integration.Connected, integration.CreatedAt, integration.UpdatedAt)
 
 	return err
 }
@@ -49,16 +50,26 @@ func (r *IntegrationRepository) GetAsanaIntegration(ctx context.Context, userID 
 
 	var integration models.AsanaIntegration
 	err := pool.QueryRow(ctx, `
-		SELECT id, user_id, access_token, refresh_token, workspace_id, workspace_name, connected, last_sync_at, created_at, updated_at
+		SELECT id, user_id, access_token, refresh_token, workspace_id, workspace_name, COALESCE(project_gid, ''), connected, last_sync_at, created_at, updated_at
 		FROM asana_integrations WHERE user_id = $1
 	`, userID).Scan(&integration.ID, &integration.UserID, &integration.AccessToken, &integration.RefreshToken,
-		&integration.WorkspaceID, &integration.WorkspaceName, &integration.Connected,
-		&integration.LastSyncAt, &integration.CreatedAt, &integration.UpdatedAt)
+		&integration.WorkspaceID, &integration.WorkspaceName, &integration.ProjectID,
+		&integration.Connected, &integration.LastSyncAt, &integration.CreatedAt, &integration.UpdatedAt)
 
 	if err != nil {
 		return nil, err
 	}
 	return &integration, nil
+}
+
+// UpdateAsanaProjectGID saves the user's selected Asana project GID
+func (r *IntegrationRepository) UpdateAsanaProjectGID(ctx context.Context, userID, projectGID string) error {
+	pool := GetPool()
+	_, err := pool.Exec(ctx, `
+		UPDATE asana_integrations SET project_gid = $2, updated_at = NOW()
+		WHERE user_id = $1
+	`, userID, projectGID)
+	return err
 }
 
 // UpdateAsanaLastSync updates the last sync timestamp

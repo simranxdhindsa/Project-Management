@@ -86,16 +86,19 @@ func (h *AsanaPMHandler) getAsanaClient(ctx context.Context, userID string) (*as
 		if integ, err := h.integrationRepo.GetAsanaIntegration(ctx, userID); err == nil && integ != nil && integ.Connected {
 			pat = integ.AccessToken
 			workspaceGID = integ.WorkspaceID
+			if integ.ProjectID != "" {
+				projectGID = integ.ProjectID
+			}
 		}
 	}
 
-	// 2. Global settings DB
+	// 2. Global settings DB — only fills gaps not already set by per-user integration
 	settings, _ := h.settingsRepo.GetAsanaSettings(ctx)
 	if settings != nil && settings.Configured {
 		if pat == "" {
 			pat = settings.PAT
 		}
-		if settings.ProjectID != "" {
+		if projectGID == "" && settings.ProjectID != "" {
 			projectGID = settings.ProjectID
 		}
 		if workspaceGID == "" {
@@ -117,6 +120,9 @@ func (h *AsanaPMHandler) getAsanaClient(ctx context.Context, userID string) (*as
 	if pat == "" {
 		return nil, "", "", fmt.Errorf("Asana is not configured. Please connect Asana in Settings.")
 	}
+	if projectGID == "" {
+		return nil, "", "", fmt.Errorf("No Asana project selected. Please choose a project in Settings > Integrations > Asana.")
+	}
 
 	return asana.NewClient(pat), projectGID, workspaceGID, nil
 }
@@ -128,7 +134,6 @@ func sectionStatus(name string) string {
 	switch {
 	case strings.Contains(n, "done") || strings.Contains(n, "complet") ||
 		strings.Contains(n, "deploy") || strings.Contains(n, "prod") ||
-		strings.Contains(n, "stage") || strings.Contains(n, "dev") ||
 		strings.Contains(n, "fixed") || strings.Contains(n, "closed"):
 		return "Done"
 	case strings.Contains(n, "block") || strings.Contains(n, "wait") ||
@@ -147,8 +152,7 @@ func isDoneSection(name string) bool {
 	n := strings.ToLower(name)
 	return strings.Contains(n, "done") || strings.Contains(n, "complet") ||
 		strings.Contains(n, "deploy") || strings.Contains(n, "prod") ||
-		strings.Contains(n, "stage") || strings.Contains(n, "fixed") ||
-		strings.Contains(n, "closed")
+		strings.Contains(n, "fixed") || strings.Contains(n, "closed")
 }
 
 // isBlockedSection returns true if the section name implies blocked
@@ -1506,6 +1510,28 @@ func (h *AsanaPMHandler) SetDataSource(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]string{"source": req.Source}})
 }
 
+// SaveProjectGID saves the user's selected Asana project GID
+func (h *AsanaPMHandler) SaveProjectGID(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		ProjectGID string `json:"project_gid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ProjectGID == "" {
+		http.Error(w, "project_gid is required", http.StatusBadRequest)
+		return
+	}
+	if err := h.integrationRepo.UpdateAsanaProjectGID(r.Context(), userID, req.ProjectGID); err != nil {
+		http.Error(w, "Failed to save project: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]string{"project_gid": req.ProjectGID}})
+}
+
 // ─── internal helpers ────────────────────────────────────────────────────────
 
 // tasksToIssueList converts a slice of Asana tasks to the YouTrack issue list shape
@@ -1520,12 +1546,18 @@ func tasksToIssueList(tasks []asana.Task) []map[string]interface{} {
 	return result
 }
 
-// taskToIssueMap converts a single Asana task to the YouTrack issue map shape
+// taskToIssueMap converts a single Asana task to the YouTrack issue map shape.
+// status = real section name (e.g. "Sprint 23 - P1") so the board columns match exactly.
+// sectionStatus() is only used by daily-ops endpoints (taskToIssueRow).
 func taskToIssueMap(task asana.Task) map[string]interface{} {
 	section := taskSectionName(task)
-	status := sectionStatus(section)
-	if task.Completed {
+	// Use the actual section name as the status so board columns line up 1:1 with Asana sections.
+	status := section
+	if status == "" && task.Completed {
 		status = "Done"
+	}
+	if status == "" {
+		status = "Backlog"
 	}
 
 	var assignee interface{}

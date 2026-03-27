@@ -8,9 +8,10 @@ type AsanaIntegration struct {
 	UserID       string    `json:"user_id" db:"user_id"`
 	AccessToken  string    `json:"-" db:"access_token"` // Hidden in JSON
 	RefreshToken *string   `json:"-" db:"refresh_token"`
-	WorkspaceID  string    `json:"workspace_id" db:"workspace_id"`
-	WorkspaceName string   `json:"workspace_name" db:"workspace_name"`
-	Connected    bool      `json:"connected" db:"connected"`
+	WorkspaceID   string    `json:"workspace_id" db:"workspace_id"`
+	WorkspaceName string    `json:"workspace_name" db:"workspace_name"`
+	ProjectID     string    `json:"project_gid" db:"project_gid"`
+	Connected     bool      `json:"connected" db:"connected"`
 	LastSyncAt   *time.Time `json:"last_sync_at,omitempty" db:"last_sync_at"`
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`

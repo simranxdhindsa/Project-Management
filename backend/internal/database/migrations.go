@@ -467,6 +467,8 @@ func RunMigrations() error {
 			analyzed_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 		)`,
 
+		`ALTER TABLE asana_integrations ADD COLUMN IF NOT EXISTS project_gid VARCHAR(255)`,
+
 		`ALTER TABLE pm_reports ADD COLUMN IF NOT EXISTS report_type VARCHAR(10) NOT NULL DEFAULT 'daily'`,
 		`ALTER TABLE pm_reports DROP CONSTRAINT IF EXISTS pm_reports_date_key`,
 		// ADD CONSTRAINT IF NOT EXISTS is not valid PG syntax — use DO block instead

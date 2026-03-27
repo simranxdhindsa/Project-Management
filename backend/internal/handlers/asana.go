@@ -158,6 +158,7 @@ func (h *AsanaHandler) GetAsanaStatus(w http.ResponseWriter, r *http.Request) {
 		"connected":      integration.Connected,
 		"workspace_id":   integration.WorkspaceID,
 		"workspace_name": integration.WorkspaceName,
+		"project_gid":    integration.ProjectID,
 		"last_sync_at":   integration.LastSyncAt,
 	})
 }

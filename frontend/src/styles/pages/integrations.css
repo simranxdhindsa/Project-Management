@@ -468,6 +468,16 @@
   flex-wrap: wrap;
 }
 
+/* Project select row */
+.int-project-select-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.int-project-select-row .int-project-dropdown {
+  flex: 1;
+}
+
 /* Empty state */
 .int-empty-state {
   display: flex;
