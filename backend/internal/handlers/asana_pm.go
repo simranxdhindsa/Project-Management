@@ -1782,7 +1782,19 @@ func (h *AsanaPMHandler) GetUserAvatars(w http.ResponseWriter, r *http.Request) 
 
 	avatarMap := make(map[string]string, len(users))
 	for _, u := range users {
-		photoURL := client.GetUserPhoto(r.Context(), u.GID)
+		// Photo is already included in GetWorkspaceUsers (opt_fields=photo)
+		photoURL := ""
+		if u.Photo != nil {
+			if u.Photo.Image60x60 != "" {
+				photoURL = u.Photo.Image60x60
+			} else if u.Photo.Image128x128 != "" {
+				photoURL = u.Photo.Image128x128
+			}
+		}
+		// Fallback: individual fetch if workspace listing didn't include photo
+		if photoURL == "" {
+			photoURL = client.GetUserPhoto(r.Context(), u.GID)
+		}
 		if photoURL != "" {
 			avatarMap[u.Name] = photoURL
 		}
@@ -1843,6 +1855,55 @@ func (h *AsanaPMHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request)
 		logs = []database.IssueStateLog{}
 	}
 
+	// Live fallback: if log is empty (no webhook history yet), synthesize rows from
+	// live Asana tasks. When a week filter is set, only include tasks modified within
+	// that week so results are scoped to the requested period.
+	if len(logs) == 0 {
+		if client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID); clientErr == nil && projectGID != "" {
+			if tasks, tasksErr := client.GetProjectTasksPaginated(r.Context(), projectGID); tasksErr == nil {
+				now := time.Now()
+				for _, task := range tasks {
+					if task.Completed {
+						continue
+					}
+					// Week filter: only include tasks modified within the requested week
+					if params.WeekStart != nil && params.WeekEnd != nil {
+						if task.ModifiedAt.Before(*params.WeekStart) || task.ModifiedAt.After(*params.WeekEnd) {
+							continue
+						}
+					}
+					assigneeName := ""
+					if task.Assignee != nil {
+						assigneeName = task.Assignee.Name
+					}
+					// Apply assignee filter
+					if len(params.Assignees) > 0 {
+						matched := false
+						for _, a := range params.Assignees {
+							if strings.EqualFold(a, assigneeName) {
+								matched = true
+								break
+							}
+						}
+						if !matched {
+							continue
+						}
+					}
+					section := taskSectionName(task)
+					hoursInState := now.Sub(task.ModifiedAt).Hours()
+					logs = append(logs, database.IssueStateLog{
+						IssueID:                  task.GID,
+						IssueSummary:             task.Name,
+						Assignee:                 assigneeName,
+						ToState:                  section,
+						TransitionedAt:           task.ModifiedAt,
+						DurationInPrevStateHours: &hoursInState,
+					})
+				}
+			}
+		}
+	}
+
 	pinnedSet := make(map[string]bool, len(pinnedIDs))
 	for _, id := range pinnedIDs {
 		pinnedSet[id] = true
@@ -1893,6 +1954,50 @@ func (h *AsanaPMHandler) GetIssueTimelines(w http.ResponseWriter, r *http.Reques
 	}
 	if timelines == nil {
 		timelines = []database.IssueTimeline{}
+	}
+
+	// Live fallback: synthesize timelines from current Asana tasks when log is empty.
+	if len(timelines) == 0 {
+		if client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID); clientErr == nil && projectGID != "" {
+			if tasks, tasksErr := client.GetProjectTasksPaginated(r.Context(), projectGID); tasksErr == nil {
+				now := time.Now()
+				pinnedSet2 := make(map[string]bool, len(pinnedIDs))
+				for _, id := range pinnedIDs {
+					pinnedSet2[id] = true
+				}
+				for _, task := range tasks {
+					if task.Completed {
+						continue
+					}
+					assigneeName := ""
+					if task.Assignee != nil {
+						assigneeName = task.Assignee.Name
+					}
+					section := taskSectionName(task)
+					liveHours := now.Sub(task.ModifiedAt).Hours()
+					threshold := overdueThresholdHoursForPriority("")
+					timelines = append(timelines, database.IssueTimeline{
+						IssueID:        task.GID,
+						IssueSummary:   task.Name,
+						Assignee:       assigneeName,
+						Pinned:         pinnedSet2[task.GID],
+						TotalStints:    1,
+						TotalHours:     liveHours,
+						IsLive:         true,
+						LiveHours:      liveHours,
+						IsOverdue:      liveHours > threshold,
+						ThresholdHours: threshold,
+						FirstEnteredAt: task.ModifiedAt,
+						LastActivityAt: task.ModifiedAt,
+						Stints: []database.IssueStint{{
+							StintNumber: 1,
+							EnteredAt:   task.ModifiedAt,
+							ExitedTo:    section,
+						}},
+					})
+				}
+			}
+		}
 	}
 
 	type TimelineWithDismiss struct {

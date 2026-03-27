@@ -46,11 +46,21 @@ type Task struct {
 	PermalinkURL string       `json:"permalink_url"`
 }
 
+// UserPhoto holds Asana avatar URLs at different sizes
+type UserPhoto struct {
+	Image21x21   string `json:"image_21x21"`
+	Image27x27   string `json:"image_27x27"`
+	Image36x36   string `json:"image_36x36"`
+	Image60x60   string `json:"image_60x60"`
+	Image128x128 string `json:"image_128x128"`
+}
+
 // User represents an Asana user
 type User struct {
-	GID   string `json:"gid"`
-	Name  string `json:"name"`
-	Email string `json:"email,omitempty"`
+	GID   string     `json:"gid"`
+	Name  string     `json:"name"`
+	Email string     `json:"email,omitempty"`
+	Photo *UserPhoto `json:"photo,omitempty"`
 }
 
 // Project represents an Asana project
@@ -345,7 +355,7 @@ func (c *Client) DeleteTask(ctx context.Context, taskGID string) error {
 
 // GetWorkspaceUsers returns all users in a workspace
 func (c *Client) GetWorkspaceUsers(ctx context.Context, workspaceGID string) ([]User, error) {
-	path := fmt.Sprintf("/workspaces/%s/users?opt_fields=gid,name,email", workspaceGID)
+	path := fmt.Sprintf("/workspaces/%s/users?opt_fields=gid,name,email,photo", workspaceGID)
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -427,23 +437,22 @@ func (c *Client) GetProjectTasksPaginated(ctx context.Context, projectGID string
 }
 
 // GetUserPhoto returns the photo URL for an Asana user (empty string if none).
-// Asana API: GET /users/{user_gid}/photo
+// Asana API: GET /users/{user_gid}?opt_fields=photo
 func (c *Client) GetUserPhoto(ctx context.Context, userGID string) string {
-	body, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/users/%s/photo", userGID), nil)
+	body, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/users/%s?opt_fields=photo", userGID), nil)
 	if err != nil {
 		return ""
 	}
 	var resp struct {
 		Data *struct {
-			Image60x60 string `json:"image_60x60"`
-			Image128x128 string `json:"image_128x128"`
+			Photo *UserPhoto `json:"photo"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(body, &resp); err != nil || resp.Data == nil {
+	if err := json.Unmarshal(body, &resp); err != nil || resp.Data == nil || resp.Data.Photo == nil {
 		return ""
 	}
-	if resp.Data.Image60x60 != "" {
-		return resp.Data.Image60x60
+	if resp.Data.Photo.Image60x60 != "" {
+		return resp.Data.Photo.Image60x60
 	}
-	return resp.Data.Image128x128
+	return resp.Data.Photo.Image128x128
 }
