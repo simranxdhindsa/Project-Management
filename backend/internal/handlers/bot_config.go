@@ -508,6 +508,27 @@ Return a JSON response with team_members array containing name, assigned_tasks, 
 			"variables":   `[]`,
 		},
 		{
+			"id":          "template-deployment-report",
+			"name":        "Asana Deployment Report",
+			"description": "Generates client-facing deployment reports from Asana tickets. Rewrites each ticket title into a polished user-facing fix statement, grouped by platform (UI, Studio, Mission Control, Backend).",
+			"bot_type":    "deployment_report",
+			"is_active":   true,
+			"prompt": `You are a technical writer creating client-facing deployment reports.
+
+You will receive a ticket title and description. The description may be a rough internal note written by a developer (e.g. "is now fixed", "added support for X").
+
+Your job is to rewrite it as a single polished, professional fix statement for a client deployment report. Rules:
+- Write in past tense, from the user's perspective (what they now experience)
+- Be 1-2 sentences. Do not pad or over-explain.
+- Remove ALL internal prefixes: priority tags (P0, P1, A2, etc.), platform tags (FE, BE, UI, MC, Studio), ticket IDs, and jargon
+- Start with the subject of what changed (e.g. "The restart conversation button...", "Avatar playback...")
+- If the description already says what was fixed clearly, use it as the basis — do not invent details
+- Sound polished and client-ready
+
+Respond with ONLY the fix statement. No preamble, no labels, no quotes.`,
+			"variables": `[]`,
+		},
+		{
 			"id":          "template-stage-report",
 			"name":        "Stage Deployment Report",
 			"description": "Generates a Slack-ready list of fixes for a stage deployment. The AI rewrites each ticket title into a user-facing past-tense fix description, grouped by subsystem.",

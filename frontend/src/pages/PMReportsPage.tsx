@@ -1,4 +1,15 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import DeploymentProjectBrowser from '../components/deployment/DeploymentProjectBrowser'
+import DeploymentTicketInput from '../components/deployment/DeploymentTicketInput'
+import DeploymentTicketList from '../components/deployment/DeploymentTicketList'
+import DeploymentReportPreview from '../components/deployment/DeploymentReportPreview'
+import DeploymentExportButtons from '../components/deployment/DeploymentExportButtons'
+import DeploymentBotConfigPanel from '../components/deployment/DeploymentBotConfig'
+import type { LoadedDeploymentTicket } from '../components/deployment/DeploymentProjectBrowser'
+import type { TicketLine } from '../components/deployment/DeploymentTicketInput'
+import type { DeploymentTicket, Platform } from '../components/deployment/types'
+import { extractPriority, detectPlatform, stripPrefix } from '../components/deployment/types'
+import type { DeploymentBotConfig, DeploymentSectionConfig } from '../services/api'
 import { createPortal } from 'react-dom'
 import {
   MessageSquare, Send, User, Bot, Loader2,
@@ -2083,7 +2094,7 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
 
 // ─── Deployment Report Tab ───────────────────────────────────────────────────
 
-function DeploymentReportTab() {
+function YouTrackStageReport() {
   const [columns, setColumns] = useState<string[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [generating, setGenerating] = useState(false)
@@ -2099,8 +2110,7 @@ function DeploymentReportTab() {
       const res = await getStageReportColumns()
       if ((res as any).success && (res as any).data) setColumns((res as any).data)
     } catch {
-      const src = getActiveSource()
-      setError(`Failed to load columns. Check ${src === 'asana' ? 'Asana' : 'YouTrack'} connection.`)
+      setError('Failed to load columns. Check YouTrack connection.')
     } finally {
       setLoadingCols(false)
     }
@@ -2145,7 +2155,7 @@ function DeploymentReportTab() {
   }
 
   return (
-    <div className="pm-tab-content sr-panel">
+    <>
       <div className="pm-tab-header">
         <h3 className="pm-section-title"><Rocket size={18} /> Deployment Report</h3>
         <p className="sr-subtitle">Select YouTrack columns, generate a Slack-ready list of fixes for your stage deployment.</p>
@@ -2210,6 +2220,311 @@ function DeploymentReportTab() {
             <pre className="sr-report-box">{report}</pre>
           )}
         </div>
+      )}
+    </>
+  )
+}
+
+const DEFAULT_SECTIONS: DeploymentSectionConfig[] = [
+  { platform: 'UI', header: 'UI', enabled: true },
+  { platform: 'Studio', header: 'Studio', enabled: true },
+  { platform: 'Mission Control', header: 'Mission Control', enabled: true },
+  { platform: 'Backend', header: 'Backend / Platform', enabled: true },
+  { platform: 'Uncategorized', header: 'Other', enabled: true },
+]
+
+const DR_PAGE_SIZE = 8
+
+function AsanaDeploymentReport() {
+  const [activeView, setActiveView] = useState<'report' | 'config'>('report')
+  const [tickets, setTickets] = useState<DeploymentTicket[]>([])
+  const [botConfig, setBotConfig] = useState<DeploymentBotConfig>({ systemPrompt: '', sections: DEFAULT_SECTIONS })
+  const [isFetching, setIsFetching] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [reportReady, setReportReady] = useState(false)
+  const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number } | null>(null)
+  const [genProgress, setGenProgress] = useState<{ current: number; total: number; retryCountdown: number } | null>(null)
+  const [preloadTickets, setPreloadTickets] = useState<LoadedDeploymentTicket[]>([])
+
+  const readyCount = useMemo(() => tickets.filter(t => t.status === 'ready').length, [tickets])
+  const sections = botConfig.sections?.length ? botConfig.sections : DEFAULT_SECTIONS
+
+  // ── Fetch tickets (matches DR App.tsx handleFetchTickets exactly) ───────────
+  const handleFetch = async (lines: TicketLine[]) => {
+    if (!lines.length) return
+    setIsFetching(true)
+    setReportReady(false)
+
+    // Count lines that need an Asana API call
+    const total = lines.filter(l => !(l.title !== null && l.manualDesc !== null)).length
+    let done = 0
+    setFetchProgress(total > 0 ? { done: 0, total } : null)
+
+    // Add placeholders immediately (status: fetching)
+    const placeholders: DeploymentTicket[] = lines.map(({ url, title, manualDesc, gid }) => ({
+      url, gid: gid || '', name: title ?? '',
+      notes: '', manualDescription: false,
+      platform: title ? detectPlatform(title) : ('Uncategorized' as Platform),
+      priority: title ? extractPriority(title) : null,
+      cleanName: title ? stripPrefix(title) : '',
+      fixStatement: null, status: 'fetching' as const,
+    }))
+    setTickets(prev => {
+      const existing = new Set(prev.map(t => t.url))
+      return [...prev, ...placeholders.filter(p => !existing.has(p.url))]
+    })
+
+    // Fire all fetches concurrently — increment counter as each settles
+    const results = await Promise.allSettled(
+      lines.map(async ({ url, title, manualDesc, gid }) => {
+        // Immediate: title + manualDesc both known — no Asana call needed
+        if (title !== null && manualDesc !== null) {
+          return { gid: gid || url, name: title, notes: manualDesc, manualDescription: true }
+        }
+
+        const afterFetch = () => { done++; setFetchProgress({ done, total }) }
+
+        try {
+          const res = await api.getAsanaDeploymentTask(url)
+          afterFetch()
+          if (!res.success || !res.data) throw new Error('Fetch failed')
+          return {
+            gid: res.data.gid,
+            name: title ?? res.data.name,
+            notes: manualDesc ?? res.data.notes,
+            manualDescription: !!manualDesc,
+          }
+        } catch (e) {
+          afterFetch()
+          throw e
+        }
+      })
+    )
+
+    // Apply results back to tickets array
+    setTickets(prev => {
+      const updated = [...prev]
+      results.forEach((result, i) => {
+        const idx = updated.findIndex(t => t.url === lines[i].url)
+        if (idx === -1) return
+        if (result.status === 'fulfilled') {
+          const { gid, name, notes, manualDescription } = result.value
+          updated[idx] = {
+            ...updated[idx], gid, name, notes, manualDescription,
+            platform: detectPlatform(name), priority: extractPriority(name),
+            cleanName: stripPrefix(name), fixStatement: null, status: 'ready' as const,
+          }
+        } else {
+          updated[idx] = { ...updated[idx], status: 'error' as const, error: 'Failed to fetch ticket' }
+        }
+      })
+      return updated
+    })
+
+    setIsFetching(false)
+    setFetchProgress(null)
+  }
+
+  // Load from ProjectBrowser → populate textarea only; user edits then clicks Fetch Tickets
+  const handleProjectLoad = (loaded: LoadedDeploymentTicket[]) => {
+    setTickets([])
+    setReportReady(false)
+    setPreloadTickets(loaded)
+  }
+
+  // ── Generate fix statements (matches DR App.tsx handleGenerateReport) ───────
+  const handleGenerate = async () => {
+    const toGenerate = tickets.filter(t => t.status === 'ready' && t.gid)
+    if (!toGenerate.length) return
+
+    setIsGenerating(true)
+    setReportReady(false)
+
+    const makeBatches = (list: typeof toGenerate) => {
+      const batches: typeof toGenerate[] = []
+      for (let i = 0; i < list.length; i += DR_PAGE_SIZE) batches.push(list.slice(i, i + DR_PAGE_SIZE))
+      return batches
+    }
+    const pages = makeBatches(toGenerate)
+    setGenProgress({ current: 0, total: pages.length, retryCountdown: 0 })
+
+    // Mark all as generating
+    setTickets(prev => prev.map(t =>
+      toGenerate.find(g => g.gid === t.gid) ? { ...t, status: 'generating' as const } : t
+    ))
+
+    // Local set — never read React state mid-async
+    const resolvedGids = new Set<string>()
+
+    const countdown = async (secs: number, pageIdx: number, total: number) => {
+      for (let s = secs; s > 0; s--) {
+        setGenProgress({ current: pageIdx, total, retryCountdown: s })
+        await new Promise(r => setTimeout(r, 1000))
+      }
+    }
+
+    const runBatch = async (batch: typeof toGenerate, pageIdx: number, total: number) => {
+      setGenProgress({ current: pageIdx, total, retryCountdown: 0 })
+      const inputs = batch.map(t => ({
+        gid: t.gid, name: t.name, notes: t.notes, manualDescription: t.manualDescription,
+      }))
+      try {
+        const res = await api.generateAsanaDeploymentReport(inputs)
+        if (res.success && res.data) {
+          res.data.results.forEach(r => { if (r.fixStatement) resolvedGids.add(r.gid) })
+          setTickets(prev => prev.map(t => {
+            const result = res.data!.results.find(r => r.gid === t.gid)
+            if (!result?.fixStatement) return t
+            return { ...t, fixStatement: result.fixStatement, status: 'ready' as const }
+          }))
+          const waitSecs = (res.data as any).retryAfter ?? 0
+          if (waitSecs > 0 && pageIdx < total - 1) {
+            await countdown(waitSecs, pageIdx + 1, total)
+          }
+        } else if (pageIdx < total - 1) {
+          await countdown(5, pageIdx + 1, total)
+        }
+      } catch (err: any) {
+        const is429 = err?.response?.status === 429 || err?.status === 429
+        if (pageIdx < total - 1) {
+          await countdown(is429 ? 10 : 5, pageIdx + 1, total)
+        }
+      }
+      setGenProgress({ current: pageIdx + 1, total, retryCountdown: 0 })
+    }
+
+    for (const [i, batch] of pages.entries()) {
+      await runBatch(batch, i, pages.length)
+    }
+
+    // Auto-retry unresolved (up to 3 passes)
+    const MAX_RETRIES = 3
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const remaining = toGenerate.filter(t => !resolvedGids.has(t.gid))
+      if (remaining.length === 0) break
+      await countdown(8, 0, Math.ceil(remaining.length / DR_PAGE_SIZE))
+      for (const [i, batch] of makeBatches(remaining).entries()) {
+        await runBatch(batch, i, Math.ceil(remaining.length / DR_PAGE_SIZE))
+      }
+    }
+
+    // Revert any still-generating tickets back to 'ready' (never show error)
+    setTickets(prev => prev.map(t =>
+      t.status === 'generating' ? { ...t, status: 'ready' as const } : t
+    ))
+
+    setIsGenerating(false)
+    setGenProgress(null)
+    setReportReady(true)
+  }
+
+  const handleClearAll = () => {
+    setTickets([])
+    setReportReady(false)
+    setPreloadTickets([])
+  }
+
+  const genButtonLabel = () => {
+    if (!isGenerating) return <><Rocket size={14} /> Generate Report ({readyCount} tickets)</>
+    if (genProgress) {
+      if (genProgress.retryCountdown > 0) {
+        return <><Loader2 size={14} className="animate-spin" /> Rate limited — resuming in {genProgress.retryCountdown}s…</>
+      }
+      return <><Loader2 size={14} className="animate-spin" /> Batch {genProgress.current + 1} of {genProgress.total}…</>
+    }
+    return <><Loader2 size={14} className="animate-spin" /> Generating…</>
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <nav className="dr-tab-bar">
+        <button className={`dr-tab${activeView === 'report' ? ' dr-tab--active' : ''}`} onClick={() => setActiveView('report')}>Report</button>
+        <button className={`dr-tab${activeView === 'config' ? ' dr-tab--active' : ''}`} onClick={() => setActiveView('config')}>Bot Config</button>
+      </nav>
+
+      {activeView === 'config' ? (
+        <DeploymentBotConfigPanel onConfigChange={setBotConfig} />
+      ) : (
+        <>
+          {/* Step 1: ProjectBrowser + TicketInput (combined, like DR) */}
+          <div className="dr-card">
+            <div className="dr-step-label"><span className="dr-step-num">1</span>Paste Asana ticket URLs</div>
+            <DeploymentProjectBrowser onLoad={handleProjectLoad} isLoading={isFetching} />
+            <hr className="dr-divider" />
+            <DeploymentTicketInput onFetch={handleFetch} isLoading={isFetching} preloadTickets={preloadTickets} />
+            {isFetching && fetchProgress && (
+              <div className="dr-gen-progress" style={{ marginTop: '0.6rem' }}>
+                <div className="dr-progress-track">
+                  <div className="dr-progress-fill" style={{ width: `${Math.round((fetchProgress.done / fetchProgress.total) * 100)}%` }} />
+                </div>
+                <span className="dr-progress-label">Fetching tickets… {fetchProgress.done}/{fetchProgress.total}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Step 2: Ticket list + Generate (like DR) */}
+          {tickets.length > 0 && (
+            <div className="dr-card">
+              <div className="dr-step-label"><span className="dr-step-num">2</span>Review fetched tickets</div>
+              <DeploymentTicketList tickets={tickets} />
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={handleGenerate}
+                  disabled={isGenerating || readyCount === 0}
+                >
+                  {genButtonLabel()}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={handleClearAll} disabled={isGenerating}>
+                  Clear All
+                </button>
+              </div>
+
+              {isGenerating && genProgress && (
+                <div className="dr-gen-progress" style={{ marginTop: '0.6rem' }}>
+                  <div className="dr-progress-track">
+                    <div className="dr-progress-fill" style={{ width: `${Math.round((genProgress.current / genProgress.total) * 100)}%` }} />
+                  </div>
+                  {genProgress.retryCountdown > 0
+                    ? <span className="dr-progress-countdown">Rate limit reached — resuming in {genProgress.retryCountdown}s</span>
+                    : <span className="dr-progress-label">Batch {genProgress.current + 1} of {genProgress.total} · {DR_PAGE_SIZE} tickets per batch</span>
+                  }
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 3: Report preview + export (like DR) */}
+          {reportReady && (
+            <div className="dr-card">
+              <div className="dr-step-label"><span className="dr-step-num">3</span>Export deployment report</div>
+              <DeploymentExportButtons tickets={tickets} sections={sections} disabled={!reportReady} />
+              <hr className="dr-divider" />
+              <DeploymentReportPreview tickets={tickets} sections={sections} />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function DeploymentReportTab() {
+  const isAsana = getActiveSource() === 'asana'
+
+  return (
+    <div className="pm-tab-content sr-panel">
+      {isAsana ? (
+        <>
+          <div className="pm-tab-header">
+            <h3 className="pm-section-title"><Rocket size={18} /> Deployment Report</h3>
+            <p className="sr-subtitle">Generate a client-ready deployment report from Asana tickets with AI-polished fix statements.</p>
+          </div>
+          <AsanaDeploymentReport />
+        </>
+      ) : (
+        <YouTrackStageReport />
       )}
     </div>
   )

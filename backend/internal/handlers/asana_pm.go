@@ -42,6 +42,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
@@ -62,6 +63,7 @@ type AsanaPMHandler struct {
 	asanaPMRepo     *database.AsanaPMRepository
 	configRepo      *database.WorkflowConfigRepository
 	reportRepo      *database.ReportRepository
+	botRepo         *database.BotConfigRepository
 }
 
 // NewAsanaPMHandler creates a new AsanaPMHandler
@@ -75,6 +77,7 @@ func NewAsanaPMHandler() *AsanaPMHandler {
 		asanaPMRepo:     database.NewAsanaPMRepository(),
 		configRepo:      database.NewWorkflowConfigRepository(),
 		reportRepo:      database.NewReportRepository(),
+		botRepo:         database.NewBotConfigRepository(),
 	}
 }
 
@@ -2663,6 +2666,505 @@ func (h *AsanaPMHandler) BackfillAsanaLog(w http.ResponseWriter, r *http.Request
 		"inserted":  inserted,
 		"skipped":   len(entries) - inserted,
 	})
+}
+
+// ─── Deployment Report ───────────────────────────────────────────────────────
+
+// deploymentSectionEntry mirrors the Deployment-Report app's SectionEntry shape
+type deploymentSectionEntry struct {
+	Platform string `json:"platform"`
+	Header   string `json:"header"`
+	Enabled  bool   `json:"enabled"`
+}
+
+// deploymentBotConfig is the shape returned/accepted by GET/PUT /deployment/config
+type deploymentBotConfig struct {
+	SystemPrompt string                   `json:"systemPrompt"`
+	Sections     []deploymentSectionEntry `json:"sections"`
+}
+
+var defaultDeploymentPrompt = `You are a technical writer creating client-facing deployment reports.
+
+You will receive a ticket title and description. The description may be a rough internal note written by a developer (e.g. "is now fixed", "added support for X").
+
+Your job is to rewrite it as a single polished, professional fix statement for a client deployment report. Rules:
+- Write in past tense, from the user's perspective (what they now experience)
+- Be 1-2 sentences. Do not pad or over-explain.
+- Remove ALL internal prefixes: priority tags (P0, P1, A2, etc.), platform tags (FE, BE, UI, MC, Studio), ticket IDs, and jargon
+- Start with the subject of what changed (e.g. "The restart conversation button...", "Avatar playback...")
+- If the description already says what was fixed clearly, use it as the basis — do not invent details
+- Sound polished and client-ready
+
+Respond with ONLY the fix statement. No preamble, no labels, no quotes.`
+
+var defaultDeploymentSections = []deploymentSectionEntry{
+	{Platform: "UI", Header: "UI", Enabled: true},
+	{Platform: "Studio", Header: "Studio", Enabled: true},
+	{Platform: "Mission Control", Header: "Mission Control", Enabled: true},
+	{Platform: "Backend", Header: "Backend / Platform", Enabled: true},
+	{Platform: "Uncategorized", Header: "Other", Enabled: true},
+}
+
+// getDeploymentPAT returns the Asana PAT for direct HTTP calls (same resolution as getAsanaClient)
+func (h *AsanaPMHandler) getDeploymentPAT(ctx context.Context, userID string) string {
+	if userID != "" {
+		if integ, err := h.integrationRepo.GetAsanaIntegration(ctx, userID); err == nil && integ != nil && integ.Connected && integ.AccessToken != "" {
+			return integ.AccessToken
+		}
+	}
+	settings, _ := h.settingsRepo.GetAsanaSettings(ctx)
+	if settings != nil && settings.Configured && settings.PAT != "" {
+		return settings.PAT
+	}
+	return os.Getenv("ASANA_PAT")
+}
+
+// GetDeploymentTask fetches a single Asana task by URL and returns its name + notes.
+// POST /api/asana/pm/deployment/task
+func (h *AsanaPMHandler) GetDeploymentTask(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "url is required"})
+		return
+	}
+	if !strings.HasPrefix(req.URL, "https://app.asana.com/") {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Please enter a valid Asana URL"})
+		return
+	}
+
+	// Extract numeric GID from URL
+	gid := extractAsanaTaskGID(req.URL)
+	if gid == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Could not parse task ID from URL"})
+		return
+	}
+
+	pat := h.getDeploymentPAT(r.Context(), userID)
+	if pat == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Asana is not configured"})
+		return
+	}
+
+	asanaURL := fmt.Sprintf("https://app.asana.com/api/1.0/tasks/%s?opt_fields=gid,name,notes", gid)
+	httpReq, _ := http.NewRequest(http.MethodGet, asanaURL, nil)
+	httpReq.Header.Set("Authorization", "Bearer "+pat)
+	httpReq.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Could not reach Asana"})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Asana authentication failed"})
+		return
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Task not found — check the URL"})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Asana returned an error"})
+		return
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var asanaResp struct {
+		Data struct {
+			GID   string `json:"gid"`
+			Name  string `json:"name"`
+			Notes string `json:"notes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &asanaResp); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to parse Asana response"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"gid":   asanaResp.Data.GID,
+			"name":  asanaResp.Data.Name,
+			"notes": asanaResp.Data.Notes,
+		},
+	})
+}
+
+// extractAsanaTaskGID extracts the numeric GID from an Asana task URL
+func extractAsanaTaskGID(rawURL string) string {
+	// Strip query and fragment
+	if idx := strings.Index(rawURL, "?"); idx != -1 {
+		rawURL = rawURL[:idx]
+	}
+	if idx := strings.Index(rawURL, "#"); idx != -1 {
+		rawURL = rawURL[:idx]
+	}
+	parts := strings.Split(strings.TrimRight(rawURL, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		seg := parts[i]
+		if len(seg) > 0 {
+			allDigit := true
+			for _, c := range seg {
+				if c < '0' || c > '9' {
+					allDigit = false
+					break
+				}
+			}
+			if allDigit {
+				return seg
+			}
+		}
+	}
+	return ""
+}
+
+// deploymentTicketInput is one ticket in a GenerateDeploymentReport request
+type deploymentTicketInput struct {
+	GID               string `json:"gid"`
+	Name              string `json:"name"`
+	Notes             string `json:"notes"`
+	ManualDescription bool   `json:"manualDescription"`
+}
+
+// GenerateDeploymentReport generates per-ticket AI fix statements.
+// POST /api/asana/pm/deployment/generate
+func (h *AsanaPMHandler) GenerateDeploymentReport(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Tickets []deploymentTicketInput `json:"tickets"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Tickets) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "No tickets provided"})
+		return
+	}
+	if len(req.Tickets) > 100 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Maximum 100 tickets per request"})
+		return
+	}
+
+	// Truncate oversized fields
+	for i, t := range req.Tickets {
+		if len(t.Name) > 500 {
+			req.Tickets[i].Name = t.Name[:500]
+		}
+		if len(t.Notes) > 5000 {
+			req.Tickets[i].Notes = t.Notes[:5000]
+		}
+	}
+
+	// Load system prompt from active deployment_report bot config
+	systemPrompt := defaultDeploymentPrompt
+	if h.botRepo != nil {
+		bots, _ := h.botRepo.GetByType(r.Context(), models.BotTypeDeploymentReport)
+		for _, b := range bots {
+			if b.IsActive && strings.TrimSpace(b.Prompt) != "" {
+				systemPrompt = b.Prompt
+				break
+			}
+		}
+	}
+
+	type ticketResult struct {
+		GID          string  `json:"gid"`
+		FixStatement *string `json:"fixStatement"`
+		Error        *string `json:"error,omitempty"`
+	}
+	results := make([]ticketResult, len(req.Tickets))
+
+	// Process concurrently (max 3 goroutines — Groq free tier limit)
+	sem := make(chan struct{}, 3)
+	var wg sync.WaitGroup
+
+	for i, ticket := range req.Tickets {
+		wg.Add(1)
+		go func(idx int, t deploymentTicketInput) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			notes := strings.TrimSpace(t.Notes)
+
+			// If user provided a manual description (via --> syntax), use it directly — skip AI
+			if t.ManualDescription && notes != "" {
+				results[idx] = ticketResult{GID: t.GID, FixStatement: &notes}
+				return
+			}
+
+			if notes == "" {
+				notes = "No description provided."
+			}
+			userMsg := fmt.Sprintf("<title>%s</title>\n<description>%s</description>", t.Name, notes)
+
+			fix, err := ai.QueryWithContext(r.Context(), systemPrompt, userMsg)
+			if err != nil || strings.TrimSpace(fix) == "" {
+				if err != nil {
+					errMsg := err.Error()
+					results[idx] = ticketResult{GID: t.GID, FixStatement: nil, Error: &errMsg}
+				} else {
+					results[idx] = ticketResult{GID: t.GID, FixStatement: &t.Name}
+				}
+				return
+			}
+			fix = strings.TrimSpace(fix)
+			results[idx] = ticketResult{GID: t.GID, FixStatement: &fix}
+		}(i, ticket)
+	}
+	wg.Wait()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"results":    results,
+		"retryAfter": 0,
+	})
+}
+
+// GetDeploymentConfig returns the deployment bot config (system prompt + sections).
+// GET /api/asana/pm/deployment/config
+func (h *AsanaPMHandler) GetDeploymentConfig(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	cfg := deploymentBotConfig{
+		SystemPrompt: defaultDeploymentPrompt,
+		Sections:     defaultDeploymentSections,
+	}
+
+	if h.botRepo != nil {
+		bots, _ := h.botRepo.GetByType(r.Context(), models.BotTypeDeploymentReport)
+		for _, b := range bots {
+			if b.IsActive {
+				if strings.TrimSpace(b.Prompt) != "" {
+					cfg.SystemPrompt = b.Prompt
+				}
+				if strings.TrimSpace(b.Variables) != "" && b.Variables != "[]" {
+					var sections []deploymentSectionEntry
+					if err := json.Unmarshal([]byte(b.Variables), &sections); err == nil && len(sections) > 0 {
+						cfg.Sections = sections
+					}
+				}
+				break
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": cfg})
+}
+
+// PutDeploymentConfig saves the deployment bot config.
+// PUT /api/asana/pm/deployment/config
+func (h *AsanaPMHandler) PutDeploymentConfig(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var incoming deploymentBotConfig
+	if err := json.NewDecoder(r.Body).Decode(&incoming); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid request body"})
+		return
+	}
+	if strings.TrimSpace(incoming.SystemPrompt) == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "systemPrompt is required"})
+		return
+	}
+	if len(incoming.SystemPrompt) > 8000 {
+		incoming.SystemPrompt = incoming.SystemPrompt[:8000]
+	}
+	if len(incoming.Sections) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "sections must not be empty"})
+		return
+	}
+
+	sectionsJSON, _ := json.Marshal(incoming.Sections)
+
+	// Upsert: update if active deployment_report bot exists, else insert
+	var upsertErr error
+	if h.botRepo != nil {
+		bots, _ := h.botRepo.GetByType(r.Context(), models.BotTypeDeploymentReport)
+		var existing *models.BotConfig
+		for _, b := range bots {
+			if b.IsActive {
+				existing = b
+				break
+			}
+		}
+		if existing != nil {
+			existing.Prompt = incoming.SystemPrompt
+			existing.Variables = string(sectionsJSON)
+			upsertErr = h.botRepo.Update(r.Context(), existing)
+		} else {
+			newBot := &models.BotConfig{
+				Name:        "Deployment Report",
+				Description: "Generates client-facing deployment reports from Asana tickets",
+				BotType:     models.BotTypeDeploymentReport,
+				Prompt:      incoming.SystemPrompt,
+				Variables:   string(sectionsJSON),
+				IsActive:    true,
+				CreatedBy:   userID,
+			}
+			upsertErr = h.botRepo.Create(r.Context(), newBot)
+		}
+	}
+
+	if upsertErr != nil {
+		log.Printf("PutDeploymentConfig: %v", upsertErr)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": incoming})
+}
+
+// GetSectionTasksForDeployment returns paginated tasks for a given Asana section GID.
+// GET /api/asana/pm/deployment/sections/{sectionGid}/tasks
+func (h *AsanaPMHandler) GetSectionTasksForDeployment(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	sectionGid := vars["sectionGid"]
+	if sectionGid == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "sectionGid is required"})
+		return
+	}
+
+	pat := h.getDeploymentPAT(r.Context(), userID)
+	if pat == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Asana is not configured"})
+		return
+	}
+
+	type taskItem struct {
+		GID          string `json:"gid"`
+		Name         string `json:"name"`
+		PermalinkURL string `json:"permalink_url"`
+	}
+
+	var allTasks []taskItem
+	nextURL := fmt.Sprintf("https://app.asana.com/api/1.0/sections/%s/tasks?opt_fields=gid,name,permalink_url&limit=100", sectionGid)
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	pageCount := 0
+
+	for nextURL != "" && pageCount < 50 {
+		pageCount++
+		req, _ := http.NewRequest(http.MethodGet, nextURL, nil)
+		req.Header.Set("Authorization", "Bearer "+pat)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			break
+		}
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			break
+		}
+
+		var page struct {
+			Data     []taskItem `json:"data"`
+			NextPage *struct {
+				URI string `json:"uri"`
+			} `json:"next_page"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			resp.Body.Close()
+			break
+		}
+		resp.Body.Close()
+
+		allTasks = append(allTasks, page.Data...)
+
+		if page.NextPage != nil && page.NextPage.URI != "" {
+			if strings.HasPrefix(page.NextPage.URI, "/") {
+				nextURL = "https://app.asana.com" + page.NextPage.URI
+			} else {
+				nextURL = page.NextPage.URI
+			}
+		} else {
+			nextURL = ""
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]interface{}{"tasks": allTasks}})
+}
+
+// GetDeploymentProjectSections returns sections for the configured Asana project.
+// GET /api/asana/pm/deployment/project/sections
+func (h *AsanaPMHandler) GetDeploymentProjectSections(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, projectGID, _, err := h.getAsanaClient(r.Context(), userID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+		return
+	}
+
+	sections, err := client.GetSections(r.Context(), projectGID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to fetch sections: " + err.Error()})
+		return
+	}
+
+	type sectionItem struct {
+		GID  string `json:"gid"`
+		Name string `json:"name"`
+	}
+	result := make([]sectionItem, 0, len(sections))
+	for _, s := range sections {
+		result = append(result, sectionItem{GID: s.GID, Name: s.Name})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": result})
 }
 
 // Ensure log and _ imports are used

@@ -123,6 +123,12 @@ func main() {
 	asanaPMRoutes.HandleFunc("/report/{date}", asanaPMHandler.GeneratePMReport).Methods("GET")
 	asanaPMRoutes.HandleFunc("/stage-report/columns", asanaPMHandler.GetStageReportColumns).Methods("GET")
 	asanaPMRoutes.HandleFunc("/stage-report/generate", asanaPMHandler.GenerateStageReport).Methods("POST")
+	asanaPMRoutes.HandleFunc("/deployment/task", asanaPMHandler.GetDeploymentTask).Methods("POST")
+	asanaPMRoutes.HandleFunc("/deployment/generate", asanaPMHandler.GenerateDeploymentReport).Methods("POST")
+	asanaPMRoutes.HandleFunc("/deployment/config", asanaPMHandler.GetDeploymentConfig).Methods("GET")
+	asanaPMRoutes.HandleFunc("/deployment/config", asanaPMHandler.PutDeploymentConfig).Methods("PUT")
+	asanaPMRoutes.HandleFunc("/deployment/project/sections", asanaPMHandler.GetDeploymentProjectSections).Methods("GET")
+	asanaPMRoutes.HandleFunc("/deployment/sections/{sectionGid}/tasks", asanaPMHandler.GetSectionTasksForDeployment).Methods("GET")
 	asanaPMRoutes.HandleFunc("/backfill", asanaPMHandler.BackfillAsanaLog).Methods("POST")
 
 	// User data source preference routes (protected)

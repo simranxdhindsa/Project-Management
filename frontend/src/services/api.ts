@@ -1365,6 +1365,42 @@ class ApiService {
       method: 'POST',
     })
   }
+
+  // ── Deployment Report (Asana) ────────────────────────────────────────────
+
+  async getAsanaDeploymentTask(url: string) {
+    return this.request<{ gid: string; name: string; notes: string }>(
+      '/asana/pm/deployment/task', { method: 'POST', body: JSON.stringify({ url }) }
+    )
+  }
+
+  async generateAsanaDeploymentReport(tickets: DeploymentTicketInput[]) {
+    return this.request<DeploymentGenerateResponse>(
+      '/asana/pm/deployment/generate', { method: 'POST', body: JSON.stringify({ tickets }) }
+    )
+  }
+
+  async getAsanaDeploymentConfig() {
+    return this.request<DeploymentBotConfig>('/asana/pm/deployment/config')
+  }
+
+  async putAsanaDeploymentConfig(cfg: DeploymentBotConfig) {
+    return this.request<DeploymentBotConfig>(
+      '/asana/pm/deployment/config', { method: 'PUT', body: JSON.stringify(cfg) }
+    )
+  }
+
+  async getAsanaDeploymentProjectSections() {
+    return this.request<Array<{ gid: string; name: string }>>(
+      '/asana/pm/deployment/project/sections'
+    )
+  }
+
+  async getAsanaDeploymentSectionTasks(sectionGid: string) {
+    return this.request<{ tasks: Array<{ gid: string; name: string; permalink_url: string }> }>(
+      `/asana/pm/deployment/sections/${sectionGid}/tasks`
+    )
+  }
 }
 
 // Types
@@ -1803,6 +1839,29 @@ export interface IssueStint {
   moved_back: boolean
   moved_by: string
   comment: string
+}
+
+export interface DeploymentSectionConfig {
+  platform: string
+  header: string
+  enabled: boolean
+}
+
+export interface DeploymentBotConfig {
+  systemPrompt: string
+  sections: DeploymentSectionConfig[]
+}
+
+export interface DeploymentTicketInput {
+  gid: string
+  name: string
+  notes: string
+  manualDescription: boolean
+}
+
+export interface DeploymentGenerateResponse {
+  results: Array<{ gid: string; fixStatement: string | null; error?: string }>
+  retryAfter?: number
 }
 
 export interface IssueTimeline {
