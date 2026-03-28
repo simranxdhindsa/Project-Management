@@ -30,20 +30,38 @@ func NewClient(accessToken string) *Client {
 	}
 }
 
+// CustomField represents an Asana custom field on a task
+type CustomField struct {
+	GID          string      `json:"gid"`
+	Name         string      `json:"name"`
+	DisplayValue string      `json:"display_value,omitempty"`
+	EnumValue    *EnumOption `json:"enum_value,omitempty"`
+	TextValue    *string     `json:"text_value,omitempty"`
+	NumberValue  *float64    `json:"number_value,omitempty"`
+	Type         string      `json:"type,omitempty"`
+}
+
+// EnumOption represents an enum choice value for a custom field
+type EnumOption struct {
+	GID  string `json:"gid"`
+	Name string `json:"name"`
+}
+
 // Task represents an Asana task
 type Task struct {
-	GID          string       `json:"gid"`
-	Name         string       `json:"name"`
-	Notes        string       `json:"notes"`
-	Completed    bool         `json:"completed"`
-	CompletedAt  *time.Time   `json:"completed_at,omitempty"`
-	DueOn        *string      `json:"due_on,omitempty"`
-	Assignee     *User        `json:"assignee,omitempty"`
-	Projects     []Project    `json:"projects,omitempty"`
-	Memberships  []Membership `json:"memberships,omitempty"`
-	CreatedAt    time.Time    `json:"created_at"`
-	ModifiedAt   time.Time    `json:"modified_at"`
-	PermalinkURL string       `json:"permalink_url"`
+	GID          string        `json:"gid"`
+	Name         string        `json:"name"`
+	Notes        string        `json:"notes"`
+	Completed    bool          `json:"completed"`
+	CompletedAt  *time.Time    `json:"completed_at,omitempty"`
+	DueOn        *string       `json:"due_on,omitempty"`
+	Assignee     *User         `json:"assignee,omitempty"`
+	Projects     []Project     `json:"projects,omitempty"`
+	Memberships  []Membership  `json:"memberships,omitempty"`
+	CustomFields []CustomField `json:"custom_fields,omitempty"`
+	CreatedAt    time.Time     `json:"created_at"`
+	ModifiedAt   time.Time     `json:"modified_at"`
+	PermalinkURL string        `json:"permalink_url"`
 }
 
 // UserPhoto holds Asana avatar URLs at different sizes

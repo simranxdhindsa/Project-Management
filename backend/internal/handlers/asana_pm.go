@@ -192,12 +192,35 @@ func taskToIssueRow(task asana.Task) issueRow {
 
 // extractAsanaPriority tries to get priority from Asana custom fields
 func extractAsanaPriority(task asana.Task) string {
-	// AsanaTask from client.go doesn't have CustomFields in the basic struct,
-	// but GetProjectTasksPaginated fetches them. We check the raw JSON by
-	// trying to match known priority field names.
-	// Since the Task struct doesn't have CustomFields, return "Normal" for now.
-	// The richer BoardSyncv2 pattern can be added when custom field mapping is configured.
+	for _, cf := range task.CustomFields {
+		switch strings.ToLower(cf.Name) {
+		case "priority", "p", "pri":
+			if cf.EnumValue != nil && cf.EnumValue.Name != "" {
+				return cf.EnumValue.Name
+			}
+			if cf.DisplayValue != "" {
+				return cf.DisplayValue
+			}
+		}
+	}
 	return "Normal"
+}
+
+// extractAsanaDueDate returns the due date string for a task.
+// Prefers the standard due_on field; falls back to a custom field named "due date", "deadline", or "target date".
+func extractAsanaDueDate(task asana.Task) *string {
+	if task.DueOn != nil && *task.DueOn != "" {
+		return task.DueOn
+	}
+	for _, cf := range task.CustomFields {
+		switch strings.ToLower(cf.Name) {
+		case "due date", "deadline", "target date", "due":
+			if cf.DisplayValue != "" {
+				return &cf.DisplayValue
+			}
+		}
+	}
+	return nil
 }
 
 // taskSectionName returns the first section name for a task
@@ -1103,20 +1126,22 @@ func (h *AsanaPMHandler) GetDailyBrief(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get done yesterday from asana_task_log
+	// Get done yesterday using Asana's native completed_at timestamp (reliable, not affected by backfill timing)
 	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-	since := time.Now().AddDate(0, 0, -1)
-	logs, _ := h.asanaPMRepo.GetTransitionsSince(r.Context(), projectGID, since)
 
 	var doneYesterday []issueRow
-	for _, l := range logs {
-		if l.TransitionedAt.Format("2006-01-02") == yesterday && isDoneSection(l.ToSection) {
+	for _, task := range tasks {
+		if task.CompletedAt != nil && task.CompletedAt.UTC().Format("2006-01-02") == yesterday {
+			assigneeName := ""
+			if task.Assignee != nil {
+				assigneeName = task.Assignee.Name
+			}
 			doneYesterday = append(doneYesterday, issueRow{
-				ID:       l.TaskGID,
-				Summary:  l.TaskName,
-				Status:   l.ToSection,
-				Priority: l.Priority,
-				Assignee: l.Assignee,
+				ID:       task.GID,
+				Summary:  task.Name,
+				Status:   taskSectionName(task),
+				Priority: extractAsanaPriority(task),
+				Assignee: assigneeName,
 			})
 		}
 	}
@@ -2036,26 +2061,34 @@ func (h *AsanaPMHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request
 	}
 	yesterday := parsedDate.AddDate(0, 0, -1).Format("2006-01-02")
 
-	// Done tasks (from asana_task_log yesterday)
+	// Fetch all tasks once — used for both done (completed_at) and open/blocked categorisation
 	client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID)
-	doneTasks, _ := h.asanaPMRepo.GetAsanaDoneTasksForDate(r.Context(), projectGID, yesterday)
+	var allTasks []asana.Task
+	if clientErr == nil {
+		allTasks, _ = client.GetProjectTasksPaginated(r.Context(), projectGID)
+	}
 
-	// Open/blocked — live from Asana
+	// Done tasks — use Asana's native completed_at (accurate timestamp, not affected by backfill)
+	var doneTasks []asana.Task
+	for _, task := range allTasks {
+		if task.CompletedAt != nil && task.CompletedAt.UTC().Format("2006-01-02") == yesterday {
+			doneTasks = append(doneTasks, task)
+		}
+	}
+
+	// Open/blocked — live from Asana, skip completed tasks
 	var openTasks, blockedTasks []asana.Task
-	if clientErr == nil && scope == "full" {
-		allTasks, err := client.GetProjectTasksPaginated(r.Context(), projectGID)
-		if err == nil {
-			for _, task := range allTasks {
-				if task.Completed {
-					continue
-				}
-				status := sectionStatus(taskSectionName(task))
-				switch status {
-				case "Blocked":
-					blockedTasks = append(blockedTasks, task)
-				case "In Progress", "Backlog":
-					openTasks = append(openTasks, task)
-				}
+	if scope == "full" {
+		for _, task := range allTasks {
+			if task.Completed {
+				continue
+			}
+			status := sectionStatus(taskSectionName(task))
+			switch status {
+			case "Blocked":
+				blockedTasks = append(blockedTasks, task)
+			case "In Progress", "Backlog":
+				openTasks = append(openTasks, task)
 			}
 		}
 	}
@@ -2066,14 +2099,14 @@ func (h *AsanaPMHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request
 	// Done section
 	sb.WriteString(fmt.Sprintf("*Tasks Done %s (Asana):*\n\n", doneLabel))
 	if len(doneTasks) == 0 {
-		sb.WriteString("_No tasks moved to a completed section yesterday_\n")
+		sb.WriteString("_No tasks completed yesterday_\n")
 	} else {
 		for _, t := range doneTasks {
 			assigneeStr := ""
-			if t.Assignee != "" {
-				assigneeStr = fmt.Sprintf(" (%s)", t.Assignee)
+			if t.Assignee != nil {
+				assigneeStr = fmt.Sprintf(" (%s)", t.Assignee.Name)
 			}
-			sb.WriteString(fmt.Sprintf("• %s%s\n", t.TaskName, assigneeStr))
+			sb.WriteString(fmt.Sprintf("• %s%s\n", t.Name, assigneeStr))
 		}
 	}
 
@@ -2179,22 +2212,34 @@ func (h *AsanaPMHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.R
 
 	client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID)
 
-	doneTasks, _ := h.asanaPMRepo.GetAsanaDoneTasksForWeek(r.Context(), projectGID, weekStart, weekEnd)
+	// Fetch all tasks once — used for both done (completed_at) and open/blocked categorisation
+	var allWeeklyTasks []asana.Task
+	if clientErr == nil {
+		allWeeklyTasks, _ = client.GetProjectTasksPaginated(r.Context(), projectGID)
+	}
+
+	// Done tasks for the week — use Asana's native completed_at timestamp
+	var doneTasks []asana.Task
+	for _, task := range allWeeklyTasks {
+		if task.CompletedAt != nil {
+			d := task.CompletedAt.UTC().Format("2006-01-02")
+			if d >= weekStart && d <= weekEnd {
+				doneTasks = append(doneTasks, task)
+			}
+		}
+	}
 
 	var openTasks, blockedTasks []asana.Task
-	if clientErr == nil && scope == "full" {
-		allTasks, err := client.GetProjectTasksPaginated(r.Context(), projectGID)
-		if err == nil {
-			for _, task := range allTasks {
-				if task.Completed {
-					continue
-				}
-				status := sectionStatus(taskSectionName(task))
-				if status == "Blocked" {
-					blockedTasks = append(blockedTasks, task)
-				} else {
-					openTasks = append(openTasks, task)
-				}
+	if scope == "full" {
+		for _, task := range allWeeklyTasks {
+			if task.Completed {
+				continue
+			}
+			status := sectionStatus(taskSectionName(task))
+			if status == "Blocked" {
+				blockedTasks = append(blockedTasks, task)
+			} else {
+				openTasks = append(openTasks, task)
 			}
 		}
 	}
@@ -2207,12 +2252,12 @@ func (h *AsanaPMHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.R
 	if len(doneTasks) == 0 {
 		sb.WriteString("_No tasks completed this week_\n")
 	} else {
-		assigneeGroups := map[string][]database.AsanaTaskLog{}
+		assigneeGroups := map[string][]asana.Task{}
 		assigneeOrder := []string{}
 		for _, t := range doneTasks {
-			name := t.Assignee
-			if name == "" {
-				name = "Unassigned"
+			name := "Unassigned"
+			if t.Assignee != nil {
+				name = t.Assignee.Name
 			}
 			if _, ok := assigneeGroups[name]; !ok {
 				assigneeOrder = append(assigneeOrder, name)
@@ -2225,7 +2270,7 @@ func (h *AsanaPMHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.R
 			}
 			sb.WriteString(fmt.Sprintf("@%s\n", name))
 			for _, t := range assigneeGroups[name] {
-				sb.WriteString(fmt.Sprintf("• %s\n", t.TaskName))
+				sb.WriteString(fmt.Sprintf("• %s\n", t.Name))
 			}
 		}
 	}
@@ -2483,19 +2528,27 @@ func (h *AsanaPMHandler) BackfillAsanaLog(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	now := time.Now()
 	var entries []database.AsanaTaskLog
 	for _, task := range tasks {
-		if task.Completed {
-			continue
-		}
 		section := taskSectionName(task)
+		// For completed tasks use their done section name; for in-progress tasks use current section
 		if section == "" {
-			continue
+			if task.Completed {
+				section = "Done"
+			} else {
+				continue
+			}
 		}
 		assigneeName := ""
 		if task.Assignee != nil {
 			assigneeName = task.Assignee.Name
+		}
+		// Use accurate timestamps: completed_at for done tasks, modified_at for in-progress
+		var transitionedAt time.Time
+		if task.Completed && task.CompletedAt != nil {
+			transitionedAt = *task.CompletedAt
+		} else {
+			transitionedAt = task.ModifiedAt
 		}
 		entries = append(entries, database.AsanaTaskLog{
 			TaskGID:        task.GID,
@@ -2505,7 +2558,7 @@ func (h *AsanaPMHandler) BackfillAsanaLog(w http.ResponseWriter, r *http.Request
 			FromSection:    "",
 			ToSection:      section,
 			Priority:       extractAsanaPriority(task),
-			TransitionedAt: now,
+			TransitionedAt: transitionedAt,
 		})
 	}
 
