@@ -73,6 +73,7 @@ interface TimeTrackingRow {
   comment: string
   overdue: boolean
   threshold_hours: number
+  due_date?: string
   pinned: boolean
 }
 
@@ -863,62 +864,70 @@ function DailyReportTab() {
               const allPrioritiesOn = cfgPriorities.length === 0 || allPriorityLabels.every(l => cfgPriorities.includes(l))
               return (
                 <div className="pm-config-panel">
-                  <div className="pm-config-row">
-                    <span className="pm-config-label">Sections</span>
-                    <label className="cfg-chip" style={{ gap: '0.35rem' }}>
-                      <input type="checkbox" checked={allSectionsOn} onChange={() => setCfgSections(allSectionsOn ? [] : [...allSections])} style={{ accentColor: 'var(--color-primary)', margin: 0 }} />
-                      All
-                    </label>
-                    {allSections.map(s => (
-                      <button key={s} className={`cfg-chip${cfgSections.includes(s) ? ' on' : ''}`}
-                        onClick={() => setCfgSections(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="pm-config-row">
-                    <span className="pm-config-label">Priorities</span>
-                    <label className="cfg-chip" style={{ gap: '0.35rem' }}>
-                      <input type="checkbox" checked={allPrioritiesOn}
-                        onChange={() => {
-                          if (allPrioritiesOn) {
-                            // deselect all → keep none selected means filter nothing sent, so explicitly set all then remove one to trigger
-                            setCfgPriorities([...allPriorityLabels])
-                          } else {
-                            setCfgPriorities([]) // empty = all
-                          }
-                        }}
-                        style={{ accentColor: 'var(--color-primary)', margin: 0 }} />
-                      All
-                    </label>
-                    {allPriorities.map(t => {
-                      const isOn = cfgPriorities.length === 0 || cfgPriorities.includes(t.label)
-                      return (
-                        <button key={t.label} className={`cfg-chip${isOn ? ' on' : ''}`}
-                          onClick={() => setCfgPriorities(prev => {
-                            // if currently "all" (empty), switching to explicit list minus this one
-                            const effective = prev.length === 0 ? allPriorityLabels : prev
-                            const next = effective.includes(t.label) ? effective.filter(x => x !== t.label) : [...effective, t.label]
-                            // if all selected again, collapse back to empty (= all)
-                            return next.length === allPriorityLabels.length ? [] : next
-                          })}>
-                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.color, display: 'inline-block', flexShrink: 0 }} />
-                          {t.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {(wfConfig?.report_config?.open_states ?? []).length > 0 && (
-                    <div className="pm-config-row">
-                      <span className="pm-config-label">Open States</span>
-                      {(wfConfig?.report_config?.open_states ?? []).map(s => (
-                        <button key={s} className={`cfg-chip${cfgOpenStates.includes(s) ? ' on' : ''}`}
-                          onClick={() => setCfgOpenStates(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
-                          {s}
-                        </button>
-                      ))}
+                  <div className="pm-config-grid">
+                    <div className="pm-config-card">
+                      <div className="pm-config-card-title">Sections</div>
+                      <div className="pm-config-chips">
+                        <label className="cfg-chip" style={{ gap: '0.35rem' }}>
+                          <input type="checkbox" checked={allSectionsOn} onChange={() => setCfgSections(allSectionsOn ? [] : [...allSections])} style={{ accentColor: 'var(--color-primary)', margin: 0 }} />
+                          All
+                        </label>
+                        {allSections.map(s => (
+                          <button key={s} className={`cfg-chip${cfgSections.includes(s) ? ' on' : ''}`}
+                            onClick={() => setCfgSections(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  )}
+                    <div className="pm-config-card">
+                      <div className="pm-config-card-title">Priorities</div>
+                      <div className="pm-config-chips">
+                        <label className="cfg-chip" style={{ gap: '0.35rem' }}>
+                          <input type="checkbox" checked={allPrioritiesOn}
+                            onChange={() => {
+                              if (allPrioritiesOn) {
+                                setCfgPriorities([...allPriorityLabels])
+                              } else {
+                                setCfgPriorities([])
+                              }
+                            }}
+                            style={{ accentColor: 'var(--color-primary)', margin: 0 }} />
+                          All
+                        </label>
+                        {allPriorities.map(t => {
+                          const isOn = cfgPriorities.length === 0 || cfgPriorities.includes(t.label)
+                          return (
+                            <button key={t.label} className={`cfg-chip${isOn ? ' on' : ''}`}
+                              onClick={() => setCfgPriorities(prev => {
+                                const effective = prev.length === 0 ? allPriorityLabels : prev
+                                const next = effective.includes(t.label) ? effective.filter(x => x !== t.label) : [...effective, t.label]
+                                return next.length === allPriorityLabels.length ? [] : next
+                              })}>
+                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.color, display: 'inline-block', flexShrink: 0 }} />
+                              {t.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    {(() => {
+                      const availableStates = ytStatesList.length > 0 ? ytStatesList : (wfConfig?.report_config?.open_states ?? [])
+                      return availableStates.length > 0 ? (
+                        <div className="pm-config-card">
+                          <div className="pm-config-card-title">Open States</div>
+                          <div className="pm-config-chips">
+                            {availableStates.map(s => (
+                              <button key={s} className={`cfg-chip${cfgOpenStates.includes(s) ? ' on' : ''}`}
+                                onClick={() => setCfgOpenStates(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
+                                {s}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null
+                    })()}
+                  </div>
                   <div className="pm-config-actions">
                     <button className="btn-primary pm-generate-btn" disabled={loading} onClick={() => { setConfigOpen(false); generateReport() }}>
                       {loading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
@@ -1287,6 +1296,7 @@ function stintLabel(stint: IssueStint): string {
 type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at' | 'status'
 
 function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
+  const isAsana = getActiveSource() === 'asana'
   const [mode, setMode] = useState<'logbook' | 'summary'>('logbook')
 
   // ── Logbook state ─────────────────────────────────────────────────────────
@@ -1847,7 +1857,7 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
               <span className="tt-col-regression">Regression</span>
               <span className="tt-col-priority">Priority</span>
               <span className="tt-col-status">Status</span>
-              <span className="tt-col-time">Time / Threshold</span>
+              <span className="tt-col-time">{isAsana ? 'Time / Due Date' : 'Time / Threshold'}</span>
               <span className="tt-col-assignee">Assignee</span>
               <span className="tt-col-chevron" />
             </div>
@@ -1860,8 +1870,10 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
                 const isDone    = ['dev','done','mobile done','stage','prod'].includes(row.to_state.toLowerCase())
                 const showOverdue = row.overdue && !isDone && !isBlocked
                 const hasRegression = transitions.some(t => isMovedBack(t.from_state, t.to_state))
-                const ratio = row.duration_in_prev_state_hours != null && row.threshold_hours > 0
-                  ? Math.min(row.duration_in_prev_state_hours / row.threshold_hours, 1) : 0
+                const ratio = isAsana
+                  ? (row.overdue ? 1 : row.duration_in_prev_state_hours != null ? 0.5 : 0)
+                  : (row.duration_in_prev_state_hours != null && row.threshold_hours > 0
+                      ? Math.min(row.duration_in_prev_state_hours / row.threshold_hours, 1) : 0)
                 const barColor = row.overdue ? '#ef4444' : isLive ? '#22c55e' : '#6366f1'
                 return (
                   <div key={row.issue_id} className={['pm-row', showOverdue ? 'pm-row-overdue' : '', row.pinned ? 'pm-row-pinned' : '', movedBack ? 'pm-row-movedback' : ''].filter(Boolean).join(' ')}>
@@ -1891,7 +1903,12 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
                         <div className="tt-time-bar">
                           <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
                         </div>
-                        <span className="tt-time-label">{formatHours(row.duration_in_prev_state_hours)}<span className="tt-threshold"> / {row.threshold_hours}h</span></span>
+                        <span className="tt-time-label">{formatHours(row.duration_in_prev_state_hours)}
+                          {isAsana
+                            ? <span className="tt-threshold"> / {row.due_date ? new Date(row.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</span>
+                            : <span className="tt-threshold"> / {row.threshold_hours}h</span>
+                          }
+                        </span>
                       </div>
                       <div className="tt-assignee">
                         {avatarMap[row.assignee] ? <img src={avatarMap[row.assignee]} alt={row.assignee} className="filter-avatar-img" /> : <span className="filter-avatar-placeholder">{(row.assignee || '?').charAt(0).toUpperCase()}</span>}
@@ -1955,7 +1972,7 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
               <span className="pm-col-issue">Issue</span>
               <span className="pm-col-priority">Priority</span>
               <span className="pm-col-status">Status</span>
-              <span className="pm-col-time">Time / Threshold</span>
+              <span className="pm-col-time">{isAsana ? 'Time / Due Date' : 'Time / Threshold'}</span>
               <span className="pm-col-stints">Stints</span>
               <span className="pm-col-assignee">Assignee</span>
               <span className="pm-col-chevron" />
@@ -1964,7 +1981,9 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
               {tlDisplayed.map(t => {
                 const isExpanded = expandedIssues.has(t.issue_id)
                 const lastMovedBackStint = [...t.stints].reverse().find(s => s.moved_back)
-                const ratio = t.threshold_hours > 0 ? Math.min(t.total_hours / t.threshold_hours, 1) : 0
+                const ratio = isAsana
+                  ? (t.is_overdue ? 1 : t.is_live ? 0.5 : 0)
+                  : (t.threshold_hours > 0 ? Math.min(t.total_hours / t.threshold_hours, 1) : 0)
                 const barColor = t.is_overdue ? '#ef4444' : t.total_hours > t.threshold_hours ? '#f97316' : t.is_live ? '#22c55e' : '#6366f1'
                 return (
                   <div key={t.issue_id} className={['pm-row', t.is_overdue ? 'pm-row-overdue' : '', t.is_live ? 'pm-row-live' : '', t.pinned ? 'pm-row-pinned' : ''].filter(Boolean).join(' ')}>
@@ -1988,7 +2007,12 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
                         <div className="tt-time-bar">
                           <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
                         </div>
-                        <span className="tt-time-label">{formatHoursDetailed(t.total_hours)}<span className="tt-threshold"> / {t.threshold_hours}h</span></span>
+                        <span className="tt-time-label">{formatHoursDetailed(t.total_hours)}
+                          {isAsana
+                            ? <span className="tt-threshold"> / {t.due_date ? new Date(t.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</span>
+                            : <span className="tt-threshold"> / {t.threshold_hours}h</span>
+                          }
+                        </span>
                       </div>
                       <span className="pm-col-stints">
                         {t.total_stints > 1 && <span className="tt-transition-count" title={`${t.total_stints} stints`}>{t.total_stints}</span>}
@@ -2029,7 +2053,10 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
                         ))}
                         <div className="tl-stint-summary">
                           <span>Total: <strong>{formatHoursDetailed(t.total_hours)}</strong></span>
-                          <span>Threshold: <strong>{t.threshold_hours}h</strong></span>
+                          {isAsana
+                            ? <span>Due Date: <strong>{t.due_date ? new Date(t.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</strong></span>
+                            : <span>Threshold: <strong>{t.threshold_hours}h</strong></span>
+                          }
                           {lastMovedBackStint && (
                             <span className="tl-last-reason">Last moved back: {lastMovedBackStint.comment || `→ ${lastMovedBackStint.exited_to}`}</span>
                           )}

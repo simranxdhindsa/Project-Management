@@ -2085,6 +2085,35 @@ func (h *AsanaPMHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request
 		scope = "full"
 	}
 
+	// Parse filter params (mirrors YouTrack report handler)
+	var openStatesFilter []string
+	if raw := r.URL.Query().Get("open_states"); raw != "" {
+		for _, s := range strings.Split(raw, ",") {
+			if t := strings.TrimSpace(s); t != "" {
+				openStatesFilter = append(openStatesFilter, strings.ToLower(t))
+			}
+		}
+	}
+	var sectionsFilter []string
+	if raw := r.URL.Query().Get("sections"); raw != "" {
+		for _, s := range strings.Split(raw, ",") {
+			if t := strings.TrimSpace(s); t != "" {
+				sectionsFilter = append(sectionsFilter, t)
+			}
+		}
+	}
+	showSection := func(name string) bool {
+		if len(sectionsFilter) == 0 {
+			return true
+		}
+		for _, f := range sectionsFilter {
+			if f == name {
+				return true
+			}
+		}
+		return false
+	}
+
 	parsedDate, err := time.Parse("2006-01-02", date)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -2109,18 +2138,40 @@ func (h *AsanaPMHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request
 	}
 
 	// Open/blocked — live from Asana, skip completed tasks
+	// If open_states filter provided, a task is "open" only if its section matches one of those states
 	var openTasks, blockedTasks []asana.Task
 	if scope == "full" {
 		for _, task := range allTasks {
 			if task.Completed {
 				continue
 			}
-			status := sectionStatus(taskSectionName(task))
-			switch status {
-			case "Blocked":
-				blockedTasks = append(blockedTasks, task)
-			case "In Progress", "Backlog":
-				openTasks = append(openTasks, task)
+			sectionName := taskSectionName(task)
+			if len(openStatesFilter) > 0 {
+				// User specified explicit open states — check section name match
+				sectionLower := strings.ToLower(sectionName)
+				matched := false
+				for _, f := range openStatesFilter {
+					if sectionLower == f || strings.Contains(sectionLower, f) {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					if isBlockedSection(sectionName) {
+						blockedTasks = append(blockedTasks, task)
+					} else {
+						openTasks = append(openTasks, task)
+					}
+				}
+			} else {
+				// Default: use sectionStatus classification
+				status := sectionStatus(sectionName)
+				switch status {
+				case "Blocked":
+					blockedTasks = append(blockedTasks, task)
+				case "In Progress", "Backlog":
+					openTasks = append(openTasks, task)
+				}
 			}
 		}
 	}
@@ -2129,37 +2180,41 @@ func (h *AsanaPMHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request
 	doneLabel := parsedDate.AddDate(0, 0, -1).Format("Mon, Jan 2")
 
 	// Done section
-	sb.WriteString(fmt.Sprintf("*Tasks Done %s (Asana):*\n\n", doneLabel))
-	if len(doneTasks) == 0 {
-		sb.WriteString("_No tasks completed yesterday_\n")
-	} else {
-		for _, t := range doneTasks {
-			assigneeStr := ""
-			if t.Assignee != nil {
-				assigneeStr = fmt.Sprintf(" (%s)", t.Assignee.Name)
+	if showSection("done") {
+		sb.WriteString(fmt.Sprintf("*Tasks Done %s (Asana):*\n\n", doneLabel))
+		if len(doneTasks) == 0 {
+			sb.WriteString("_No tasks completed yesterday_\n")
+		} else {
+			for _, t := range doneTasks {
+				assigneeStr := ""
+				if t.Assignee != nil {
+					assigneeStr = fmt.Sprintf(" (%s)", t.Assignee.Name)
+				}
+				sb.WriteString(fmt.Sprintf("• %s%s\n", t.Name, assigneeStr))
 			}
-			sb.WriteString(fmt.Sprintf("• %s%s\n", t.Name, assigneeStr))
 		}
 	}
 
 	if scope == "full" {
 		// Open section
-		sb.WriteString("\n\n*Open Tasks Today:*\n\n")
-		if len(openTasks) == 0 {
-			sb.WriteString("_No open tasks_\n")
-		} else {
-			for _, task := range openTasks {
-				assignee := ""
-				if task.Assignee != nil {
-					assignee = fmt.Sprintf(" (%s)", task.Assignee.Name)
+		if showSection("open") {
+			sb.WriteString("\n\n*Open Tasks Today:*\n\n")
+			if len(openTasks) == 0 {
+				sb.WriteString("_No open tasks_\n")
+			} else {
+				for _, task := range openTasks {
+					assignee := ""
+					if task.Assignee != nil {
+						assignee = fmt.Sprintf(" (%s)", task.Assignee.Name)
+					}
+					section := taskSectionName(task)
+					sb.WriteString(fmt.Sprintf("• %s%s [%s]\n", task.Name, assignee, section))
 				}
-				section := taskSectionName(task)
-				sb.WriteString(fmt.Sprintf("• %s%s [%s]\n", task.Name, assignee, section))
 			}
 		}
 
 		// Blocked section
-		if len(blockedTasks) > 0 {
+		if showSection("blocked") && len(blockedTasks) > 0 {
 			sb.WriteString("\n\n*Blocked Tasks:*\n\n")
 			for _, task := range blockedTasks {
 				assignee := ""

@@ -1336,8 +1336,11 @@ class ApiService {
     return this.request<IssueTimeline[]>('/asana/pm/issue-timelines')
   }
 
-  async generateAsanaPMReport(date: string, scope: 'full' | 'summary' = 'full') {
+  async generateAsanaPMReport(date: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }) {
     const params = new URLSearchParams({ scope })
+    if (overrides?.open_states?.length) params.set('open_states', overrides.open_states.join(','))
+    if (overrides?.sections?.length) params.set('sections', overrides.sections.join(','))
+    if (overrides?.priorities?.length) params.set('priorities', overrides.priorities.join(','))
     return this.request<PMReport>(`/asana/pm/report/${date}?${params.toString()}`)
   }
 
@@ -1815,6 +1818,7 @@ export interface IssueTimeline {
   moved_back_count: number
   is_overdue: boolean
   threshold_hours: number
+  due_date?: string
   first_entered_at: string
   last_activity_at: string
   stints: IssueStint[]

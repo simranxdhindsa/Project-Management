@@ -709,8 +709,9 @@ type IssueTimeline struct {
 	IsLive             bool         `json:"is_live"`             // currently In Progress
 	LiveHours          float64      `json:"live_hours"`          // elapsed hours for the current open stint (0 if not live)
 	MovedBackCount     int          `json:"moved_back_count"`    // times ticket regressed
-	IsOverdue          bool         `json:"is_overdue"`          // total_hours > threshold
+	IsOverdue          bool         `json:"is_overdue"`          // total_hours > threshold (YouTrack) OR past due_date (Asana)
 	ThresholdHours     float64      `json:"threshold_hours"`
+	DueDate            *time.Time   `json:"due_date,omitempty"`  // Asana: task due date (nil for YouTrack)
 	FirstEnteredAt     time.Time    `json:"first_entered_at"`    // when it FIRST entered In Progress
 	LastActivityAt     time.Time    `json:"last_activity_at"`    // most recent transition
 	Stints             []IssueStint `json:"stints"`

@@ -424,7 +424,7 @@ func (r *AsanaPMRepository) GetAsanaIssueTimelines(ctx context.Context, pinnedID
 
 	rows, err := pool.Query(ctx, `
 		SELECT task_gid, task_name, COALESCE(assignee,''), COALESCE(from_section,''), to_section,
-		       COALESCE(priority,''), transitioned_at, duration_in_prev_section_hours
+		       COALESCE(priority,''), transitioned_at, duration_in_prev_section_hours, due_date
 		FROM asana_task_log
 		ORDER BY task_gid, transitioned_at ASC
 	`)
@@ -442,6 +442,7 @@ func (r *AsanaPMRepository) GetAsanaIssueTimelines(ctx context.Context, pinnedID
 		priority    string
 		at          time.Time
 		durHrs      *float64
+		dueDate     *time.Time
 	}
 
 	byTask := map[string][]rawRow{}
@@ -450,7 +451,7 @@ func (r *AsanaPMRepository) GetAsanaIssueTimelines(ctx context.Context, pinnedID
 	for rows.Next() {
 		var rr rawRow
 		if err := rows.Scan(&rr.taskGID, &rr.taskName, &rr.assignee, &rr.fromSection, &rr.toSection,
-			&rr.priority, &rr.at, &rr.durHrs); err != nil {
+			&rr.priority, &rr.at, &rr.durHrs, &rr.dueDate); err != nil {
 			continue
 		}
 		if _, ok := byTask[rr.taskGID]; !ok {
@@ -533,8 +534,22 @@ func (r *AsanaPMRepository) GetAsanaIssueTimelines(ctx context.Context, pinnedID
 			stints = append(stints, stint)
 		}
 
+		// Collect the most recent due_date for this task (last non-nil value in log rows)
+		var taskDueDate *time.Time
+		for _, rr := range rrows {
+			if rr.dueDate != nil {
+				taskDueDate = rr.dueDate
+			}
+		}
+
+		// Overdue: use due_date if available, otherwise fall back to threshold hours
 		threshold := overdueThresholdForPriority(priority)
-		isOverdue := totalHours > threshold
+		var isOverdue bool
+		if taskDueDate != nil {
+			isOverdue = taskDueDate.UTC().Before(now.UTC().Truncate(24 * time.Hour))
+		} else {
+			isOverdue = totalHours > threshold
+		}
 
 		timelines = append(timelines, IssueTimeline{
 			IssueID:        taskGID,
@@ -549,6 +564,7 @@ func (r *AsanaPMRepository) GetAsanaIssueTimelines(ctx context.Context, pinnedID
 			MovedBackCount: movedBackCount,
 			IsOverdue:      isOverdue,
 			ThresholdHours: threshold,
+			DueDate:        taskDueDate,
 			FirstEnteredAt: firstEnteredAt,
 			LastActivityAt: lastActivityAt,
 			Stints:         stints,

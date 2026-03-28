@@ -1323,17 +1323,23 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
               {/* Priority Tags */}
               {wcSection === 'priorities' && (
                 <div className="wc-section">
-                  <p className="int-help-text">Define tags like P0, B1, A0 with custom colors and SLA thresholds.</p>
+                  <p className="int-help-text">
+                    {wcSource === 'asana'
+                      ? 'Define tags like P0, P1 with custom colors. SLA thresholds are not used for Asana — overdue is determined by task due dates.'
+                      : 'Define tags like P0, B1, A0 with custom colors and SLA thresholds.'}
+                  </p>
                   <div className="wc-tag-list">
                     <div className="wc-tag-header">
-                      <span>Color</span><span>Label</span><span>SLA</span><span>Unit</span>
+                      <span>Color</span><span>Label</span>
+                      <span style={{ visibility: wcSource === 'asana' ? 'hidden' : undefined }}>SLA</span>
+                      <span style={{ visibility: wcSource === 'asana' ? 'hidden' : undefined }}>Unit</span>
                       <span>Prefixes</span><span>YT Mappings</span><span></span>
                     </div>
                     {editTags.map((tag, i) => (
                       <div key={i} className="wc-tag-row">
                         <input type="color" value={tag.color} onChange={e => updateTag(i, 'color', e.target.value)} className="wc-color-input" />
                         <input type="text" value={tag.label} onChange={e => updateTag(i, 'label', e.target.value)} placeholder="P0" className="wc-input wc-input-label" />
-                        <div className="wc-sla-cell">
+                        <div className="wc-sla-cell" style={{ visibility: wcSource === 'asana' ? 'hidden' : undefined }}>
                           <input
                             type="number"
                             value={fromHours(tag.sla_hours).val}

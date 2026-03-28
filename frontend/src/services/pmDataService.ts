@@ -246,7 +246,7 @@ export function getIssueTimelines() {
 
 export function generatePMReport(date: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }) {
   return getActiveSource() === 'asana'
-    ? api.generateAsanaPMReport(date, scope)
+    ? api.generateAsanaPMReport(date, scope, overrides)
     : api.generatePMReport(date, scope, overrides)
 }
 
