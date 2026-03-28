@@ -56,11 +56,15 @@ func extractPriority(summary string) string {
 }
 
 // loadWorkflowConfig loads the effective workflow config for a user, with graceful fallback.
-func (h *ReportHandler) loadWorkflowConfig(ctx context.Context, userID string) *models.WorkflowConfig {
+// source should be "youtrack" or "asana" — defaults to "youtrack" for the YouTrack report handler.
+func (h *ReportHandler) loadWorkflowConfig(ctx context.Context, userID, source string) *models.WorkflowConfig {
 	if h.configRepo == nil {
 		return nil
 	}
-	cfg, err := h.configRepo.GetEffective(ctx, userID)
+	if source == "" {
+		source = "youtrack"
+	}
+	cfg, err := h.configRepo.GetEffective(ctx, userID, source)
 	if err != nil {
 		return nil
 	}
@@ -99,7 +103,7 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 	yesterday := parsedDate.AddDate(0, 0, -1).Format("2006-01-02")
 
 	// Load workflow config for this user (drives done states, hotfix rules, priority tags, open states)
-	wfCfg := h.loadWorkflowConfig(r.Context(), user.ID)
+	wfCfg := h.loadWorkflowConfig(r.Context(), user.ID, "youtrack")
 	doneStates := []string{"dev"}
 	hotfixFromStates := []string{"backlog", "in progress"}
 	hotfixToStates := []string{"ready for stage", "stage", "ready for prod", "prod"}
@@ -628,7 +632,7 @@ func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Load config for threshold lookups
-	ttCfg := h.loadWorkflowConfig(r.Context(), user.ID)
+	ttCfg := h.loadWorkflowConfig(r.Context(), user.ID, "youtrack")
 
 	// Enrich with overdue flag and pinned flag
 	type TimeTrackingRow struct {
@@ -1145,7 +1149,7 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 	weekEndDate := sunday.Format("2006-01-02")
 
 	// Load workflow config for this user
-	wfCfgW := h.loadWorkflowConfig(r.Context(), user.ID)
+	wfCfgW := h.loadWorkflowConfig(r.Context(), user.ID, "youtrack")
 	wDoneStates := []string{"dev"}
 	wHotfixFrom := []string{"backlog", "in progress"}
 	wHotfixTo := []string{"ready for stage", "stage", "ready for prod", "prod"}

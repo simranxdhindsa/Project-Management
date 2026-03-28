@@ -158,6 +158,18 @@ func isDoneSection(name string) bool {
 		strings.Contains(n, "fixed") || strings.Contains(n, "closed")
 }
 
+// isDoneSectionWithConfig checks if a section is a done/deployed/closed state using the
+// Asana workflow config column hierarchy first, falling back to pattern matching.
+func isDoneSectionWithConfig(name string, hierarchy []models.ColumnState) bool {
+	if len(hierarchy) > 0 {
+		role := getStateRole(strings.ToLower(name), hierarchy)
+		if role != "" {
+			return role == "dev_done" || role == "closed" || role == "deployed"
+		}
+	}
+	return isDoneSection(name)
+}
+
 // isBlockedSection returns true if the section name implies blocked
 func isBlockedSection(name string) bool {
 	n := strings.ToLower(name)
@@ -1238,6 +1250,12 @@ func (h *AsanaPMHandler) GetEODSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load Asana workflow config for done/regression detection
+	var asanaHierarchy []models.ColumnState
+	if asanaCfg, cfgErr := h.configRepo.GetEffective(r.Context(), userID, "asana"); cfgErr == nil {
+		asanaHierarchy = asanaCfg.ColumnHierarchy
+	}
+
 	today := time.Now().Format("2006-01-02")
 	todayStart := time.Now().Truncate(24 * time.Hour)
 	logs, _ := h.asanaPMRepo.GetTransitionsSince(r.Context(), projectGID, todayStart)
@@ -1250,7 +1268,7 @@ func (h *AsanaPMHandler) GetEODSummary(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		movedToday[l.TaskGID] = true
-		if isDoneSection(l.ToSection) {
+		if isDoneSectionWithConfig(l.ToSection, asanaHierarchy) {
 			completedToday = append(completedToday, issueRow{
 				ID: l.TaskGID, Summary: l.TaskName, Status: l.ToSection,
 				Priority: l.Priority, Assignee: l.Assignee,
@@ -1909,6 +1927,12 @@ func (h *AsanaPMHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request)
 				}
 				section := taskSectionName(task)
 				hoursInState := now.Sub(task.ModifiedAt).Hours()
+				var liveDD *time.Time
+				if task.DueOn != nil && *task.DueOn != "" {
+					if d, parseErr := time.Parse("2006-01-02", *task.DueOn); parseErr == nil {
+						liveDD = &d
+					}
+				}
 				logs = append(logs, database.IssueStateLog{
 					IssueID:                  task.GID,
 					IssueSummary:             task.Name,
@@ -1916,6 +1940,7 @@ func (h *AsanaPMHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request)
 					ToState:                  section,
 					TransitionedAt:           task.ModifiedAt,
 					DurationInPrevStateHours: &hoursInState,
+					DueDate:                  liveDD,
 				})
 			}
 		}
@@ -1933,10 +1958,17 @@ func (h *AsanaPMHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request)
 		Pinned         bool    `json:"pinned"`
 	}
 
+	today := time.Now().UTC().Truncate(24 * time.Hour)
 	var rows []TimeTrackingRow
 	for _, l := range logs {
 		threshold := overdueThresholdHoursForPriority(l.Priority)
-		overdue := l.DurationInPrevStateHours != nil && *l.DurationInPrevStateHours > threshold
+		var overdue bool
+		if l.DueDate != nil {
+			// Asana: use task due date for overdue detection
+			overdue = l.DueDate.UTC().Before(today)
+		} else {
+			overdue = l.DurationInPrevStateHours != nil && *l.DurationInPrevStateHours > threshold
+		}
 		rows = append(rows, TimeTrackingRow{
 			IssueStateLog:  l,
 			Overdue:        overdue,

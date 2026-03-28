@@ -380,7 +380,7 @@ func (s *Service) checkBlockedIssues(ctx context.Context) {
 // Thresholds: P0=4h, P1=24h, P2=48h, P3/Other=72h
 func (s *Service) checkOverdueInProgress(ctx context.Context) {
 	// Load system default config for SLA thresholds
-	sysCfg, _ := s.configRepo.GetSystemDefault(ctx)
+	sysCfg, _ := s.configRepo.GetSystemDefault(ctx, "youtrack")
 
 	// Query the lowest threshold so we catch all overdue tickets in one pass.
 	// We check all tickets older than 4h and then filter by their specific threshold.

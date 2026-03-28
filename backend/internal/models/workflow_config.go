@@ -39,17 +39,19 @@ type HotfixRules struct {
 
 // ReportConfig defines which data goes into generated reports
 type ReportConfig struct {
-	DoneRole        string   `json:"done_role"`        // column role that counts as "done" (default: "dev_done")
-	BlockedStates   []string `json:"blocked_states"`   // ["Blocked"]
-	OpenStates      []string `json:"open_states"`      // columns to pull open issues from
-	PriorityFilters []string `json:"priority_filters"` // which priority tags to include
-	Sections        []string `json:"sections"`          // report sections: ["done","hotfixes","open","blocked","overdue"]
+	DoneRole           string   `json:"done_role"`             // column role that counts as "done" (default: "dev_done")
+	BlockedStates      []string `json:"blocked_states"`        // ["Blocked"]
+	OpenStates         []string `json:"open_states"`           // columns to pull open issues from
+	PriorityFilters    []string `json:"priority_filters"`      // which priority tags to include
+	Sections           []string `json:"sections"`              // report sections: ["done","hotfixes","open","blocked","overdue"]
+	TrackedColumnRoles []string `json:"tracked_column_roles"`  // column roles shown in tracking tab (empty = all)
 }
 
 // WorkflowConfig is the top-level configuration object
 type WorkflowConfig struct {
 	ID              string        `json:"id"`
 	UserID          *string       `json:"user_id"`
+	PMSource        string        `json:"pm_source"` // "youtrack" | "asana"
 	PriorityTags    []PriorityTag `json:"priority_tags"`
 	ColumnHierarchy []ColumnState `json:"column_hierarchy"`
 	HotfixRules     HotfixRules   `json:"hotfix_rules"`

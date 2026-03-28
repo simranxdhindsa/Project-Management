@@ -8,21 +8,21 @@ import (
 	"time"
 )
 
-// IssueStateLog represents one state transition for a YouTrack issue
+// IssueStateLog represents one state transition for a YouTrack issue (or Asana section transition)
 type IssueStateLog struct {
-	ID                       string    `json:"id"`
-	IssueID                  string    `json:"issue_id"`
-	IssueSummary             string    `json:"issue_summary"`
-	Assignee                 string    `json:"assignee"`
-	MovedBy                  string    `json:"moved_by"`
-	FromState                string    `json:"from_state"`
-	ToState                  string    `json:"to_state"`
-	Priority                 string    `json:"priority"`
-	TransitionedAt           time.Time `json:"transitioned_at"`
-	DurationInPrevStateHours *float64  `json:"duration_in_prev_state_hours"`
-	Comment                  string    `json:"comment"`   // comment added at time of transition (for backward moves)
-	// MovedByMismatch is true when moved_by ≠ assignee (both non-empty)
-	MovedByMismatch          bool      `json:"moved_by_mismatch"`
+	ID                       string     `json:"id"`
+	IssueID                  string     `json:"issue_id"`
+	IssueSummary             string     `json:"issue_summary"`
+	Assignee                 string     `json:"assignee"`
+	MovedBy                  string     `json:"moved_by"`
+	FromState                string     `json:"from_state"`
+	ToState                  string     `json:"to_state"`
+	Priority                 string     `json:"priority"`
+	TransitionedAt           time.Time  `json:"transitioned_at"`
+	DurationInPrevStateHours *float64   `json:"duration_in_prev_state_hours"`
+	Comment                  string     `json:"comment"`            // comment at transition time (backward moves)
+	MovedByMismatch          bool       `json:"moved_by_mismatch"`
+	DueDate                  *time.Time `json:"due_date,omitempty"` // Asana: task due date for overdue detection
 }
 
 // PMReport represents a saved daily or weekly PM report

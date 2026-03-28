@@ -27,6 +27,7 @@ export function getActiveSource(): DataSource {
 
 export async function setActiveSource(source: DataSource): Promise<void> {
   localStorage.setItem(SOURCE_KEY, source)
+  window.dispatchEvent(new CustomEvent('pm-source-changed', { detail: source }))
   await api.setDataSource(source)
 }
 
@@ -34,7 +35,9 @@ export async function loadActiveSourceFromDB(): Promise<DataSource> {
   try {
     const res = await api.getDataSource()
     const source = (res.data?.source || 'youtrack') as DataSource
+    const prev = localStorage.getItem(SOURCE_KEY)
     localStorage.setItem(SOURCE_KEY, source)
+    if (prev !== source) window.dispatchEvent(new CustomEvent('pm-source-changed', { detail: source }))
     return source
   } catch {
     return getActiveSource()

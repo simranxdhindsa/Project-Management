@@ -25,6 +25,7 @@ import {
   getActiveSource,
 } from '../services/pmDataService'
 import DailyOpsTab from './DailyOpsTab'
+import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1314,6 +1315,9 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [dismissing, setDismissing] = useState<string | null>(null)
 
+  // ── Workflow config (for column role filter) ──────────────────────────────
+  const { config: wfConfig, getColumnHierarchy } = useWorkflowConfig()
+
   // ── Shared filter state ───────────────────────────────────────────────────
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
   const [filterOverdue, setFilterOverdue] = useState(false)
@@ -1323,6 +1327,9 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   const [filterPinned, setFilterPinned] = useState(false)
   const [filterAssignee, setFilterAssignee] = useState('')
   const [filterPriorities, setFilterPriorities] = useState<string[]>([])
+  const [filterColumnRoles, setFilterColumnRoles] = useState<string[]>(() =>
+    wfConfig?.report_config?.tracked_column_roles ?? []
+  )
   const [searchIssue, setSearchIssue] = useState('')
   const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false)
   const assigneeDropdownRef = useRef<HTMLButtonElement>(null)
@@ -1364,6 +1371,11 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
     return () => clearInterval(id)
   }, [fetchTimelines])
   useEffect(() => { getAvatarMap().then(setAvatarMap) }, [])
+  // Sync column role filter from workflow config when config loads
+  useEffect(() => {
+    const configured = wfConfig?.report_config?.tracked_column_roles
+    if (configured && configured.length > 0) setFilterColumnRoles(configured)
+  }, [wfConfig])
 
   // ── Close dropdowns on outside click ─────────────────────────────────────
   useEffect(() => {
@@ -1445,7 +1457,20 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   }
 
   // ── Logbook derived values ────────────────────────────────────────────────
+  const getStateRole = (stateName: string): string | undefined => {
+    const hierarchy = getColumnHierarchy()
+    const col = hierarchy.find(c =>
+      c.state.toLowerCase() === stateName.toLowerCase() ||
+      (c.aliases ?? []).some(a => a.toLowerCase() === stateName.toLowerCase())
+    )
+    return col?.role
+  }
+
   let displayed = rows
+  if (filterColumnRoles.length > 0) displayed = displayed.filter(r => {
+    const role = getStateRole(r.to_state)
+    return role ? filterColumnRoles.includes(role) : true
+  })
   if (filterOverdue)   displayed = displayed.filter(r => r.overdue)
   if (filterMismatch)  displayed = displayed.filter(r => r.moved_by_mismatch)
   if (filterMovedBack) displayed = displayed.filter(r => isMovedBack(r.from_state, r.to_state))
@@ -1526,7 +1551,7 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
   )).sort()
   const activeFilterCount = [
     filterOverdue, filterMovedBack, filterLive, filterDelayed, filterPinned,
-    filterAssignee !== '', filterPriorities.length > 0,
+    filterAssignee !== '', filterPriorities.length > 0, filterColumnRoles.length > 0,
     ...(mode === 'logbook' ? [filterMismatch] : []),
   ].filter(Boolean).length
 
@@ -1705,6 +1730,22 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
           ))}
         </div>
 
+        {getColumnHierarchy().length > 0 && (
+          <div className="pm-column-role-chips">
+            {getColumnHierarchy().filter(c => c.role).map(col => (
+              <button
+                key={col.state}
+                className={`column-role-chip${filterColumnRoles.includes(col.role) ? ' active' : ''}`}
+                onClick={() => setFilterColumnRoles(prev =>
+                  prev.includes(col.role) ? prev.filter(x => x !== col.role) : [...prev, col.role]
+                )}
+              >
+                {col.state}
+              </button>
+            ))}
+          </div>
+        )}
+
         {mode === 'logbook' && (
           <div className="pm-custom-dropdown">
             <button ref={sortDropdownRef} className="pm-custom-dropdown-trigger" onClick={() => {
@@ -1774,7 +1815,7 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
             <button className="btn-sm btn-ghost tl-clear-filters" onClick={() => {
               setFilterOverdue(false); setFilterMismatch(false); setFilterMovedBack(false)
               setFilterLive(false); setFilterDelayed(false); setFilterPinned(false)
-              setFilterAssignee(''); setFilterPriorities([]); setSearchIssue('')
+              setFilterAssignee(''); setFilterPriorities([]); setFilterColumnRoles([]); setSearchIssue('')
             }}>
               <X size={12} /> Clear filters
             </button>

@@ -1,28 +1,32 @@
 import { useState, useEffect, useCallback } from 'react'
 import api from '../services/api'
 import type { WorkflowConfig, PriorityTag, ColumnState } from '../services/api'
+import { getActiveSource } from '../services/pmDataService'
 
-let _cache: WorkflowConfig | null = null
-let _cacheTs = 0
+// Per-source in-memory cache
+const _cache: Record<string, WorkflowConfig> = {}
+const _cacheTs: Record<string, number> = {}
 const CACHE_TTL = 5 * 60 * 1000 // 5 min
 
-export function useWorkflowConfig() {
-  const [config, setConfig] = useState<WorkflowConfig | null>(_cache)
-  const [loading, setLoading] = useState(!_cache)
+export function useWorkflowConfig(explicitSource?: string) {
+  const source = explicitSource || getActiveSource()
+  const [config, setConfig] = useState<WorkflowConfig | null>(_cache[source] ?? null)
+  const [loading, setLoading] = useState(!_cache[source])
   const [error, setError] = useState<string | null>(null)
 
   const fetch = useCallback(async (force = false) => {
-    if (!force && _cache && Date.now() - _cacheTs < CACHE_TTL) {
-      setConfig(_cache)
+    const src = explicitSource || getActiveSource()
+    if (!force && _cache[src] && Date.now() - (_cacheTs[src] ?? 0) < CACHE_TTL) {
+      setConfig(_cache[src])
       setLoading(false)
       return
     }
     setLoading(true)
     try {
-      const res = await api.getWorkflowConfig()
+      const res = await api.getWorkflowConfig(src)
       if (res.success && res.data) {
-        _cache = res.data
-        _cacheTs = Date.now()
+        _cache[src] = res.data
+        _cacheTs[src] = Date.now()
         setConfig(res.data)
       }
     } catch (e) {
@@ -30,17 +34,26 @@ export function useWorkflowConfig() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [explicitSource]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetch()
   }, [fetch])
 
-  const invalidate = useCallback(() => {
-    _cache = null
-    _cacheTs = 0
+  // Re-fetch when the active PM source changes (fired by setActiveSource in pmDataService)
+  useEffect(() => {
+    if (explicitSource) return // explicit source takes priority, ignore global changes
+    const handler = () => fetch(true)
+    window.addEventListener('pm-source-changed', handler)
+    return () => window.removeEventListener('pm-source-changed', handler)
+  }, [fetch, explicitSource])
+
+  const invalidate = useCallback((src?: string) => {
+    const key = src || explicitSource || getActiveSource()
+    delete _cache[key]
+    delete _cacheTs[key]
     fetch(true)
-  }, [fetch])
+  }, [fetch, explicitSource]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Helpers
   const getPriorityColor = useCallback((label: string): string => {

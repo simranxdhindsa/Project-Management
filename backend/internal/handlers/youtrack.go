@@ -1686,7 +1686,7 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	customInstructions = strings.ReplaceAll(customInstructions, "{{DATE}}", time.Now().Format("2006-01-02"))
 
 	// Load workflow config for priority/threshold lookups
-	pmCfg, _ := h.configRepo.GetEffective(r.Context(), userID)
+	pmCfg, _ := h.configRepo.GetEffective(r.Context(), userID, "youtrack")
 
 	// ── 2. Fetch live YouTrack issues ────────────────────────────────────────
 	var issueSection strings.Builder

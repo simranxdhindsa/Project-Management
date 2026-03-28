@@ -189,6 +189,11 @@ class ApiService {
     return this.request<AsanaSection[]>('/asana/sections')
   }
 
+  // Get live sections for a specific Asana project (from Asana API)
+  async getAsanaProjectSections(projectGid: string) {
+    return this.request<AsanaSection[]>(`/asana/projects/${projectGid}/sections`)
+  }
+
   // Update task section (move to different column)
   async updateTaskSection(taskId: string, sectionGid: string, sectionName: string) {
     return this.request(`/tasks/${taskId}/section`, {
@@ -1082,53 +1087,61 @@ class ApiService {
   }
 
   // ── Workflow Config ────────────────────────────────────────────────────────
-  async getWorkflowConfig() {
-    return this.request<WorkflowConfig>('/workflow-config')
+  async getWorkflowConfig(source?: string) {
+    const qs = source ? `?source=${source}` : ''
+    return this.request<WorkflowConfig>(`/workflow-config${qs}`)
   }
 
-  async updateWorkflowConfig(config: Partial<WorkflowConfig>) {
-    return this.request<WorkflowConfig>('/workflow-config', {
+  async updateWorkflowConfig(config: Partial<WorkflowConfig>, source?: string) {
+    const qs = source ? `?source=${source}` : ''
+    return this.request<WorkflowConfig>(`/workflow-config${qs}`, {
       method: 'PUT',
       body: JSON.stringify(config),
     })
   }
 
-  async updatePriorityTags(tags: PriorityTag[]) {
-    return this.request<WorkflowConfig>('/workflow-config/priorities', {
+  async updatePriorityTags(tags: PriorityTag[], source?: string) {
+    const qs = source ? `?source=${source}` : ''
+    return this.request<WorkflowConfig>(`/workflow-config/priorities${qs}`, {
       method: 'PUT',
       body: JSON.stringify({ priority_tags: tags }),
     })
   }
 
-  async updateColumnHierarchy(columns: ColumnState[]) {
-    return this.request<WorkflowConfig>('/workflow-config/columns', {
+  async updateColumnHierarchy(columns: ColumnState[], source?: string) {
+    const qs = source ? `?source=${source}` : ''
+    return this.request<WorkflowConfig>(`/workflow-config/columns${qs}`, {
       method: 'PUT',
       body: JSON.stringify({ column_hierarchy: columns }),
     })
   }
 
-  async updateHotfixRules(rules: HotfixRules) {
-    return this.request<WorkflowConfig>('/workflow-config/hotfix-rules', {
+  async updateHotfixRules(rules: HotfixRules, source?: string) {
+    const qs = source ? `?source=${source}` : ''
+    return this.request<WorkflowConfig>(`/workflow-config/hotfix-rules${qs}`, {
       method: 'PUT',
       body: JSON.stringify({ hotfix_rules: rules }),
     })
   }
 
-  async updateReportConfig(config: ReportConfig) {
-    return this.request<WorkflowConfig>('/workflow-config/report', {
+  async updateReportConfig(config: ReportConfig, source?: string) {
+    const qs = source ? `?source=${source}` : ''
+    return this.request<WorkflowConfig>(`/workflow-config/report${qs}`, {
       method: 'PUT',
       body: JSON.stringify({ report_config: config }),
     })
   }
 
-  async resetWorkflowConfig() {
-    return this.request<{ message: string }>('/workflow-config/reset', {
+  async resetWorkflowConfig(source?: string) {
+    const qs = source ? `?source=${source}` : ''
+    return this.request<{ message: string }>(`/workflow-config/reset${qs}`, {
       method: 'POST',
     })
   }
 
-  async getWorkflowDefaults() {
-    return this.request<WorkflowConfig>('/workflow-config/defaults')
+  async getWorkflowDefaults(source?: string) {
+    const qs = source ? `?source=${source}` : ''
+    return this.request<WorkflowConfig>(`/workflow-config/defaults${qs}`)
   }
 
   // ── User data source preference ─────────────────────────────────────────
@@ -1855,11 +1868,13 @@ export interface ReportConfig {
   open_states: string[]
   priority_filters: string[]
   sections: string[]
+  tracked_column_roles: string[]  // column roles shown in tracking tab (empty = all)
 }
 
 export interface WorkflowConfig {
   id: string
   user_id: string | null
+  pm_source: string  // "youtrack" | "asana"
   priority_tags: PriorityTag[]
   column_hierarchy: ColumnState[]
   hotfix_rules: HotfixRules

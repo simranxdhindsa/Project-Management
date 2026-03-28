@@ -1325,6 +1325,38 @@
 .priority-chip.active.p2, .priority-chip.active.medium   { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #818cf8; }
 .priority-chip.active.p3, .priority-chip.active.low      { background: rgba(100,116,139,0.15); border-color: rgba(100,116,139,0.4); color: #94a3b8; }
 
+.pm-column-role-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.column-role-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+}
+.column-role-chip:hover { border-color: rgba(99,102,241,0.4); color: var(--text-primary); }
+.column-role-chip.active {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.4);
+  color: #818cf8;
+}
+
+[data-theme="light"] .column-role-chip { border-color: #e2e8f0; color: #64748b; }
+[data-theme="light"] .column-role-chip:hover { border-color: #a5b4fc; color: #0f172a; }
+[data-theme="light"] .column-role-chip.active { background: #ede9fe; border-color: #a5b4fc; color: #4f46e5; }
+
 .pm-toggle-filters {
   display: flex;
   align-items: center;

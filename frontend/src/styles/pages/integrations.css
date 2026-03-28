@@ -657,6 +657,31 @@
 
 /* ── Workflow Config (wc-*) ─────────────────────────────────────────── */
 
+/* Source toggle */
+.wc-source-toggle {
+  display: flex;
+  gap: 0.375rem;
+  margin-bottom: 1rem;
+}
+.wc-source-btn {
+  padding: 0.35rem 0.9rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+.wc-source-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.08); }
+.wc-source-btn.wc-source-btn-active {
+  color: #fff;
+  background: rgba(99,102,241,0.3);
+  border-color: rgba(99,102,241,0.5);
+}
+
 /* Sub-tabs */
 .wc-tabs {
   display: flex;
@@ -1045,6 +1070,10 @@
 }
 
 /* ── Workflow light mode overrides ──────────────────────────────────── */
+
+[data-theme="light"] .wc-source-btn { color: #64748b; background: #f1f5f9; border-color: #e2e8f0; }
+[data-theme="light"] .wc-source-btn:hover { color: #0f172a; background: #e2e8f0; }
+[data-theme="light"] .wc-source-btn.wc-source-btn-active { color: #4f46e5; background: #ede9fe; border-color: #a5b4fc; }
 
 [data-theme="light"] .wc-tabs {
   border-bottom-color: rgba(0,0,0,0.08);

@@ -317,8 +317,44 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const [editColumns, setEditColumns] = useState<ColumnState[]>([])
   const [editHotfix, setEditHotfix] = useState<HotfixRules>({ from_states: [], to_states: [] })
   const [editReport, setEditReport] = useState<ReportConfig>({
-    done_role: 'dev_done', blocked_states: [], open_states: [], priority_filters: [], sections: []
+    done_role: 'dev_done', blocked_states: [], open_states: [], priority_filters: [], sections: [], tracked_column_roles: []
   })
+  const [wcSource, setWcSource] = useState<'youtrack' | 'asana'>(() => getActiveSource() as 'youtrack' | 'asana')
+  // Real Asana section names fetched directly from the project — always up to date
+  const [asanaSectionNames, setAsanaSectionNames] = useState<string[]>([])
+
+  // Fetch real Asana sections whenever wcSource=asana and a project is connected.
+  // Using a useEffect (not inline in fetchWorkflowConfig) means this fires correctly even
+  // if asanaSelectedProject is set AFTER the initial fetchWorkflowConfig runs (race condition fix).
+  useEffect(() => {
+    if (wcSource !== 'asana' || !asanaSelectedProject) return
+    api.getAsanaProjectSections(asanaSelectedProject).then(res => {
+      // Backend returns a raw array (not {success,data} wrapped)
+      const sections: Array<{ name: string }> = Array.isArray(res)
+        ? res as unknown as Array<{ name: string }>
+        : ((res as any)?.data ?? [])
+      if (sections.length > 0) {
+        const names: string[] = sections.map(s => s.name).filter(Boolean)
+        setAsanaSectionNames(names)
+        // Update editColumns: merge real section names with stored role/rank mappings
+        setEditColumns(prev => {
+          const storedMap = new Map(prev.map(c => [c.state.toLowerCase(), c]))
+          return names.map((name, i) => {
+            const stored = storedMap.get(name.toLowerCase())
+            return stored
+              ? { ...stored, state: name }
+              : { state: name, rank: i, aliases: [], role: 'active', is_lateral: false }
+          })
+        })
+      }
+    }).catch(() => {})
+  }, [wcSource, asanaSelectedProject]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // For Report Defaults Open/Blocked States: use real Asana sections in Asana mode,
+  // fall back to YouTrack states in YouTrack mode.
+  const reportAvailableStates = wcSource === 'asana' && asanaSectionNames.length > 0
+    ? asanaSectionNames
+    : ytStates
 
   useEffect(() => {
     loadActiveSourceFromDB().then(setActiveSrc).catch(() => {})
@@ -602,17 +638,37 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   }
 
   // ── Workflow Config ─────────────────────────────────────────────────────────
-  const fetchWorkflowConfig = async () => {
+  const fetchWorkflowConfig = async (src?: 'youtrack' | 'asana') => {
+    const source = src ?? wcSource
     try {
-      const res = await api.getWorkflowConfig()
+      const res = await api.getWorkflowConfig(source)
       if (res.success && res.data) {
         setWorkflowConfig(res.data)
         setEditTags(res.data.priority_tags ?? [])
-        setEditColumns(res.data.column_hierarchy ?? [])
         setEditHotfix(res.data.hotfix_rules ?? { from_states: [], to_states: [] })
-        setEditReport(res.data.report_config ?? {
-          done_role: 'dev_done', blocked_states: [], open_states: [], priority_filters: [], sections: []
-        })
+
+        const rawReport = res.data.report_config ?? {
+          done_role: 'dev_done', blocked_states: [], open_states: [], priority_filters: [], sections: [], tracked_column_roles: []
+        }
+
+        // For Asana: store the role/rank mappings in editColumns as a baseline.
+        // The useEffect above will override editColumns with REAL section names from the
+        // Asana project API (fixes race condition and ensures correct section names).
+        setEditColumns(res.data.column_hierarchy ?? [])
+
+        // Normalize report config: strip any open/blocked state values that don't match
+        // the stored column hierarchy (cleans up stale YouTrack values in Asana configs).
+        const hierarchy = res.data.column_hierarchy ?? []
+        if (source === 'asana' && hierarchy.length > 0) {
+          const validStates = new Set(hierarchy.map((c: ColumnState) => c.state).filter(Boolean))
+          setEditReport({
+            ...rawReport,
+            open_states: (rawReport.open_states ?? []).filter(s => validStates.has(s)),
+            blocked_states: (rawReport.blocked_states ?? []).filter(s => validStates.has(s)),
+          })
+        } else {
+          setEditReport(rawReport)
+        }
       }
     } catch { /* ignore */ }
   }
@@ -620,7 +676,7 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const handleSavePriorities = async () => {
     try {
       setWcSaving(true); setWcError(null)
-      const res = await api.updatePriorityTags(editTags)
+      const res = await api.updatePriorityTags(editTags, wcSource)
       if (res.success) {
         if (res.data) setWorkflowConfig(res.data)
         else await fetchWorkflowConfig()
@@ -634,7 +690,7 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
     const withRanks = editColumns.map((c, i) => ({ ...c, rank: i }))
     try {
       setWcSaving(true); setWcError(null)
-      const res = await api.updateColumnHierarchy(withRanks)
+      const res = await api.updateColumnHierarchy(withRanks, wcSource)
       if (res.success) {
         if (res.data) { setWorkflowConfig(res.data); setEditColumns(res.data.column_hierarchy) }
         else await fetchWorkflowConfig()
@@ -647,7 +703,7 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const handleSaveHotfix = async () => {
     try {
       setWcSaving(true); setWcError(null)
-      const res = await api.updateHotfixRules(editHotfix)
+      const res = await api.updateHotfixRules(editHotfix, wcSource)
       if (res.success && res.data) { setWorkflowConfig(res.data); setWcSuccess('Hotfix rules saved!'); setTimeout(() => setWcSuccess(null), 3000) }
     } catch (e) { setWcError(e instanceof Error ? e.message : 'Save failed') }
     finally { setWcSaving(false) }
@@ -656,7 +712,7 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const handleSaveReport = async () => {
     try {
       setWcSaving(true); setWcError(null)
-      const res = await api.updateReportConfig(editReport)
+      const res = await api.updateReportConfig(editReport, wcSource)
       if (res.success) {
         if (res.data) { setWorkflowConfig(res.data); setEditReport(res.data.report_config ?? editReport) }
         else { await fetchWorkflowConfig() }
@@ -667,10 +723,10 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   }
 
   const handleResetWorkflow = async () => {
-    if (!confirm('Reset workflow config to system defaults?')) return
+    if (!confirm(`Reset ${wcSource} workflow config to system defaults?`)) return
     try {
       setWcSaving(true); setWcError(null)
-      await api.resetWorkflowConfig()
+      await api.resetWorkflowConfig(wcSource)
       await fetchWorkflowConfig()
       setWcSuccess('Reset to defaults!'); setTimeout(() => setWcSuccess(null), 3000)
     } catch (e) { setWcError(e instanceof Error ? e.message : 'Reset failed') }
@@ -1242,6 +1298,19 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                 <div className="int-alert int-alert-success"><CheckCircle size={14} /><span>{wcSuccess}</span></div>
               )}
 
+              {/* Source toggle */}
+              <div className="wc-source-toggle">
+                {(['youtrack', 'asana'] as const).map(src => (
+                  <button
+                    key={src}
+                    className={`wc-source-btn${wcSource === src ? ' wc-source-btn-active' : ''}`}
+                    onClick={() => { setWcSource(src); fetchWorkflowConfig(src) }}
+                  >
+                    {src === 'youtrack' ? 'YouTrack Config' : 'Asana Config'}
+                  </button>
+                ))}
+              </div>
+
               {/* Workflow sub-tabs */}
               <div className="wc-tabs">
                 {(['priorities', 'columns', 'hotfix', 'report'] as const).map(t => (
@@ -1414,9 +1483,9 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                     <div className="wc-report-block">
                       <div className="wc-report-block-title">Open States</div>
                       <p className="int-label-hint">Columns shown in the "open issues" section.</p>
-                      {ytStates.length > 0 ? (
+                      {reportAvailableStates.length > 0 ? (
                         <div className="wc-chip-group">
-                          {ytStates.map(s => (
+                          {reportAvailableStates.map(s => (
                             <label key={s} className="wc-chip-label">
                               <input
                                 type="checkbox"
@@ -1438,9 +1507,9 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                     <div className="wc-report-block">
                       <div className="wc-report-block-title">Blocked States</div>
                       <p className="int-label-hint">Columns that count as "blocked" in reports.</p>
-                      {ytStates.length > 0 ? (
+                      {reportAvailableStates.length > 0 ? (
                         <div className="wc-chip-group">
-                          {ytStates.map(s => (
+                          {reportAvailableStates.map(s => (
                             <label key={s} className="wc-chip-label">
                               <input
                                 type="checkbox"
@@ -1474,6 +1543,27 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                               })}
                             />
                             {s}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Tracked Columns */}
+                    <div className="wc-report-block wc-report-block-full">
+                      <div className="wc-report-block-title">Tracked Columns</div>
+                      <p className="int-label-hint">Which workflow states appear in the Tracking tab. Empty = show all.</p>
+                      <div className="wc-chip-group">
+                        {COLUMN_ROLES.map(role => (
+                          <label key={role} className="wc-chip-label">
+                            <input
+                              type="checkbox"
+                              checked={(editReport.tracked_column_roles ?? []).includes(role)}
+                              onChange={e => setEditReport(r => {
+                                const current = r.tracked_column_roles ?? []
+                                return { ...r, tracked_column_roles: e.target.checked ? [...current.filter(x => x !== role), role] : current.filter(x => x !== role) }
+                              })}
+                            />
+                            {role}
                           </label>
                         ))}
                       </div>

@@ -481,6 +481,59 @@ func RunMigrations() error {
 				ALTER TABLE pm_reports ADD CONSTRAINT pm_reports_date_type_unique UNIQUE (date, report_type);
 			END IF;
 		END $$`,
+
+		// ── Source-specific workflow config ───────────────────────────────────
+		// Add pm_source column so YouTrack and Asana can have separate configs
+		`ALTER TABLE workflow_config ADD COLUMN IF NOT EXISTS pm_source TEXT`,
+
+		// Migrate all existing rows (system defaults and user configs) to 'youtrack'
+		`UPDATE workflow_config SET pm_source = 'youtrack' WHERE pm_source IS NULL`,
+
+		// Drop old single-column unique constraint on user_id (now replaced by composite)
+		`ALTER TABLE workflow_config DROP CONSTRAINT IF EXISTS workflow_config_user_id_key`,
+
+		// Create composite unique index for non-null (user_id, pm_source) pairs (user configs)
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_config_user_source
+		 ON workflow_config(user_id, pm_source)
+		 WHERE user_id IS NOT NULL AND pm_source IS NOT NULL`,
+
+		// Seed Asana system default workflow config
+		`INSERT INTO workflow_config (id, user_id, pm_source, priority_tags, column_hierarchy, hotfix_rules, report_config)
+		SELECT
+			gen_random_uuid()::text,
+			NULL,
+			'asana',
+			'[
+				{"label":"P0","color":"#ef4444","display_order":0,"sla_hours":4,"prefixes":["P0"],"yt_mappings":[]},
+				{"label":"P1","color":"#f97316","display_order":1,"sla_hours":24,"prefixes":["P1"],"yt_mappings":[]},
+				{"label":"P2","color":"#eab308","display_order":2,"sla_hours":48,"prefixes":["P2"],"yt_mappings":[]},
+				{"label":"P3","color":"#6366f1","display_order":3,"sla_hours":72,"prefixes":["P3"],"yt_mappings":[]},
+				{"label":"Other","color":"#94a3b8","display_order":4,"sla_hours":72,"prefixes":[],"yt_mappings":[]}
+			]'::jsonb,
+			'[
+				{"state":"Backlog","rank":0,"aliases":["To Do","Upcoming"],"role":"backlog","is_lateral":false},
+				{"state":"Sprint","rank":1,"aliases":["In Progress","Active"],"role":"active","is_lateral":false},
+				{"state":"Blocked","rank":1,"aliases":[],"role":"blocked","is_lateral":true},
+				{"state":"Findings","rank":1,"aliases":[],"role":"findings","is_lateral":true},
+				{"state":"DEV","rank":2,"aliases":["Review","Code Review"],"role":"dev_done","is_lateral":false},
+				{"state":"Ready for Stage","rank":3,"aliases":[],"role":"verified","is_lateral":false},
+				{"state":"STAGE","rank":4,"aliases":[],"role":"deployed","is_lateral":false},
+				{"state":"Ready for PROD","rank":5,"aliases":[],"role":"verified","is_lateral":false},
+				{"state":"PROD","rank":6,"aliases":[],"role":"deployed","is_lateral":false},
+				{"state":"Done","rank":7,"aliases":["Completed","Complete","Fixed","Closed"],"role":"closed","is_lateral":false}
+			]'::jsonb,
+			'{"from_states":[],"to_states":[]}'::jsonb,
+			'{"done_role":"dev_done","blocked_states":["Blocked"],"open_states":["Sprint","In Progress","DEV","STAGE","PROD","Findings"],"priority_filters":["P0","P1","P2","P3","Other"],"sections":["done","hotfixes","open","blocked","overdue"],"tracked_column_roles":[]}'::jsonb
+		WHERE NOT EXISTS (SELECT 1 FROM workflow_config WHERE user_id IS NULL AND pm_source = 'asana')`,
+
+		// Add regression flag and due_date to asana_task_log
+		`ALTER TABLE asana_task_log ADD COLUMN IF NOT EXISTS is_regression BOOLEAN DEFAULT FALSE`,
+		`ALTER TABLE asana_task_log ADD COLUMN IF NOT EXISTS due_date DATE`,
+
+		// Remove user-specific Asana workflow configs that were saved before the Asana
+		// column/state fix — they contain YouTrack state names in open_states/blocked_states.
+		// The Asana system default will be used instead, and users can re-configure cleanly.
+		`DELETE FROM workflow_config WHERE pm_source = 'asana' AND user_id IS NOT NULL`,
 	}
 
 	for i, migration := range migrations {

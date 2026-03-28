@@ -27,6 +27,7 @@ type AsanaHandler struct {
 	syncService     *asana.SyncService
 	webhookService  *asana.WebhookService
 	asanaPMRepo     *database.AsanaPMRepository
+	configRepo      *database.WorkflowConfigRepository
 }
 
 // NewAsanaHandler creates a new Asana handler
@@ -40,7 +41,39 @@ func NewAsanaHandler() *AsanaHandler {
 		syncService:     asana.NewSyncService(),
 		webhookService:  asana.NewWebhookService(),
 		asanaPMRepo:     database.NewAsanaPMRepository(),
+		configRepo:      database.NewWorkflowConfigRepository(),
 	}
+}
+
+// resolveAsanaPAT resolves the Asana PAT: per-user integration → global settings → env var
+func (h *AsanaHandler) resolveAsanaPAT(ctx context.Context, userID string) (pat string, projectGID string) {
+	// 1. Per-user integration
+	if userID != "" {
+		if integ, err := h.integrationRepo.GetAsanaIntegration(ctx, userID); err == nil && integ != nil && integ.Connected {
+			pat = integ.AccessToken
+			projectGID = integ.ProjectID
+		}
+	}
+	// 2. Global settings DB
+	if pat == "" || projectGID == "" {
+		settings, _ := h.settingsRepo.GetAsanaSettings(ctx)
+		if settings != nil && settings.Configured {
+			if pat == "" {
+				pat = settings.PAT
+			}
+			if projectGID == "" {
+				projectGID = settings.ProjectID
+			}
+		}
+	}
+	// 3. Environment variables
+	if pat == "" {
+		pat = os.Getenv("ASANA_PAT")
+	}
+	if projectGID == "" {
+		projectGID = os.Getenv("ASANA_PROJECT_ID")
+	}
+	return
 }
 
 // ConnectAsana handles connecting an Asana account
@@ -217,7 +250,15 @@ func (h *AsanaHandler) GetAsanaSections(w http.ResponseWriter, r *http.Request) 
 	vars := mux.Vars(r)
 	asanaProjectID := vars["asana_project_id"]
 
-	sections, err := h.syncService.GetAsanaSections(r.Context(), userID, asanaProjectID)
+	// Resolve PAT using the full 3-level lookup (per-user → global settings → env var)
+	pat, _ := h.resolveAsanaPAT(r.Context(), userID)
+	if pat == "" {
+		http.Error(w, "Asana is not configured", http.StatusBadRequest)
+		return
+	}
+
+	client := asana.NewClient(pat)
+	sections, err := client.GetSections(r.Context(), asanaProjectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -384,19 +425,9 @@ func (h *AsanaHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 // logWebhookSectionChanges detects task section changes from webhook events
 // and records them in asana_task_log for PM analytics.
 func (h *AsanaHandler) logWebhookSectionChanges(ctx context.Context, events []asana.WebhookEvent) {
-	// Resolve Asana credentials (global settings → env vars)
-	settings, _ := h.settingsRepo.GetAsanaSettings(ctx)
-	var pat, projectGID string
-	if settings != nil {
-		pat = settings.PAT
-		projectGID = settings.ProjectID
-	}
-	if pat == "" {
-		pat = os.Getenv("ASANA_PAT")
-	}
-	if projectGID == "" {
-		projectGID = os.Getenv("ASANA_PROJECT_ID")
-	}
+	// Resolve Asana credentials: per-user integration → global settings → env vars
+	// Webhooks are not per-user, so userID is "" — falls through to global settings / env
+	pat, projectGID := h.resolveAsanaPAT(ctx, "")
 	if pat == "" {
 		return // no credentials, skip
 	}
@@ -448,6 +479,22 @@ func (h *AsanaHandler) logWebhookSectionChanges(ctx context.Context, events []as
 		if task.Completed && task.CompletedAt != nil {
 			transitionedAt = *task.CompletedAt
 		}
+		// Detect regression using Asana workflow config column hierarchy
+		isRegression := false
+		if fromSection != "" && h.configRepo != nil {
+			if asanaCfg, err := h.configRepo.GetSystemDefault(ctx, "asana"); err == nil {
+				isRegression = isBackwardMoveFromConfig(fromSection, currentSection, asanaCfg.ColumnHierarchy)
+			}
+		}
+
+		// Parse due date from Asana task
+		var dueDate *time.Time
+		if task.DueOn != nil && *task.DueOn != "" {
+			if d, err := time.Parse("2006-01-02", *task.DueOn); err == nil {
+				dueDate = &d
+			}
+		}
+
 		entry := &database.AsanaTaskLog{
 			TaskGID:        taskGID,
 			TaskName:       task.Name,
@@ -456,6 +503,8 @@ func (h *AsanaHandler) logWebhookSectionChanges(ctx context.Context, events []as
 			FromSection:    fromSection,
 			ToSection:      currentSection,
 			TransitionedAt: transitionedAt,
+			IsRegression:   isRegression,
+			DueDate:        dueDate,
 		}
 		if err := h.asanaPMRepo.LogTaskTransition(ctx, entry); err != nil {
 			log.Printf("asana webhook: failed to log transition for task %s: %v", taskGID, err)
@@ -471,23 +520,8 @@ func (h *AsanaHandler) ImportFromEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to get credentials from database first
-	settings, _ := h.settingsRepo.GetAsanaSettings(r.Context())
-
-	var asanaPAT, asanaProjectID string
-
-	if settings != nil && settings.Configured {
-		asanaPAT = settings.PAT
-		asanaProjectID = settings.ProjectID
-	}
-
-	// Fallback to environment variables if DB not configured
-	if asanaPAT == "" {
-		asanaPAT = os.Getenv("ASANA_PAT")
-	}
-	if asanaProjectID == "" {
-		asanaProjectID = os.Getenv("ASANA_PROJECT_ID")
-	}
+	// Resolve credentials: per-user integration → global settings → env vars
+	asanaPAT, asanaProjectID := h.resolveAsanaPAT(r.Context(), userID)
 
 	if asanaPAT == "" || asanaProjectID == "" {
 		http.Error(w, "Asana is not configured. Please configure Asana PAT and Project ID in Settings.", http.StatusBadRequest)
@@ -626,15 +660,8 @@ func (h *AsanaHandler) PushToAsana(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	taskID := vars["id"]
 
-	// Get PAT from database or environment
-	settings, _ := h.settingsRepo.GetAsanaSettings(r.Context())
-	var asanaPAT string
-	if settings != nil && settings.Configured {
-		asanaPAT = settings.PAT
-	}
-	if asanaPAT == "" {
-		asanaPAT = os.Getenv("ASANA_PAT")
-	}
+	// Resolve PAT: per-user integration → global settings → env vars
+	asanaPAT, _ := h.resolveAsanaPAT(r.Context(), userID)
 	if asanaPAT == "" {
 		http.Error(w, "Asana is not configured", http.StatusBadRequest)
 		return

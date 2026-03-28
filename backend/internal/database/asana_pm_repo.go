@@ -11,16 +11,18 @@ import (
 
 // AsanaTaskLog records a section transition for an Asana task (mirrors IssueStateLog)
 type AsanaTaskLog struct {
-	ID                          string
-	TaskGID                     string
-	TaskName                    string
-	ProjectGID                  string
-	Assignee                    string
-	FromSection                 string
-	ToSection                   string
-	Priority                    string
-	TransitionedAt              time.Time
-	DurationInPrevSectionHours  *float64
+	ID                         string
+	TaskGID                    string
+	TaskName                   string
+	ProjectGID                 string
+	Assignee                   string
+	FromSection                string
+	ToSection                  string
+	Priority                   string
+	TransitionedAt             time.Time
+	DurationInPrevSectionHours *float64
+	IsRegression               bool
+	DueDate                    *time.Time // task due date from Asana (for overdue detection)
 }
 
 // AsanaPMRepository handles asana_task_log and asana_blocker_cache DB operations
@@ -55,10 +57,10 @@ func (r *AsanaPMRepository) LogTaskTransition(ctx context.Context, log *AsanaTas
 
 	_, err := pool.Exec(ctx, `
 		INSERT INTO asana_task_log
-			(task_gid, task_name, project_gid, assignee, from_section, to_section, priority, transitioned_at, duration_in_prev_section_hours)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			(task_gid, task_name, project_gid, assignee, from_section, to_section, priority, transitioned_at, duration_in_prev_section_hours, is_regression, due_date)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 	`, log.TaskGID, log.TaskName, log.ProjectGID, log.Assignee, log.FromSection, log.ToSection,
-		log.Priority, log.TransitionedAt, durationHours)
+		log.Priority, log.TransitionedAt, durationHours, log.IsRegression, log.DueDate)
 	return err
 }
 
@@ -71,7 +73,7 @@ func (r *AsanaPMRepository) GetTransitionsSince(ctx context.Context, projectGID 
 
 	rows, err := pool.Query(ctx, `
 		SELECT id, task_gid, task_name, project_gid, COALESCE(assignee,''), COALESCE(from_section,''), to_section,
-		       COALESCE(priority,''), transitioned_at, duration_in_prev_section_hours
+		       COALESCE(priority,''), transitioned_at, duration_in_prev_section_hours, COALESCE(is_regression, false)
 		FROM asana_task_log
 		WHERE project_gid = $1 AND transitioned_at >= $2
 		ORDER BY transitioned_at ASC
@@ -85,7 +87,7 @@ func (r *AsanaPMRepository) GetTransitionsSince(ctx context.Context, projectGID 
 	for rows.Next() {
 		var l AsanaTaskLog
 		if err := rows.Scan(&l.ID, &l.TaskGID, &l.TaskName, &l.ProjectGID, &l.Assignee,
-			&l.FromSection, &l.ToSection, &l.Priority, &l.TransitionedAt, &l.DurationInPrevSectionHours); err == nil {
+			&l.FromSection, &l.ToSection, &l.Priority, &l.TransitionedAt, &l.DurationInPrevSectionHours, &l.IsRegression); err == nil {
 			logs = append(logs, l)
 		}
 	}
@@ -102,10 +104,10 @@ func (r *AsanaPMRepository) GetLastTransitionForTask(ctx context.Context, taskGI
 	var l AsanaTaskLog
 	err := pool.QueryRow(ctx, `
 		SELECT id, task_gid, task_name, project_gid, COALESCE(assignee,''), COALESCE(from_section,''), to_section,
-		       COALESCE(priority,''), transitioned_at, duration_in_prev_section_hours
+		       COALESCE(priority,''), transitioned_at, duration_in_prev_section_hours, COALESCE(is_regression, false)
 		FROM asana_task_log WHERE task_gid = $1 ORDER BY transitioned_at DESC LIMIT 1
 	`, taskGID).Scan(&l.ID, &l.TaskGID, &l.TaskName, &l.ProjectGID, &l.Assignee,
-		&l.FromSection, &l.ToSection, &l.Priority, &l.TransitionedAt, &l.DurationInPrevSectionHours)
+		&l.FromSection, &l.ToSection, &l.Priority, &l.TransitionedAt, &l.DurationInPrevSectionHours, &l.IsRegression)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +237,8 @@ func (r *AsanaPMRepository) GetAsanaTimeTracking(ctx context.Context, params Tim
 					THEN EXTRACT(EPOCH FROM (NOW() - transitioned_at)) / 3600.0
 				ELSE duration_in_prev_section_hours
 			END AS duration_hours,
-			'' AS comment
+			'' AS comment,
+			due_date
 		FROM asana_task_log
 		%s
 		ORDER BY
@@ -259,6 +262,7 @@ func (r *AsanaPMRepository) GetAsanaTimeTracking(ctx context.Context, params Tim
 			&l.Assignee, &l.MovedBy,
 			&l.FromState, &l.ToState,
 			&l.Priority, &l.TransitionedAt, &durHrs, &l.Comment,
+			&l.DueDate,
 		); err != nil {
 			continue
 		}
