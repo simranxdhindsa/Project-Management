@@ -2235,6 +2235,19 @@ const DEFAULT_SECTIONS: DeploymentSectionConfig[] = [
 
 const DR_PAGE_SIZE = 8
 
+async function drRequestNotificationPermission(): Promise<void> {
+  if (typeof Notification === 'undefined') return
+  if (Notification.permission === 'default') await Notification.requestPermission()
+}
+
+function drShowCompletionNotification(succeeded: number, failed: number) {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  const body = failed > 0
+    ? `${succeeded} fix statements generated, ${failed} failed.`
+    : `All ${succeeded} fix statements generated successfully.`
+  new Notification('Deployment Report Ready', { body, icon: '/favicon.ico', tag: 'deployment-report-done' })
+}
+
 function AsanaDeploymentReport() {
   const [activeView, setActiveView] = useState<'report' | 'config'>('report')
   const [tickets, setTickets] = useState<DeploymentTicket[]>([])
@@ -2242,6 +2255,7 @@ function AsanaDeploymentReport() {
   const [isFetching, setIsFetching] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [reportReady, setReportReady] = useState(false)
+
   const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number } | null>(null)
   const [genProgress, setGenProgress] = useState<{ current: number; total: number; retryCountdown: number } | null>(null)
   const [preloadTickets, setPreloadTickets] = useState<LoadedDeploymentTicket[]>([])
@@ -2337,6 +2351,9 @@ function AsanaDeploymentReport() {
     const toGenerate = tickets.filter(t => t.status === 'ready' && t.gid)
     if (!toGenerate.length) return
 
+    // Request notification permission inside user gesture (required by browsers)
+    drRequestNotificationPermission()
+
     setIsGenerating(true)
     setReportReady(false)
 
@@ -2353,59 +2370,55 @@ function AsanaDeploymentReport() {
       toGenerate.find(g => g.gid === t.gid) ? { ...t, status: 'generating' as const } : t
     ))
 
-    // Local set — never read React state mid-async
-    const resolvedGids = new Set<string>()
+    let totalSucceeded = 0
+    let totalFailed = 0
 
-    const countdown = async (secs: number, pageIdx: number, total: number) => {
-      for (let s = secs; s > 0; s--) {
-        setGenProgress({ current: pageIdx, total, retryCountdown: s })
-        await new Promise(r => setTimeout(r, 1000))
-      }
-    }
+    for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
+      const page = pages[pageIdx]
+      setGenProgress({ current: pageIdx, total: pages.length, retryCountdown: 0 })
 
-    const runBatch = async (batch: typeof toGenerate, pageIdx: number, total: number) => {
-      setGenProgress({ current: pageIdx, total, retryCountdown: 0 })
-      const inputs = batch.map(t => ({
-        gid: t.gid, name: t.name, notes: t.notes, manualDescription: t.manualDescription,
-      }))
       try {
-        const res = await api.generateAsanaDeploymentReport(inputs)
+        const res = await api.generateAsanaDeploymentReport(
+          page.map(t => ({ gid: t.gid, name: t.name, notes: t.notes, manualDescription: t.manualDescription }))
+        )
+
         if (res.success && res.data) {
-          res.data.results.forEach(r => { if (r.fixStatement) resolvedGids.add(r.gid) })
           setTickets(prev => prev.map(t => {
             const result = res.data!.results.find(r => r.gid === t.gid)
-            if (!result?.fixStatement) return t
-            return { ...t, fixStatement: result.fixStatement, status: 'ready' as const }
+            if (!result) return t
+            if (result.fixStatement) {
+              totalSucceeded++
+              return { ...t, fixStatement: result.fixStatement, status: 'ready' as const }
+            }
+            totalFailed++
+            return { ...t, status: 'ready' as const }
           }))
-          const waitSecs = (res.data as any).retryAfter ?? 0
-          if (waitSecs > 0 && pageIdx < total - 1) {
-            await countdown(waitSecs, pageIdx + 1, total)
+
+          // If rate limited, show countdown before next batch (backend already retried internally)
+          const waitSecs = res.data.retryAfter ?? 0
+          if (waitSecs > 0) {
+            for (let s = waitSecs; s > 0; s--) {
+              setGenProgress({ current: pageIdx + 1, total: pages.length, retryCountdown: s })
+              await new Promise(r => setTimeout(r, 1000))
+            }
           }
-        } else if (pageIdx < total - 1) {
-          await countdown(5, pageIdx + 1, total)
         }
       } catch (err: any) {
         const is429 = err?.response?.status === 429 || err?.status === 429
-        if (pageIdx < total - 1) {
-          await countdown(is429 ? 10 : 5, pageIdx + 1, total)
+        const pageGids = new Set(page.map(t => t.gid))
+        setTickets(prev => prev.map(t =>
+          pageGids.has(t.gid) && t.status === 'generating' ? { ...t, status: 'ready' as const } : t
+        ))
+        totalFailed += page.length
+        if (is429) {
+          for (let s = 10; s > 0; s--) {
+            setGenProgress({ current: pageIdx + 1, total: pages.length, retryCountdown: s })
+            await new Promise(r => setTimeout(r, 1000))
+          }
         }
       }
-      setGenProgress({ current: pageIdx + 1, total, retryCountdown: 0 })
-    }
 
-    for (const [i, batch] of pages.entries()) {
-      await runBatch(batch, i, pages.length)
-    }
-
-    // Auto-retry unresolved (up to 3 passes)
-    const MAX_RETRIES = 3
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      const remaining = toGenerate.filter(t => !resolvedGids.has(t.gid))
-      if (remaining.length === 0) break
-      await countdown(8, 0, Math.ceil(remaining.length / DR_PAGE_SIZE))
-      for (const [i, batch] of makeBatches(remaining).entries()) {
-        await runBatch(batch, i, Math.ceil(remaining.length / DR_PAGE_SIZE))
-      }
+      setGenProgress({ current: pageIdx + 1, total: pages.length, retryCountdown: 0 })
     }
 
     // Revert any still-generating tickets back to 'ready' (never show error)
@@ -2416,6 +2429,7 @@ function AsanaDeploymentReport() {
     setIsGenerating(false)
     setGenProgress(null)
     setReportReady(true)
+    drShowCompletionNotification(totalSucceeded, totalFailed)
   }
 
   const handleClearAll = () => {
@@ -2428,12 +2442,13 @@ function AsanaDeploymentReport() {
     if (!isGenerating) return <><Rocket size={14} /> Generate Report ({readyCount} tickets)</>
     if (genProgress) {
       if (genProgress.retryCountdown > 0) {
-        return <><Loader2 size={14} className="animate-spin" /> Rate limited — resuming in {genProgress.retryCountdown}s…</>
+        return <><Loader2 size={14} className="animate-spin" /> Cooking up brilliance… resuming in {genProgress.retryCountdown}s</>
       }
       return <><Loader2 size={14} className="animate-spin" /> Batch {genProgress.current + 1} of {genProgress.total}…</>
     }
     return <><Loader2 size={14} className="animate-spin" /> Generating…</>
   }
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -2487,7 +2502,7 @@ function AsanaDeploymentReport() {
                     <div className="dr-progress-fill" style={{ width: `${Math.round((genProgress.current / genProgress.total) * 100)}%` }} />
                   </div>
                   {genProgress.retryCountdown > 0
-                    ? <span className="dr-progress-countdown">Rate limit reached — resuming in {genProgress.retryCountdown}s</span>
+                    ? <span className="dr-progress-countdown">✦ Hang tight — crafting your report… resuming in {genProgress.retryCountdown}s</span>
                     : <span className="dr-progress-label">Batch {genProgress.current + 1} of {genProgress.total} · {DR_PAGE_SIZE} tickets per batch</span>
                   }
                 </div>

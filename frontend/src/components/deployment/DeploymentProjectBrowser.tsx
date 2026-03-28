@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Loader2, FolderOpen, ChevronDown } from 'lucide-react'
 import api from '../../services/api'
 
@@ -21,9 +21,9 @@ export default function DeploymentProjectBrowser({ onLoad, isLoading }: Props) {
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
 
-  const fetchSections = async () => {
+  const fetchSections = async (autoOpen = false) => {
     if (sections.length > 0) {
-      setOpen(o => !o)
+      if (!autoOpen) setOpen(o => !o)
       return
     }
     setLoadingSections(true)
@@ -42,6 +42,9 @@ export default function DeploymentProjectBrowser({ onLoad, isLoading }: Props) {
       setLoadingSections(false)
     }
   }
+
+  // Auto-load sections on mount
+  useEffect(() => { fetchSections(true) }, [])
 
   const toggleSection = (gid: string) => {
     setSelectedSections(prev => {

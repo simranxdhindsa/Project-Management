@@ -2924,10 +2924,31 @@ func (h *AsanaPMHandler) GenerateDeploymentReport(w http.ResponseWriter, r *http
 			}
 			userMsg := fmt.Sprintf("<title>%s</title>\n<description>%s</description>", t.Name, notes)
 
-			fix, err := ai.QueryWithContext(r.Context(), systemPrompt, userMsg)
-			if err != nil || strings.TrimSpace(fix) == "" {
-				if err != nil {
-					errMsg := err.Error()
+			// Retry up to 4 times with exponential backoff on rate-limit errors (mirrors DR backend)
+			const maxRetries = 4
+			backoff := 2 * time.Second
+			var fix string
+			var lastErr error
+			for attempt := 0; attempt < maxRetries; attempt++ {
+				fix, lastErr = ai.QueryWithContext(r.Context(), systemPrompt, userMsg)
+				if lastErr == nil && strings.TrimSpace(fix) != "" {
+					break
+				}
+				if lastErr != nil {
+					lower := strings.ToLower(lastErr.Error())
+					isRateLimit := strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
+						strings.Contains(lower, "429") || strings.Contains(lower, "too many")
+					if isRateLimit && attempt < maxRetries-1 {
+						time.Sleep(backoff)
+						backoff *= 2
+						continue
+					}
+				}
+				break
+			}
+			if lastErr != nil || strings.TrimSpace(fix) == "" {
+				if lastErr != nil {
+					errMsg := lastErr.Error()
 					results[idx] = ticketResult{GID: t.GID, FixStatement: nil, Error: &errMsg}
 				} else {
 					results[idx] = ticketResult{GID: t.GID, FixStatement: &t.Name}
@@ -2940,11 +2961,25 @@ func (h *AsanaPMHandler) GenerateDeploymentReport(w http.ResponseWriter, r *http
 	}
 	wg.Wait()
 
+	// Signal frontend to wait if any ticket hit a rate limit (case-insensitive)
+	retryAfter := 0
+	for _, r := range results {
+		if r.Error != nil {
+			lower := strings.ToLower(*r.Error)
+			if strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") || strings.Contains(lower, "429") || strings.Contains(lower, "too many") {
+				retryAfter = 34 // Groq's typical retry window
+				break
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":    true,
-		"results":    results,
-		"retryAfter": 0,
+		"success": true,
+		"data": map[string]interface{}{
+			"results":    results,
+			"retryAfter": retryAfter,
+		},
 	})
 }
 
