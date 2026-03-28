@@ -1951,43 +1951,42 @@ func (h *AsanaPMHandler) GetIssueTimelines(w http.ResponseWriter, r *http.Reques
 	// Live fallback: synthesize timelines from current Asana tasks when log is empty.
 	if len(timelines) == 0 {
 		if client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID); clientErr == nil && projectGID != "" {
-			if tasks, tasksErr := client.GetProjectTasksPaginated(r.Context(), projectGID); tasksErr == nil {
-				now := time.Now()
-				pinnedSet2 := make(map[string]bool, len(pinnedIDs))
-				for _, id := range pinnedIDs {
-					pinnedSet2[id] = true
+			tasks, _ := client.GetProjectTasksPaginated(r.Context(), projectGID)
+			now := time.Now()
+			pinnedSet2 := make(map[string]bool, len(pinnedIDs))
+			for _, id := range pinnedIDs {
+				pinnedSet2[id] = true
+			}
+			for _, task := range tasks {
+				if task.Completed {
+					continue
 				}
-				for _, task := range tasks {
-					if task.Completed {
-						continue
-					}
-					assigneeName := ""
-					if task.Assignee != nil {
-						assigneeName = task.Assignee.Name
-					}
-					section := taskSectionName(task)
-					liveHours := now.Sub(task.ModifiedAt).Hours()
-					threshold := overdueThresholdHoursForPriority("")
-					timelines = append(timelines, database.IssueTimeline{
-						IssueID:        task.GID,
-						IssueSummary:   task.Name,
-						Assignee:       assigneeName,
-						Pinned:         pinnedSet2[task.GID],
-						TotalStints:    1,
-						TotalHours:     liveHours,
-						IsLive:         true,
-						LiveHours:      liveHours,
-						IsOverdue:      liveHours > threshold,
-						ThresholdHours: threshold,
-						FirstEnteredAt: task.ModifiedAt,
-						LastActivityAt: task.ModifiedAt,
-						Stints: []database.IssueStint{{
-							StintNumber: 1,
-							EnteredAt:   task.ModifiedAt,
-							ExitedTo:    section,
-						}},
-					})
+				assigneeName := ""
+				if task.Assignee != nil {
+					assigneeName = task.Assignee.Name
 				}
+				section := taskSectionName(task)
+				liveHours := now.Sub(task.ModifiedAt).Hours()
+				threshold := overdueThresholdHoursForPriority("")
+				timelines = append(timelines, database.IssueTimeline{
+					IssueID:        task.GID,
+					IssueSummary:   task.Name,
+					Assignee:       assigneeName,
+					Pinned:         pinnedSet2[task.GID],
+					TotalStints:    1,
+					TotalHours:     liveHours,
+					IsLive:         true,
+					LiveHours:      liveHours,
+					IsOverdue:      liveHours > threshold,
+					ThresholdHours: threshold,
+					FirstEnteredAt: task.ModifiedAt,
+					LastActivityAt: task.ModifiedAt,
+					Stints: []database.IssueStint{{
+						StintNumber: 1,
+						EnteredAt:   task.ModifiedAt,
+						ExitedTo:    section,
+					}},
+				})
 			}
 		}
 	}

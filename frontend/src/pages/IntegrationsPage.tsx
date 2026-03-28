@@ -147,7 +147,7 @@ function WcObjDropdown({ value, placeholder = '— Select —', options, onChang
         <ChevronDown size={11} className={`dropdown-chevron ${open ? 'open' : ''}`} />
       </button>
       {open && rect && createPortal(
-        <div className="pm-custom-dropdown-menu" style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, minWidth: rect.width, zIndex: 9999 }}>
+        <div className="pm-custom-dropdown-menu wc-obj-dropdown" style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, minWidth: rect.width, zIndex: 9999 }}>
           {options.map(opt => (
             <button key={opt.id} type="button" className={`pm-dropdown-item ${value === opt.id ? 'active' : ''}`}
               onClick={() => { onChange(opt.id); setOpen(false); setRect(null) }}>
