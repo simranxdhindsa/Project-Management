@@ -114,6 +114,16 @@ func main() {
 	asanaPMRoutes.HandleFunc("/save-plan", asanaPMHandler.SaveCarryoverPlan).Methods("POST")
 	asanaPMRoutes.HandleFunc("/carryover", asanaPMHandler.GetCarryover).Methods("GET")
 	asanaPMRoutes.HandleFunc("/project", asanaPMHandler.SaveProjectGID).Methods("PATCH")
+	// PM Reports endpoints
+	asanaPMRoutes.HandleFunc("/assignee-stats", asanaPMHandler.GetAssigneeStats).Methods("GET")
+	asanaPMRoutes.HandleFunc("/users/avatars", asanaPMHandler.GetUserAvatars).Methods("GET")
+	asanaPMRoutes.HandleFunc("/time-tracking", asanaPMHandler.GetTimeTracking).Methods("GET")
+	asanaPMRoutes.HandleFunc("/issue-timelines", asanaPMHandler.GetIssueTimelines).Methods("GET")
+	asanaPMRoutes.HandleFunc("/report/weekly/{weekStart}", asanaPMHandler.GenerateWeeklyPMReport).Methods("GET")
+	asanaPMRoutes.HandleFunc("/report/{date}", asanaPMHandler.GeneratePMReport).Methods("GET")
+	asanaPMRoutes.HandleFunc("/stage-report/columns", asanaPMHandler.GetStageReportColumns).Methods("GET")
+	asanaPMRoutes.HandleFunc("/stage-report/generate", asanaPMHandler.GenerateStageReport).Methods("POST")
+	asanaPMRoutes.HandleFunc("/backfill", asanaPMHandler.BackfillAsanaLog).Methods("POST")
 
 	// User data source preference routes (protected)
 	userPrefRoutes := api.PathPrefix("/user").Subrouter()

@@ -123,13 +123,13 @@ export function BoardPage() {
   }, [selectedIssue])
 
   // ── Data fetching ──────────────────────────────────────────────────────────
-  const fetchBoard = useCallback(async (silent = false) => {
+  const fetchBoard = useCallback(async (silent = false, force = false) => {
     if (!silent) setLoading(true)
     else setSyncing(true)
     setError(null)
     try {
       const [issuesRes, statesRes] = await Promise.all([
-        getPMIssues(),
+        getPMIssues(force),
         getPMStates(),
       ])
       if (issuesRes.data) setIssues(issuesRes.data as YouTrackIssue[])
@@ -256,7 +256,7 @@ export function BoardPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <button
             className="btn-secondary btn-sm"
-            onClick={() => fetchBoard(true)}
+            onClick={() => fetchBoard(true, true)}
             disabled={syncing}
             title="Refresh from YouTrack"
           >

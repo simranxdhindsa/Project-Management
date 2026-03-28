@@ -443,6 +443,11 @@ func (h *AsanaHandler) logWebhookSectionChanges(ctx context.Context, events []as
 			assignee = task.Assignee.Name
 		}
 
+		// Use completed_at when the task is being moved to a done state, otherwise now
+		transitionedAt := time.Now()
+		if task.Completed && task.CompletedAt != nil {
+			transitionedAt = *task.CompletedAt
+		}
 		entry := &database.AsanaTaskLog{
 			TaskGID:        taskGID,
 			TaskName:       task.Name,
@@ -450,7 +455,7 @@ func (h *AsanaHandler) logWebhookSectionChanges(ctx context.Context, events []as
 			Assignee:       assignee,
 			FromSection:    fromSection,
 			ToSection:      currentSection,
-			TransitionedAt: time.Now(),
+			TransitionedAt: transitionedAt,
 		}
 		if err := h.asanaPMRepo.LogTaskTransition(ctx, entry); err != nil {
 			log.Printf("asana webhook: failed to log transition for task %s: %v", taskGID, err)

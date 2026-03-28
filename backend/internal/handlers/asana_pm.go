@@ -40,6 +40,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,6 +61,7 @@ type AsanaPMHandler struct {
 	taskRepo        *database.TaskRepository
 	asanaPMRepo     *database.AsanaPMRepository
 	configRepo      *database.WorkflowConfigRepository
+	reportRepo      *database.ReportRepository
 }
 
 // NewAsanaPMHandler creates a new AsanaPMHandler
@@ -72,6 +74,7 @@ func NewAsanaPMHandler() *AsanaPMHandler {
 		taskRepo:        database.NewTaskRepository(),
 		asanaPMRepo:     database.NewAsanaPMRepository(),
 		configRepo:      database.NewWorkflowConfigRepository(),
+		reportRepo:      database.NewReportRepository(),
 	}
 }
 
@@ -189,12 +192,35 @@ func taskToIssueRow(task asana.Task) issueRow {
 
 // extractAsanaPriority tries to get priority from Asana custom fields
 func extractAsanaPriority(task asana.Task) string {
-	// AsanaTask from client.go doesn't have CustomFields in the basic struct,
-	// but GetProjectTasksPaginated fetches them. We check the raw JSON by
-	// trying to match known priority field names.
-	// Since the Task struct doesn't have CustomFields, return "Normal" for now.
-	// The richer BoardSyncv2 pattern can be added when custom field mapping is configured.
+	for _, cf := range task.CustomFields {
+		switch strings.ToLower(cf.Name) {
+		case "priority", "p", "pri":
+			if cf.EnumValue != nil && cf.EnumValue.Name != "" {
+				return cf.EnumValue.Name
+			}
+			if cf.DisplayValue != "" {
+				return cf.DisplayValue
+			}
+		}
+	}
 	return "Normal"
+}
+
+// extractAsanaDueDate returns the due date string for a task.
+// Prefers the standard due_on field; falls back to a custom field named "due date", "deadline", or "target date".
+func extractAsanaDueDate(task asana.Task) *string {
+	if task.DueOn != nil && *task.DueOn != "" {
+		return task.DueOn
+	}
+	for _, cf := range task.CustomFields {
+		switch strings.ToLower(cf.Name) {
+		case "due date", "deadline", "target date", "due":
+			if cf.DisplayValue != "" {
+				return &cf.DisplayValue
+			}
+		}
+	}
+	return nil
 }
 
 // taskSectionName returns the first section name for a task
@@ -1100,20 +1126,22 @@ func (h *AsanaPMHandler) GetDailyBrief(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get done yesterday from asana_task_log
+	// Get done yesterday using Asana's native completed_at timestamp (reliable, not affected by backfill timing)
 	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
-	since := time.Now().AddDate(0, 0, -1)
-	logs, _ := h.asanaPMRepo.GetTransitionsSince(r.Context(), projectGID, since)
 
 	var doneYesterday []issueRow
-	for _, l := range logs {
-		if l.TransitionedAt.Format("2006-01-02") == yesterday && isDoneSection(l.ToSection) {
+	for _, task := range tasks {
+		if task.CompletedAt != nil && task.CompletedAt.UTC().Format("2006-01-02") == yesterday {
+			assigneeName := ""
+			if task.Assignee != nil {
+				assigneeName = task.Assignee.Name
+			}
 			doneYesterday = append(doneYesterday, issueRow{
-				ID:       l.TaskGID,
-				Summary:  l.TaskName,
-				Status:   l.ToSection,
-				Priority: l.Priority,
-				Assignee: l.Assignee,
+				ID:       task.GID,
+				Summary:  task.Name,
+				Status:   taskSectionName(task),
+				Priority: extractAsanaPriority(task),
+				Assignee: assigneeName,
 			})
 		}
 	}
@@ -1574,6 +1602,13 @@ func taskToIssueMap(task asana.Task) map[string]interface{} {
 	createdMs := task.CreatedAt.UnixMilli()
 	updatedMs := task.ModifiedAt.UnixMilli()
 
+	var dueMs int64
+	if task.DueOn != nil && *task.DueOn != "" {
+		if t, err := time.Parse("2006-01-02", *task.DueOn); err == nil {
+			dueMs = t.UnixMilli()
+		}
+	}
+
 	return map[string]interface{}{
 		"id":          task.GID,
 		"summary":     task.Name,
@@ -1584,6 +1619,7 @@ func taskToIssueMap(task asana.Task) map[string]interface{} {
 		"assignee":    assignee,
 		"created":     createdMs,
 		"updated":     updatedMs,
+		"due_date":    dueMs,
 		"attachments": []interface{}{},
 		"section":     section,
 		"permalink":   task.PermalinkURL,
@@ -1654,6 +1690,892 @@ func analyseAsanaBlockerStories(ctx context.Context, taskGID string, comments []
 		return "Could not analyse"
 	}
 	return strings.TrimSpace(aiResp.Choices[0].Message.Content)
+}
+
+// ─── Assignee Stats ───────────────────────────────────────────────────────────
+
+// GetAssigneeStats returns per-assignee open/in_progress/blocked/done counts from Asana
+// GET /api/asana/pm/assignee-stats
+func (h *AsanaPMHandler) GetAssigneeStats(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	type AssigneeReport struct {
+		Assignee           string   `json:"assignee"`
+		Open               int      `json:"open"`
+		InProgress         int      `json:"in_progress"`
+		Done               int      `json:"done"`
+		Blocked            int      `json:"blocked"`
+		AvgHoursInProgress *float64 `json:"avg_hours_in_progress"`
+		Issues             []string `json:"issues"`
+	}
+
+	reportMap := make(map[string]*AssigneeReport)
+	ensureAssignee := func(name string) *AssigneeReport {
+		if name == "" {
+			name = "Unassigned"
+		}
+		if _, ok := reportMap[name]; !ok {
+			reportMap[name] = &AssigneeReport{Assignee: name}
+		}
+		return reportMap[name]
+	}
+
+	// Live tasks from Asana
+	client, projectGID, _, err := h.getAsanaClient(r.Context(), userID)
+	if err == nil {
+		tasks, taskErr := client.GetProjectTasksPaginated(r.Context(), projectGID)
+		if taskErr == nil {
+			for _, task := range tasks {
+				if task.Completed {
+					continue
+				}
+				name := ""
+				if task.Assignee != nil {
+					name = task.Assignee.Name
+				}
+				ar := ensureAssignee(name)
+				section := taskSectionName(task)
+				status := sectionStatus(section)
+				switch status {
+				case "In Progress":
+					ar.InProgress++
+				case "Blocked":
+					ar.Blocked++
+				default:
+					ar.Open++
+				}
+				ar.Issues = append(ar.Issues, task.GID+" "+task.Name)
+			}
+		}
+	}
+
+	// DB done stats from asana_task_log
+	dbStats, _ := h.asanaPMRepo.GetAsanaAssigneeStats(r.Context())
+	for _, stat := range dbStats {
+		ar := ensureAssignee(stat.Assignee)
+		ar.Done = stat.Done
+		ar.AvgHoursInProgress = stat.AvgHoursInProgress
+	}
+
+	var result []AssigneeReport
+	for _, ar := range reportMap {
+		result = append(result, *ar)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Assignee < result[j].Assignee
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": result})
+}
+
+// ─── User Avatars ─────────────────────────────────────────────────────────────
+
+// GetUserAvatars returns a map of assignee name → avatar URL for Asana workspace users
+// GET /api/asana/pm/users/avatars
+func (h *AsanaPMHandler) GetUserAvatars(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, _, workspaceGID, err := h.getAsanaClient(r.Context(), userID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]string{}})
+		return
+	}
+
+	if workspaceGID == "" {
+		ws, wsErr := client.GetWorkspaces(r.Context())
+		if wsErr == nil && len(ws) > 0 {
+			workspaceGID = ws[0].GID
+		}
+	}
+
+	users, err := client.GetWorkspaceUsers(r.Context(), workspaceGID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]string{}})
+		return
+	}
+
+	avatarMap := make(map[string]string, len(users))
+	for _, u := range users {
+		// Photo is already included in GetWorkspaceUsers (opt_fields=photo)
+		photoURL := ""
+		if u.Photo != nil {
+			if u.Photo.Image60x60 != "" {
+				photoURL = u.Photo.Image60x60
+			} else if u.Photo.Image128x128 != "" {
+				photoURL = u.Photo.Image128x128
+			}
+		}
+		// Fallback: individual fetch if workspace listing didn't include photo
+		if photoURL == "" {
+			photoURL = client.GetUserPhoto(r.Context(), u.GID)
+		}
+		if photoURL != "" {
+			avatarMap[u.Name] = photoURL
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": avatarMap})
+}
+
+// ─── Time Tracking ────────────────────────────────────────────────────────────
+
+// GetTimeTracking returns the Asana time tracking table (section durations per task)
+// GET /api/asana/pm/time-tracking?week=2026-02-16&assignee=alice,bob&priority=P0
+func (h *AsanaPMHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	q := r.URL.Query()
+	params := database.TimeTrackingParams{}
+
+	if weekStr := q.Get("week"); weekStr != "" {
+		monday, err := time.Parse("2006-01-02", weekStr)
+		if err == nil {
+			monday = time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, time.UTC)
+			sunday := monday.AddDate(0, 0, 6).Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+			params.WeekStart = &monday
+			params.WeekEnd = &sunday
+		}
+	}
+	if a := q.Get("assignee"); a != "" {
+		for _, name := range strings.Split(a, ",") {
+			if t := strings.TrimSpace(strings.ToLower(name)); t != "" {
+				params.Assignees = append(params.Assignees, t)
+			}
+		}
+	}
+	if p := q.Get("priority"); p != "" {
+		for _, pri := range strings.Split(p, ",") {
+			if t := strings.TrimSpace(pri); t != "" {
+				params.Priorities = append(params.Priorities, t)
+			}
+		}
+	}
+
+	pinnedIDs, _ := h.reportRepo.GetPinnedIssueIDs(r.Context(), userID)
+	params.PinnedIssues = pinnedIDs
+
+	logs, err := h.asanaPMRepo.GetAsanaTimeTracking(r.Context(), params)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to get time tracking: " + err.Error()})
+		return
+	}
+	if logs == nil {
+		logs = []database.IssueStateLog{}
+	}
+
+	// Live fallback: if asana_task_log is empty (no webhook history yet), synthesize
+	// rows from live Asana tasks. Week filter is intentionally ignored here — when
+	// there is no log data we show current task state regardless of the week param.
+	if len(logs) == 0 {
+		if liveClient, liveProjectGID, _, liveClientErr := h.getAsanaClient(r.Context(), userID); liveClientErr == nil && liveProjectGID != "" {
+			liveTasks, _ := liveClient.GetProjectTasksPaginated(r.Context(), liveProjectGID)
+			now := time.Now()
+			for _, task := range liveTasks {
+				if task.Completed {
+					continue
+				}
+				assigneeName := ""
+				if task.Assignee != nil {
+					assigneeName = task.Assignee.Name
+				}
+				if len(params.Assignees) > 0 {
+					matched := false
+					for _, a := range params.Assignees {
+						if strings.EqualFold(a, assigneeName) {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						continue
+					}
+				}
+				section := taskSectionName(task)
+				hoursInState := now.Sub(task.ModifiedAt).Hours()
+				logs = append(logs, database.IssueStateLog{
+					IssueID:                  task.GID,
+					IssueSummary:             task.Name,
+					Assignee:                 assigneeName,
+					ToState:                  section,
+					TransitionedAt:           task.ModifiedAt,
+					DurationInPrevStateHours: &hoursInState,
+				})
+			}
+		}
+	}
+
+	pinnedSet := make(map[string]bool, len(pinnedIDs))
+	for _, id := range pinnedIDs {
+		pinnedSet[id] = true
+	}
+
+	type TimeTrackingRow struct {
+		database.IssueStateLog
+		Overdue        bool    `json:"overdue"`
+		ThresholdHours float64 `json:"threshold_hours"`
+		Pinned         bool    `json:"pinned"`
+	}
+
+	var rows []TimeTrackingRow
+	for _, l := range logs {
+		threshold := overdueThresholdHoursForPriority(l.Priority)
+		overdue := l.DurationInPrevStateHours != nil && *l.DurationInPrevStateHours > threshold
+		rows = append(rows, TimeTrackingRow{
+			IssueStateLog:  l,
+			Overdue:        overdue,
+			ThresholdHours: threshold,
+			Pinned:         pinnedSet[l.IssueID],
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": rows})
+}
+
+// ─── Issue Timelines ──────────────────────────────────────────────────────────
+
+// GetIssueTimelines returns per-task timelines from asana_task_log
+// GET /api/asana/pm/issue-timelines
+func (h *AsanaPMHandler) GetIssueTimelines(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	pinnedIDs, _ := h.reportRepo.GetPinnedIssueIDs(r.Context(), userID)
+	dismissedSet, _ := h.reportRepo.GetDismissedAlertIDs(r.Context(), userID)
+
+	timelines, err := h.asanaPMRepo.GetAsanaIssueTimelines(r.Context(), pinnedIDs)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to get timelines: " + err.Error()})
+		return
+	}
+	if timelines == nil {
+		timelines = []database.IssueTimeline{}
+	}
+
+	// Live fallback: synthesize timelines from current Asana tasks when log is empty.
+	if len(timelines) == 0 {
+		if client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID); clientErr == nil && projectGID != "" {
+			tasks, _ := client.GetProjectTasksPaginated(r.Context(), projectGID)
+			now := time.Now()
+			pinnedSet2 := make(map[string]bool, len(pinnedIDs))
+			for _, id := range pinnedIDs {
+				pinnedSet2[id] = true
+			}
+			for _, task := range tasks {
+				if task.Completed {
+					continue
+				}
+				assigneeName := ""
+				if task.Assignee != nil {
+					assigneeName = task.Assignee.Name
+				}
+				section := taskSectionName(task)
+				liveHours := now.Sub(task.ModifiedAt).Hours()
+				threshold := overdueThresholdHoursForPriority("")
+				timelines = append(timelines, database.IssueTimeline{
+					IssueID:        task.GID,
+					IssueSummary:   task.Name,
+					Assignee:       assigneeName,
+					Pinned:         pinnedSet2[task.GID],
+					TotalStints:    1,
+					TotalHours:     liveHours,
+					IsLive:         true,
+					LiveHours:      liveHours,
+					IsOverdue:      liveHours > threshold,
+					ThresholdHours: threshold,
+					FirstEnteredAt: task.ModifiedAt,
+					LastActivityAt: task.ModifiedAt,
+					Stints: []database.IssueStint{{
+						StintNumber: 1,
+						EnteredAt:   task.ModifiedAt,
+						ExitedTo:    section,
+					}},
+				})
+			}
+		}
+	}
+
+	type TimelineWithDismiss struct {
+		database.IssueTimeline
+		AlertDismissed bool `json:"alert_dismissed"`
+	}
+	result := make([]TimelineWithDismiss, len(timelines))
+	for i, t := range timelines {
+		result[i] = TimelineWithDismiss{
+			IssueTimeline:  t,
+			AlertDismissed: dismissedSet[t.IssueID],
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": result})
+}
+
+// ─── PM Report Generation ─────────────────────────────────────────────────────
+
+// GeneratePMReport generates a Slack-style daily PM report using Asana data
+// GET /api/asana/pm/report/{date}?scope=full|summary
+func (h *AsanaPMHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	date := vars["date"]
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+	scope := r.URL.Query().Get("scope")
+	if scope != "summary" {
+		scope = "full"
+	}
+
+	parsedDate, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid date format"})
+		return
+	}
+	yesterday := parsedDate.AddDate(0, 0, -1).Format("2006-01-02")
+
+	// Fetch all tasks once — used for both done (completed_at) and open/blocked categorisation
+	client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID)
+	var allTasks []asana.Task
+	if clientErr == nil {
+		allTasks, _ = client.GetProjectTasksPaginated(r.Context(), projectGID)
+	}
+
+	// Done tasks — use Asana's native completed_at (accurate timestamp, not affected by backfill)
+	var doneTasks []asana.Task
+	for _, task := range allTasks {
+		if task.CompletedAt != nil && task.CompletedAt.UTC().Format("2006-01-02") == yesterday {
+			doneTasks = append(doneTasks, task)
+		}
+	}
+
+	// Open/blocked — live from Asana, skip completed tasks
+	var openTasks, blockedTasks []asana.Task
+	if scope == "full" {
+		for _, task := range allTasks {
+			if task.Completed {
+				continue
+			}
+			status := sectionStatus(taskSectionName(task))
+			switch status {
+			case "Blocked":
+				blockedTasks = append(blockedTasks, task)
+			case "In Progress", "Backlog":
+				openTasks = append(openTasks, task)
+			}
+		}
+	}
+
+	var sb strings.Builder
+	doneLabel := parsedDate.AddDate(0, 0, -1).Format("Mon, Jan 2")
+
+	// Done section
+	sb.WriteString(fmt.Sprintf("*Tasks Done %s (Asana):*\n\n", doneLabel))
+	if len(doneTasks) == 0 {
+		sb.WriteString("_No tasks completed yesterday_\n")
+	} else {
+		for _, t := range doneTasks {
+			assigneeStr := ""
+			if t.Assignee != nil {
+				assigneeStr = fmt.Sprintf(" (%s)", t.Assignee.Name)
+			}
+			sb.WriteString(fmt.Sprintf("• %s%s\n", t.Name, assigneeStr))
+		}
+	}
+
+	if scope == "full" {
+		// Open section
+		sb.WriteString("\n\n*Open Tasks Today:*\n\n")
+		if len(openTasks) == 0 {
+			sb.WriteString("_No open tasks_\n")
+		} else {
+			for _, task := range openTasks {
+				assignee := ""
+				if task.Assignee != nil {
+					assignee = fmt.Sprintf(" (%s)", task.Assignee.Name)
+				}
+				section := taskSectionName(task)
+				sb.WriteString(fmt.Sprintf("• %s%s [%s]\n", task.Name, assignee, section))
+			}
+		}
+
+		// Blocked section
+		if len(blockedTasks) > 0 {
+			sb.WriteString("\n\n*Blocked Tasks:*\n\n")
+			for _, task := range blockedTasks {
+				assignee := ""
+				if task.Assignee != nil {
+					assignee = fmt.Sprintf(" (%s)", task.Assignee.Name)
+				}
+				sb.WriteString(fmt.Sprintf("• %s%s\n", task.Name, assignee))
+			}
+		}
+	}
+
+	reportText := sb.String()
+	reportType := "daily-" + scope
+	savedReport, saveErr := h.reportRepo.SavePMReport(
+		r.Context(), date, reportType, reportText,
+		len(doneTasks), len(openTasks), len(blockedTasks),
+	)
+	if saveErr != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":       true,
+			"report_text":   reportText,
+			"done_count":    len(doneTasks),
+			"open_count":    len(openTasks),
+			"blocked_count": len(blockedTasks),
+			"date":          date,
+			"report_type":   reportType,
+			"saved":         false,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"report_text":   savedReport.ReportText,
+		"done_count":    savedReport.DoneCount,
+		"open_count":    savedReport.OpenCount,
+		"blocked_count": savedReport.BlockedCount,
+		"date":          savedReport.Date,
+		"report_type":   savedReport.ReportType,
+		"id":            savedReport.ID,
+		"generated_at":  savedReport.GeneratedAt,
+		"saved":         true,
+	})
+}
+
+// GenerateWeeklyPMReport generates a Slack-style weekly PM report using Asana data
+// GET /api/asana/pm/report/weekly/{weekStart}?scope=full|summary
+func (h *AsanaPMHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	vars := mux.Vars(r)
+	weekStart := vars["weekStart"]
+	if weekStart == "" {
+		// Default to current Monday
+		now := time.Now()
+		offset := int(now.Weekday())
+		if offset == 0 {
+			offset = 7
+		}
+		weekStart = now.AddDate(0, 0, -(offset - 1)).Format("2006-01-02")
+	}
+
+	scope := r.URL.Query().Get("scope")
+	if scope != "summary" {
+		scope = "full"
+	}
+
+	monday, err := time.Parse("2006-01-02", weekStart)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid weekStart format (use YYYY-MM-DD)"})
+		return
+	}
+	sunday := monday.AddDate(0, 0, 6)
+	weekEnd := sunday.Format("2006-01-02")
+
+	client, projectGID, _, clientErr := h.getAsanaClient(r.Context(), userID)
+
+	// Fetch all tasks once — used for both done (completed_at) and open/blocked categorisation
+	var allWeeklyTasks []asana.Task
+	if clientErr == nil {
+		allWeeklyTasks, _ = client.GetProjectTasksPaginated(r.Context(), projectGID)
+	}
+
+	// Done tasks for the week — use Asana's native completed_at timestamp
+	var doneTasks []asana.Task
+	for _, task := range allWeeklyTasks {
+		if task.CompletedAt != nil {
+			d := task.CompletedAt.UTC().Format("2006-01-02")
+			if d >= weekStart && d <= weekEnd {
+				doneTasks = append(doneTasks, task)
+			}
+		}
+	}
+
+	var openTasks, blockedTasks []asana.Task
+	if scope == "full" {
+		for _, task := range allWeeklyTasks {
+			if task.Completed {
+				continue
+			}
+			status := sectionStatus(taskSectionName(task))
+			if status == "Blocked" {
+				blockedTasks = append(blockedTasks, task)
+			} else {
+				openTasks = append(openTasks, task)
+			}
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("*Weekly Report — %s to %s (Asana)*\n\n", monday.Format("Jan 2"), sunday.Format("Jan 2, 2006")))
+
+	// Done tasks grouped by assignee
+	sb.WriteString("*Tasks Completed This Week:*\n\n")
+	if len(doneTasks) == 0 {
+		sb.WriteString("_No tasks completed this week_\n")
+	} else {
+		assigneeGroups := map[string][]asana.Task{}
+		assigneeOrder := []string{}
+		for _, t := range doneTasks {
+			name := "Unassigned"
+			if t.Assignee != nil {
+				name = t.Assignee.Name
+			}
+			if _, ok := assigneeGroups[name]; !ok {
+				assigneeOrder = append(assigneeOrder, name)
+			}
+			assigneeGroups[name] = append(assigneeGroups[name], t)
+		}
+		for i, name := range assigneeOrder {
+			if i > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(fmt.Sprintf("@%s\n", name))
+			for _, t := range assigneeGroups[name] {
+				sb.WriteString(fmt.Sprintf("• %s\n", t.Name))
+			}
+		}
+	}
+
+	if scope == "full" {
+		sb.WriteString(fmt.Sprintf("\n\n*Open Tasks (%d):*\n\n", len(openTasks)))
+		if len(openTasks) == 0 {
+			sb.WriteString("_No open tasks_\n")
+		} else {
+			for _, task := range openTasks {
+				assignee := ""
+				if task.Assignee != nil {
+					assignee = fmt.Sprintf(" (%s)", task.Assignee.Name)
+				}
+				sb.WriteString(fmt.Sprintf("• %s%s\n", task.Name, assignee))
+			}
+		}
+		if len(blockedTasks) > 0 {
+			sb.WriteString(fmt.Sprintf("\n\n*Blocked Tasks (%d):*\n\n", len(blockedTasks)))
+			for _, task := range blockedTasks {
+				sb.WriteString(fmt.Sprintf("• %s\n", task.Name))
+			}
+		}
+	}
+
+	reportText := sb.String()
+	reportType := "weekly-" + scope
+	savedReport, saveErr := h.reportRepo.SavePMReport(
+		r.Context(), weekStart, reportType, reportText,
+		len(doneTasks), len(openTasks), len(blockedTasks),
+	)
+
+	if saveErr != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":       true,
+			"report_text":   reportText,
+			"done_count":    len(doneTasks),
+			"open_count":    len(openTasks),
+			"blocked_count": len(blockedTasks),
+			"date":          weekStart,
+			"report_type":   reportType,
+			"saved":         false,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"report_text":   savedReport.ReportText,
+		"done_count":    savedReport.DoneCount,
+		"open_count":    savedReport.OpenCount,
+		"blocked_count": savedReport.BlockedCount,
+		"date":          savedReport.Date,
+		"report_type":   savedReport.ReportType,
+		"id":            savedReport.ID,
+		"generated_at":  savedReport.GeneratedAt,
+		"saved":         true,
+	})
+}
+
+// ─── Stage / Deployment Report ────────────────────────────────────────────────
+
+// GetStageReportColumns returns Asana sections from the active project as selectable columns
+// GET /api/asana/pm/stage-report/columns
+func (h *AsanaPMHandler) GetStageReportColumns(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, projectGID, _, err := h.getAsanaClient(r.Context(), userID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": []string{}})
+		return
+	}
+
+	sections, err := client.GetSections(r.Context(), projectGID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": []string{}})
+		return
+	}
+
+	names := make([]string, 0, len(sections))
+	for _, s := range sections {
+		names = append(names, s.Name)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": names})
+}
+
+// GenerateStageReport fetches tasks from selected Asana sections and generates a deployment report
+// POST /api/asana/pm/stage-report/generate
+func (h *AsanaPMHandler) GenerateStageReport(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		Columns []string `json:"columns"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Columns) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Provide at least one column"})
+		return
+	}
+
+	client, projectGID, _, err := h.getAsanaClient(r.Context(), userID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+		return
+	}
+
+	// Fetch all sections to map names → GIDs
+	sections, err := client.GetSections(r.Context(), projectGID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to fetch sections: " + err.Error()})
+		return
+	}
+	sectionGIDMap := map[string]string{}
+	for _, s := range sections {
+		sectionGIDMap[strings.ToLower(s.Name)] = s.GID
+	}
+
+	// Collect tasks from selected sections
+	selectedSet := map[string]bool{}
+	for _, col := range req.Columns {
+		selectedSet[strings.ToLower(col)] = true
+	}
+
+	allTasks, err := client.GetProjectTasksPaginated(r.Context(), projectGID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to fetch tasks: " + err.Error()})
+		return
+	}
+
+	var matchedTasks []asana.Task
+	for _, task := range allTasks {
+		if task.Completed {
+			continue
+		}
+		section := strings.ToLower(taskSectionName(task))
+		if selectedSet[section] {
+			matchedTasks = append(matchedTasks, task)
+		}
+	}
+
+	if len(matchedTasks) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]interface{}{"report": "", "issue_count": 0}})
+		return
+	}
+
+	// Load stage report bot config prompt
+	systemPrompt := `You are writing bullet points for a Slack deployment update.
+Write ONE short sentence (max 15 words) describing what was fixed, in past tense, from the user's perspective.
+- Be specific and direct — name the exact feature or interaction that changed
+- Vary your sentence starts naturally (can use "Fixed", "Users can now...", etc.)
+- No internal jargon, no ticket IDs, no padding
+- Output ONLY the single sentence, nothing else`
+
+	botRepo := database.NewBotConfigRepository()
+	bots, _ := botRepo.GetByType(r.Context(), models.BotTypeStageReport)
+	for _, b := range bots {
+		if b.IsActive && strings.TrimSpace(b.Prompt) != "" {
+			systemPrompt = b.Prompt
+			break
+		}
+	}
+
+	type fixItem struct {
+		section string
+		fix     string
+	}
+	var fixes []fixItem
+
+	for _, task := range matchedTasks {
+		section := taskSectionName(task)
+		if section == "" {
+			section = "General"
+		}
+		context := task.Notes
+		if len(context) > 800 {
+			context = context[:800]
+		}
+		userMsg := fmt.Sprintf("Task: %s\nContext: %s", task.Name, context)
+		fixText, aiErr := ai.QueryWithContext(r.Context(), systemPrompt, userMsg)
+		if aiErr != nil || strings.TrimSpace(fixText) == "" {
+			fixText = task.Name
+		}
+		fixes = append(fixes, fixItem{section: section, fix: strings.TrimSpace(fixText)})
+	}
+
+	// Group by section
+	sectionOrder := []string{}
+	sectionMap := map[string][]string{}
+	for _, f := range fixes {
+		if _, exists := sectionMap[f.section]; !exists {
+			sectionOrder = append(sectionOrder, f.section)
+		}
+		sectionMap[f.section] = append(sectionMap[f.section], f.fix)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Hey team :wave: here is the list of fixes which have been deployed to STAGE today:\n")
+	for _, sec := range sectionOrder {
+		sb.WriteString(fmt.Sprintf("\n%s\n", sec))
+		for _, fix := range sectionMap[sec] {
+			sb.WriteString(fmt.Sprintf("• %s\n", fix))
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"report":      strings.TrimRight(sb.String(), "\n"),
+			"issue_count": len(matchedTasks),
+		},
+	})
+}
+
+// ─── Backfill ─────────────────────────────────────────────────────────────────
+
+// BackfillAsanaLog seeds asana_task_log with current sections for all live tasks
+// POST /api/asana/pm/backfill
+func (h *AsanaPMHandler) BackfillAsanaLog(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, projectGID, _, err := h.getAsanaClient(r.Context(), userID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": err.Error()})
+		return
+	}
+
+	tasks, err := client.GetProjectTasksPaginated(r.Context(), projectGID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Failed to fetch tasks: " + err.Error()})
+		return
+	}
+
+	var entries []database.AsanaTaskLog
+	for _, task := range tasks {
+		section := taskSectionName(task)
+		// For completed tasks use their done section name; for in-progress tasks use current section
+		if section == "" {
+			if task.Completed {
+				section = "Done"
+			} else {
+				continue
+			}
+		}
+		assigneeName := ""
+		if task.Assignee != nil {
+			assigneeName = task.Assignee.Name
+		}
+		// Use accurate timestamps: completed_at for done tasks, modified_at for in-progress
+		var transitionedAt time.Time
+		if task.Completed && task.CompletedAt != nil {
+			transitionedAt = *task.CompletedAt
+		} else {
+			transitionedAt = task.ModifiedAt
+		}
+		entries = append(entries, database.AsanaTaskLog{
+			TaskGID:        task.GID,
+			TaskName:       task.Name,
+			ProjectGID:     projectGID,
+			Assignee:       assigneeName,
+			FromSection:    "",
+			ToSection:      section,
+			Priority:       extractAsanaPriority(task),
+			TransitionedAt: transitionedAt,
+		})
+	}
+
+	inserted, err := h.asanaPMRepo.BackfillAsanaTaskLog(r.Context(), entries)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Backfill failed: " + err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"message":   fmt.Sprintf("Backfill complete: %d tasks seeded, %d already had log entries", inserted, len(entries)-inserted),
+		"inserted":  inserted,
+		"skipped":   len(entries) - inserted,
+	})
 }
 
 // Ensure log and _ imports are used
