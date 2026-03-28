@@ -2373,6 +2373,8 @@ function AsanaDeploymentReport() {
     let totalSucceeded = 0
     let totalFailed = 0
 
+    const retriedPages = new Set<number>()
+
     for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
       const page = pages[pageIdx]
       setGenProgress({ current: pageIdx, total: pages.length, retryCountdown: 0 })
@@ -2394,13 +2396,15 @@ function AsanaDeploymentReport() {
             return { ...t, status: 'ready' as const }
           }))
 
-          // If rate limited, show countdown before next batch (backend already retried internally)
           const waitSecs = res.data.retryAfter ?? 0
-          if (waitSecs > 0) {
+          if (waitSecs > 0 && !retriedPages.has(pageIdx)) {
+            // Rate limited — countdown then retry this batch once
+            retriedPages.add(pageIdx)
             for (let s = waitSecs; s > 0; s--) {
-              setGenProgress({ current: pageIdx + 1, total: pages.length, retryCountdown: s })
+              setGenProgress({ current: pageIdx, total: pages.length, retryCountdown: s })
               await new Promise(r => setTimeout(r, 1000))
             }
+            pageIdx-- // re-run this page in the next iteration
           }
         }
       } catch (err: any) {
@@ -2410,11 +2414,13 @@ function AsanaDeploymentReport() {
           pageGids.has(t.gid) && t.status === 'generating' ? { ...t, status: 'ready' as const } : t
         ))
         totalFailed += page.length
-        if (is429) {
+        if (is429 && !retriedPages.has(pageIdx)) {
+          retriedPages.add(pageIdx)
           for (let s = 10; s > 0; s--) {
-            setGenProgress({ current: pageIdx + 1, total: pages.length, retryCountdown: s })
+            setGenProgress({ current: pageIdx, total: pages.length, retryCountdown: s })
             await new Promise(r => setTimeout(r, 1000))
           }
+          pageIdx--
         }
       }
 
