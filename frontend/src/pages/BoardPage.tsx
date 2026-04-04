@@ -2,12 +2,20 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   RefreshCw, Search, Users, ChevronDown, X,
   AlertTriangle, ArrowDownUp, ArrowUpNarrowWide, ArrowDownNarrowWide,
-  ExternalLink, Loader2, Filter, LayoutDashboard,
+  ExternalLink, Loader2, Filter, LayoutDashboard, CalendarDays,
 } from 'lucide-react'
 import { KanbanBoard } from '../components/board'
 import api, { getYouTrackAvatarMap } from '../services/api'
-import type { YouTrackIssue } from '../services/api'
+import type { YouTrackIssue, YouTrackSprint } from '../services/api'
 import { getPMIssues, updatePMIssueState, getPMStates, getActiveSource } from '../services/pmDataService'
+
+const PAGE_SIZE = 20
+
+interface ColPaginationState {
+  skip: number
+  hasMore: boolean
+  loading: boolean
+}
 
 // ── Priority helpers (same as PMReportsPage pattern) ─────────────────────────
 
@@ -83,11 +91,18 @@ const YT_BASE_URL = 'https://simran.youtrack.cloud/issue/'
 export function BoardPage() {
   const [issues, setIssues] = useState<YouTrackIssue[]>([])
   const [columns, setColumns] = useState<string[]>([])
+  const [colPagination, setColPagination] = useState<Record<string, ColPaginationState>>({})
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedIssue, setSelectedIssue] = useState<YouTrackIssue | null>(null)
+
+  // ── Sprint state ───────────────────────────────────────────────────────────
+  const [sprints, setSprints] = useState<YouTrackSprint[]>([])
+  const [activeSprint, setActiveSprint] = useState<YouTrackSprint | null>(null)  // null = "All"
+  const [sprintDropdownOpen, setSprintDropdownOpen] = useState(false)
+  const sprintDropdownRef = useRef<HTMLDivElement>(null)
 
   // ── Filter state ───────────────────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState('')
@@ -109,6 +124,8 @@ export function BoardPage() {
         setAssigneeDropdownOpen(false)
       if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node))
         setSortDropdownOpen(false)
+      if (sprintDropdownRef.current && !sprintDropdownRef.current.contains(e.target as Node))
+        setSprintDropdownOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -123,22 +140,39 @@ export function BoardPage() {
   }, [selectedIssue])
 
   // ── Data fetching ──────────────────────────────────────────────────────────
-  const fetchBoard = useCallback(async (silent = false, force = false) => {
+  const fetchBoard = useCallback(async (silent = false, force = false, sprintId?: string) => {
     if (!silent) setLoading(true)
     else setSyncing(true)
     setError(null)
     try {
-      const [issuesRes, statesRes] = await Promise.all([
-        getPMIssues(force),
-        getPMStates(),
-      ])
-      if (issuesRes.data) setIssues(issuesRes.data as YouTrackIssue[])
-      if (statesRes.data) {
-        const states = statesRes.data as { name: string }[]
-        // For Asana, preserve the API order (matches the actual board column order).
-        // For YouTrack, apply the canonical sort.
-        const cols = states.map(s => s.name)
-        setColumns(getActiveSource() === 'asana' ? cols : sortColumns(cols))
+      const statesRes = await getPMStates()
+      const stateObjs = (statesRes.data as { name: string }[]) || []
+      const cols = stateObjs.map(s => s.name)
+      const sortedCols = getActiveSource() === 'asana' ? cols : sortColumns(cols)
+      setColumns(sortedCols)
+
+      if (getActiveSource() === 'youtrack') {
+        setIssues([])
+        setColPagination({})
+        const results = await Promise.all(
+          sortedCols.map(col =>
+            api.getYouTrackIssuesByState(col, 0, PAGE_SIZE, sprintId)
+              .then(res => ({ col, data: (res as any).data as { issues: YouTrackIssue[]; hasMore: boolean } }))
+              .catch(() => ({ col, data: { issues: [] as YouTrackIssue[], hasMore: false } }))
+          )
+        )
+        const allIssues: YouTrackIssue[] = []
+        const pagination: Record<string, ColPaginationState> = {}
+        for (const { col, data } of results) {
+          const colIssues = data?.issues ?? []
+          allIssues.push(...colIssues)
+          pagination[col] = { skip: colIssues.length, hasMore: data?.hasMore ?? false, loading: false }
+        }
+        setIssues(allIssues)
+        setColPagination(pagination)
+      } else {
+        const issuesRes = await getPMIssues(force)
+        if (issuesRes.data) setIssues(issuesRes.data as YouTrackIssue[])
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load board')
@@ -148,9 +182,53 @@ export function BoardPage() {
     }
   }, [])
 
+  // ── Load more for a specific column (triggered by scroll) ─────────────────
+  const handleLoadMore = useCallback(async (col: string) => {
+    setColPagination(prev => {
+      if (!prev[col] || prev[col].loading || !prev[col].hasMore) return prev
+      return { ...prev, [col]: { ...prev[col], loading: true } }
+    })
+
+    const pg = colPagination[col]
+    if (!pg || pg.loading || !pg.hasMore) return
+
+    try {
+      const res = await api.getYouTrackIssuesByState(col, pg.skip, PAGE_SIZE, activeSprint?.id)
+      const data = (res as any).data as { issues: YouTrackIssue[]; hasMore: boolean } | null
+      const newItems = data?.issues ?? []
+      setIssues(prev => {
+        const existingIds = new Set(prev.map(i => i.id))
+        return [...prev, ...newItems.filter(i => !existingIds.has(i.id))]
+      })
+      setColPagination(prev => ({
+        ...prev,
+        [col]: { skip: pg.skip + newItems.length, hasMore: data?.hasMore ?? false, loading: false },
+      }))
+    } catch {
+      setColPagination(prev => ({ ...prev, [col]: { ...prev[col], loading: false } }))
+    }
+  }, [colPagination, activeSprint])
+
   useEffect(() => {
-    fetchBoard()
     getYouTrackAvatarMap().then(setAvatarMap)
+
+    if (getActiveSource() === 'youtrack') {
+      api.getYouTrackSprints()
+        .then(res => {
+          const list = ((res as any).data as YouTrackSprint[]) ?? []
+          setSprints(list)
+          // Auto-select the current active sprint (not completed, soonest finish)
+          const now = Date.now()
+          const active = list
+            .filter(s => !s.isCompleted && s.finish > now)
+            .sort((a, b) => a.finish - b.finish)[0] ?? null
+          setActiveSprint(active)
+          fetchBoard(false, false, active?.id)
+        })
+        .catch(() => fetchBoard())
+    } else {
+      fetchBoard()
+    }
   }, [fetchBoard])
 
   // ── Derived values ─────────────────────────────────────────────────────────
@@ -190,6 +268,12 @@ export function BoardPage() {
       return (b.updated || 0) - (a.updated || 0)
     })
   }, [issues, searchQuery, filterAssignee, filterPriorities, filterOverdue, sortKey])
+
+  const handleSprintChange = useCallback((sprint: YouTrackSprint | null) => {
+    setActiveSprint(sprint)
+    setSprintDropdownOpen(false)
+    fetchBoard(false, true, sprint?.id)
+  }, [fetchBoard])
 
   const handleIssueMove = useCallback(async (issueId: string, newState: string) => {
     setIssues(prev => prev.map(i => i.id === issueId ? { ...i, status: newState } : i))
@@ -235,6 +319,10 @@ export function BoardPage() {
     )
   }
 
+  function fmtSprintDate(ms: number) {
+    return new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  }
+
   const sortLabel: Record<SortKey, string> = {
     newest: 'Newest First',
     priority: 'Priority',
@@ -254,9 +342,58 @@ export function BoardPage() {
           <span className="board-yt-badge">YouTrack</span>
         </h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {/* Sprint selector — only for YouTrack */}
+          {getActiveSource() === 'youtrack' && sprints.length > 0 && (
+            <div className="pm-custom-dropdown" ref={sprintDropdownRef}>
+              <button
+                className="pm-custom-dropdown-trigger"
+                onClick={() => setSprintDropdownOpen(o => !o)}
+                style={{ minWidth: 160 }}
+              >
+                <CalendarDays size={14} />
+                <span style={{ fontWeight: 600 }}>
+                  {activeSprint ? activeSprint.name : 'All sprints'}
+                </span>
+                {activeSprint && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginLeft: 4 }}>
+                    {fmtSprintDate(activeSprint.start)} – {fmtSprintDate(activeSprint.finish)}
+                  </span>
+                )}
+                <ChevronDown size={12} className={`dropdown-chevron ${sprintDropdownOpen ? 'open' : ''}`} />
+              </button>
+              {sprintDropdownOpen && (
+                <div className="pm-custom-dropdown-menu" style={{ minWidth: 220 }}>
+                  <button
+                    className={`pm-dropdown-item ${!activeSprint ? 'active' : ''}`}
+                    onClick={() => handleSprintChange(null)}
+                  >
+                    <CalendarDays size={14} /><span>All sprints</span>
+                  </button>
+                  <div style={{ borderTop: '1px solid var(--color-border)', margin: '4px 0' }} />
+                  {[...sprints]
+                    .sort((a, b) => b.start - a.start)
+                    .map(s => (
+                      <button
+                        key={s.id}
+                        className={`pm-dropdown-item ${activeSprint?.id === s.id ? 'active' : ''}`}
+                        onClick={() => handleSprintChange(s)}
+                      >
+                        <span style={{ flex: 1, textAlign: 'left' }}>
+                          {s.isCompleted && <span style={{ opacity: 0.5 }}>✓ </span>}
+                          {s.name}
+                        </span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                          {fmtSprintDate(s.start)} – {fmtSprintDate(s.finish)}
+                        </span>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
           <button
             className="btn-secondary btn-sm"
-            onClick={() => fetchBoard(true, true)}
+            onClick={() => fetchBoard(true, true, activeSprint?.id)}
             disabled={syncing}
             title="Refresh from YouTrack"
           >
@@ -390,6 +527,8 @@ export function BoardPage() {
             getColumnIssues={getColumnIssues}
             onIssueMove={handleIssueMove}
             onIssueClick={setSelectedIssue}
+            colPagination={getActiveSource() === 'youtrack' ? colPagination : undefined}
+            onLoadMore={getActiveSource() === 'youtrack' ? handleLoadMore : undefined}
           />
         </div>
       )}

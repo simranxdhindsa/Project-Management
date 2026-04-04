@@ -1,9 +1,9 @@
+import { useRef, useEffect } from 'react'
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { SortableTaskCard } from './SortableTaskCard'
 import type { YouTrackIssue } from '../../services/api'
 
-// Icon + color per state name — matches dashboard visual language
 function getColumnMeta(title: string): { color: string } {
   const t = title.toLowerCase()
   if (t === 'in progress')                                      return { color: 'var(--color-warning)' }
@@ -20,12 +20,30 @@ interface KanbanColumnProps {
   issues: YouTrackIssue[]
   avatarMap: Record<string, string>
   onIssueClick?: (issue: YouTrackIssue) => void
+  hasMore?: boolean
+  isLoadingMore?: boolean
+  onLoadMore?: () => void
 }
 
-export function KanbanColumn({ id, title, issues, avatarMap, onIssueClick }: KanbanColumnProps) {
+export function KanbanColumn({ id, title, issues, avatarMap, onIssueClick, hasMore, isLoadingMore, onLoadMore }: KanbanColumnProps) {
   const { isOver, setNodeRef } = useDroppable({ id })
   const issueIds = issues.map(i => i.id)
   const { color } = getColumnMeta(title)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  // Trigger onLoadMore when user scrolls within 80px of the column bottom
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || !onLoadMore) return
+    const handleScroll = () => {
+      if (!hasMore || isLoadingMore) return
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
+        onLoadMore()
+      }
+    }
+    el.addEventListener('scroll', handleScroll, { passive: true })
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [hasMore, isLoadingMore, onLoadMore])
 
   return (
     <div
@@ -33,17 +51,15 @@ export function KanbanColumn({ id, title, issues, avatarMap, onIssueClick }: Kan
       className={`kanban-column ${isOver ? 'drop-zone-active' : ''}`}
       data-status={id}
     >
-      {/* Header — matches dashboard: title left, count right */}
       <div className="kanban-column-header">
         <span className="kanban-column-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0, display: 'inline-block' }} />
           {title}
         </span>
-        <span className="kanban-column-count">{issues.length}</span>
+        <span className="kanban-column-count">{issues.length}{hasMore ? '+' : ''}</span>
       </div>
 
-      {/* Body — same class as dashboard */}
-      <div className="kanban-column-body">
+      <div className="kanban-column-body" ref={bodyRef}>
         <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
           {issues.length === 0 ? (
             <p className="text-muted" style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem' }}>
@@ -60,6 +76,12 @@ export function KanbanColumn({ id, title, issues, avatarMap, onIssueClick }: Kan
             ))
           )}
         </SortableContext>
+
+        {isLoadingMore && (
+          <div style={{ padding: '0.75rem', textAlign: 'center', fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+            Loading…
+          </div>
+        )}
       </div>
     </div>
   )

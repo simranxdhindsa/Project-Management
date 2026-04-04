@@ -182,6 +182,7 @@ func main() {
 	youtrackRoutes.HandleFunc("/projects", youtrackHandler.GetProjects).Methods("GET")
 	youtrackRoutes.HandleFunc("/boards", youtrackHandler.GetBoards).Methods("GET")
 	youtrackRoutes.HandleFunc("/boards/{board_id}/columns", youtrackHandler.GetBoardColumns).Methods("GET")
+	youtrackRoutes.HandleFunc("/sprints", youtrackHandler.GetSprints).Methods("GET")
 	youtrackRoutes.HandleFunc("/states", youtrackHandler.GetStates).Methods("GET")
 	youtrackRoutes.HandleFunc("/priorities", youtrackHandler.GetPriorities).Methods("GET")
 	youtrackRoutes.HandleFunc("/users", youtrackHandler.GetUsers).Methods("GET")

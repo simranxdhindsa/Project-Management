@@ -91,6 +91,15 @@ type Board struct {
 	Name string `json:"name"`
 }
 
+// Sprint represents a YouTrack agile sprint
+type Sprint struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Start       int64  `json:"start"`
+	Finish      int64  `json:"finish"`
+	IsCompleted bool   `json:"isCompleted"`
+}
+
 // State represents a workflow state
 type State struct {
 	Name string `json:"name"` // "Open", "In Progress", "Done", etc.
@@ -366,6 +375,88 @@ func (c *Client) GetIssues(ctx context.Context) ([]Issue, error) {
 	}
 
 	return issues, nil
+}
+
+// GetSprints returns all sprints for the configured agile board.
+func (c *Client) GetSprints(ctx context.Context) ([]Sprint, error) {
+	if c.boardID == "" {
+		return nil, fmt.Errorf("no board ID configured — set a board in Integrations → YouTrack")
+	}
+	path := fmt.Sprintf("/api/agiles/%s/sprints?fields=id,name,start,finish,isCompleted&$top=50", c.boardID)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var sprints []Sprint
+	if err := json.Unmarshal(body, &sprints); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal sprints: %w", err)
+	}
+	return sprints, nil
+}
+
+// GetIssuesByStatePaginated returns paginated issues for a single workflow state.
+// Fetches top+1 to determine hasMore, then returns only top items.
+func (c *Client) GetIssuesByStatePaginated(ctx context.Context, state string, skip, top int) ([]Issue, bool, error) {
+	query := url.QueryEscape(fmt.Sprintf("project: %s State: {%s}", c.projectID, state))
+	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=%d&$skip=%d", fields, query, top+1, skip)
+
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var issues []Issue
+	if err := json.Unmarshal(body, &issues); err != nil {
+		return nil, false, fmt.Errorf("failed to unmarshal issues: %w", err)
+	}
+
+	hasMore := len(issues) > top
+	if hasMore {
+		issues = issues[:top]
+	}
+	return issues, hasMore, nil
+}
+
+// GetSprintIssuesByStatePaginated fetches sprint issues via the agile board sprint endpoint
+// then filters by state in Go. This avoids unreliable Sprint: query syntax.
+func (c *Client) GetSprintIssuesByStatePaginated(ctx context.Context, sprintID, state string, skip, top int) ([]Issue, bool, error) {
+	if c.boardID == "" {
+		return nil, false, fmt.Errorf("no board ID configured")
+	}
+	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	// Fetch a window large enough to paginate after state filtering.
+	// We over-fetch (top*5) to account for multi-state sprints, capped at 500.
+	fetchTop := top * 5
+	if fetchTop > 500 {
+		fetchTop = 500
+	}
+	path := fmt.Sprintf("/api/agiles/%s/sprints/%s/issues?fields=%s&$top=%d&$skip=%d",
+		c.boardID, sprintID, fields, fetchTop, skip)
+
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, false, err
+	}
+
+	var allIssues []Issue
+	if err := json.Unmarshal(body, &allIssues); err != nil {
+		return nil, false, fmt.Errorf("failed to unmarshal sprint issues: %w", err)
+	}
+
+	// Filter by state on the backend
+	var filtered []Issue
+	for _, issue := range allIssues {
+		if GetStatus(issue) == state {
+			filtered = append(filtered, issue)
+		}
+	}
+
+	hasMore := len(filtered) > top
+	if hasMore {
+		filtered = filtered[:top]
+	}
+	return filtered, hasMore, nil
 }
 
 // GetIssue returns a single issue by ID

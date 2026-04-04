@@ -9,6 +9,12 @@ import { KanbanColumn } from './KanbanColumn'
 import { TaskCard } from './TaskCard'
 import type { YouTrackIssue } from '../../services/api'
 
+interface ColPaginationState {
+  skip: number
+  hasMore: boolean
+  loading: boolean
+}
+
 interface KanbanBoardProps {
   issues: YouTrackIssue[]
   columns: string[]
@@ -16,10 +22,12 @@ interface KanbanBoardProps {
   getColumnIssues: (col: string) => YouTrackIssue[]
   onIssueMove: (issueId: string, newState: string) => void
   onIssueClick?: (issue: YouTrackIssue) => void
+  colPagination?: Record<string, ColPaginationState>
+  onLoadMore?: (col: string) => void
 }
 
 export function KanbanBoard({
-  issues, columns, avatarMap, getColumnIssues, onIssueMove, onIssueClick,
+  issues, columns, avatarMap, getColumnIssues, onIssueMove, onIssueClick, colPagination, onLoadMore,
 }: KanbanBoardProps) {
   const [activeIssue, setActiveIssue] = useState<YouTrackIssue | null>(null)
 
@@ -77,16 +85,22 @@ export function KanbanBoard({
     >
       {/* Use same .kanban-board class as Dashboard */}
       <div className="kanban-board">
-        {columns.map(col => (
-          <KanbanColumn
-            key={col}
-            id={col}
-            title={col}
-            issues={getColumnIssues(col)}
-            avatarMap={avatarMap}
-            onIssueClick={onIssueClick}
-          />
-        ))}
+        {columns.map(col => {
+          const pg = colPagination?.[col]
+          return (
+            <KanbanColumn
+              key={col}
+              id={col}
+              title={col}
+              issues={getColumnIssues(col)}
+              avatarMap={avatarMap}
+              onIssueClick={onIssueClick}
+              hasMore={pg?.hasMore}
+              isLoadingMore={pg?.loading}
+              onLoadMore={onLoadMore ? () => onLoadMore(col) : undefined}
+            />
+          )
+        })}
       </div>
 
       <DragOverlay>

@@ -253,6 +253,10 @@ class ApiService {
     return this.request<YouTrackColumn[]>(`/youtrack/boards/${boardId}/columns`)
   }
 
+  async getYouTrackSprints() {
+    return this.request<YouTrackSprint[]>('/youtrack/sprints')
+  }
+
   async getYouTrackStates() {
     return this.request<YouTrackState[]>('/youtrack/states')
   }
@@ -267,6 +271,12 @@ class ApiService {
 
   async getYouTrackIssues() {
     return this.request<YouTrackIssue[]>('/youtrack/issues')
+  }
+
+  async getYouTrackIssuesByState(state: string, skip = 0, top = 20, sprintId?: string) {
+    const params = new URLSearchParams({ state, skip: String(skip), top: String(top) })
+    if (sprintId) params.set('sprint_id', sprintId)
+    return this.request<{ issues: YouTrackIssue[]; hasMore: boolean }>(`/youtrack/issues?${params}`)
   }
 
   async getYouTrackIssue(issueId: string) {
@@ -1463,6 +1473,14 @@ export interface YouTrackProject {
 export interface YouTrackBoard {
   id: string
   name: string
+}
+
+export interface YouTrackSprint {
+  id: string
+  name: string
+  start: number   // unix ms
+  finish: number  // unix ms
+  isCompleted: boolean
 }
 
 export interface YouTrackColumn {

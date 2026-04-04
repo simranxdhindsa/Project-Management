@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -238,6 +239,33 @@ func (h *YouTrackHandler) GetProjects(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetSprints returns all sprints for the configured agile board
+func (h *YouTrackHandler) GetSprints(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	sprints, err := client.GetSprints(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get sprints: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    sprints,
+	})
+}
+
 // GetBoards returns available YouTrack agile boards
 func (h *YouTrackHandler) GetBoards(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
@@ -376,7 +404,10 @@ func (h *YouTrackHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetIssues returns all issues from the configured project
+// GetIssues returns issues from the configured project.
+// Supports optional query params: state (column name), skip (offset), top (page size, default 20).
+// When state is provided, returns paginated results for that column with a hasMore flag.
+// Without state, returns all issues (legacy behaviour used by non-board callers).
 func (h *YouTrackHandler) GetIssues(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
@@ -390,13 +421,69 @@ func (h *YouTrackHandler) GetIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	state := r.URL.Query().Get("state")
+
+	// ── Paginated per-column fetch ────────────────────────────────────────────
+	if state != "" {
+		skip, _ := strconv.Atoi(r.URL.Query().Get("skip"))
+		top, _ := strconv.Atoi(r.URL.Query().Get("top"))
+		if top <= 0 {
+			top = 20
+		}
+		sprintID := r.URL.Query().Get("sprint_id")
+
+		var issues []youtrack.Issue
+		var hasMore bool
+		var err error
+		if sprintID != "" {
+			issues, hasMore, err = client.GetSprintIssuesByStatePaginated(r.Context(), sprintID, state, skip, top)
+		} else {
+			issues, hasMore, err = client.GetIssuesByStatePaginated(r.Context(), state, skip, top)
+		}
+		if err != nil {
+			http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		baseURL := client.GetBaseURL()
+		transformed := make([]map[string]interface{}, 0, len(issues))
+		for _, issue := range issues {
+			assignee := youtrack.GetAssignee(issue)
+			if assignee != nil && assignee.AvatarUrl != "" && !strings.HasPrefix(assignee.AvatarUrl, "http") {
+				assignee.AvatarUrl = baseURL + assignee.AvatarUrl
+			}
+			transformed = append(transformed, map[string]interface{}{
+				"id":          issue.ID,
+				"summary":     issue.Summary,
+				"description": issue.Description,
+				"status":      youtrack.GetStatus(issue),
+				"subsystem":   youtrack.GetSubsystem(issue),
+				"priority":    youtrack.GetPriority(issue),
+				"assignee":    assignee,
+				"created":     issue.Created,
+				"updated":     issue.Updated,
+				"attachments": issue.Attachments,
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"data": map[string]interface{}{
+				"issues":  transformed,
+				"hasMore": hasMore,
+			},
+		})
+		return
+	}
+
+	// ── Legacy: return all issues ─────────────────────────────────────────────
 	issues, err := client.GetIssues(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Transform issues to include extracted fields
 	baseURL := client.GetBaseURL()
 	var response []map[string]interface{}
 	for _, issue := range issues {
