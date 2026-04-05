@@ -297,11 +297,62 @@ export function BoardPage() {
 
   // ── Loading / error states ─────────────────────────────────────────────────
   if (loading) {
+    // Realistic card counts per column — vary like real board data
+    const skelCols = [
+      { color: '#64748b',              count: 10 },
+      { color: 'var(--color-warning)', count: 5  },
+      { color: '#8250df',              count: 13 },
+      { color: 'var(--color-danger)',  count: 7  },
+      { color: '#a78bfa',              count: 9  },
+      { color: 'var(--color-success)', count: 11 },
+    ]
+    // Varying title widths so cards look organic, not identical
+    const titleW  = ['88%','72%','95%','80%','65%','91%','76%','83%','69%','87%','74%','92%','78%']
+    const title2W = ['55%','68%','48%','62%','71%','50%','64%','58%','45%','67%','52%','61%','59%']
+    const sk = (w: number | string, h: number, r = 6) => (
+      <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+    )
     return (
-      <div className="pm-reports-page">
-        <div className="pm-loading-state">
-          <Loader2 size={32} className="animate-spin" />
-          <span>Loading board…</span>
+      <div className="pm-reports-page board-page-layout">
+        {/* Skeleton header */}
+        <div className="pm-tab-header" style={{ pointerEvents: 'none' }}>
+          {sk(180, 22, 8)}
+          <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+            {sk(110, 30, 8)}{sk(90, 30, 8)}{sk(80, 30, 8)}
+          </div>
+        </div>
+        {/* Skeleton filter bar */}
+        <div className="board-filter-bar" style={{ pointerEvents: 'none', gap: 8 }}>
+          {sk(120, 28, 20)}{sk(90, 28, 20)}{sk(80, 28, 20)}
+        </div>
+        {/* Skeleton kanban board — fills full width + height */}
+        <div className="board-kanban-wrap">
+          <div className="kanban-board" style={{ pointerEvents: 'none' }}>
+            {skelCols.map((col, ci) => (
+              <div className="kanban-column" key={ci}>
+                <div className="kanban-column-header">
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: col.color, flexShrink: 0, display: 'inline-block', opacity: 0.5 }} />
+                  {sk(60 + ci * 8, 11, 4)}
+                  <div style={{ marginLeft: 'auto' }}>{sk(28, 18, 12)}</div>
+                </div>
+                <div className="kanban-column-body">
+                  {Array.from({ length: col.count }).map((_, ki) => (
+                    <div className="task-card" key={ki} style={{ cursor: 'default', gap: '0.6rem', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        {sk(52, 13, 4)}{sk(44, 18, 12)}
+                      </div>
+                      {sk(titleW[ki % titleW.length], 12, 4)}
+                      {ki % 3 !== 1 && sk(title2W[ki % title2W.length], 12, 4)}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                        {sk(54, 17, 12)}
+                        {sk(22, 22, 11)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     )

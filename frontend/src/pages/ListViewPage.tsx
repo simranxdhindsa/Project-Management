@@ -354,11 +354,73 @@ export function ListViewPage({ showMyTasks }: ListViewPageProps) {
   // Running global index for shift-select across groups
   let globalIdx = 0
 
-  if (loading) return (
-    <div className="list-view-page">
-      <div className="loading-state"><div className="loading-spinner" /><p>Loading issues…</p></div>
-    </div>
-  )
+  if (loading) {
+    const sk = (w: number | string, h: number, r: number | string = 5) => (
+      <div className="skeleton" style={{ width: w, height: h, borderRadius: r as number, flexShrink: 0 }} />
+    )
+    const titleWidths = ['62%','78%','55%','70%','48%','82%','60%','73%','51%','85%','67%','44%','76%']
+    const skelGroups = [
+      { dot: '#6366f1', label: 120, rows: 13 },
+      { dot: '#f59e0b', label: 90,  rows: 8  },
+      { dot: '#ef4444', label: 100, rows: 11 },
+      { dot: '#10b981', label: 80,  rows: 5  },
+    ]
+    return (
+      <div className="list-view-page">
+        {/* Skeleton toolbar */}
+        <div className="lv-toolbar" style={{ pointerEvents: 'none' }}>
+          <div className="lv-toolbar-left" style={{ gap: 8 }}>
+            {sk(190, 32, 8)}{sk(110, 30, 8)}{sk(90, 30, 8)}
+          </div>
+          <div className="lv-toolbar-right" style={{ gap: 8 }}>
+            {sk(55, 30, 8)}{sk(28, 28, 6)}
+          </div>
+        </div>
+        {/* Skeleton table card */}
+        <div className="lv-table-card" style={{ pointerEvents: 'none' }}>
+          {/* Column header row */}
+          <div className="lv-col-header">
+            <div className="lv-ch">{sk(130, 11, 4)}</div>
+            <div className="lv-ch">{sk(70,  11, 4)}</div>
+            <div className="lv-ch">{sk(50,  11, 4)}</div>
+            <div className="lv-ch">{sk(55,  11, 4)}</div>
+            <div className="lv-ch">{sk(60,  11, 4)}</div>
+            <div className="lv-ch">{sk(48,  11, 4)}</div>
+          </div>
+          {/* Skeleton section groups */}
+          <div className="lv-groups-scroll">
+            {skelGroups.map((grp, gi) => (
+              <div className="lv-section-group" key={gi}>
+                <div className="lv-section-header">
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: grp.dot, display: 'inline-block', opacity: 0.6, flexShrink: 0 }} />
+                  {sk(grp.label, 13, 4)}
+                  <div style={{ marginLeft: 6 }}>{sk(26, 18, 12)}</div>
+                </div>
+                <div className="lv-section-body lv-section-body--open">
+                  <div className="lv-section-body-inner">
+                    {Array.from({ length: grp.rows }).map((_, ri) => (
+                      <div className="lv-row" key={ri} style={{ cursor: 'default' }}>
+                        <div className="lv-cell" style={{ paddingLeft: '2rem' }}>
+                          {sk(titleWidths[ri % titleWidths.length], 12, 4)}
+                        </div>
+                        <div className="lv-cell" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {sk(20, 20, 10)}{sk(55, 11, 4)}
+                        </div>
+                        <div className="lv-cell">{sk(58, 11, 4)}</div>
+                        <div className="lv-cell">{sk(58, 11, 4)}</div>
+                        <div className="lv-cell">{sk(68, 11, 4)}</div>
+                        <div className="lv-cell">{sk(46, 18, 12)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="list-view-page">
