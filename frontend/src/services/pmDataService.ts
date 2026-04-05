@@ -98,15 +98,15 @@ export function getPMSections() {
 
 // ── Issues / tasks ────────────────────────────────────────────────────────────
 
-export async function getPMIssues(forceRefresh = false): Promise<{ success: boolean; data: unknown; message?: string }> {
-  const key = getActiveSource()
+export async function getPMIssues(forceRefresh = false, sprintId?: string): Promise<{ success: boolean; data: unknown; message?: string }> {
+  const key = `${getActiveSource()}${sprintId ? `:sprint:${sprintId}` : ''}`
   const hit = _issueCache.get(key)
   if (!forceRefresh && hit && Date.now() - hit.ts < CACHE_TTL) {
     return { success: true, data: hit.data }
   }
   const res = getActiveSource() === 'asana'
     ? await api.getAsanaPMIssues()
-    : await api.getYouTrackIssues()
+    : await api.getYouTrackIssues(sprintId)
   if ((res as any).success && (res as any).data) {
     _issueCache.set(key, { data: (res as any).data, ts: Date.now() })
   }

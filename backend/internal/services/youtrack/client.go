@@ -362,19 +362,26 @@ func (c *Client) GetPriorities(ctx context.Context) ([]string, error) {
 func (c *Client) GetIssues(ctx context.Context) ([]Issue, error) {
 	query := url.QueryEscape(fmt.Sprintf("project: %s", c.projectID))
 	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
-	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=200", fields, query)
-
-	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
+	var all []Issue
+	skip := 0
+	pageSize := 500
+	for {
+		path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=%d&$skip=%d", fields, query, pageSize, skip)
+		body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		var page []Issue
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal issues: %w", err)
+		}
+		all = append(all, page...)
+		if len(page) < pageSize {
+			break
+		}
+		skip += pageSize
 	}
-
-	var issues []Issue
-	if err := json.Unmarshal(body, &issues); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal issues: %w", err)
-	}
-
-	return issues, nil
+	return all, nil
 }
 
 // GetSprints returns all sprints for the configured agile board.
@@ -418,45 +425,36 @@ func (c *Client) GetIssuesByStatePaginated(ctx context.Context, state string, sk
 	return issues, hasMore, nil
 }
 
-// GetSprintIssuesByStatePaginated fetches sprint issues via the agile board sprint endpoint
-// then filters by state in Go. This avoids unreliable Sprint: query syntax.
+// GetSprintIssuesByStatePaginated returns paginated issues for a sprint column.
+// It fetches ALL sprint issues via the paginated agile endpoint (same as GetAllSprintIssues),
+// filters by state in Go, then applies skip/top — guaranteeing correct counts regardless
+// of how many states exist in the sprint.
 func (c *Client) GetSprintIssuesByStatePaginated(ctx context.Context, sprintID, state string, skip, top int) ([]Issue, bool, error) {
-	if c.boardID == "" {
-		return nil, false, fmt.Errorf("no board ID configured")
-	}
-	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
-	// Fetch a window large enough to paginate after state filtering.
-	// We over-fetch (top*5) to account for multi-state sprints, capped at 500.
-	fetchTop := top * 5
-	if fetchTop > 500 {
-		fetchTop = 500
-	}
-	path := fmt.Sprintf("/api/agiles/%s/sprints/%s/issues?fields=%s&$top=%d&$skip=%d",
-		c.boardID, sprintID, fields, fetchTop, skip)
-
-	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	// Fetch every issue in the sprint (handles pagination internally)
+	all, err := c.GetAllSprintIssues(ctx, sprintID)
 	if err != nil {
 		return nil, false, err
 	}
 
-	var allIssues []Issue
-	if err := json.Unmarshal(body, &allIssues); err != nil {
-		return nil, false, fmt.Errorf("failed to unmarshal sprint issues: %w", err)
-	}
-
-	// Filter by state on the backend
+	// Filter to the requested state
 	var filtered []Issue
-	for _, issue := range allIssues {
+	for _, issue := range all {
 		if GetStatus(issue) == state {
 			filtered = append(filtered, issue)
 		}
 	}
 
-	hasMore := len(filtered) > top
-	if hasMore {
-		filtered = filtered[:top]
+	// Apply skip/top pagination over the filtered slice
+	total := len(filtered)
+	if skip >= total {
+		return nil, false, nil
 	}
-	return filtered, hasMore, nil
+	end := skip + top
+	hasMore := end < total
+	if end > total {
+		end = total
+	}
+	return filtered[skip:end], hasMore, nil
 }
 
 // GetAllSprintIssues returns all issues in a sprint (all states) without pagination.
@@ -726,7 +724,20 @@ func (c *Client) TestConnection(ctx context.Context) error {
 	return err
 }
 
-// GetIssueComments returns the text of all comments on an issue (newest last)
+// IssueComment is a full comment object with author info
+type IssueComment struct {
+	ID      string `json:"id"`
+	Text    string `json:"text"`
+	Created int64  `json:"created"`
+	Author  struct {
+		FullName  string `json:"fullName"`
+		Login     string `json:"login"`
+		AvatarUrl string `json:"avatarUrl"`
+	} `json:"author"`
+}
+
+// GetIssueComments returns the text of all comments on an issue (newest last).
+// Used internally by webhook/blocker analysis — returns plain strings.
 func (c *Client) GetIssueComments(ctx context.Context, issueID string) ([]string, error) {
 	path := fmt.Sprintf("/api/issues/%s/comments?fields=id,text,created&$top=10", issueID)
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -750,6 +761,27 @@ func (c *Client) GetIssueComments(ctx context.Context, issueID string) ([]string
 		}
 	}
 	return texts, nil
+}
+
+// GetIssueCommentsFull returns full comment objects including author for the detail panel.
+func (c *Client) GetIssueCommentsFull(ctx context.Context, issueID string) ([]IssueComment, error) {
+	path := fmt.Sprintf("/api/issues/%s/comments?fields=id,text,created,author(fullName,login,avatarUrl)&$top=50", issueID)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var comments []IssueComment
+	if err := json.Unmarshal(body, &comments); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal comments: %w", err)
+	}
+	return comments, nil
+}
+
+// AddIssueComment posts a new comment on an issue.
+func (c *Client) AddIssueComment(ctx context.Context, issueID, text string) error {
+	path := fmt.Sprintf("/api/issues/%s/comments", issueID)
+	_, err := c.doRequest(ctx, http.MethodPost, path, map[string]string{"text": text})
+	return err
 }
 
 // GetIssuesByState returns issues filtered by one or more states (live from YouTrack)

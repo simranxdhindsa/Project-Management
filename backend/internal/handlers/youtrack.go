@@ -477,8 +477,14 @@ func (h *YouTrackHandler) GetIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── Legacy: return all issues ─────────────────────────────────────────────
-	issues, err := client.GetIssues(r.Context())
+	// ── All issues (optionally filtered by sprint) ────────────────────────────
+	sprintIDAll := r.URL.Query().Get("sprint_id")
+	var issues []youtrack.Issue
+	if sprintIDAll != "" {
+		issues, err = client.GetAllSprintIssues(r.Context(), sprintIDAll)
+	} else {
+		issues, err = client.GetIssues(r.Context())
+	}
 	if err != nil {
 		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -556,6 +562,62 @@ func (h *YouTrackHandler) GetIssue(w http.ResponseWriter, r *http.Request) {
 			"attachments": issue.Attachments,
 		},
 	})
+}
+
+// GetIssueComments returns all comments for an issue with full author info
+func (h *YouTrackHandler) GetIssueComments(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+	issueID := mux.Vars(r)["issue_id"]
+	comments, err := client.GetIssueCommentsFull(r.Context(), issueID)
+	if err != nil {
+		http.Error(w, "Failed to get comments: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	baseURL := client.GetBaseURL()
+	for i := range comments {
+		if comments[i].Author.AvatarUrl != "" && !strings.HasPrefix(comments[i].Author.AvatarUrl, "http") {
+			comments[i].Author.AvatarUrl = baseURL + comments[i].Author.AvatarUrl
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": comments})
+}
+
+// AddIssueComment posts a new comment on an issue
+func (h *YouTrackHandler) AddIssueComment(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+	issueID := mux.Vars(r)["issue_id"]
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Text == "" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := client.AddIssueComment(r.Context(), issueID, req.Text); err != nil {
+		http.Error(w, "Failed to add comment: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
 
 // CreateIssue creates a new issue in YouTrack

@@ -1185,9 +1185,49 @@ function AssigneeStatsTab({ sprintId }: { sprintId?: string }) {
 
       {error && <div className="pm-report-error"><AlertTriangle size={16} />{error}</div>}
 
-      {loading && stats.length === 0 ? (
-        <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading stats...</span></div>
-      ) : stats.length === 0 ? (
+      {loading && stats.length === 0 ? (() => {
+        const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+        const nameW = ['72%','58%','80%','65%','50%','75%','62%','70%','55%','68%']
+        const barW  = [72, 45, 88, 55, 63, 78, 40, 95, 50, 67]
+        return (
+          <div className="pm-card-list glass-card">
+            <div className="pm-list-summary">{sk(110, 13, 4)}</div>
+            <div className="pm-col-header">
+              <span className="pm-col-as-name">Assignee</span>
+              <span className="pm-col-as-stat">Open</span>
+              <span className="pm-col-as-stat">In Progress</span>
+              <span className="pm-col-as-stat">Done</span>
+              <span className="pm-col-as-stat">Blocked</span>
+              <span className="pm-col-as-avg">Avg Time</span>
+              <span className="pm-col-as-workload">Workload</span>
+              <span className="pm-col-chevron" />
+            </div>
+            <div className="pm-rows-scroll">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} className="pm-row">
+                  <div className="pm-row-main" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.6rem 0.75rem', cursor: 'default' }}>
+                    <div className="pm-col-as-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {sk(28, 28, '50%')}{sk(nameW[i % nameW.length], 12, 4)}
+                    </div>
+                    <span className="pm-col-as-stat">{sk(22, 18, 10)}</span>
+                    <span className="pm-col-as-stat">{sk(22, 18, 10)}</span>
+                    <span className="pm-col-as-stat">{sk(22, 18, 10)}</span>
+                    <span className="pm-col-as-stat">{sk(22, 18, 10)}</span>
+                    <span className="pm-col-as-avg">{sk(50, 12, 4)}</span>
+                    <span className="pm-col-as-workload">
+                      <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', width: '100%', overflow: 'hidden' }}>
+                        <div className="skeleton" style={{ height: '100%', width: `${barW[i % barW.length]}%`, borderRadius: 4 }} />
+                      </div>
+                    </span>
+                    <span className="pm-col-chevron" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()
+      : stats.length === 0 ? (
         <div className="pm-empty-state"><Users size={40} /><p>No assignee data yet. Stats populate from webhook events or after a Backfill.</p></div>
       ) : (
         <div className="pm-card-list glass-card">
@@ -1849,9 +1889,51 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
 
       {/* ── List ───────────────────────────────────────────────────────────── */}
       {mode === 'logbook' ? (
-        loading && rows.length === 0 ? (
-          <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading…</span></div>
-        ) : rows.length === 0 ? (
+        loading && rows.length === 0 ? (() => {
+          const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+          const titleW = ['65%','80%','55%','72%','48%','85%','60%','75%','52%','68%','78%','44%']
+          const barW   = [40, 65, 28, 78, 50, 88, 35, 72, 55, 45, 92, 38]
+          return (
+            <div className="pm-card-list glass-card">
+              <div className="pm-list-summary" style={{ display: 'flex', gap: 8 }}>
+                {sk(100, 13, 4)}{sk(80, 18, 10)}{sk(90, 18, 10)}
+              </div>
+              <div className="pm-col-header">
+                <span className="tt-col-pin" />
+                <span className="tt-col-issue">Issue</span>
+                <span className="tt-col-regression">Regression</span>
+                <span className="tt-col-priority">Priority</span>
+                <span className="tt-col-status">Status</span>
+                <span className="tt-col-time">{isAsana ? 'Time / Due Date' : 'Time / Threshold'}</span>
+                <span className="tt-col-assignee">Assignee</span>
+                <span className="tt-col-chevron" />
+              </div>
+              <div className="pm-rows-scroll">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <div key={i} className="pm-row" style={{ cursor: 'default' }}>
+                    <div className="pm-row-main" style={{ display: 'contents' }}>
+                      <span className="tt-col-pin" />
+                      <span className="tt-col-issue" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {sk(54, 13, 4)}{sk(titleW[i % titleW.length], 11, 4)}
+                      </span>
+                      <span className="tt-col-regression">{sk(30, 18, 10)}</span>
+                      <span className="tt-col-priority">{sk(44, 18, 12)}</span>
+                      <span className="tt-col-status">{sk(62, 18, 10)}</span>
+                      <span className="tt-col-time">
+                        <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', width: '80%', overflow: 'hidden' }}>
+                          <div className="skeleton" style={{ height: '100%', width: `${barW[i % barW.length]}%`, borderRadius: 4 }} />
+                        </div>
+                      </span>
+                      <span className="tt-col-assignee">{sk(24, 24, '50%')}</span>
+                      <span className="tt-col-chevron" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()
+        : rows.length === 0 ? (
           <div className="pm-empty-state">
             <Clock size={40} />
             <p>No time tracking data for this week.</p>
@@ -1970,9 +2052,35 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
           </div>
         )
       ) : (
-        tlLoading && timelines.length === 0 ? (
-          <div className="pm-loading-state"><Loader2 size={32} className="animate-spin" /><span>Loading…</span></div>
-        ) : tlDisplayed.length === 0 ? (
+        tlLoading && timelines.length === 0 ? (() => {
+          const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+          const titleW = ['60%','75%','50%','82%','45%','70%','58%','88%','52%','65%']
+          const stintW = [[30,45,20],[50,25,35],[20,60,15],[40,30,50],[25,55,20],[55,20,40],[35,45,25],[45,35,30],[20,50,35],[60,20,30]]
+          return (
+            <div className="pm-card-list glass-card">
+              <div className="pm-list-summary" style={{ display: 'flex', gap: 8 }}>
+                {sk(90, 13, 4)}{sk(75, 18, 10)}
+              </div>
+              <div className="pm-rows-scroll">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <div key={i} className="pm-row" style={{ padding: '0.65rem 0.75rem', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'default' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {sk(52, 13, 4)}{sk(titleW[i % titleW.length], 12, 4)}
+                      <div style={{ marginLeft: 'auto' }}>{sk(24, 24, '50%')}</div>
+                    </div>
+                    {/* Timeline bar with stints */}
+                    <div style={{ display: 'flex', gap: 3, height: 8 }}>
+                      {stintW[i % stintW.length].map((w, si) => (
+                        <div key={si} className="skeleton" style={{ width: `${w}%`, height: 8, borderRadius: 4 }} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()
+        : tlDisplayed.length === 0 ? (
           <div className="pm-empty-state"><Activity size={40} /><p>No issues found.</p></div>
         ) : (
           <div className="pm-card-list glass-card">
@@ -2169,12 +2277,16 @@ function YouTrackStageReport() {
           <span className="sr-section-title">Select Columns</span>
           <span className="sr-section-hint">Pick one or more columns to include</span>
         </div>
-        {loadingCols ? (
-          <div className="sr-loading">
-            <div className="loading-spinner" />
-            <span>Loading columns...</span>
-          </div>
-        ) : columns.length === 0 ? (
+        {loadingCols ? (() => {
+          const sk = (w: number, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+          const pillW = [88, 110, 72, 95, 80, 65, 105, 78, 92, 60, 85, 70]
+          return (
+            <div className="sr-columns" style={{ pointerEvents: 'none' }}>
+              {pillW.map((w, i) => sk(w, 32, 20))}
+            </div>
+          )
+        })()
+        : columns.length === 0 ? (
           <div className="sr-empty">No columns found. Ensure YouTrack is connected in Integrations.</div>
         ) : (
           <div className="sr-columns">

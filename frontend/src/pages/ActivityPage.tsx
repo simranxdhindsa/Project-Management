@@ -197,12 +197,40 @@ export function ActivityPage() {
       </div>
 
       <div className="activity-page-body glass-card">
-        {loading ? (
-          <div className="notification-loading">
-            <div className="loading-spinner" />
-            <p>Loading activity...</p>
-          </div>
-        ) : filtered.length === 0 ? (
+        {loading ? (() => {
+          const sk = (w: number | string, h: number, r = 6) => (
+            <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+          )
+          // Realistic counts per date group: Today 8, Yesterday 6, Earlier 11
+          const groups = [8, 6, 11]
+          const titleW = ['55%','72%','48%','65%','80%','43%','68%','58%','75%','50%','62%','71%','45%']
+          const bodyW  = ['80%','65%','90%','70%','55%','85%','75%','60%','88%','68%','78%','52%','82%']
+          return (
+            <div className="notification-list">
+              {groups.map((count, gi) => (
+                <div key={gi}>
+                  {/* Date label skeleton */}
+                  <div className="activity-date-label" style={{ display: 'flex', alignItems: 'center' }}>
+                    {sk(80 + gi * 15, 11, 4)}
+                  </div>
+                  {Array.from({ length: count }).map((_, ri) => (
+                    <div key={ri} className="notification-item read" style={{ cursor: 'default' }}>
+                      {/* Icon circle */}
+                      <div className="notification-icon">{sk(32, 32, '50%')}</div>
+                      {/* Content: title + body + time */}
+                      <div className="notification-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {sk(titleW[(gi * 4 + ri) % titleW.length], 13, 4)}
+                        {sk(bodyW[(gi * 3 + ri) % bodyW.length],   11, 4)}
+                        {sk(55, 10, 4)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )
+        })()
+        : filtered.length === 0 ? (
           <div className="notification-empty">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />

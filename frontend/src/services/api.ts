@@ -269,8 +269,9 @@ class ApiService {
     return this.request<YouTrackUser[]>('/youtrack/users')
   }
 
-  async getYouTrackIssues() {
-    return this.request<YouTrackIssue[]>('/youtrack/issues')
+  async getYouTrackIssues(sprintId?: string) {
+    const params = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : ''
+    return this.request<YouTrackIssue[]>(`/youtrack/issues${params}`)
   }
 
   async getYouTrackIssuesByState(state: string, skip = 0, top = 20, sprintId?: string) {
@@ -281,6 +282,17 @@ class ApiService {
 
   async getYouTrackIssue(issueId: string) {
     return this.request<YouTrackIssue>(`/youtrack/issues/${issueId}`)
+  }
+
+  async getYouTrackIssueComments(issueId: string) {
+    return this.request<YouTrackComment[]>(`/youtrack/issues/${issueId}/comments`)
+  }
+
+  async addYouTrackIssueComment(issueId: string, text: string) {
+    return this.request<{ success: boolean }>(`/youtrack/issues/${issueId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    })
   }
 
   async createYouTrackIssue(params: {
@@ -1531,6 +1543,17 @@ export interface YouTrackAttachment {
   mimeType: string
   url: string
   extension: string
+}
+
+export interface YouTrackComment {
+  id: string
+  text: string
+  created: number
+  author: {
+    fullName: string
+    login: string
+    avatarUrl: string
+  }
 }
 
 export interface YouTrackSettings {

@@ -743,7 +743,27 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
           />
         )}
 
-        {briefLoading && <div className="do-loading">Loading morning brief…</div>}
+        {briefLoading && (() => {
+          const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+          const rowW = ['70%','55%','82%','48%','75%','60%','88%','52%','65%','78%']
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0.5rem 0' }}>
+              {/* 3 fake section headers */}
+              {[100, 120, 90].map((w, si) => (
+                <div key={si} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.5rem 0.25rem' }}>
+                    {sk(16, 16, 4)}{sk(w, 14, 4)}<div style={{ marginLeft: 6 }}>{sk(28, 18, 10)}</div>
+                  </div>
+                  {Array.from({ length: 3 + si }).map((_, ri) => (
+                    <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.35rem 0.75rem' }}>
+                      {sk(52, 13, 4)}{sk(rowW[(si * 3 + ri) % rowW.length], 12, 4)}<div style={{ marginLeft: 'auto' }}>{sk(22, 22, '50%')}</div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )
+        })()}
         {!brief && !briefLoading && <div className="do-loading">Click Refresh to load</div>}
 
         {brief && (
@@ -818,7 +838,26 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
         </div>
 
         {eodError && <div className="do-error">{eodError}</div>}
-        {eodLoading && <div className="do-loading">Loading…</div>}
+        {eodLoading && (() => {
+          const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+          const rowW = ['65%','80%','50%','72%','45%','85%','58%','68%']
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '0.5rem 0' }}>
+              {[4, 3, 5].map((count, gi) => (
+                <div key={gi} style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.4rem 0.25rem' }}>
+                    {sk(gi === 0 ? 90 : gi === 1 ? 110 : 75, 14, 4)}{sk(28, 18, 10)}
+                  </div>
+                  {Array.from({ length: count }).map((_, ri) => (
+                    <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0.3rem 0.75rem' }}>
+                      {sk(50, 12, 4)}{sk(rowW[(gi * 3 + ri) % rowW.length], 11, 4)}<div style={{ marginLeft: 'auto' }}>{sk(44, 18, 10)}</div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )
+        })()}
         {!eod && !eodLoading && <div className="do-loading">Click "Load Today's Data" to see EOD summary</div>}
 
         {eod && (
@@ -921,7 +960,30 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
           </div>
         </div>
 
-        {devLoading && <div className="do-loading">Loading…</div>}
+        {devLoading && (() => {
+          const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+          const barW = [72, 45, 88, 55, 63, 78, 40, 95, 50, 67, 82, 38]
+          // Dev load is displayed as cards in a grid — fake 8 developer cards
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, padding: '0.5rem 0' }}>
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: '0.875rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {sk(28, 28, '50%')}{sk(80 + (i * 13 % 40), 13, 4)}
+                  </div>
+                  {/* Load bar */}
+                  <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                    <div className="skeleton" style={{ height: '100%', width: `${barW[i % barW.length]}%`, borderRadius: 4 }} />
+                  </div>
+                  {/* Issue count + stat */}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {sk(40, 18, 10)}{sk(50, 18, 10)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        })()}
         {!devLoading && devLoad.length === 0 && <div className="do-loading">No developer data yet — move some issues first</div>}
 
         <div className="do-dev-grid">

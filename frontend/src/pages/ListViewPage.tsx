@@ -7,6 +7,9 @@ import {
 import { useAuth } from '@/contexts/AuthContext'
 import type { YouTrackIssue } from '@/services/api'
 import { getPMIssues, getPMStates, getActiveSource } from '@/services/pmDataService'
+import api, { type YouTrackSprint } from '@/services/api'
+import { CalendarDays } from 'lucide-react'
+import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 
 type SortField = 'summary' | 'priority' | 'assignee' | 'updated' | 'created' | 'due_date'
 type SortDir   = 'asc' | 'desc'
@@ -215,22 +218,50 @@ export function ListViewPage({ showMyTasks }: ListViewPageProps) {
   const [copied, setCopied]           = useState(false)
   const lastClickedIndex = useRef<number>(-1)
 
-  useEffect(() => { fetchAll() }, [])
+  const [sprints, setSprints]         = useState<YouTrackSprint[]>([])
+  const [activeSprint, setActiveSprint] = useState<YouTrackSprint | null>(null)
+  const [sprintDropdownOpen, setSprintDropdownOpen] = useState(false)
+  const sprintDropdownRef = useRef<HTMLDivElement>(null)
 
-  const fetchAll = async (force = false) => {
+  useEffect(() => {
+    if (getActiveSource() !== 'youtrack') return
+    api.getYouTrackSprints().then(res => {
+      const r = res as { success: boolean; data: YouTrackSprint[] }
+      if (r.success && r.data) {
+        setSprints(r.data)
+        const now = Date.now()
+        const active = r.data.find(s => !s.isCompleted && s.start <= now && s.finish >= now)
+          ?? r.data.find(s => !s.isCompleted)
+        if (active) setActiveSprint(active)
+      }
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (sprintDropdownRef.current && !sprintDropdownRef.current.contains(e.target as Node))
+        setSprintDropdownOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const fetchAll = useCallback(async (force = false) => {
     try {
-      force ? setRefreshing(true) : setLoading(true)
+      if (force) setRefreshing(true); else setLoading(true)
       const [issuesRes, statesRes] = await Promise.all([
-        getPMIssues(force),
+        getPMIssues(force, activeSprint?.id),
         getPMStates().catch(() => ({ data: [] })),
       ])
-      if ((issuesRes as any).success && (issuesRes as any).data)
-        setIssues((issuesRes as any).data as YouTrackIssue[])
-      const states = ((statesRes as any).data ?? statesRes ?? []) as { name: string }[]
+      const ir = issuesRes as { success: boolean; data: YouTrackIssue[] }
+      if (ir.success && ir.data) setIssues(ir.data)
+      const states = ((statesRes as { data?: { name: string }[] }).data ?? [])
       if (states.length) setSectionOrder(states.map(s => s.name))
     } catch { /* ignore */ }
     finally { setLoading(false); setRefreshing(false) }
-  }
+  }, [activeSprint])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
 
   // Derived filter option lists
   const priorityOptions = useMemo(() => {
@@ -436,6 +467,35 @@ export function ListViewPage({ showMyTasks }: ListViewPageProps) {
           </div>
           <FilterDropdown id="priority" value={priorityFilter} options={priorityOptions} onChange={setPriorityFilter} openId={openDropdown} onOpenChange={setOpenDropdown} />
           <FilterDropdown id="assignee" value={assigneeFilter} options={assigneeOptions} onChange={setAssigneeFilter} openId={openDropdown} onOpenChange={setOpenDropdown} />
+          {getActiveSource() === 'youtrack' && sprints.length > 0 && (
+            <div className="pm-custom-dropdown" ref={sprintDropdownRef}>
+              <button
+                className="pm-custom-dropdown-trigger"
+                onClick={() => setSprintDropdownOpen(o => !o)}
+              >
+                <CalendarDays size={12} style={{ opacity: 0.6 }} />
+                <span>{activeSprint ? activeSprint.name : 'All sprints'}</span>
+                <ChevronDown size={11} className={`dropdown-chevron ${sprintDropdownOpen ? 'open' : ''}`} />
+              </button>
+              {sprintDropdownOpen && (
+                <div className="pm-custom-dropdown-menu">
+                  <button className={`pm-dropdown-item ${!activeSprint ? 'active' : ''}`}
+                    onClick={() => { setActiveSprint(null); setSprintDropdownOpen(false) }}>
+                    <span>All sprints</span>
+                  </button>
+                  {[...sprints]
+                    .sort((a, b) => b.start - a.start)
+                    .map(s => (
+                      <button key={s.id}
+                        className={`pm-dropdown-item ${activeSprint?.id === s.id ? 'active' : ''}`}
+                        onClick={() => { setActiveSprint(s); setSprintDropdownOpen(false) }}>
+                        <span>{s.name}</span>
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="lv-toolbar-right">
           <span className="lv-count">{filteredIssues.length} tasks</span>
@@ -513,65 +573,11 @@ export function ListViewPage({ showMyTasks }: ListViewPageProps) {
 
       {/* ── Detail Modal ── */}
       {selectedIssue && (
-        <div className="modal-overlay" onClick={() => setSelectedIssue(null)}>
-          <div className="lv-detail-modal glass-card" onClick={e => e.stopPropagation()}>
-            <div className="lv-detail-header">
-              <div className="lv-detail-title-block">
-                <span className="lv-detail-id">{selectedIssue.id}</span>
-                <h3 className="lv-detail-title">{selectedIssue.summary}</h3>
-              </div>
-              <button className="lv-detail-close" onClick={() => setSelectedIssue(null)}>&times;</button>
-            </div>
-            <div className="lv-detail-meta">
-              <div className="lv-detail-field">
-                <span className="lv-detail-label">Section</span>
-                <span className="lv-detail-value">{selectedIssue.status || '—'}</span>
-              </div>
-              <div className="lv-detail-field">
-                <span className="lv-detail-label">Priority</span>
-                {selectedIssue.priority
-                  ? <span className={getPriorityClass(selectedIssue.priority)}>{selectedIssue.priority}</span>
-                  : <span className="lv-detail-value">—</span>}
-              </div>
-              {selectedIssue.assignee && (
-                <div className="lv-detail-field">
-                  <span className="lv-detail-label">Assignee</span>
-                  <div className="lv-assignee">
-                    <div className="lv-avatar lv-avatar-sm">{getInitials(selectedIssue.assignee.fullName)}</div>
-                    <span>{selectedIssue.assignee.fullName}</span>
-                  </div>
-                </div>
-              )}
-              {selectedIssue.due_date ? (
-                <div className="lv-detail-field">
-                  <span className="lv-detail-label">Due date</span>
-                  <span className={isOverdue(selectedIssue.due_date) ? 'lv-date-overdue' : ''}>{fmtDate(selectedIssue.due_date)}</span>
-                </div>
-              ) : null}
-              {selectedIssue.updated ? (
-                <div className="lv-detail-field">
-                  <span className="lv-detail-label">Last modified</span>
-                  <span className="lv-detail-value">{new Date(selectedIssue.updated).toLocaleString()}</span>
-                </div>
-              ) : null}
-              {selectedIssue.created ? (
-                <div className="lv-detail-field">
-                  <span className="lv-detail-label">Created on</span>
-                  <span className="lv-detail-value">{new Date(selectedIssue.created).toLocaleString()}</span>
-                </div>
-              ) : null}
-            </div>
-            {selectedIssue.description && (
-              <div className="lv-detail-desc">
-                <span className="lv-detail-label">Description</span>
-                <p className="lv-detail-desc-text">{selectedIssue.description}</p>
-              </div>
-            )}
-            <a href={getIssueUrl(selectedIssue)} target="_blank" rel="noopener noreferrer" className="lv-detail-link">
-              {getActiveSource() === 'asana' ? 'View in Asana ↗' : 'View in YouTrack ↗'}
-            </a>
-          </div>
-        </div>
+        <IssueDetailPanel
+          issue={selectedIssue}
+          onClose={() => setSelectedIssue(null)}
+          ytBaseUrl="https://simran.youtrack.cloud/issue"
+        />
       )}
     </div>
   )

@@ -193,6 +193,8 @@ func main() {
 	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.UpdateIssue).Methods("PUT", "PATCH")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.DeleteIssue).Methods("DELETE")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/state", youtrackHandler.UpdateIssueState).Methods("PATCH")
+	youtrackRoutes.HandleFunc("/issues/{issue_id}/comments", youtrackHandler.GetIssueComments).Methods("GET")
+	youtrackRoutes.HandleFunc("/issues/{issue_id}/comments", youtrackHandler.AddIssueComment).Methods("POST")
 	youtrackRoutes.HandleFunc("/sections", youtrackHandler.GetProjectSectionsFromDB).Methods("GET") // Get synced sections from DB
 	youtrackRoutes.HandleFunc("/import", youtrackHandler.ImportFromYouTrack).Methods("POST")       // Import issues from YouTrack
 	youtrackRoutes.HandleFunc("/match-analysis", youtrackHandler.MatchAnalysis).Methods("POST")

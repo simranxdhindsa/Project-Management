@@ -8,6 +8,7 @@ import { KanbanBoard } from '../components/board'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { YouTrackIssue, YouTrackSprint } from '../services/api'
 import { getPMIssues, updatePMIssueState, getPMStates, getActiveSource } from '../services/pmDataService'
+import { IssueDetailPanel } from '../components/IssueDetailPanel'
 
 const PAGE_SIZE = 20
 
@@ -586,65 +587,11 @@ export function BoardPage() {
 
       {/* ── Detail Modal ───────────────────────────────────────────────────── */}
       {selectedIssue && (
-        <div className="modal-overlay" onClick={() => setSelectedIssue(null)}>
-          <div className="modal glass-card" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="board-modal-title">
-                <span className="board-issue-id">{selectedIssue.id}</span>
-                <h2>{selectedIssue.summary}</h2>
-              </div>
-              <button className="modal-close" onClick={() => setSelectedIssue(null)}>
-                <X size={20} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="task-detail-grid">
-                <div className="task-detail-item">
-                  <label>Status</label>
-                  <span className="tt-badge tt-badge-live">{selectedIssue.status}</span>
-                </div>
-                <div className="task-detail-item">
-                  <label>Priority</label>
-                  <span className={`task-priority-badge ${ytPriorityBadgeClass(selectedIssue.priority || '')}`}>
-                    {ytPriorityLabel(selectedIssue.priority || '')}
-                  </span>
-                </div>
-                {selectedIssue.assignee && (
-                  <div className="task-detail-item">
-                    <label>Assignee</label>
-                    <div className="tt-assignee">
-                      {avatarMap[selectedIssue.assignee.fullName || '']
-                        ? <img src={avatarMap[selectedIssue.assignee.fullName || '']} alt={selectedIssue.assignee.fullName} className="filter-avatar-img" />
-                        : <span className="filter-avatar-placeholder">{(selectedIssue.assignee.fullName || selectedIssue.assignee.login || '?').charAt(0).toUpperCase()}</span>}
-                      <span className="tt-assignee-name">{selectedIssue.assignee.fullName || selectedIssue.assignee.login}</span>
-                    </div>
-                  </div>
-                )}
-                {selectedIssue.subsystem && (
-                  <div className="task-detail-item">
-                    <label>Subsystem</label>
-                    <span>{selectedIssue.subsystem}</span>
-                  </div>
-                )}
-              </div>
-              {selectedIssue.description && (
-                <div className="task-description">
-                  <label>Description</label>
-                  <p>{selectedIssue.description}</p>
-                </div>
-              )}
-              <a
-                href={`${YT_BASE_URL}${selectedIssue.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="board-yt-link"
-              >
-                <ExternalLink size={14} />
-                View in YouTrack
-              </a>
-            </div>
-          </div>
-        </div>
+        <IssueDetailPanel
+          issue={selectedIssue}
+          onClose={() => setSelectedIssue(null)}
+          ytBaseUrl={YT_BASE_URL.replace('/issue/', '/issue')}
+        />
       )}
     </div>
   )
