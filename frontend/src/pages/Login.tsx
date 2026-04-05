@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { KanbanSquare, CheckCircle, Zap, Shield, Sun, Moon } from 'lucide-react'
+import IsoTicketCard from '@/components/IsoTicketCard'
 
 // Declare Google global type
 declare global {
@@ -270,15 +271,15 @@ export default function Login() {
         <div className="iso-board">
           <div className="iso-col">
             <div className="iso-col-header">Backlog</div>
-            <div className="iso-card red" />
-            <div className="iso-card yellow" />
-            <div className="iso-card indigo" />
+            <IsoTicketCard color="red"    ticketId="PM-118" priority="P0" assignee="RK" estimate="4h" initialDelay={0}    titles={["Auth token expiry crashes app","Session loop on mobile","JWT refresh 500 error"]} />
+            <IsoTicketCard color="yellow" ticketId="PM-134" priority="P1" assignee="SJ" estimate="2h" initialDelay={700}  titles={["Update user profile API","Add avatar upload flow","Profile cache miss"]} />
+            <IsoTicketCard color="indigo" ticketId="PM-141" priority="P2" assignee="AM" estimate="1d" initialDelay={1400} titles={["Refactor settings page","Move config to env vars","Remove legacy flags"]} />
           </div>
           <div className="iso-col">
             <div className="iso-col-header">In Progress</div>
-            <div className="iso-card yellow" />
-            <div className="iso-card purple" />
-            <div className="iso-card indigo" />
+            <IsoTicketCard color="yellow" ticketId="PM-127" priority="P1" assignee="PR" estimate="3h" initialDelay={350}  titles={["Dashboard loading skeleton","Shimmer for data tables","Skeleton on route change"]} />
+            <IsoTicketCard color="purple" ticketId="PM-139" priority="P1" assignee="AS" estimate="2d" initialDelay={1050} titles={["Sprint board drag & drop","Fix card reorder bug","Kanban state out of sync"]} />
+            <IsoTicketCard color="indigo" ticketId="PM-143" priority="P2" assignee="NK" estimate="5h" initialDelay={1750} titles={["Dark mode contrast audit","Fix light mode tokens","Review color variables"]} />
           </div>
         </div>
       </div>
@@ -288,15 +289,15 @@ export default function Login() {
         <div className="iso-board">
           <div className="iso-col">
             <div className="iso-col-header">Blocked</div>
-            <div className="iso-card red" />
-            <div className="iso-card red" />
-            <div className="iso-card yellow" />
+            <IsoTicketCard color="red"    ticketId="PM-109" priority="P0" assignee="VT" estimate="6h" initialDelay={200}  titles={["Payment gateway timeout","Stripe webhook 502s","Billing rate limit hit"]} />
+            <IsoTicketCard color="red"    ticketId="PM-122" priority="P0" assignee="RK" estimate="1d" initialDelay={900}  titles={["DB migration blocked","Needs schema review","Prod index rebuild pending"]} />
+            <IsoTicketCard color="yellow" ticketId="PM-136" priority="P1" assignee="SJ" estimate="3h" initialDelay={1600} titles={["Blocked on design review","Waiting Figma handoff","UI spec pending"]} />
           </div>
           <div className="iso-col">
             <div className="iso-col-header">Done</div>
-            <div className="iso-card green" />
-            <div className="iso-card green" />
-            <div className="iso-card indigo" />
+            <IsoTicketCard color="green"  ticketId="PM-101" priority="P1" assignee="AS" estimate="4h" initialDelay={500}  titles={["OAuth Google login live","SSO integration shipped","Login redirect fixed"]} />
+            <IsoTicketCard color="green"  ticketId="PM-115" priority="P2" assignee="NK" estimate="2h" initialDelay={1200} titles={["Email digest system","Weekly emails shipped","Unsubscribe flow done"]} />
+            <IsoTicketCard color="indigo" ticketId="PM-131" priority="P2" assignee="PR" estimate="1d" initialDelay={1900} titles={["Analytics tracking live","Mixpanel events wired","Dashboard metrics up"]} />
           </div>
         </div>
       </div>

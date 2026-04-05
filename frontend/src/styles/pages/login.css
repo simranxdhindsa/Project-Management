@@ -278,7 +278,7 @@
   transform: translateY(-50%);
   pointer-events: none;
   z-index: 2;
-  opacity: 0.45;
+  opacity: 0.65;
   animation: isoFloat 6s ease-in-out infinite;
 }
 
@@ -289,7 +289,7 @@
   transform: translateY(-50%);
   pointer-events: none;
   z-index: 2;
-  opacity: 0.45;
+  opacity: 0.65;
   animation: isoFloat 6s ease-in-out infinite;
   animation-delay: 1.5s;
 }
@@ -343,6 +343,114 @@
 .iso-card.green  { border-left-color: #10b981; }
 .iso-card.indigo { border-left-color: #6366f1; }
 .iso-card.purple { border-left-color: #8b5cf6; }
+
+/* ── iso-card inner layout (ticket content) ───────────────── */
+.iso-card {
+  padding: 10px 12px 10px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.iso-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.iso-card-id {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.50);
+  letter-spacing: 0.04em;
+}
+
+/* Priority pill — background set inline via PRIORITY_BG map */
+.iso-card-priority {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: rgba(255,255,255,0.88);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.iso-card-priority::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.75);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* Mid row: assignee avatar + estimate */
+.iso-card-midrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.iso-card-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.90);
+  flex-shrink: 0;
+  letter-spacing: 0;
+}
+
+.iso-card-estimate {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.02em;
+}
+
+/* Title area — natural flow (space-between handles vertical centering) */
+.iso-card-title-wrap {
+  overflow: hidden;
+}
+
+/* Typewriter text (ui-ux-pro-max: 500 weight, tight line-height) */
+.iso-card-title {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.95);
+  line-height: 1.4;
+  width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Blinking cursor — rendered via framer-motion motion.span */
+.iso-card-cursor {
+  display: inline;
+  margin-left: 1px;
+  color: rgba(255,255,255,0.55);
+  font-weight: 300;
+}
 
 /* Left board: Backlog=slate, In Progress=amber */
 .iso-board-left .iso-col:nth-child(1) .iso-col-header { color: rgba(148,163,184,0.7); }
