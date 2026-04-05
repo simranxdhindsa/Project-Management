@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -618,6 +619,77 @@ func (h *YouTrackHandler) AddIssueComment(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// ProxyAttachment fetches a YouTrack attachment using the stored token and streams it back.
+// This is needed because YouTrack attachment URLs require Bearer auth that the browser can't provide.
+func (h *YouTrackHandler) ProxyAttachment(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	encodedURL := r.URL.Query().Get("url")
+	if encodedURL == "" {
+		http.Error(w, "Missing url param", http.StatusBadRequest)
+		return
+	}
+	rawBytes, err := base64.StdEncoding.DecodeString(encodedURL)
+	if err != nil {
+		http.Error(w, "Invalid url encoding", http.StatusBadRequest)
+		return
+	}
+	rawURL := string(rawBytes)
+
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack not configured", http.StatusBadRequest)
+		return
+	}
+
+	// If the attachment URL is relative (e.g. /api/files/...), make it absolute
+	if strings.HasPrefix(rawURL, "/") {
+		rawURL = strings.TrimRight(client.GetBaseURL(), "/") + rawURL
+	}
+
+	// Security: only proxy URLs from the configured YouTrack instance
+	if !strings.HasPrefix(rawURL, client.GetBaseURL()) {
+		http.Error(w, "URL not allowed", http.StatusForbidden)
+		return
+	}
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, rawURL, nil)
+	if err != nil {
+		http.Error(w, "Failed to build request", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+client.GetToken())
+
+	// Forward Range header so video seeking works
+	if rng := r.Header.Get("Range"); rng != "" {
+		req.Header.Set("Range", rng)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "Failed to fetch from YouTrack", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Forward relevant response headers
+	for _, hdr := range []string{
+		"Content-Type", "Content-Length", "Content-Range",
+		"Accept-Ranges", "Last-Modified", "ETag",
+	} {
+		if v := resp.Header.Get(hdr); v != "" {
+			w.Header().Set(hdr, v)
+		}
+	}
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // CreateIssue creates a new issue in YouTrack

@@ -46,6 +46,11 @@ func (c *Client) GetBaseURL() string {
 	return c.baseURL
 }
 
+// GetToken returns the YouTrack API token (used by the attachment proxy handler)
+func (c *Client) GetToken() string {
+	return c.token
+}
+
 // Issue represents a YouTrack issue
 type Issue struct {
 	ID           string        `json:"id"`           // internal id e.g. "3-671"

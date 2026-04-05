@@ -3,6 +3,7 @@ import { ExternalLink, X, Send, MessageSquare, Paperclip, Clock, User } from 'lu
 import api from '@/services/api'
 import type { YouTrackIssue, YouTrackComment } from '@/services/api'
 import { getActiveSource } from '@/services/pmDataService'
+import { AttachmentViewer } from '@/components/AttachmentViewer'
 
 interface IssueDetailPanelProps {
   issue: YouTrackIssue
@@ -59,8 +60,10 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
   const [commentsLoading, setCommentsLoading] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [posting, setPosting] = useState(false)
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isYouTrack = getActiveSource() === 'youtrack'
+  const allAttachments = issue.attachments || []
 
   useEffect(() => {
     if (!isYouTrack) return
@@ -98,6 +101,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
   const fileAttachments  = (issue.attachments || []).filter(a => !isImageAttachment(a.mimeType, a.url))
 
   return (
+    <>
     <div className="modal-overlay" onClick={onClose}>
       <div className="idp-modal" onClick={e => e.stopPropagation()}>
 
@@ -135,21 +139,36 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                 </div>
                 {imageAttachments.length > 0 && (
                   <div className="idp-attachments-grid">
-                    {imageAttachments.map(a => (
-                      <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="idp-attachment-thumb">
-                        <img src={a.url} alt={a.name} />
+                    {imageAttachments.map((a, i) => (
+                      <div
+                        key={a.id}
+                        className="idp-attachment-thumb"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => setViewerIndex(i)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={e => e.key === 'Enter' && setViewerIndex(i)}
+                        title={a.name}
+                      >
+                        <img src={api.buildProxyUrl(a.url)} alt={a.name}
+                          onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = '0.3' }} />
                         <span className="idp-attachment-name">{a.name}</span>
-                      </a>
+                      </div>
                     ))}
                   </div>
                 )}
                 {fileAttachments.length > 0 && (
                   <div className="idp-file-attachments">
-                    {fileAttachments.map(a => (
-                      <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="idp-file-pill">
+                    {fileAttachments.map((a, fi) => (
+                      <button
+                        key={a.id}
+                        className="idp-file-pill"
+                        onClick={() => setViewerIndex(imageAttachments.length + fi)}
+                        title={a.name}
+                      >
                         <Paperclip size={11} />
                         {a.name}
-                      </a>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -290,5 +309,15 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
         </div>
       </div>
     </div>
+
+    {/* Attachment viewer overlay */}
+    {viewerIndex !== null && allAttachments.length > 0 && (
+      <AttachmentViewer
+        attachments={allAttachments}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerIndex(null)}
+      />
+    )}
+  </>
   )
 }

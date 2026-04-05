@@ -1509,3 +1509,415 @@
   .idp-body { flex-direction: column; }
   .idp-sidebar { width: 100%; border-left: none; border-top: 1px solid rgba(255,255,255,0.07); }
 }
+
+/* ============================================================
+   ATTACHMENT VIEWER  (avw-*)
+   Full-screen overlay for viewing images, video, audio, PDF,
+   text and office files — no browser-native UI.
+   Glassmorphism + Dimensional Layering (ui-ux-pro-max).
+   ============================================================ */
+
+.avw-overlay {
+  position: fixed; inset: 0;
+  background: rgba(2, 6, 23, 0.92);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  z-index: 1100;
+  display: flex; align-items: center; justify-content: center;
+  animation: fadeIn 120ms ease;
+}
+
+.avw-modal {
+  width: 100vw; height: 100vh;
+  display: flex; flex-direction: column;
+  background: rgba(8, 6, 22, 0.98);
+  overflow: hidden;
+}
+
+/* ── Top bar ──────────────────────────────────────────────── */
+.avw-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.65rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0; gap: 1rem;
+}
+
+.avw-filename {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.875rem; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; min-width: 0;
+}
+
+.avw-filename-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.avw-type-badge {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-full);
+  background: rgba(99, 102, 241, 0.18); color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  flex-shrink: 0; white-space: nowrap;
+}
+
+.avw-topbar-actions {
+  display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
+}
+
+.avw-download-btn {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 0.78rem; font-weight: 500; color: var(--text-secondary);
+  padding: 0.4rem 0.85rem; min-height: 36px;
+  border-radius: var(--radius-md); cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all var(--transition-fast);
+}
+.avw-download-btn:hover {
+  background: rgba(255, 255, 255, 0.12); color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.avw-close-btn {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: var(--radius-md);
+  color: var(--text-muted); cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.avw-close-btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-primary); }
+
+/* ── Stage (content area + side nav) ─────────────────────── */
+.avw-stage {
+  flex: 1; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; min-height: 0;
+}
+
+.avw-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%; color: var(--text-primary); cursor: pointer;
+  z-index: 2; transition: all var(--transition-fast);
+  backdrop-filter: blur(8px);
+}
+.avw-nav:hover { background: rgba(255, 255, 255, 0.15); }
+.avw-nav:disabled { opacity: 0.2; cursor: default; pointer-events: none; }
+.avw-nav--prev { left: 1rem; }
+.avw-nav--next { right: 1rem; }
+
+.avw-content-wrap {
+  display: flex; align-items: center; justify-content: center;
+  width: calc(100% - 120px); height: 100%; overflow: hidden;
+}
+
+/* ── Image viewer ─────────────────────────────────────────── */
+.avw-image-wrap {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; user-select: none;
+}
+
+.avw-image {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  transition: transform 80ms ease;
+  display: block;
+}
+.avw-image.zoom-in  { cursor: zoom-in; }
+.avw-image.zoom-out { cursor: zoom-out; }
+.avw-image.dragging { cursor: grabbing; transition: none; }
+
+/* ── Video viewer ─────────────────────────────────────────── */
+.avw-video-wrap {
+  position: relative; background: #000;
+  border-radius: var(--radius-md); overflow: hidden;
+  max-width: 100%; max-height: calc(100vh - 140px);
+  display: flex; align-items: center; justify-content: center;
+}
+
+.avw-video {
+  display: block;
+  max-width: 100%; max-height: calc(100vh - 200px);
+  outline: none;
+}
+
+.avw-video-controls {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 0.5rem 0.75rem 0.65rem;
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 60%, transparent 100%);
+  display: flex; flex-direction: column; gap: 0.4rem;
+  transition: opacity var(--transition-normal);
+}
+.avw-video-controls.hidden { opacity: 0; }
+
+.avw-vc-seek-row {
+  display: flex; align-items: center;
+}
+
+.avw-seek-bar {
+  flex: 1; height: 4px; cursor: pointer;
+  accent-color: var(--color-primary);
+  background: transparent;
+  appearance: none; -webkit-appearance: none;
+}
+.avw-seek-bar::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+}
+.avw-seek-bar::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--color-primary); margin-top: -4px; cursor: pointer;
+}
+.avw-seek-bar::-moz-range-track {
+  height: 4px; border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+}
+.avw-seek-bar::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%; border: none;
+  background: var(--color-primary); cursor: pointer;
+}
+
+.avw-vc-bottom-row {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+
+.avw-vc-btn {
+  width: 36px; height: 36px; min-width: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: var(--radius-md);
+  color: rgba(255, 255, 255, 0.9); cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.avw-vc-btn:hover { background: rgba(255, 255, 255, 0.15); }
+
+.avw-vc-time {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.72rem; color: rgba(255, 255, 255, 0.7);
+  white-space: nowrap; margin-right: auto;
+}
+
+.avw-vol-slider {
+  width: 72px; height: 4px; cursor: pointer;
+  accent-color: var(--color-primary);
+  appearance: none; -webkit-appearance: none; background: transparent;
+}
+.avw-vol-slider::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.2);
+}
+.avw-vol-slider::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #fff; margin-top: -3px; cursor: pointer;
+}
+
+/* ── Audio viewer ─────────────────────────────────────────── */
+.avw-audio-wrap {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1.5rem; padding: 2.5rem 3rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-xl); min-width: 320px;
+}
+
+.avw-audio-icon {
+  width: 80px; height: 80px; border-radius: 50%;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  display: flex; align-items: center; justify-content: center;
+  color: #818cf8;
+}
+
+.avw-audio-name {
+  font-size: 1rem; font-weight: 600; color: var(--text-primary);
+  text-align: center; max-width: 280px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.avw-audio-controls {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0.75rem; width: 100%;
+}
+
+.avw-audio-seek {
+  width: 100%; height: 4px; cursor: pointer;
+  accent-color: var(--color-primary);
+  appearance: none; -webkit-appearance: none; background: transparent;
+}
+.avw-audio-seek::-webkit-slider-runnable-track {
+  height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.15);
+}
+.avw-audio-seek::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--color-primary); margin-top: -4px; cursor: pointer;
+}
+
+.avw-audio-btns {
+  display: flex; align-items: center; gap: 1rem;
+}
+
+.avw-audio-play-btn {
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--color-primary); border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; transition: all var(--transition-fast);
+}
+.avw-audio-play-btn:hover { background: var(--color-primary-hover); transform: scale(1.05); }
+
+.avw-audio-time {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem; color: var(--text-muted);
+}
+
+/* ── PDF viewer ───────────────────────────────────────────── */
+.avw-pdf {
+  width: min(960px, calc(100vw - 120px));
+  height: calc(100vh - 140px);
+  border: none; border-radius: var(--radius-md);
+  background: #fff;
+}
+
+/* ── Text viewer ──────────────────────────────────────────── */
+.avw-text-wrap {
+  width: min(860px, calc(100vw - 120px));
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: 1.5rem;
+}
+
+.avw-text {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8rem; line-height: 1.7;
+  color: var(--text-secondary); margin: 0;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+/* ── Office / Google Docs viewer ─────────────────────────── */
+.avw-office-frame {
+  width: min(1000px, calc(100vw - 120px));
+  height: calc(100vh - 140px);
+  border: none; border-radius: var(--radius-md);
+  background: #fff;
+}
+
+/* ── Unsupported / download card ─────────────────────────── */
+.avw-unsupported {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1.25rem; padding: 3rem 3.5rem; text-align: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-xl);
+}
+
+.avw-unsupported-icon {
+  width: 72px; height: 72px; border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted);
+}
+
+.avw-unsupported-name {
+  font-size: 1rem; font-weight: 600; color: var(--text-primary);
+  max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.avw-unsupported-meta {
+  font-size: 0.8rem; color: var(--text-muted);
+}
+
+.avw-unsupported-note {
+  font-size: 0.75rem; color: var(--text-muted); font-style: italic;
+}
+
+.avw-unsupported-dl-btn {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  padding: 0.6rem 1.5rem; border-radius: var(--radius-md);
+  background: var(--color-primary); color: #fff; cursor: pointer;
+  font-size: 0.875rem; font-weight: 600; border: none;
+  transition: all var(--transition-fast);
+}
+.avw-unsupported-dl-btn:hover { background: var(--color-primary-hover); transform: translateY(-1px); }
+
+/* ── Loading ──────────────────────────────────────────────── */
+.avw-loading {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1rem; color: var(--text-muted); font-size: 0.875rem;
+}
+
+.avw-spinner {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--color-primary);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Error state ──────────────────────────────────────────── */
+.avw-error {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 1rem; color: var(--text-muted); font-size: 0.875rem; text-align: center;
+}
+
+.avw-error-icon { color: #f87171; }
+
+.avw-retry-btn {
+  padding: 0.4rem 1rem; border-radius: var(--radius-md); cursor: pointer;
+  background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary); font-size: 0.8rem;
+  transition: all var(--transition-fast);
+}
+.avw-retry-btn:hover { background: rgba(255, 255, 255, 0.13); }
+
+/* ── Footer (counter + thumbnail strip) ──────────────────── */
+.avw-footer {
+  display: flex; align-items: center; justify-content: center;
+  gap: 1rem; padding: 0.5rem 1.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0; min-height: 56px;
+}
+
+.avw-counter {
+  font-size: 0.72rem; color: var(--text-muted);
+  min-width: 40px; text-align: center; flex-shrink: 0;
+}
+
+.avw-thumb-strip {
+  display: flex; gap: 0.4rem; align-items: center;
+  overflow-x: auto; padding: 2px 0;
+  scrollbar-width: none;
+}
+.avw-thumb-strip::-webkit-scrollbar { display: none; }
+
+.avw-thumb {
+  width: 40px; height: 40px; flex-shrink: 0;
+  border-radius: var(--radius-sm); overflow: hidden;
+  border: 2px solid transparent; cursor: pointer;
+  background: rgba(255, 255, 255, 0.07);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); transition: border-color var(--transition-fast);
+}
+.avw-thumb:hover { border-color: rgba(255, 255, 255, 0.25); }
+.avw-thumb.active { border-color: var(--color-primary); }
+.avw-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ── Reduced motion ───────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .avw-overlay { animation: none; }
+  .avw-image   { transition: none; }
+  .avw-video-controls { transition: none; }
+}

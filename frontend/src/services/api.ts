@@ -295,6 +295,26 @@ class ApiService {
     })
   }
 
+  buildProxyUrl(attachmentUrl: string): string {
+    return `${API_URL}/youtrack/proxy?url=${btoa(attachmentUrl)}`
+  }
+
+  async fetchAttachmentBlob(attachmentUrl: string): Promise<Blob> {
+    const resp = await fetch(this.buildProxyUrl(attachmentUrl), {
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    return resp.blob()
+  }
+
+  async fetchAttachmentText(attachmentUrl: string): Promise<string> {
+    const resp = await fetch(this.buildProxyUrl(attachmentUrl), {
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    return resp.text()
+  }
+
   async createYouTrackIssue(params: {
     summary: string
     description?: string
