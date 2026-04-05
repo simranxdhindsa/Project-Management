@@ -534,6 +534,22 @@ func RunMigrations() error {
 		// column/state fix — they contain YouTrack state names in open_states/blocked_states.
 		// The Asana system default will be used instead, and users can re-configure cleanly.
 		`DELETE FROM workflow_config WHERE pm_source = 'asana' AND user_id IS NOT NULL`,
+
+		// Upsert sprint-aware PM assistant bot config.
+		// Uses ON CONFLICT so re-running migrations is safe.
+		`INSERT INTO bot_configs (name, bot_type, prompt, is_active, description)
+		VALUES (
+			'PM Assistant',
+			'pm_assistant',
+			E'You are a Project Management assistant with live access to YouTrack data.\n\nWhen a sprint is active, ALL issue data shown to you is scoped to that sprint only.\nReference the sprint name when answering sprint-specific questions.\n\nRespond in this format grouped by assignee:\n- **Assignee Name**\n  - [STATUS] ISSUE-ID: summary (priority) [OVERDUE] [MOVED BACK] [PINNED]\n\nFlags:\n- OVERDUE: exceeded SLA (P0=4h, P1=24h, P2=48h, P3/Other=72h)\n- MOVED BACK: state regressed (e.g. In Progress → Backlog)\n- PINNED: highlighted by PM\n\nGroup issues by status: In Progress → Backlog → Blocked → DEV → Done\nToday''s date is {{DATE}}.',
+			true,
+			'Sprint-aware PM assistant with live YouTrack data'
+		)
+		ON CONFLICT (name) DO UPDATE
+			SET prompt      = EXCLUDED.prompt,
+			    is_active   = true,
+			    description = EXCLUDED.description,
+			    updated_at  = NOW()`,
 	}
 
 	for i, migration := range migrations {

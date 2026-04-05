@@ -1748,8 +1748,10 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
-		Query   string           `json:"query"`
-		History []ai.ConvMessage `json:"history"`
+		Query      string           `json:"query"`
+		History    []ai.ConvMessage `json:"history"`
+		SprintID   string           `json:"sprint_id"`
+		SprintName string           `json:"sprint_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Query == "" {
 		http.Error(w, "Invalid request: query is required", http.StatusBadRequest)
@@ -1772,6 +1774,11 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	// Substitute {{DATE}} variable
 	customInstructions = strings.ReplaceAll(customInstructions, "{{DATE}}", time.Now().Format("2006-01-02"))
 
+	// Inject sprint context if active
+	if req.SprintName != "" {
+		customInstructions = fmt.Sprintf("ACTIVE SPRINT: %s\nAll issue data below is scoped to this sprint only. Reference the sprint name when answering sprint-specific questions.\n\n", req.SprintName) + customInstructions
+	}
+
 	// Load workflow config for priority/threshold lookups
 	pmCfg, _ := h.configRepo.GetEffective(r.Context(), userID, "youtrack")
 
@@ -1782,7 +1789,12 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 
 	ytClient, err := h.getYouTrackClient(r.Context())
 	if err == nil && ytClient != nil {
-		issues, err := ytClient.GetIssues(r.Context())
+		var issues []youtrack.Issue
+		if req.SprintID != "" {
+			issues, err = ytClient.GetAllSprintIssues(r.Context(), req.SprintID)
+		} else {
+			issues, err = ytClient.GetIssues(r.Context())
+		}
 		if err == nil {
 			for _, issue := range issues {
 				status := youtrack.GetStatus(issue)
@@ -2238,8 +2250,14 @@ func (h *YouTrackHandler) GetDailyBrief(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Fetch all live issues
-	issues, err := client.GetIssues(r.Context())
+	// Fetch live issues — sprint-scoped when sprint_id is provided
+	sprintID := r.URL.Query().Get("sprint_id")
+	var issues []youtrack.Issue
+	if sprintID != "" {
+		issues, err = client.GetAllSprintIssues(r.Context(), sprintID)
+	} else {
+		issues, err = client.GetIssues(r.Context())
+	}
 	if err != nil {
 		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
 		return

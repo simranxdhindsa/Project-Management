@@ -410,16 +410,17 @@ class ApiService {
   }
 
   // PM Assistant
-  async pmAssistantQuery(query: string, history: { role: string; content: string }[] = []) {
+  async pmAssistantQuery(query: string, history: { role: string; content: string }[] = [], sprintId?: string, sprintName?: string) {
     return this.request<{ response: string }>('/youtrack/pm-query', {
       method: 'POST',
-      body: JSON.stringify({ query, history }),
+      body: JSON.stringify({ query, history, sprint_id: sprintId, sprint_name: sprintName }),
     })
   }
 
   // Daily Ops endpoints
-  async getDailyBrief() {
-    return this.request<DailyBrief>('/youtrack/daily-brief')
+  async getDailyBrief(sprintId?: string) {
+    const qs = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : ''
+    return this.request<DailyBrief>(`/youtrack/daily-brief${qs}`)
   }
 
   async getEODSummary() {
@@ -1004,11 +1005,13 @@ class ApiService {
   }
 
   // PM Report endpoints
-  async generatePMReport(date: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }) {
+  async generatePMReport(date: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }, sprintId?: string, sprintName?: string) {
     const params = new URLSearchParams({ scope })
     if (overrides?.priorities?.length) params.set('priorities', overrides.priorities.join(','))
     if (overrides?.open_states?.length) params.set('open_states', overrides.open_states.join(','))
     if (overrides?.sections?.length) params.set('sections', overrides.sections.join(','))
+    if (sprintId) params.set('sprint_id', sprintId)
+    if (sprintName) params.set('sprint_name', encodeURIComponent(sprintName))
     return this.request<PMReport>(`/reports/pm-report/${date}?${params}`)
   }
 
@@ -1024,23 +1027,28 @@ class ApiService {
     return this.request<{ message: string }>(`/reports/pm-report/${id}/delete`, { method: 'DELETE' })
   }
 
-  async generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full') {
-    return this.request<PMReport>(`/reports/pm-report/weekly/${weekStart}?scope=${scope}`)
+  async generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full', sprintId?: string, sprintName?: string) {
+    const params = new URLSearchParams({ scope })
+    if (sprintId) params.set('sprint_id', sprintId)
+    if (sprintName) params.set('sprint_name', encodeURIComponent(sprintName))
+    return this.request<PMReport>(`/reports/pm-report/weekly/${weekStart}?${params}`)
   }
 
   async listWeeklyPMReports() {
     return this.request<PMReport[]>('/reports/pm-reports/weekly')
   }
 
-  async getAssigneeStats() {
-    return this.request<AssigneeStat[]>('/reports/assignee-stats')
+  async getAssigneeStats(sprintId?: string) {
+    const qs = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : ''
+    return this.request<AssigneeStat[]>(`/reports/assignee-stats${qs}`)
   }
 
-  async getTimeTracking(params?: { week?: string; assignee?: string; priority?: string }) {
+  async getTimeTracking(params?: { week?: string; assignee?: string; priority?: string; sprint_id?: string }) {
     const qs = new URLSearchParams()
     if (params?.week) qs.set('week', params.week)
     if (params?.assignee) qs.set('assignee', params.assignee)
     if (params?.priority) qs.set('priority', params.priority)
+    if (params?.sprint_id) qs.set('sprint_id', params.sprint_id)
     const query = qs.toString() ? `?${qs.toString()}` : ''
     return this.request<TimeTrackingRow[]>(`/reports/time-tracking${query}`)
   }

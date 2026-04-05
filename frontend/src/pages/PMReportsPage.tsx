@@ -26,7 +26,7 @@ import {
 } from 'lucide-react'
 import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
 import api from '../services/api'
-import type { IssueTimeline, IssueStint } from '../services/api'
+import type { IssueTimeline, IssueStint, YouTrackSprint } from '../services/api'
 import {
   pmAssistantQuery, getCarryover, saveCarryoverPlan,
   getAssigneeStats, getAvatarMap,
@@ -328,7 +328,9 @@ export function PMAssistantTab() {
     const history = updatedMessages.map(m => ({ role: m.role, content: m.content }))
     const historyWithoutLast = history.slice(0, -1)
 
-    const doQuery = () => pmAssistantQuery(text, historyWithoutLast)
+    const activeSprintId = localStorage.getItem('pm_active_sprint_id') || undefined
+    const activeSprintName = localStorage.getItem('pm_active_sprint_name') || undefined
+    const doQuery = () => pmAssistantQuery(text, historyWithoutLast, activeSprintId, activeSprintName)
 
     const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
 
@@ -530,7 +532,7 @@ function formatWeekLabel(mondayStr: string): string {
   return `${mo} – ${su}`
 }
 
-function DailyReportTab() {
+function DailyReportTab({ sprintId, sprintName }: { sprintId?: string; sprintName?: string }) {
   const [mode, setMode] = useState<'daily' | 'weekly'>('daily')
   const [reportScope, setReportScope] = useState<'full' | 'summary'>('full')
   const [date, setDate] = useState(todayStr())
@@ -671,8 +673,8 @@ function DailyReportTab() {
     }
     try {
       const res = mode === 'daily'
-        ? await generatePMReport(date, reportScope, overrides)
-        : await generateWeeklyPMReport(weekStart, reportScope)
+        ? await generatePMReport(date, reportScope, overrides, sprintId, sprintName)
+        : await generateWeeklyPMReport(weekStart as any, reportScope, sprintId, sprintName)
       setReport((res as any).data)
       mode === 'daily' ? fetchHistory() : fetchWeeklyHistory()
     } catch (err) {
@@ -1146,7 +1148,7 @@ function DailyReportTab() {
 
 // ─── Tab: Assignee Stats ──────────────────────────────────────────────────────
 
-function AssigneeStatsTab() {
+function AssigneeStatsTab({ sprintId }: { sprintId?: string }) {
   const [stats, setStats] = useState<AssigneeStat[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1157,14 +1159,14 @@ function AssigneeStatsTab() {
     setLoading(true)
     setError(null)
     try {
-      const res = await getAssigneeStats()
+      const res = await getAssigneeStats(sprintId)
       setStats((res as any).data || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load stats')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [sprintId])
 
   useEffect(() => { fetchStats() }, [fetchStats])
   useEffect(() => { getAvatarMap().then(setAvatarMap) }, [])
@@ -1306,7 +1308,7 @@ function stintLabel(stint: IssueStint): string {
 
 type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at' | 'status'
 
-function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
+function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<string>; sprintId?: string }) {
   const isAsana = getActiveSource() === 'asana'
   const [mode, setMode] = useState<'logbook' | 'summary'>('logbook')
 
@@ -1361,8 +1363,9 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
     setLoading(true)
     setError(null)
     try {
-      const params: { week?: string } = {}
+      const params: { week?: string; sprint_id?: string } = {}
       if (!skipWeek) params.week = toISODate(week)
+      if (sprintId) params.sprint_id = sprintId
       const res = await getTimeTracking(params)
       setRows((res as any).data || [])
     } catch (err) {
@@ -1370,7 +1373,7 @@ function TrackingTab({ blockerIssueIds }: { blockerIssueIds?: Set<string> }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [sprintId])
 
   const fetchTimelines = useCallback(async () => {
     setTlLoading(true)
@@ -2556,9 +2559,57 @@ interface PMReportsPageProps {
   onTabChange?: (tab: TabId) => void
 }
 
+const SPRINT_ID_KEY = 'pm_active_sprint_id'
+const SPRINT_NAME_KEY = 'pm_active_sprint_name'
+
+function fmtSprintDate(ms: number) {
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReportsPageProps) {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab)
   const [blockerIssueIds, setBlockerIssueIds] = useState<Set<string>>(new Set())
+
+  // ── Sprint state ────────────────────────────────────────────────────────────
+  const [sprints, setSprints] = useState<YouTrackSprint[]>([])
+  const [activeSprint, setActiveSprint] = useState<YouTrackSprint | null>(null)
+  const [sprintDropdownOpen, setSprintDropdownOpen] = useState(false)
+  const sprintDropdownRef = useRef<HTMLDivElement>(null)
+  const isYouTrack = getActiveSource() === 'youtrack'
+
+  useEffect(() => {
+    if (!isYouTrack) return
+    api.getYouTrackSprints().then(res => {
+      const list = ((res as any).data as YouTrackSprint[]) ?? []
+      setSprints(list)
+      const now = Date.now()
+      const active = list
+        .filter(s => !s.isCompleted && s.finish > now)
+        .sort((a, b) => a.finish - b.finish)[0] ?? null
+      setActiveSprint(active)
+      localStorage.setItem(SPRINT_ID_KEY, active?.id ?? '')
+      localStorage.setItem(SPRINT_NAME_KEY, active?.name ?? '')
+    }).catch(() => {})
+  }, [isYouTrack])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (sprintDropdownRef.current && !sprintDropdownRef.current.contains(e.target as Node)) {
+        setSprintDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const handleSprintChange = (sprint: YouTrackSprint | null) => {
+    setActiveSprint(sprint)
+    setSprintDropdownOpen(false)
+    localStorage.setItem(SPRINT_ID_KEY, sprint?.id ?? '')
+    localStorage.setItem(SPRINT_NAME_KEY, sprint?.name ?? '')
+  }
+
+  const sortedSprints = [...sprints].sort((a, b) => b.finish - a.finish)
 
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab)
@@ -2570,22 +2621,73 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
   return (
     <div className="pm-reports-page">
       <div className="pm-reports-container">
-        <div className="pm-tab-bar glass-card">
-          {TABS.map(tab => {
-            const Icon = tab.icon
-            return (
-              <button key={tab.id} className={`pm-tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => handleTabChange(tab.id)}>
-                <Icon size={16} />
-                <span>{tab.label}</span>
+        <div style={{ display: 'flex', alignItems: 'flex-end', overflow: 'visible' }}>
+          <div className="pm-tab-bar glass-card" style={{ flex: 1, marginBottom: 0 }}>
+            {TABS.map(tab => {
+              const Icon = tab.icon
+              return (
+                <button key={tab.id} className={`pm-tab-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => handleTabChange(tab.id)}>
+                  <Icon size={16} />
+                  <span>{tab.label}</span>
+                </button>
+              )
+            })}
+          </div>
+          {isYouTrack && (
+            <div ref={sprintDropdownRef} style={{ position: 'relative', paddingBottom: '0.5rem', paddingLeft: 8, flexShrink: 0 }}>
+              <button
+                onClick={() => setSprintDropdownOpen(o => !o)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap' }}
+              >
+                <GitBranch size={13} />
+                {activeSprint
+                  ? <>{activeSprint.name} <span style={{ opacity: 0.55, fontWeight: 400, marginLeft: 3 }}>{fmtSprintDate(activeSprint.start)}–{fmtSprintDate(activeSprint.finish)}</span></>
+                  : <span>All sprints</span>
+                }
+                <ChevronDown size={12} style={{ opacity: 0.5 }} />
               </button>
-            )
-          })}
+              {sprintDropdownOpen && createPortal(
+                <div
+                  className="pm-custom-dropdown-menu"
+                  style={{
+                    position: 'fixed',
+                    top: (sprintDropdownRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                    left: (sprintDropdownRef.current?.getBoundingClientRect().right ?? 0) - 220,
+                    minWidth: 220,
+                    zIndex: 9999,
+                  }}
+                >
+                  <button className={`pm-dropdown-item${!activeSprint ? ' active' : ''}`} onClick={() => handleSprintChange(null)}>
+                    <span style={{ width: 13, display: 'inline-flex', alignItems: 'center' }}>{!activeSprint && <Check size={12} />}</span>
+                    All sprints
+                  </button>
+                  {sortedSprints.length === 0 && (
+                    <div style={{ padding: '9px 14px', fontSize: 13, opacity: 0.5 }}>No sprints found</div>
+                  )}
+                  {sortedSprints.map(s => (
+                    <button
+                      key={s.id}
+                      className={`pm-dropdown-item${activeSprint?.id === s.id ? ' active' : ''}`}
+                      onClick={() => handleSprintChange(s)}
+                      style={{ opacity: s.isCompleted ? 0.6 : 1 }}
+                    >
+                      <span style={{ width: 13, display: 'inline-flex', alignItems: 'center' }}>{activeSprint?.id === s.id && <Check size={12} />}</span>
+                      <span style={{ flex: 1 }}>{s.name}</span>
+                      <span style={{ fontSize: 11, opacity: 0.55, marginLeft: 8 }}>{fmtSprintDate(s.start)}–{fmtSprintDate(s.finish)}</span>
+                      {s.isCompleted && <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 4 }}>✓</span>}
+                    </button>
+                  ))}
+                </div>,
+                document.body
+              )}
+            </div>
+          )}
         </div>
         <div className={`pm-tab-panel glass-card${activeTab === 'daily' ? ' pm-tab-panel--daily' : ''}`}>
-          {activeTab === 'daily'      && <DailyReportTab />}
-          {activeTab === 'assignees'  && <AssigneeStatsTab />}
-          {activeTab === 'tracking'   && <TrackingTab blockerIssueIds={blockerIssueIds} />}
-          {activeTab === 'dailyops'   && <DailyOpsTab onBlockersChange={setBlockerIssueIds} />}
+          {activeTab === 'daily'      && <DailyReportTab sprintId={activeSprint?.id} sprintName={activeSprint?.name} />}
+          {activeTab === 'assignees'  && <AssigneeStatsTab sprintId={activeSprint?.id} />}
+          {activeTab === 'tracking'   && <TrackingTab blockerIssueIds={blockerIssueIds} sprintId={activeSprint?.id} />}
+          {activeTab === 'dailyops'   && <DailyOpsTab onBlockersChange={setBlockerIssueIds} sprintId={activeSprint?.id} />}
           {activeTab === 'deployment' && <DeploymentReportTab />}
         </div>
       </div>

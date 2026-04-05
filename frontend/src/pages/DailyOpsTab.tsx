@@ -10,6 +10,7 @@ import { getDailyBrief, getEODSummary, getDeveloperLoad, getBlockerReasons, save
 
 interface Props {
   onBlockersChange: (ids: Set<string>) => void
+  sprintId?: string
 }
 
 interface Channel { id: string; name: string }
@@ -458,7 +459,7 @@ function CarryoverChecklist({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function DailyOpsTab({ onBlockersChange }: Props) {
+export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
   // ── data state
   const [brief, setBrief] = useState<DailyBrief | null>(null)
   const [briefLoading, setBriefLoading] = useState(false)
@@ -517,7 +518,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
     setBriefLoading(true)
     setBriefError('')
     try {
-      const res = await getDailyBrief()
+      const res = await getDailyBrief(sprintId)
       if (res.data) {
         const rawBrief = res.data
         setBriefRefreshedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
@@ -555,7 +556,7 @@ export default function DailyOpsTab({ onBlockersChange }: Props) {
     } finally {
       setBriefLoading(false)
     }
-  }, [onBlockersChange])
+  }, [onBlockersChange, sprintId])
 
   const loadEOD = useCallback(async () => {
     setEodLoading(true)

@@ -459,6 +459,36 @@ func (c *Client) GetSprintIssuesByStatePaginated(ctx context.Context, sprintID, 
 	return filtered, hasMore, nil
 }
 
+// GetAllSprintIssues returns all issues in a sprint (all states) without pagination.
+// Used for assignee stats, daily brief, time tracking and report filtering.
+func (c *Client) GetAllSprintIssues(ctx context.Context, sprintID string) ([]Issue, error) {
+	if c.boardID == "" {
+		return nil, fmt.Errorf("no board ID configured")
+	}
+	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	var all []Issue
+	skip := 0
+	pageSize := 500
+	for {
+		path := fmt.Sprintf("/api/agiles/%s/sprints/%s/issues?fields=%s&$top=%d&$skip=%d",
+			c.boardID, sprintID, fields, pageSize, skip)
+		body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		var page []Issue
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal sprint issues: %w", err)
+		}
+		all = append(all, page...)
+		if len(page) < pageSize {
+			break
+		}
+		skip += pageSize
+	}
+	return all, nil
+}
+
 // GetIssue returns a single issue by ID
 func (c *Client) GetIssue(ctx context.Context, issueID string) (*Issue, error) {
 	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"

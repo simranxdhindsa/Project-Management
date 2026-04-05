@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -166,6 +167,10 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Sprint filter params
+	sprintID := r.URL.Query().Get("sprint_id")
+	sprintName, _ := url.QueryUnescape(r.URL.Query().Get("sprint_name"))
+
 	// --- 1. Done tickets ---
 	doneIssues, err := h.reportRepo.GetDoneIssues(r.Context(), yesterday, doneStates)
 	if err != nil {
@@ -187,19 +192,65 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 		var ytClient *youtrack.Client
 		ytClient, ytErr = h.getYouTrackClient(r.Context())
 		if ytErr == nil {
-			open, err := ytClient.GetIssuesByState(r.Context(), openStates)
-			if err == nil {
-				openIssues = open
-			}
-			blocked, err := ytClient.GetIssuesByState(r.Context(), blockedStates)
-			if err == nil {
-				blockedIssues = blocked
+			if sprintID != "" {
+				// Sprint-scoped: fetch all sprint issues and filter by state in Go
+				sprintIssues, _ := ytClient.GetAllSprintIssues(r.Context(), sprintID)
+				openStateSet := make(map[string]bool)
+				for _, s := range openStates {
+					openStateSet[strings.ToLower(s)] = true
+				}
+				blockedStateSet := make(map[string]bool)
+				for _, s := range blockedStates {
+					blockedStateSet[strings.ToLower(s)] = true
+				}
+				// Also build sprint issue ID set for filtering done/hotfix DB issues
+				sprintIDSet := make(map[string]bool)
+				for _, si := range sprintIssues {
+					sprintIDSet[si.ID] = true
+					if si.IDReadable != "" {
+						sprintIDSet[si.IDReadable] = true
+					}
+					st := strings.ToLower(youtrack.GetStatus(si))
+					if openStateSet[st] {
+						openIssues = append(openIssues, si)
+					} else if blockedStateSet[st] {
+						blockedIssues = append(blockedIssues, si)
+					}
+				}
+				// Filter done/hotfix issues to sprint
+				var filteredDone []database.IssueStateLog
+				for _, d := range doneIssues {
+					if sprintIDSet[d.IssueID] {
+						filteredDone = append(filteredDone, d)
+					}
+				}
+				doneIssues = filteredDone
+				var filteredHotfix []database.IssueStateLog
+				for _, hf := range hotfixIssues {
+					if sprintIDSet[hf.IssueID] {
+						filteredHotfix = append(filteredHotfix, hf)
+					}
+				}
+				hotfixIssues = filteredHotfix
+			} else {
+				open, err := ytClient.GetIssuesByState(r.Context(), openStates)
+				if err == nil {
+					openIssues = open
+				}
+				blocked, err := ytClient.GetIssuesByState(r.Context(), blockedStates)
+				if err == nil {
+					blockedIssues = blocked
+				}
 			}
 		}
 	}
 
 	// --- 3. Build Slack-style message ---
 	var sb strings.Builder
+
+	if sprintName != "" {
+		sb.WriteString(fmt.Sprintf("*Sprint: %s*\n\n", sprintName))
+	}
 
 	// Done section
 	doneLabel := parsedDate.AddDate(0, 0, -1).Format("Mon, Jan 2")
@@ -521,9 +572,26 @@ func (h *ReportHandler) GetAssigneeStats(w http.ResponseWriter, r *http.Request)
 
 	ytClient, ytErr := h.getYouTrackClient(r.Context())
 	if ytErr == nil {
-		// Open issues — use actual project state names (same set as Daily Report)
-		openIssues, _ := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
-		for _, issue := range openIssues {
+		sprintID := r.URL.Query().Get("sprint_id")
+
+		var allIssues []youtrack.Issue
+		if sprintID != "" {
+			// Sprint-scoped: fetch all sprint issues once, filter by state in Go
+			allIssues, _ = ytClient.GetAllSprintIssues(r.Context(), sprintID)
+		} else {
+			// Full project: use existing state-based queries
+			openIssues, _ := ytClient.GetIssuesByState(r.Context(), []string{"In Progress", "Backlog", "Ready for Stage", "STAGE", "Ready for PROD", "PROD", "Findings", "Mobile DONE"})
+			blockedIssues, _ := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
+			allIssues = append(openIssues, blockedIssues...)
+		}
+
+		openStates := map[string]bool{
+			"in progress": true, "backlog": true, "ready for stage": true,
+			"stage": true, "ready for prod": true, "prod": true,
+			"findings": true, "mobile done": true,
+		}
+
+		for _, issue := range allIssues {
 			u := youtrack.GetAssignee(issue)
 			name := "Unassigned"
 			if u != nil {
@@ -533,27 +601,16 @@ func (h *ReportHandler) GetAssigneeStats(w http.ResponseWriter, r *http.Request)
 				}
 			}
 			ar := ensureAssignee(name)
-			state := strings.ToLower(youtrack.GetStatus(issue))
-			if strings.Contains(state, "progress") {
+			stateLower := strings.ToLower(youtrack.GetStatus(issue))
+			if stateLower == "blocked" {
+				ar.Blocked++
+			} else if strings.Contains(stateLower, "progress") {
 				ar.InProgress++
-			} else {
+				ar.Issues = append(ar.Issues, issue.ID+" "+issue.Summary)
+			} else if openStates[stateLower] {
 				ar.Open++
+				ar.Issues = append(ar.Issues, issue.ID+" "+issue.Summary)
 			}
-			ar.Issues = append(ar.Issues, issue.ID+" "+issue.Summary)
-		}
-
-		// Blocked issues
-		blockedIssues, _ := ytClient.GetIssuesByState(r.Context(), []string{"Blocked"})
-		for _, issue := range blockedIssues {
-			u := youtrack.GetAssignee(issue)
-			name := "Unassigned"
-			if u != nil {
-				name = u.FullName
-				if name == "" {
-					name = u.Login
-				}
-			}
-			ensureAssignee(name).Blocked++
 		}
 	}
 
@@ -614,6 +671,22 @@ func (h *ReportHandler) GetTimeTracking(w http.ResponseWriter, r *http.Request) 
 			if trimmed := strings.TrimSpace(pri); trimmed != "" {
 				params.Priorities = append(params.Priorities, trimmed)
 			}
+		}
+	}
+
+	// Sprint filter: when sprint_id is provided, scope to only those issue IDs
+	if sprintID := q.Get("sprint_id"); sprintID != "" {
+		ytClient, ytErr := h.getYouTrackClient(r.Context())
+		if ytErr == nil {
+			sprintIssues, _ := ytClient.GetAllSprintIssues(r.Context(), sprintID)
+			ids := make([]string, 0, len(sprintIssues))
+			for _, issue := range sprintIssues {
+				ids = append(ids, issue.ID)
+				if issue.IDReadable != "" && issue.IDReadable != issue.ID {
+					ids = append(ids, issue.IDReadable)
+				}
+			}
+			params.SprintIssueIDs = ids
 		}
 	}
 
@@ -1169,6 +1242,10 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 		wPriorityTags = wfCfgW.PriorityTags
 	}
 
+	// Sprint filter params
+	wSprintID := r.URL.Query().Get("sprint_id")
+	wSprintName, _ := url.QueryUnescape(r.URL.Query().Get("sprint_name"))
+
 	// --- 1. Done tickets for the full week ---
 	doneIssues, err := h.reportRepo.GetDoneIssuesForWeek(r.Context(), weekStartDate, weekEndDate, wDoneStates)
 	if err != nil {
@@ -1190,19 +1267,62 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 		var ytClient *youtrack.Client
 		ytClient, ytErr = h.getYouTrackClient(r.Context())
 		if ytErr == nil {
-			open, err := ytClient.GetIssuesByState(r.Context(), wOpenStates)
-			if err == nil {
-				openIssues = open
-			}
-			blocked, err := ytClient.GetIssuesByState(r.Context(), wBlockedStates)
-			if err == nil {
-				blockedIssues = blocked
+			if wSprintID != "" {
+				sprintIssues, _ := ytClient.GetAllSprintIssues(r.Context(), wSprintID)
+				wOpenSet := make(map[string]bool)
+				for _, s := range wOpenStates {
+					wOpenSet[strings.ToLower(s)] = true
+				}
+				wBlockedSet := make(map[string]bool)
+				for _, s := range wBlockedStates {
+					wBlockedSet[strings.ToLower(s)] = true
+				}
+				sprintIDSet := make(map[string]bool)
+				for _, si := range sprintIssues {
+					sprintIDSet[si.ID] = true
+					if si.IDReadable != "" {
+						sprintIDSet[si.IDReadable] = true
+					}
+					st := strings.ToLower(youtrack.GetStatus(si))
+					if wOpenSet[st] {
+						openIssues = append(openIssues, si)
+					} else if wBlockedSet[st] {
+						blockedIssues = append(blockedIssues, si)
+					}
+				}
+				var filteredDone []database.IssueStateLog
+				for _, d := range doneIssues {
+					if sprintIDSet[d.IssueID] {
+						filteredDone = append(filteredDone, d)
+					}
+				}
+				doneIssues = filteredDone
+				var filteredHotfix []database.IssueStateLog
+				for _, hf := range hotfixIssues {
+					if sprintIDSet[hf.IssueID] {
+						filteredHotfix = append(filteredHotfix, hf)
+					}
+				}
+				hotfixIssues = filteredHotfix
+			} else {
+				open, err := ytClient.GetIssuesByState(r.Context(), wOpenStates)
+				if err == nil {
+					openIssues = open
+				}
+				blocked, err := ytClient.GetIssuesByState(r.Context(), wBlockedStates)
+				if err == nil {
+					blockedIssues = blocked
+				}
 			}
 		}
 	}
 
 	// --- 3. Build Slack-style weekly message ---
 	var sb strings.Builder
+
+	if wSprintName != "" {
+		sb.WriteString(fmt.Sprintf("*Sprint: %s*\n\n", wSprintName))
+	}
 
 	weekLabel := fmt.Sprintf("Mon %s – Sun %s", monday.Format("Jan 2"), sunday.Format("Jan 2"))
 	if scope == "summary" {

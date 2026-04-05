@@ -401,11 +401,12 @@ func (r *ReportRepository) GetHotfixIssuesForWeek(ctx context.Context, weekStart
 // TimeTrackingParams holds optional filters for the time tracking query.
 // nil/zero values mean "no filter".
 type TimeTrackingParams struct {
-	WeekStart    *time.Time // Monday 00:00:00 of selected week (nil = no week filter)
-	WeekEnd      *time.Time // Sunday 23:59:59 of selected week (nil = no week filter)
-	Assignees    []string   // filter to these assignees (empty = all)
-	Priorities   []string   // filter to these priorities e.g. ["P0","P1"] (empty = all)
-	PinnedIssues []string   // issue IDs that are pinned — always included regardless of week
+	WeekStart      *time.Time // Monday 00:00:00 of selected week (nil = no week filter)
+	WeekEnd        *time.Time // Sunday 23:59:59 of selected week (nil = no week filter)
+	Assignees      []string   // filter to these assignees (empty = all)
+	Priorities     []string   // filter to these priorities e.g. ["P0","P1"] (empty = all)
+	PinnedIssues   []string   // issue IDs that are pinned — always included regardless of week
+	SprintIssueIDs []string   // when set, only include rows for these issue IDs (sprint filter)
 }
 
 // GetTimeTracking returns all In Progress activity rows matching the given params.
@@ -478,6 +479,12 @@ func (r *ReportRepository) GetTimeTracking(ctx context.Context, params TimeTrack
 			argIdx++
 		}
 		conditions = append(conditions, fmt.Sprintf("UPPER(COALESCE(priority,'')) IN (%s)", placeholders))
+	}
+
+	if len(params.SprintIssueIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf("issue_id = ANY($%d)", argIdx))
+		args = append(args, params.SprintIssueIDs)
+		argIdx++
 	}
 
 	whereClause := ""

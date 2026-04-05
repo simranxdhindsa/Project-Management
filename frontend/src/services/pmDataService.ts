@@ -167,10 +167,10 @@ export function getPMIssuesGroupedByAssignee() {
 
 // ── AI / analysis ─────────────────────────────────────────────────────────────
 
-export function pmAssistantQuery(query: string, history: { role: string; content: string }[] = []) {
+export function pmAssistantQuery(query: string, history: { role: string; content: string }[] = [], sprintId?: string, sprintName?: string) {
   return getActiveSource() === 'asana'
     ? api.asanaPMAssistantQuery(query, history)
-    : api.pmAssistantQuery(query, history)
+    : api.pmAssistantQuery(query, history, sprintId, sprintName)
 }
 
 export function matchAnalysis(personBreakdown: any[], analysis: any[]) {
@@ -181,10 +181,10 @@ export function matchAnalysis(personBreakdown: any[], analysis: any[]) {
 
 // ── Daily ops ─────────────────────────────────────────────────────────────────
 
-export function getDailyBrief() {
+export function getDailyBrief(sprintId?: string) {
   return getActiveSource() === 'asana'
     ? api.getAsanaPMDailyBrief()
-    : api.getDailyBrief()
+    : api.getDailyBrief(sprintId)
 }
 
 export function getEODSummary() {
@@ -219,10 +219,10 @@ export function getCarryover() {
 
 // ── PM Reports ────────────────────────────────────────────────────────────────
 
-export function getAssigneeStats() {
+export function getAssigneeStats(sprintId?: string) {
   return getActiveSource() === 'asana'
     ? api.getAsanaAssigneeStats()
-    : api.getAssigneeStats()
+    : api.getAssigneeStats(sprintId)
 }
 
 export function getAvatarMap(): Promise<Record<string, string>> {
@@ -232,7 +232,7 @@ export function getAvatarMap(): Promise<Record<string, string>> {
   return getYouTrackAvatarMap()
 }
 
-export function getTimeTracking(params?: { week?: string; assignee?: string; priority?: string }) {
+export function getTimeTracking(params?: { week?: string; assignee?: string; priority?: string; sprint_id?: string }) {
   return getActiveSource() === 'asana'
     ? api.getAsanaTimeTracking(params)
     : api.getTimeTracking(params)
@@ -244,16 +244,16 @@ export function getIssueTimelines() {
     : api.getIssueTimelines()
 }
 
-export function generatePMReport(date: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }) {
+export function generatePMReport(date: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }, sprintId?: string, sprintName?: string) {
   return getActiveSource() === 'asana'
     ? api.generateAsanaPMReport(date, scope, overrides)
-    : api.generatePMReport(date, scope, overrides)
+    : api.generatePMReport(date, scope, overrides, sprintId, sprintName)
 }
 
-export function generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full') {
+export function generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full', sprintId?: string, sprintName?: string) {
   return getActiveSource() === 'asana'
     ? api.generateAsanaWeeklyPMReport(weekStart, scope)
-    : api.generateWeeklyPMReport(weekStart, scope)
+    : api.generateWeeklyPMReport(weekStart, scope, sprintId, sprintName)
 }
 
 export function listPMReports() {
