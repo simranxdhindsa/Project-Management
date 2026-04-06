@@ -157,9 +157,40 @@ func RunMigrations() error {
 			triggered_by VARCHAR(255) REFERENCES users(id)
 		)`,
 
-		// Add youtrack_id to next_day_tasks if missing
+		// next_day_tasks — stores planned tasks for the next day per assignee
+		`CREATE TABLE IF NOT EXISTS next_day_tasks (
+			id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			target_date DATE NOT NULL,
+			assignee VARCHAR(255) NOT NULL,
+			task_title TEXT NOT NULL,
+			priority VARCHAR(50) NOT NULL DEFAULT 'medium',
+			position INT NOT NULL DEFAULT 0,
+			is_carried_forward BOOLEAN DEFAULT FALSE,
+			source_date DATE,
+			source_task_id TEXT,
+			notes TEXT,
+			youtrack_id VARCHAR(255),
+			created_by TEXT,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_next_day_tasks_target_date ON next_day_tasks(target_date)`,
+
+		// Add youtrack_id to next_day_tasks if missing (safe on existing installs)
 		`ALTER TABLE next_day_tasks ADD COLUMN IF NOT EXISTS youtrack_id VARCHAR(255)`,
 		`CREATE INDEX IF NOT EXISTS idx_next_day_tasks_youtrack_id ON next_day_tasks(youtrack_id)`,
+
+		// global_settings — key/value store for org-wide configuration
+		`CREATE TABLE IF NOT EXISTS global_settings (
+			id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			key VARCHAR(255) UNIQUE NOT NULL,
+			value TEXT NOT NULL DEFAULT '',
+			encrypted BOOLEAN DEFAULT FALSE,
+			description TEXT,
+			updated_by TEXT,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
 
 		// Reminders table (no FK on user_id — avoids type mismatch with UUID PKs)
 		`CREATE TABLE IF NOT EXISTS reminders (

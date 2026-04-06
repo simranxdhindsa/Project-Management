@@ -127,3 +127,49 @@ VITE_GOOGLE_CLIENT_ID=    # must match backend GOOGLE_CLIENT_ID
 - If `DATABASE_URL` is unset, app runs with in-memory maps (limited persistence).
 - The `go.mod` toolchain version must match an **actually released** Go version. `go 1.25.x` does not exist — use `go 1.24.0` or lower.
 - Windows: Windows Defender may corrupt module cache downloads. Add `C:\Users\<user>\go\pkg\mod` to Defender exclusions if you see `unexpected NUL in input` errors.
+
+<!-- code-review-graph MCP tools -->
+## MCP Tools: code-review-graph
+
+**IMPORTANT: This project has a knowledge graph. ALWAYS use the
+code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
+the codebase.** The graph is faster, cheaper (fewer tokens), and gives
+you structural context (callers, dependents, test coverage) that file
+scanning cannot.
+
+### When to use graph tools FIRST
+
+- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
+- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
+- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
+- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
+- **Architecture questions**: `get_architecture_overview` + `list_communities`
+
+Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
+
+### Key Tools
+
+| Tool | Use when |
+|------|----------|
+| `detect_changes` | Reviewing code changes � gives risk-scored analysis |
+| `get_review_context` | Need source snippets for review � token-efficient |
+| `get_impact_radius` | Understanding blast radius of a change |
+| `get_affected_flows` | Finding which execution paths are impacted |
+| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
+| `semantic_search_nodes` | Finding functions/classes by name or keyword |
+| `get_architecture_overview` | Understanding high-level codebase structure |
+| `refactor_tool` | Planning renames, finding dead code |
+
+### Workflow
+
+1. The graph auto-updates on every file change via the PostToolUse hook — no manual action needed.
+2. After adding a **new feature or significant refactor**, run a full rebuild: `code-review-graph build`
+3. Use `detect_changes` for code review before committing.
+4. Use `get_affected_flows` to understand impact of a change.
+5. Use `query_graph` pattern="tests_for" to check coverage.
+
+### Rebuild triggers
+Run `code-review-graph build` manually when:
+- A new feature is added (new files/modules)
+- A major refactor moves or renames files
+- The graph feels stale (`code-review-graph status` shows low coverage)

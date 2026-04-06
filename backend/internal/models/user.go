@@ -13,7 +13,7 @@ const (
 )
 
 // DefaultAdminEmail is the email that always has admin access
-const DefaultAdminEmail = "sirmanjot@apyhub.com"
+const DefaultAdminEmail = "simranjot@apyhub.com"
 
 // User represents a user in the system
 type User struct {
