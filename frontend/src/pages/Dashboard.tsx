@@ -67,7 +67,7 @@ import type { LocalNotification } from '../components/notifications/RightPanel'
 type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'list', 'daily-tasks']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-tasks', 'activity', 'calendar', 'ai-analysis', 'daily-analysis', 'pm-reports']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -538,15 +538,13 @@ export default function Dashboard() {
               <LayoutDashboard size={20} />
               <span>Dashboard</span>
             </button>
-            {isFullAccess && (
-              <button
-                className={`sidebar-nav-item ${currentPage === 'board' ? 'active' : ''}`}
-                onClick={() => setCurrentPage('board')}
-              >
-                <KanbanSquare size={20} />
-                <span>Board View</span>
-              </button>
-            )}
+            <button
+              className={`sidebar-nav-item ${currentPage === 'board' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('board')}
+            >
+              <KanbanSquare size={20} />
+              <span>Board View</span>
+            </button>
             <button
               className={`sidebar-nav-item ${currentPage === 'list' ? 'active' : ''}`}
               onClick={() => setCurrentPage('list')}
@@ -561,50 +559,46 @@ export default function Dashboard() {
               <ClipboardList size={20} />
               <span>Daily Tasks</span>
             </button>
-            {isFullAccess && (
-              <>
-                <button
-                  className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
-                  onClick={() => setCurrentPage('activity')}
-                >
-                  <Activity size={20} />
-                  <span>Activity</span>
-                </button>
-                <button
-                  className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
-                  onClick={() => setCurrentPage('calendar')}
-                >
-                  <Calendar size={20} />
-                  <span>Calendar</span>
-                </button>
-              </>
-            )}
+            <button
+              className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('activity')}
+            >
+              <Activity size={20} />
+              <span>Activity</span>
+            </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('calendar')}
+            >
+              <Calendar size={20} />
+              <span>Calendar</span>
+            </button>
           </div>
 
-          {isFullAccess && (
-            <div className="nav-section">
-              <span className="nav-section-title">Analytics</span>
-              <button
-                className={`sidebar-nav-item ${currentPage === 'ai-analysis' ? 'active' : ''}`}
-                onClick={() => setCurrentPage('ai-analysis')}
-              >
-                <Brain size={20} />
-                <span>AI Analysis</span>
-              </button>
-              <button
-                className={`sidebar-nav-item ${currentPage === 'daily-analysis' ? 'active' : ''}`}
-                onClick={() => setCurrentPage('daily-analysis')}
-              >
-                <CheckCircle size={20} />
-                <span>Daily Status</span>
-              </button>
-              <button
-                className={`sidebar-nav-item ${currentPage === 'pm-reports' ? 'active' : ''}`}
-                onClick={() => setCurrentPage('pm-reports')}
-              >
-                <MessageSquare size={20} />
-                <span>PM Reports</span>
-              </button>
+          <div className="nav-section">
+            <span className="nav-section-title">Analytics</span>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'ai-analysis' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('ai-analysis')}
+            >
+              <Brain size={20} />
+              <span>AI Analysis</span>
+            </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'daily-analysis' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('daily-analysis')}
+            >
+              <CheckCircle size={20} />
+              <span>Daily Status</span>
+            </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'pm-reports' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('pm-reports')}
+            >
+              <MessageSquare size={20} />
+              <span>PM Reports</span>
+            </button>
+            {isFullAccess && (
               <button
                 className={`sidebar-nav-item ${currentPage === 'slack' ? 'active' : ''}`}
                 onClick={() => setCurrentPage('slack')}
@@ -621,8 +615,8 @@ export default function Dashboard() {
                 </svg>
                 <span>Slack</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="nav-section">
             {isFullAccess && <span className="nav-section-title">Settings</span>}
@@ -694,6 +688,7 @@ export default function Dashboard() {
             {currentPage === 'daily-tasks' && 'Daily Task List'}
             {currentPage === 'calendar' && 'Calendar'}
             {currentPage === 'ai-analysis' && 'AI Task Analysis'}
+            {currentPage === 'daily-analysis' && 'Daily Status'}
             {currentPage === 'pm-reports' && 'Reports'}
             {currentPage === 'team' && 'Team Management'}
             {currentPage === 'bots' && 'Bot Configuration'}

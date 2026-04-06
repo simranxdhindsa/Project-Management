@@ -29,7 +29,8 @@ func NewBotConfigHandler() *BotConfigHandler {
 	}
 }
 
-// ListBots returns all bot configurations, merging DB bots with any templates not yet saved.
+// ListBots returns all bot configurations from DB.
+// All default configs are seeded at startup via migrations, so this always reads from DB.
 func (h *BotConfigHandler) ListBots(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUserFromContext(r)
 	if user == nil {
@@ -38,51 +39,19 @@ func (h *BotConfigHandler) ListBots(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if database.GetPool() == nil {
-		sendJSON(w, http.StatusOK, Response{
-			Success: true,
-			Data:    getDefaultTemplates(),
-		})
+		sendJSON(w, http.StatusOK, Response{Success: true, Data: []interface{}{}})
 		return
 	}
 
 	configs, err := h.botRepo.List(r.Context())
 	if err != nil {
-		sendJSON(w, http.StatusOK, Response{
-			Success: true,
-			Data:    getDefaultTemplates(),
-		})
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to fetch bot configs"})
 		return
-	}
-
-	if len(configs) == 0 {
-		sendJSON(w, http.StatusOK, Response{
-			Success: true,
-			Data:    getDefaultTemplates(),
-		})
-		return
-	}
-
-	// Build set of bot_types already in DB
-	dbTypes := map[string]bool{}
-	for _, c := range configs {
-		dbTypes[string(c.BotType)] = true
-	}
-
-	// Build response: real DB bots first, then any templates whose type isn't in DB yet
-	var result []interface{}
-	for _, c := range configs {
-		result = append(result, c)
-	}
-	for _, tmpl := range getDefaultTemplates() {
-		bt, _ := tmpl["bot_type"].(string)
-		if !dbTypes[bt] {
-			result = append(result, tmpl)
-		}
 	}
 
 	sendJSON(w, http.StatusOK, Response{
 		Success: true,
-		Data:    result,
+		Data:    configs,
 	})
 }
 

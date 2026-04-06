@@ -54,7 +54,16 @@ func (h *AsanaHandler) resolveAsanaPAT(ctx context.Context, userID string) (pat 
 			projectGID = integ.ProjectID
 		}
 	}
-	// 2. Global settings DB
+	// 2. Admin fallback for members/viewers
+	if pat == "" {
+		if u := middleware.GetUserFromCtx(ctx); u != nil && (u.Role == models.RoleMember || u.Role == models.RoleViewer) {
+			if adminInteg, err := h.integrationRepo.GetAdminAsanaIntegration(ctx); err == nil && adminInteg != nil && adminInteg.Connected {
+				pat = adminInteg.AccessToken
+				projectGID = adminInteg.ProjectID
+			}
+		}
+	}
+	// 3. Global settings DB
 	if pat == "" || projectGID == "" {
 		settings, _ := h.settingsRepo.GetAsanaSettings(ctx)
 		if settings != nil && settings.Configured {

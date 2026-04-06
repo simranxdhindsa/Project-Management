@@ -136,8 +136,9 @@ $RECYCLE.BIN/
 nul
 
 # Documentation files (sensitive configs)
-md
+*.md
 !README.md
 !CONTRIBUTING.md
 !LICENSE.md
+!CLAUDE.md
 !docs/

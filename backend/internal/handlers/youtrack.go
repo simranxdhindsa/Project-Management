@@ -75,7 +75,19 @@ func (h *YouTrackHandler) getYouTrackClientForUser(ctx context.Context, userID s
 		}
 	}
 
-	// 2. Global settings DB (org-wide fallback)
+	// 2. Admin fallback for members/viewers
+	if baseURL == "" {
+		if u := middleware.GetUserFromCtx(ctx); u != nil && (u.Role == models.RoleMember || u.Role == models.RoleViewer) {
+			if adminInteg, err := h.settingsRepo.GetAdminYouTrackIntegration(ctx); err == nil && adminInteg != nil && adminInteg.Connected {
+				baseURL = adminInteg.BaseURL
+				token = adminInteg.Token
+				projectID = adminInteg.ProjectID
+				boardID = adminInteg.BoardID
+			}
+		}
+	}
+
+	// 3. Global settings DB (org-wide fallback)
 	if baseURL == "" {
 		if settings, err := h.settingsRepo.GetYouTrackSettings(ctx); err == nil && settings != nil && settings.Configured {
 			baseURL = settings.BaseURL

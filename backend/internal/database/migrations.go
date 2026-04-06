@@ -536,7 +536,6 @@ func RunMigrations() error {
 		`DELETE FROM workflow_config WHERE pm_source = 'asana' AND user_id IS NOT NULL`,
 
 		// Upsert sprint-aware PM assistant bot config.
-		// Uses ON CONFLICT so re-running migrations is safe.
 		`INSERT INTO bot_configs (name, bot_type, prompt, is_active, description)
 		VALUES (
 			'PM Assistant',
@@ -550,6 +549,39 @@ func RunMigrations() error {
 			    is_active   = true,
 			    description = EXCLUDED.description,
 			    updated_at  = NOW()`,
+
+		// Seed remaining default bot config types so they are always served from DB.
+		`INSERT INTO bot_configs (name, description, bot_type, prompt, variables, is_active, created_by)
+		SELECT 'Slack Task Analysis', 'Analyzes Slack messages to determine task completion status', 'slack_analysis',
+			E'Analyze the following Slack messages from channel {{$CHANNEL$}} for date {{$DATE$}}.\n\nMorning task assignments:\n{{$MORNING_MESSAGES$}}\n\nEvening status updates:\n{{$EVENING_MESSAGES$}}\n\nFor each team member, determine:\n1. Which tasks were assigned in the morning\n2. Which tasks were reported as completed in the evening\n3. Which tasks are still pending\n4. Any new tasks that were added during the day\n\nReturn a JSON response with team_members array containing name, assigned_tasks, completed_tasks, pending_tasks, new_tasks, and notes.',
+			'[{"name":"CHANNEL","label":"Slack Channel","type":"text","default":"#ardoise-platform","required":true},{"name":"DATE","label":"Date","type":"date","default":"today","required":true},{"name":"MORNING_MESSAGES","label":"Morning Messages","type":"text","default":"","required":false,"description":"Auto-filled from Slack"},{"name":"EVENING_MESSAGES","label":"Evening Messages","type":"text","default":"","required":false,"description":"Auto-filled from Slack"}]',
+			true, 'system'
+		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'slack_analysis')`,
+
+		`INSERT INTO bot_configs (name, description, bot_type, prompt, variables, is_active, created_by)
+		SELECT 'Daily Report Generator', 'Generates formatted daily task reports for Slack', 'daily_report',
+			E'Generate a daily task report for {{$DATE$}} for team {{$TEAM_NAME$}}.\n\nCurrent tasks by team member:\n{{$TASK_DATA$}}\n\nFormat as a Slack message with backtick headers and bullet points.',
+			'[{"name":"DATE","label":"Date","type":"date","default":"today","required":true},{"name":"TEAM_NAME","label":"Team Name","type":"text","default":"Ardoise Platform","required":true},{"name":"TASK_DATA","label":"Task Data","type":"text","default":"","required":false,"description":"Auto-filled from task database"}]',
+			true, 'system'
+		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'daily_report')`,
+
+		`INSERT INTO bot_configs (name, description, bot_type, prompt, variables, is_active, created_by)
+		SELECT 'Custom Bot', 'Create your own bot with custom prompts and variables', 'custom',
+			'Your custom prompt here. Use {{$VARIABLE_NAME$}} for variables.',
+			'[]', true, 'system'
+		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'custom')`,
+
+		`INSERT INTO bot_configs (name, description, bot_type, prompt, variables, is_active, created_by)
+		SELECT 'Stage Deployment Report', 'Generates a Slack-ready list of fixes for a stage deployment. The AI rewrites each ticket title into a user-facing past-tense fix description, grouped by subsystem.', 'stage_report',
+			E'You are writing bullet points for a Slack deployment update.\nWrite ONE short sentence (max 15 words) describing what was fixed, in past tense, from the user''s perspective.\n- Be specific and direct — name the exact feature or interaction that changed\n- Vary your sentence starts naturally (can use "Fixed", "Mic no longer...", "Users can now...", etc.)\n- No internal jargon, no ticket IDs, no padding\n- Output ONLY the single sentence, nothing else\n\nExample input:\nTicket: FE UI: Fix mic issue when released spacebar the mic still remains activated\nContext: When user releases the spacebar the microphone should deactivate\n\nExample output:\nMic no longer stays activated after releasing the spacebar.',
+			'[]', true, 'system'
+		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'stage_report')`,
+
+		`INSERT INTO bot_configs (name, description, bot_type, prompt, variables, is_active, created_by)
+		SELECT 'Asana Deployment Report', 'Generates client-facing deployment reports from Asana tickets. Rewrites each ticket title into a polished user-facing fix statement, grouped by platform.', 'deployment_report',
+			E'You are a technical writer creating client-facing deployment reports.\n\nYou will receive a ticket title and description. The description may be a rough internal note written by a developer (e.g. "is now fixed", "added support for X").\n\nYour job is to rewrite it as a single polished, professional fix statement for a client deployment report. Rules:\n- Write in past tense, from the user''s perspective (what they now experience)\n- Be 1-2 sentences. Do not pad or over-explain.\n- Remove ALL internal prefixes: priority tags (P0, P1, A2, etc.), platform tags (FE, BE, UI, MC, Studio), ticket IDs, and jargon\n- Start with the subject of what changed (e.g. "The restart conversation button...", "Avatar playback...")\n- If the description already says what was fixed clearly, use it as the basis — do not invent details\n- Sound polished and client-ready\n\nRespond with ONLY the fix statement. No preamble, no labels, no quotes.',
+			'[]', true, 'system'
+		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'deployment_report')`,
 	}
 
 	for i, migration := range migrations {

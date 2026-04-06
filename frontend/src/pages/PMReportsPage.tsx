@@ -4,7 +4,6 @@ import DeploymentTicketInput from '../components/deployment/DeploymentTicketInpu
 import DeploymentTicketList from '../components/deployment/DeploymentTicketList'
 import DeploymentReportPreview from '../components/deployment/DeploymentReportPreview'
 import DeploymentExportButtons from '../components/deployment/DeploymentExportButtons'
-import DeploymentBotConfigPanel from '../components/deployment/DeploymentBotConfig'
 import type { LoadedDeploymentTicket } from '../components/deployment/DeploymentProjectBrowser'
 import type { TicketLine } from '../components/deployment/DeploymentTicketInput'
 import type { DeploymentTicket, Platform } from '../components/deployment/types'
@@ -2364,7 +2363,6 @@ function drShowCompletionNotification(succeeded: number, failed: number) {
 }
 
 function AsanaDeploymentReport() {
-  const [activeView, setActiveView] = useState<'report' | 'config'>('report')
   const [tickets, setTickets] = useState<DeploymentTicket[]>([])
   const [botConfig, setBotConfig] = useState<DeploymentBotConfig>({ systemPrompt: '', sections: DEFAULT_SECTIONS })
   const [isFetching, setIsFetching] = useState(false)
@@ -2374,6 +2372,12 @@ function AsanaDeploymentReport() {
   const [fetchProgress, setFetchProgress] = useState<{ done: number; total: number } | null>(null)
   const [genProgress, setGenProgress] = useState<{ current: number; total: number; retryCountdown: number } | null>(null)
   const [preloadTickets, setPreloadTickets] = useState<LoadedDeploymentTicket[]>([])
+
+  useEffect(() => {
+    api.getAsanaDeploymentConfig().then(res => {
+      if (res.success && res.data) setBotConfig(res.data)
+    }).catch(() => {})
+  }, [])
 
   const readyCount = useMemo(() => tickets.filter(t => t.status === 'ready').length, [tickets])
   const sections = botConfig.sections?.length ? botConfig.sections : DEFAULT_SECTIONS
@@ -2573,15 +2577,7 @@ function AsanaDeploymentReport() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-      <nav className="dr-tab-bar">
-        <button className={`dr-tab${activeView === 'report' ? ' dr-tab--active' : ''}`} onClick={() => setActiveView('report')}>Report</button>
-        <button className={`dr-tab${activeView === 'config' ? ' dr-tab--active' : ''}`} onClick={() => setActiveView('config')}>Bot Config</button>
-      </nav>
-
-      {activeView === 'config' ? (
-        <DeploymentBotConfigPanel onConfigChange={setBotConfig} />
-      ) : (
-        <>
+      <>
           {/* Step 1: ProjectBrowser + TicketInput (combined, like DR) */}
           <div className="dr-card">
             <div className="dr-step-label"><span className="dr-step-num">1</span>Paste Asana ticket URLs</div>
@@ -2641,7 +2637,6 @@ function AsanaDeploymentReport() {
             </div>
           )}
         </>
-      )}
     </div>
   )
 }

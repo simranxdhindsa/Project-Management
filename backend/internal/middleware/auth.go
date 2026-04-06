@@ -86,6 +86,15 @@ func GetUserID(ctx context.Context) string {
 	return user.ID
 }
 
+// GetUserFromCtx retrieves the full user from context
+func GetUserFromCtx(ctx context.Context) *models.User {
+	user, ok := ctx.Value(UserContextKey).(*models.User)
+	if !ok || user == nil {
+		return nil
+	}
+	return user
+}
+
 // RequireRole middleware checks if user has required role
 func RequireRole(roles ...models.Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

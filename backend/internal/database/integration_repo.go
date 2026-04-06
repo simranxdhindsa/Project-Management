@@ -84,6 +84,21 @@ func (r *IntegrationRepository) UpdateAsanaLastSync(ctx context.Context, userID 
 	return err
 }
 
+// GetAdminAsanaIntegration returns the Asana integration belonging to the default admin user.
+// Used as a fallback so that member-role users can read Asana data via the admin's credentials.
+func (r *IntegrationRepository) GetAdminAsanaIntegration(ctx context.Context) (*models.AsanaIntegration, error) {
+	pool := GetPool()
+	if pool == nil {
+		return nil, nil
+	}
+	var adminUserID string
+	err := pool.QueryRow(ctx, `SELECT id FROM users WHERE email = $1`, models.DefaultAdminEmail).Scan(&adminUserID)
+	if err != nil {
+		return nil, nil
+	}
+	return r.GetAsanaIntegration(ctx, adminUserID)
+}
+
 // DisconnectAsana marks an Asana integration as disconnected
 func (r *IntegrationRepository) DisconnectAsana(ctx context.Context, userID string) error {
 	pool := GetPool()

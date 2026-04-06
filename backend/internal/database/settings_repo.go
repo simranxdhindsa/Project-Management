@@ -255,6 +255,24 @@ func (r *SettingsRepository) GetUserDataSource(ctx context.Context, userID strin
 	return source, nil
 }
 
+// GetAdminDataSource returns the active data source for the default admin user.
+// Used as a fallback for member-role users.
+func (r *SettingsRepository) GetAdminDataSource(ctx context.Context) string {
+	pool := GetPool()
+	if pool == nil {
+		return "youtrack"
+	}
+	var adminUserID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM users WHERE email = $1`, models.DefaultAdminEmail).Scan(&adminUserID); err != nil {
+		return "youtrack"
+	}
+	source, _ := r.GetUserDataSource(ctx, adminUserID)
+	if source == "" {
+		return "youtrack"
+	}
+	return source
+}
+
 // SetUserDataSource upserts the user's active data source preference
 func (r *SettingsRepository) SetUserDataSource(ctx context.Context, userID, source string) error {
 	pool := GetPool()
@@ -270,6 +288,21 @@ func (r *SettingsRepository) SetUserDataSource(ctx context.Context, userID, sour
 		ON CONFLICT (user_id) DO UPDATE SET source = $2, updated_at = NOW()
 	`, userID, source)
 	return err
+}
+
+// GetAdminYouTrackIntegration returns the YouTrack integration belonging to the default admin user.
+// Used as a fallback so that member-role users can read YouTrack data via the admin's credentials.
+func (r *SettingsRepository) GetAdminYouTrackIntegration(ctx context.Context) (*models.YouTrackIntegration, error) {
+	pool := GetPool()
+	if pool == nil {
+		return nil, nil
+	}
+	var adminUserID string
+	err := pool.QueryRow(ctx, `SELECT id FROM users WHERE email = $1`, models.DefaultAdminEmail).Scan(&adminUserID)
+	if err != nil {
+		return nil, nil
+	}
+	return r.GetYouTrackIntegration(ctx, adminUserID)
 }
 
 // DisconnectYouTrackIntegration marks the integration as disconnected

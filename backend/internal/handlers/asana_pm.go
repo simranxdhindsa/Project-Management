@@ -1532,7 +1532,13 @@ func (h *AsanaPMHandler) GetDataSource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	source, _ := h.settingsRepo.GetUserDataSource(r.Context(), userID)
+	var source string
+	u := middleware.GetUserFromCtx(r.Context())
+	if u != nil && (u.Role == models.RoleMember || u.Role == models.RoleViewer) {
+		source = h.settingsRepo.GetAdminDataSource(r.Context())
+	} else {
+		source, _ = h.settingsRepo.GetUserDataSource(r.Context(), userID)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": map[string]string{"source": source}})
 }

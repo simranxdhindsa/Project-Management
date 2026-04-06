@@ -1088,7 +1088,7 @@
    ============================================================ */
 
 .idp-modal {
-  background: var(--bg-card, rgba(11,9,30,0.98));
+  background: rgba(11,9,30,0.98);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid rgba(255,255,255,0.1);
@@ -1271,7 +1271,7 @@
 .idp-markdown strong { color: var(--text-primary); font-weight: 600; }
 .idp-markdown em { font-style: italic; }
 
-/* Light theme overrides */
+/* Light theme overrides for markdown */
 [data-theme="light"] .idp-markdown code {
   background: rgba(0,0,0,0.05);
   border-color: rgba(0,0,0,0.1);
@@ -1282,6 +1282,7 @@
 }
 [data-theme="light"] .idp-markdown a { color: #6366f1; }
 [data-theme="light"] .idp-markdown hr { border-color: rgba(0,0,0,0.1); }
+[data-theme="light"] .idp-markdown blockquote { border-left-color: rgba(99,102,241,0.4); }
 
 /* Attachments */
 .idp-attachments-grid {
@@ -1573,6 +1574,15 @@
   background: rgba(255,255,255,0.98);
   border-color: rgba(0,0,0,0.08);
 }
+[data-theme="light"] .idp-topbar {
+  border-bottom-color: rgba(0,0,0,0.07);
+}
+[data-theme="light"] .idp-close:hover {
+  background: rgba(0,0,0,0.06);
+}
+[data-theme="light"] .idp-section-label {
+  border-bottom-color: rgba(0,0,0,0.07);
+}
 [data-theme="light"] .idp-sidebar {
   background: rgba(0,0,0,0.02);
   border-left-color: rgba(0,0,0,0.07);
@@ -1585,7 +1595,16 @@
   background: #fff;
   border-color: rgba(0,0,0,0.1);
 }
+[data-theme="light"] .idp-comment-actions {
+  border-top-color: rgba(0,0,0,0.07);
+  background: rgba(0,0,0,0.02);
+}
+[data-theme="light"] .idp-comment-avatar {
+  background: rgba(99,102,241,0.12);
+}
 [data-theme="light"] .idp-status-badge { background: rgba(16,185,129,0.12); color: #059669; }
+[data-theme="light"] .idp-overdue { color: #dc2626; }
+[data-theme="light"] .idp-meta-badge { background: rgba(99,102,241,0.1); color: #4f46e5; }
 
 /* ── Responsive ── */
 @media (max-width: 680px) {

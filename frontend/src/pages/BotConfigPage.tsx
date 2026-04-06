@@ -115,6 +115,7 @@ function BotCard({
     custom: 'Custom',
     pm_assistant: 'PM Assistant',
     stage_report: 'Stage Report',
+    deployment_report: 'Deployment Report',
   }
 
   const botTypeColors: Record<string, string> = {
@@ -123,6 +124,7 @@ function BotCard({
     custom: 'var(--color-secondary)',
     pm_assistant: '#f59e0b',
     stage_report: '#8b5cf6',
+    deployment_report: '#0ea5e9',
   }
 
   const con = getBotCon(bot.id)
