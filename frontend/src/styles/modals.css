@@ -1209,8 +1209,79 @@
   color: var(--text-secondary);
   line-height: 1.65;
   margin: 0;
-  white-space: pre-wrap;
 }
+
+/* Markdown rendered description */
+.idp-markdown { white-space: normal; }
+.idp-markdown p { margin: 0 0 0.6em; }
+.idp-markdown p:last-child { margin-bottom: 0; }
+.idp-markdown h1, .idp-markdown h2, .idp-markdown h3,
+.idp-markdown h4, .idp-markdown h5, .idp-markdown h6 {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin: 1em 0 0.4em;
+  line-height: 1.3;
+}
+.idp-markdown h1 { font-size: 1.1rem; }
+.idp-markdown h2 { font-size: 1rem; }
+.idp-markdown h3 { font-size: 0.9rem; }
+.idp-markdown ul, .idp-markdown ol {
+  margin: 0.4em 0 0.6em;
+  padding-left: 1.4em;
+}
+.idp-markdown li { margin-bottom: 0.2em; }
+.idp-markdown code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8em;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+}
+.idp-markdown pre {
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.idp-markdown pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.8125rem;
+}
+.idp-markdown blockquote {
+  border-left: 3px solid rgba(99,102,241,0.5);
+  margin: 0.5em 0;
+  padding: 0.25em 0.75em;
+  color: var(--text-muted);
+}
+.idp-markdown a {
+  color: var(--color-primary-light);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.idp-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  margin: 0.75em 0;
+}
+.idp-markdown strong { color: var(--text-primary); font-weight: 600; }
+.idp-markdown em { font-style: italic; }
+
+/* Light theme overrides */
+[data-theme="light"] .idp-markdown code {
+  background: rgba(0,0,0,0.05);
+  border-color: rgba(0,0,0,0.1);
+}
+[data-theme="light"] .idp-markdown pre {
+  background: rgba(0,0,0,0.04);
+  border-color: rgba(0,0,0,0.08);
+}
+[data-theme="light"] .idp-markdown a { color: #6366f1; }
+[data-theme="light"] .idp-markdown hr { border-color: rgba(0,0,0,0.1); }
 
 /* Attachments */
 .idp-attachments-grid {
@@ -1223,50 +1294,63 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.35rem;
-  text-decoration: none;
+  gap: 0.4rem;
   cursor: pointer;
+  width: 110px;
 }
 
-.idp-attachment-thumb img {
-  width: 120px;
-  height: 80px;
-  object-fit: cover;
+/* The preview area — same fixed size for all types */
+.idp-attachment-thumb img,
+.idp-attachment-icon {
+  width: 110px;
+  height: 76px;
   border-radius: var(--radius-md);
   border: 1px solid rgba(255,255,255,0.1);
-  transition: border-color var(--transition-fast);
+  transition: border-color 150ms, box-shadow 150ms;
+  object-fit: cover;
+  display: block;
 }
-.idp-attachment-thumb:hover img { border-color: rgba(99,102,241,0.4); }
+
+/* Icon card for non-image files */
+.idp-attachment-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+}
+.idp-attachment-icon--hidden { display: none; }
+.idp-attachment-icon-fallback { display: flex !important; }
+
+.idp-attachment-thumb:hover img,
+.idp-attachment-thumb:hover .idp-attachment-icon {
+  border-color: rgba(99,102,241,0.5);
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.15);
+}
 
 .idp-attachment-name {
   font-size: 0.7rem;
   color: var(--text-muted);
-  max-width: 120px;
+  width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 
-.idp-file-attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+/* Light theme */
+[data-theme="light"] .idp-attachment-thumb img,
+[data-theme="light"] .idp-attachment-icon {
+  border-color: rgba(0,0,0,0.1);
 }
-
-.idp-file-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  padding: 0.3rem 0.65rem;
-  border-radius: var(--radius-full);
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
-  text-decoration: none;
-  transition: all var(--transition-fast);
+[data-theme="light"] .idp-attachment-icon {
+  background: rgba(0,0,0,0.04);
+  color: #64748b;
 }
-.idp-file-pill:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.15); }
+[data-theme="light"] .idp-attachment-thumb:hover img,
+[data-theme="light"] .idp-attachment-thumb:hover .idp-attachment-icon {
+  border-color: rgba(99,102,241,0.4);
+}
 
 /* Comments */
 .idp-comments-section { gap: 1rem; }

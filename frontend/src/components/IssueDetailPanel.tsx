@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { ExternalLink, X, Send, MessageSquare, Paperclip, Clock, User } from 'lucide-react'
+import { ExternalLink, X, Send, MessageSquare, Paperclip, Clock, User, FileText, Film, Music, FileCode, File, FileSpreadsheet } from 'lucide-react'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import api from '@/services/api'
 import type { YouTrackIssue, YouTrackComment } from '@/services/api'
 import { getActiveSource } from '@/services/pmDataService'
@@ -53,6 +55,24 @@ function isImageAttachment(mimeType: string, url: string) {
   if (mimeType?.startsWith('image/')) return true
   const ext = url?.split('.').pop()?.toLowerCase()
   return ['png','jpg','jpeg','gif','webp','svg'].includes(ext || '')
+}
+
+function attachmentTypeIcon(mimeType: string, name: string) {
+  const ext = (name?.split('.').pop() || '').toLowerCase()
+  const mime = (mimeType || '').toLowerCase()
+  if (mime.startsWith('video/') || ['mp4','webm','mov','mkv','avi'].includes(ext))
+    return <Film size={22} />
+  if (mime.startsWith('audio/') || ['mp3','wav','ogg','aac','flac'].includes(ext))
+    return <Music size={22} />
+  if (mime === 'application/pdf' || ext === 'pdf')
+    return <FileText size={22} />
+  if (['xls','xlsx','csv'].includes(ext))
+    return <FileSpreadsheet size={22} />
+  if (['js','ts','jsx','tsx','py','go','json','xml','html','css','md','txt','log'].includes(ext))
+    return <FileCode size={22} />
+  if (['doc','docx','ppt','pptx'].includes(ext))
+    return <FileText size={22} />
+  return <File size={22} />
 }
 
 export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanelProps) {
@@ -126,7 +146,12 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
 
             {issue.description && (
               <div className="idp-section">
-                <p className="idp-description">{issue.description}</p>
+                <div
+                  className="idp-description idp-markdown"
+                  dangerouslySetInnerHTML={{
+                    __html: DOMPurify.sanitize(marked.parse(issue.description) as string)
+                  }}
+                />
               </div>
             )}
 
@@ -137,41 +162,36 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                   <Paperclip size={13} />
                   Attachments · {issue.attachments!.length}
                 </div>
-                {imageAttachments.length > 0 && (
-                  <div className="idp-attachments-grid">
-                    {imageAttachments.map((a, i) => (
+                <div className="idp-attachments-grid">
+                  {issue.attachments!.map((a, i) => {
+                    const isImg = isImageAttachment(a.mimeType, a.url)
+                    const imgSrc = isYouTrack ? api.buildProxyUrl(a.url) : a.url
+                    return (
                       <div
                         key={a.id}
                         className="idp-attachment-thumb"
-                        style={{ cursor: 'pointer' }}
                         onClick={() => setViewerIndex(i)}
                         role="button"
                         tabIndex={0}
                         onKeyDown={e => e.key === 'Enter' && setViewerIndex(i)}
                         title={a.name}
                       >
-                        <img src={api.buildProxyUrl(a.url)} alt={a.name}
-                          onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = '0.3' }} />
+                        {isImg ? (
+                          <img src={imgSrc} alt={a.name}
+                            onError={e => {
+                              const el = e.currentTarget
+                              el.style.display = 'none';
+                              (el.nextElementSibling as HTMLElement | null)?.classList.add('idp-attachment-icon-fallback')
+                            }} />
+                        ) : null}
+                        <div className={`idp-attachment-icon${isImg ? ' idp-attachment-icon--hidden' : ''}`}>
+                          {attachmentTypeIcon(a.mimeType, a.name)}
+                        </div>
                         <span className="idp-attachment-name">{a.name}</span>
                       </div>
-                    ))}
-                  </div>
-                )}
-                {fileAttachments.length > 0 && (
-                  <div className="idp-file-attachments">
-                    {fileAttachments.map((a, fi) => (
-                      <button
-                        key={a.id}
-                        className="idp-file-pill"
-                        onClick={() => setViewerIndex(imageAttachments.length + fi)}
-                        title={a.name}
-                      >
-                        <Paperclip size={11} />
-                        {a.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                    )
+                  })}
+                </div>
               </div>
             )}
 

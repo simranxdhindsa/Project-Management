@@ -383,3 +383,25 @@
 
 /* ── Legacy compat ───────────────────────────────────────── */
 .list-page { display: flex; flex-direction: column; gap: 1rem; height: 100%; min-height: 0; }
+
+/* ── Attachment count badge (list view) ──────────────────── */
+.lv-attachment-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  margin-left: 6px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 1px 6px;
+  line-height: 1.6;
+  cursor: default;
+}
+[data-theme="light"] .lv-attachment-count {
+  background: rgba(0,0,0,0.05);
+  border-color: rgba(0,0,0,0.12);
+  color: #64748b;
+}

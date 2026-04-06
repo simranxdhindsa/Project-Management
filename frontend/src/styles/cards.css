@@ -192,3 +192,26 @@
 .stat-icon-red    { background: linear-gradient(135deg, rgba(239,68,68,0.25), rgba(239,68,68,0.10)); color: var(--color-danger-light); border: 1px solid rgba(239,68,68,0.2); box-shadow: 0 0 16px rgba(239,68,68,0.2); }
 .stat-value, .stat-card-value { font-size: 1.875rem; font-weight: 800; color: var(--text-primary); line-height: 1; letter-spacing: -0.03em; }
 .stat-label, .stat-card-label { font-size: 0.75rem; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.25rem; }
+
+/* ── Attachment count badge (board card) ─────────────────── */
+.task-attachment-count {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 2px 7px;
+  line-height: 1.5;
+  cursor: default;
+}
+[data-theme="light"] .task-attachment-count {
+  background: rgba(0,0,0,0.05);
+  border-color: rgba(0,0,0,0.12);
+  color: #64748b;
+}

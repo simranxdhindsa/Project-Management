@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Search, Copy, CheckCheck, X, ChevronDown, ChevronUp,
-  ArrowUpDown, RefreshCw, ChevronRight,
+  ArrowUpDown, RefreshCw, ChevronRight, Paperclip,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import type { YouTrackIssue } from '@/services/api'
@@ -166,6 +166,12 @@ function SectionGroup({
               >
                 <div className="lv-cell lv-cell-name">
                   <span className="lv-title-text">{issue.summary}</span>
+                  {(issue.attachments?.length ?? 0) > 0 && (
+                    <span className="lv-attachment-count" title={`${issue.attachments!.length} attachment${issue.attachments!.length !== 1 ? 's' : ''}`}>
+                      <Paperclip size={10} />
+                      {issue.attachments!.length}
+                    </span>
+                  )}
                 </div>
                 <div className="lv-cell lv-cell-assignee">
                   {issue.assignee ? (

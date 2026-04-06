@@ -1,3 +1,4 @@
+import { Paperclip } from 'lucide-react'
 import type { YouTrackIssue } from '../../services/api'
 
 interface TaskCardProps {
@@ -41,6 +42,14 @@ export function TaskCard({ issue, avatarMap, isDragging, onClick }: TaskCardProp
       className={`task-card ${priorityCls} ${isDragging ? 'dragging' : ''}`}
       onClick={onClick}
     >
+      {/* Attachment count — top-right corner */}
+      {(issue.attachments?.length ?? 0) > 0 && (
+        <span className="task-attachment-count" title={`${issue.attachments!.length} attachment${issue.attachments!.length !== 1 ? 's' : ''}`}>
+          <Paperclip size={10} />
+          {issue.attachments!.length}
+        </span>
+      )}
+
       {/* Issue ID */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
         <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{issue.id}</span>
