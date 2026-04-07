@@ -210,6 +210,49 @@ func (r *ReportRepository) GetStateLogForIssue(ctx context.Context, issueID stri
 	return logs, nil
 }
 
+// GetStateLogsForIssues batch-fetches the most recent state log entry for each issue in one query.
+// Returns a map of issueID → most recent IssueStateLog entry (the one matching current state).
+func (r *ReportRepository) GetStateLogsForIssues(ctx context.Context, issueIDs []string) (map[string][]IssueStateLog, error) {
+	if len(issueIDs) == 0 {
+		return map[string][]IssueStateLog{}, nil
+	}
+	pool := GetPool()
+
+	// Build $1,$2,... placeholders
+	placeholders := make([]string, len(issueIDs))
+	args := make([]interface{}, len(issueIDs))
+	for i, id := range issueIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, issue_id, issue_summary,
+		       COALESCE(assignee,''), COALESCE(moved_by,''),
+		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,''), COALESCE(issue_type,'')
+		FROM issue_state_log
+		WHERE issue_id = ANY(ARRAY[%s]::text[])
+		ORDER BY issue_id, transitioned_at ASC
+	`, strings.Join(placeholders, ","))
+
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := map[string][]IssueStateLog{}
+	for rows.Next() {
+		l, err := scanStateLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		result[l.IssueID] = append(result[l.IssueID], l)
+	}
+	return result, nil
+}
+
 // GetDoneIssues returns issues that moved to a "done" state on a specific date.
 // doneStates is a list of state names that count as "done" (e.g. ["DEV", "dev"]).
 // Falls back to ["dev"] if doneStates is empty.

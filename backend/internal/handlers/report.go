@@ -22,6 +22,7 @@ import (
 type ReportHandler struct {
 	reportRepo   *database.ReportRepository
 	configRepo   *database.WorkflowConfigRepository
+	settingsRepo *database.SettingsRepository
 	notifHandler *NotificationHandler
 }
 
@@ -30,19 +31,60 @@ func NewReportHandler(notifHandler *NotificationHandler) *ReportHandler {
 	return &ReportHandler{
 		reportRepo:   database.NewReportRepository(),
 		configRepo:   database.NewWorkflowConfigRepository(),
+		settingsRepo: database.NewSettingsRepository(),
 		notifHandler: notifHandler,
 	}
 }
 
-// getYouTrackClient builds a YouTrack client from env settings
+// getYouTrackClient builds a YouTrack client, reading board ID from DB so the
+// correct agile board is used (mirrors YouTrackHandler.getYouTrackClientForUser).
 func (h *ReportHandler) getYouTrackClient(ctx context.Context) (*youtrack.Client, error) {
-	baseURL := os.Getenv("YOUTRACK_BASE_URL")
-	token := os.Getenv("YOUTRACK_TOKEN")
-	projectID := os.Getenv("YOUTRACK_PROJECT_ID")
+	var baseURL, token, projectID, boardID string
+
+	userID := middleware.GetUserID(ctx)
+
+	// 1. Per-user DB integration
+	if userID != "" && h.settingsRepo != nil {
+		if integ, err := h.settingsRepo.GetYouTrackIntegration(ctx, userID); err == nil && integ != nil && integ.Connected {
+			baseURL = integ.BaseURL
+			token = integ.Token
+			projectID = integ.ProjectID
+			boardID = integ.BoardID
+		}
+	}
+
+	// 2. Admin integration fallback
+	if baseURL == "" && h.settingsRepo != nil {
+		if integ, err := h.settingsRepo.GetAdminYouTrackIntegration(ctx); err == nil && integ != nil && integ.Connected {
+			baseURL = integ.BaseURL
+			token = integ.Token
+			projectID = integ.ProjectID
+			boardID = integ.BoardID
+		}
+	}
+
+	// 3. Env vars as last resort
+	if baseURL == "" {
+		baseURL = os.Getenv("YOUTRACK_BASE_URL")
+	}
+	if token == "" {
+		token = os.Getenv("YOUTRACK_TOKEN")
+	}
+	if projectID == "" {
+		projectID = os.Getenv("YOUTRACK_PROJECT_ID")
+	}
+	if boardID == "" {
+		boardID = os.Getenv("YOUTRACK_BOARD_ID")
+	}
+
 	if baseURL == "" || token == "" || projectID == "" {
 		return nil, fmt.Errorf("YouTrack not configured (YOUTRACK_BASE_URL, YOUTRACK_TOKEN, YOUTRACK_PROJECT_ID)")
 	}
-	return youtrack.NewClient(baseURL, token, projectID), nil
+	client := youtrack.NewClient(baseURL, token, projectID)
+	if boardID != "" {
+		client.SetBoardID(boardID)
+	}
+	return client, nil
 }
 
 // extractPriority extracts priority from a ticket summary using the P0/P1/P2/P3 prefix convention.
@@ -1709,6 +1751,15 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Batch-fetch all state logs for sprint issues in one DB query
+	issueIDs := make([]string, 0, len(sprintIssues))
+	for _, issue := range sprintIssues {
+		if issue.IDReadable != "" {
+			issueIDs = append(issueIDs, issue.IDReadable)
+		}
+	}
+	stateLogMap, _ := h.reportRepo.GetStateLogsForIssues(r.Context(), issueIDs)
+
 	// Group issues by current state, computing time-in-state from DB state log
 	now := time.Now()
 	type colData struct {
@@ -1740,12 +1791,11 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			issueType = youtrack.GetCustomFieldValue(issue, wfCfg.HotfixRules.TypeFieldName)
 		}
 
-		// Determine when this issue entered its current state from DB log
+		// Determine when this issue entered its current state from batch-loaded logs
 		sinceDate := ""
 		var hoursInState float64
 		fromState := ""
-		logs, logErr := h.reportRepo.GetStateLogForIssue(r.Context(), issue.IDReadable)
-		if logErr == nil && len(logs) > 0 {
+		if logs, ok := stateLogMap[issue.IDReadable]; ok && len(logs) > 0 {
 			// Find most recent log entry where to_state matches current state
 			for i := len(logs) - 1; i >= 0; i-- {
 				if strings.EqualFold(logs[i].ToState, currentState) {

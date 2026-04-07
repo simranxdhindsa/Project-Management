@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -296,9 +297,9 @@ func (c *Client) GetBoards(ctx context.Context) ([]Board, error) {
 	return boards, nil
 }
 
-// GetBoardColumns returns columns (states) from an agile board
+// GetBoardColumns returns columns (states) from an agile board, sorted by board ordinal.
 func (c *Client) GetBoardColumns(ctx context.Context, boardID string) ([]Column, error) {
-	path := fmt.Sprintf("/api/agiles/%s?fields=columnSettings(columns(fieldValues(name,presentation)))", boardID)
+	path := fmt.Sprintf("/api/agiles/%s?fields=columnSettings(columns(ordinal,fieldValues(name,presentation)))", boardID)
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -309,34 +310,49 @@ func (c *Client) GetBoardColumns(ctx context.Context, boardID string) ([]Column,
 		return nil, fmt.Errorf("failed to unmarshal board: %w", err)
 	}
 
-	var columns []Column
+	type rawCol struct {
+		ordinal     int
+		fieldValues []string
+	}
+	var rawCols []rawCol
+
 	if columnSettings, ok := agileBoard["columnSettings"].(map[string]interface{}); ok {
 		if cols, ok := columnSettings["columns"].([]interface{}); ok {
 			for _, col := range cols {
-				if column, ok := col.(map[string]interface{}); ok {
-					var fieldValues []string
-					if fvs, ok := column["fieldValues"].([]interface{}); ok {
-						for _, fv := range fvs {
-							if fieldValue, ok := fv.(map[string]interface{}); ok {
-								if name, ok := fieldValue["name"].(string); ok {
-									fieldValues = append(fieldValues, name)
-								} else if presentation, ok := fieldValue["presentation"].(string); ok {
-									fieldValues = append(fieldValues, presentation)
-								}
+				column, ok := col.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				ordinal := 0
+				if o, ok := column["ordinal"].(float64); ok {
+					ordinal = int(o)
+				}
+				var fieldValues []string
+				if fvs, ok := column["fieldValues"].([]interface{}); ok {
+					for _, fv := range fvs {
+						if fieldValue, ok := fv.(map[string]interface{}); ok {
+							if name, ok := fieldValue["name"].(string); ok && name != "" {
+								fieldValues = append(fieldValues, name)
+							} else if presentation, ok := fieldValue["presentation"].(string); ok {
+								fieldValues = append(fieldValues, presentation)
 							}
 						}
 					}
-					if len(fieldValues) > 0 {
-						columns = append(columns, Column{
-							Name:        fieldValues[0], // First value as column name
-							FieldValues: fieldValues,
-						})
-					}
+				}
+				if len(fieldValues) > 0 {
+					rawCols = append(rawCols, rawCol{ordinal: ordinal, fieldValues: fieldValues})
 				}
 			}
 		}
 	}
 
+	// Sort by ordinal to match YouTrack board column order
+	sort.Slice(rawCols, func(i, j int) bool { return rawCols[i].ordinal < rawCols[j].ordinal })
+
+	columns := make([]Column, len(rawCols))
+	for i, rc := range rawCols {
+		columns[i] = Column{Name: rc.fieldValues[0], FieldValues: rc.fieldValues}
+	}
 	return columns, nil
 }
 

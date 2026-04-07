@@ -2092,6 +2092,7 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
   const [activeSprint, setActiveSprint] = useState<YouTrackSprint | null>(null)
   const [sprintDropdownOpen, setSprintDropdownOpen] = useState(false)
   const sprintDropdownRef = useRef<HTMLDivElement>(null)
+  const sprintMenuRef = useRef<HTMLDivElement>(null)
   const isYouTrack = getActiveSource() === 'youtrack'
 
   useEffect(() => {
@@ -2111,9 +2112,10 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (sprintDropdownRef.current && !sprintDropdownRef.current.contains(e.target as Node)) {
-        setSprintDropdownOpen(false)
-      }
+      const target = e.target as Node
+      const insideTrigger = sprintDropdownRef.current?.contains(target)
+      const insideMenu = sprintMenuRef.current?.contains(target)
+      if (!insideTrigger && !insideMenu) setSprintDropdownOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -2165,6 +2167,7 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
               </button>
               {sprintDropdownOpen && createPortal(
                 <div
+                  ref={sprintMenuRef}
                   className="pm-custom-dropdown-menu"
                   style={{
                     position: 'fixed',
