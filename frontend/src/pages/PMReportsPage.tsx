@@ -1040,6 +1040,28 @@ function DailyReportTab({ sprintId, sprintName }: {
               </div>
             )}
 
+            {loading && (() => {
+              const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+              const lineW = ['92%','78%','85%','60%','88%','70%','95%','55%','80%','65%','90%','72%','83%','58%','76%']
+              return (
+                <div className="pm-report-viewer" style={{ pointerEvents: 'none' }}>
+                  <div className="pm-report-meta">
+                    {sk(60, 26, 8)}{sk(60, 26, 8)}{sk(60, 26, 8)}{sk(140, 14, 4)}
+                  </div>
+                  <div className="pm-report-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {sk('45%', 16, 4)}
+                    {lineW.slice(0, 5).map((w, i) => <div key={i}>{sk(w, 13, 4)}</div>)}
+                    <div style={{ height: 8 }} />
+                    {sk('38%', 16, 4)}
+                    {lineW.slice(5, 10).map((w, i) => <div key={i}>{sk(w, 13, 4)}</div>)}
+                    <div style={{ height: 8 }} />
+                    {sk('42%', 16, 4)}
+                    {lineW.slice(10, 15).map((w, i) => <div key={i}>{sk(w, 13, 4)}</div>)}
+                  </div>
+                </div>
+              )
+            })()}
+
             {/* Carry-over checklist — shown at top when viewing today in daily mode */}
             {mode === 'daily' && date === todayStr() && carryoverItems.length > 0 && (
               <div className="pm-carryover-block">
@@ -1068,7 +1090,7 @@ function DailyReportTab({ sprintId, sprintName }: {
               </div>
             )}
 
-            {report ? (
+            {!loading && report ? (
               <div className="pm-report-viewer">
                 <div className="pm-report-meta">
                   <div className="pm-report-stat-chip done">
@@ -1090,7 +1112,7 @@ function DailyReportTab({ sprintId, sprintName }: {
                   {renderReportText(report.report_text)}
                 </div>
               </div>
-            ) : (() => {
+            ) : !loading ? (() => {
               const pool = mode === 'weekly' ? weekHistory : history
               const activeDate = mode === 'weekly' ? weekStart : date
               const prefix = mode === 'weekly' ? 'weekly' : 'daily'
@@ -1119,7 +1141,7 @@ function DailyReportTab({ sprintId, sprintName }: {
                   }
                 </div>
               )
-            })()}
+            })() : null}
           </div>
         </div>
 
@@ -1490,13 +1512,47 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
       .filter(col => col.issues.length > 0)
   }, [boardColumns, filterAssignee])
 
+  const sk = (w: number | string, h: number, r = 5) => (
+    <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+  )
+
+  const trackingSkeleton = (
+    <div className="pm-tracking-board" style={{ pointerEvents: 'none' }}>
+      {[8, 5, 12, 6].map((count, ci) => (
+        <div key={ci} className="pm-tracking-column-section">
+          <div className="pm-tracking-col-header">
+            {sk(['90px','70px','110px','80px'][ci], 14, 6)}
+            {sk(22, 18, 10)}
+          </div>
+          <div className="pm-tracking-issue-row pm-tracking-col-header-row">
+            {sk(52, 11, 3)}{sk(36, 11, 3)}{sk('55%', 11, 3)}{sk(32, 11, 3)}{sk(80, 11, 3)}
+          </div>
+          {Array.from({ length: count }).map((_, i) => {
+            const titleW = ['65%','80%','72%','58%','75%','68%','82%','61%','70%','77%']
+            return (
+              <div key={i} className="pm-tracking-issue-row">
+                {sk(52, 13, 4)}
+                {sk(36, 18, 12)}
+                {sk(titleW[i % titleW.length], 13, 4)}
+                {sk(38, 13, 4)}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {sk(22, 22, 11)}
+                  {sk(54, 12, 4)}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+
   return (
     <div className="pm-tab-content pm-tracking-tab">
       {/* ── Header ── */}
       <div className="pm-tracking-header">
         <h3 className="pm-section-title"><Activity size={16} /> Tracking</h3>
         <div className="pm-tracking-controls">
-          {/* Assignee filter */}
           {allAssignees.length > 0 && (
             <div className="pm-custom-dropdown" ref={assigneeRef}>
               <button className="pm-custom-dropdown-trigger" onClick={() => setAssigneeOpen(o => !o)}>
@@ -1515,24 +1571,12 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
               )}
             </div>
           )}
-          <button className="btn-secondary btn-sm" onClick={runReconcile} disabled={reconciling || loading}
-            title="Reconcile: close any In Progress entries whose ticket has since moved">
-            {reconciling ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
-            {reconciling ? 'Reconciling…' : 'Reconcile'}
-          </button>
-          <button className="btn-primary btn-sm" onClick={runImportHistory} disabled={importing || loading}>
-            {importing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-            {importing ? 'Syncing…' : 'Import History'}
-          </button>
-          <button className="btn-secondary btn-sm" onClick={fetchBoardStatus} disabled={loading}>
+          <button className="btn-secondary btn-sm" onClick={fetchBoardStatus} disabled={loading} title="Refresh">
             {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
           </button>
         </div>
       </div>
 
-      {statusMsg && (
-        <div className="pm-backfill-msg">{statusMsg}</div>
-      )}
       {error && <div className="pm-report-error"><AlertTriangle size={14} />{error}</div>}
 
       {!sprintId && (
@@ -1542,70 +1586,75 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
         </div>
       )}
 
-      {sprintId && loading && (
-        <div className="pm-empty-state">
-          <Loader2 size={28} className="animate-spin" />
-          <p>Loading board status…</p>
-        </div>
-      )}
+      {sprintId && loading && trackingSkeleton}
 
       {sprintId && !loading && filteredColumns.length === 0 && !error && (
         <div className="pm-empty-state">
           <Activity size={36} />
           <p>No issues found for this sprint.</p>
-          <p style={{ fontSize: '0.8rem' }}>Try clicking <strong>Import History</strong> to sync transitions.</p>
         </div>
       )}
 
       {/* ── Column sections ── */}
-      <div className="pm-tracking-board">
-        {filteredColumns.map(col => (
-          <div key={col.name} className="pm-tracking-column-section">
-            <div className="pm-tracking-col-header">
-              <span className="pm-tracking-col-name">{col.name}</span>
-              <span className="pm-tracking-col-count">{col.issues.length}</span>
-              {col.issues.filter(i => i.is_delayed).length > 0 && (
-                <span className="pm-tracking-col-delayed">
-                  <AlertTriangle size={11} /> {col.issues.filter(i => i.is_delayed).length} delayed
-                </span>
-              )}
-            </div>
-            {col.issues.map(issue => {
-              const avatarUrl = avatarMap[issue.assignee]
-              return (
-                <div key={issue.id} className={`pm-tracking-issue-row${issue.is_delayed ? ' pm-tracking-issue-row--delayed' : ''}${blockerIssueIds?.has(issue.idReadable) ? ' pm-tracking-issue-row--blocked' : ''}`}>
-                  <span className="pm-tracking-issue-id">{issue.idReadable || issue.id}</span>
-                  <span className={ttPriorityClass(issue.priority)}>{issue.priority}</span>
-                  <span className="pm-tracking-issue-summary" title={issue.summary}>{issue.summary}</span>
-                  <span className={`pm-tracking-time${issue.is_delayed ? ' pm-tracking-time--overdue' : ''}`}>
-                    {fmtHoursCompact(issue.hours_in_state)}
-                    {issue.is_delayed && <AlertTriangle size={10} style={{ marginLeft: 3 }} />}
+      {!loading && (
+        <div className="pm-tracking-board">
+          {filteredColumns.map(col => (
+            <div key={col.name} className="pm-tracking-column-section">
+              <div className="pm-tracking-col-header">
+                <span className="pm-tracking-col-name">{col.name}</span>
+                <span className="pm-tracking-col-count">{col.issues.length}</span>
+                {col.issues.filter(i => i.is_delayed).length > 0 && (
+                  <span className="pm-tracking-col-delayed">
+                    <AlertTriangle size={11} /> {col.issues.filter(i => i.is_delayed).length} delayed
                   </span>
-                  {issue.assignee && (
-                    <div className="pm-tracking-assignee" title={issue.assignee}>
-                      {avatarUrl
-                        ? <img className="pm-tracking-avatar" src={avatarUrl} alt={issue.assignee} />
-                        : <div className="pm-tracking-avatar pm-tracking-avatar--initials">{getInitialsFromName(issue.assignee)}</div>
-                      }
-                    </div>
-                  )}
-                  {issue.issue_type && (
-                    <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase()}`}>
-                      {issue.issue_type}
+                )}
+              </div>
+              {/* Column row headings */}
+              <div className="pm-tracking-issue-row pm-tracking-col-header-row">
+                <span className="pm-tracking-issue-id pm-tracking-col-heading">Ticket</span>
+                <span className="pm-tracking-col-heading">Priority</span>
+                <span className="pm-tracking-issue-summary pm-tracking-col-heading">Title</span>
+                <span className="pm-tracking-time pm-tracking-col-heading">Time</span>
+                <span className="pm-tracking-assignee-cell pm-tracking-col-heading">Assignee</span>
+              </div>
+              {col.issues.map(issue => {
+                const avatarUrl = avatarMap[issue.assignee]
+                return (
+                  <div key={issue.id} className={`pm-tracking-issue-row${issue.is_delayed ? ' pm-tracking-issue-row--delayed' : ''}${blockerIssueIds?.has(issue.idReadable) ? ' pm-tracking-issue-row--blocked' : ''}`}>
+                    <span className="pm-tracking-issue-id">{issue.idReadable || issue.id}</span>
+                    <span className={ttPriorityClass(issue.priority)}>{issue.priority}</span>
+                    <span className="pm-tracking-issue-summary" title={issue.summary}>{issue.summary}</span>
+                    <span className={`pm-tracking-time${issue.is_delayed ? ' pm-tracking-time--overdue' : ''}`}>
+                      {fmtHoursCompact(issue.hours_in_state)}
+                      {issue.is_delayed && <AlertTriangle size={10} style={{ marginLeft: 3 }} />}
                     </span>
-                  )}
-                  {issue.move_type === 'qa_rejected' && (
-                    <span className="pm-tracking-move-badge pm-tracking-move-badge--qa">QA Rejected</span>
-                  )}
-                  {issue.move_type === 'dev_stalled' && (
-                    <span className="pm-tracking-move-badge pm-tracking-move-badge--dev">Dev Stalled</span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        ))}
-      </div>
+                    {issue.assignee ? (
+                      <div className="pm-tracking-assignee-cell">
+                        {avatarUrl
+                          ? <img className="pm-tracking-avatar" src={avatarUrl} alt={issue.assignee} />
+                          : <div className="pm-tracking-avatar pm-tracking-avatar--initials">{getInitialsFromName(issue.assignee)}</div>
+                        }
+                        <span className="pm-tracking-assignee-name">{issue.assignee}</span>
+                      </div>
+                    ) : <span className="pm-tracking-assignee-cell" />}
+                    {issue.issue_type && (
+                      <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase()}`}>
+                        {issue.issue_type}
+                      </span>
+                    )}
+                    {issue.move_type === 'qa_rejected' && (
+                      <span className="pm-tracking-move-badge pm-tracking-move-badge--qa">QA Rejected</span>
+                    )}
+                    {issue.move_type === 'dev_stalled' && (
+                      <span className="pm-tracking-move-badge pm-tracking-move-badge--dev">Dev Stalled</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

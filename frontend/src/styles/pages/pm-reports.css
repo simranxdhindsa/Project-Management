@@ -1105,6 +1105,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  padding-top: 0.75rem;
 }
 
 .pm-tab-header {
@@ -2442,7 +2443,7 @@
 
 .pm-tracking-issue-row {
   display: grid;
-  grid-template-columns: 80px 44px 1fr 52px 28px auto;
+  grid-template-columns: 80px 44px 1fr 52px 140px auto;
   align-items: center;
   gap: 0.5rem;
   padding: 0.38rem 0.75rem;
@@ -2486,6 +2487,41 @@
 .pm-tracking-time--overdue { color: #ef4444; }
 
 .pm-tracking-assignee { display: flex; align-items: center; }
+
+/* Assignee cell: avatar + name */
+.pm-tracking-assignee-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.pm-tracking-assignee-name {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Column heading row inside each section */
+.pm-tracking-col-header-row {
+  background: rgba(255,255,255,0.02) !important;
+  border-bottom: 1px solid rgba(255,255,255,0.06) !important;
+  pointer-events: none;
+}
+.pm-tracking-col-header-row:hover { background: rgba(255,255,255,0.02) !important; }
+.pm-tracking-col-heading {
+  font-size: 0.67rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.6;
+}
+.pm-tracking-issue-summary.pm-tracking-col-heading {
+  text-align: center;
+  padding-left: 1rem;
+}
 
 .pm-tracking-avatar {
   width: 22px;
