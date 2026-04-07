@@ -390,6 +390,65 @@ func (h *YouTrackHandler) GetBoardColumns(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// GetTypeFieldValues returns possible enum values for a named custom field (e.g. "Type").
+// Used by the Hotfix Rules UI to populate Hotfix/Regression value selectors.
+// Query param: ?field_name=Type
+func (h *YouTrackHandler) GetTypeFieldValues(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	fieldName := r.URL.Query().Get("field_name")
+	if fieldName == "" {
+		fieldName = "Type"
+	}
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+	values, err := client.GetCustomFieldValues(r.Context(), fieldName)
+	if err != nil {
+		http.Error(w, "Failed to get field values: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    values,
+	})
+}
+
+// GetDefaultBoardColumns returns columns from the auto-resolved project board (no board ID needed).
+func (h *YouTrackHandler) GetDefaultBoardColumns(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+	boardID, err := client.ResolveBoard(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to resolve board: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	columns, err := client.GetBoardColumns(r.Context(), boardID)
+	if err != nil {
+		http.Error(w, "Failed to get columns: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    columns,
+	})
+}
+
 // GetUsers returns all YouTrack users
 func (h *YouTrackHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
@@ -2141,9 +2200,10 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 		}
 		summary := event.Issue.Summary
 
-		// Extract assignee, priority and the person who made the change
+		// Extract assignee, priority, issue type and the person who made the change
 		assignee := ""
 		priority := ""
+		issueType := ""
 		movedBy := ""
 		if event.Issue != nil {
 			if u := youtrack.GetAssignee(*event.Issue); u != nil {
@@ -2154,6 +2214,14 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 				}
 			}
 			priority = youtrack.GetPriority(*event.Issue)
+			// Extract type field (for hotfix/regression classification) using configured field name
+			if h.configRepo != nil {
+				if wfCfg, err := h.configRepo.GetEffective(ctx, "", "youtrack"); err == nil && wfCfg != nil {
+					if wfCfg.HotfixRules.TypeFieldName != "" {
+						issueType = youtrack.GetCustomFieldValue(*event.Issue, wfCfg.HotfixRules.TypeFieldName)
+					}
+				}
+			}
 		}
 		if updater := event.GetUpdater(); updater != nil {
 			if updater.FullName != "" {
@@ -2220,6 +2288,7 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 					FromState:      oldValue,
 					ToState:        newValue,
 					Priority:       priority,
+					IssueType:      issueType,
 					TransitionedAt: time.Now(),
 					Comment:        latestComment,
 				}

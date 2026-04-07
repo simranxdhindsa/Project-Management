@@ -315,7 +315,11 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const [doneRoleOpen, setDoneRoleOpen] = useState(false)
   const [doneRoleRect, setDoneRoleRect] = useState<DOMRect | null>(null)
   const [editColumns, setEditColumns] = useState<ColumnState[]>([])
-  const [editHotfix, setEditHotfix] = useState<HotfixRules>({ from_states: [], to_states: [] })
+  const [columnsLoadingFromYT, setColumnsLoadingFromYT] = useState(false)
+  const [editHotfix, setEditHotfix] = useState<HotfixRules>({ from_states: [], to_states: [], type_field_name: '', hotfix_values: [], regression_values: [] })
+  const [typeFieldValues, setTypeFieldValues] = useState<{ name: string; background?: string }[]>([])
+  const [typeFieldLoading, setTypeFieldLoading] = useState(false)
+  const [prioritiesLoadingFromYT, setPrioritiesLoadingFromYT] = useState(false)
   const [editReport, setEditReport] = useState<ReportConfig>({
     done_role: 'dev_done', blocked_states: [], open_states: [], priority_filters: [], sections: [], tracked_column_roles: []
   })
@@ -349,6 +353,30 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
       }
     }).catch(() => {})
   }, [wcSource, asanaSelectedProject]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-load columns from YouTrack board when Column Hierarchy tab opens (Issue 3)
+  useEffect(() => {
+    if (wcSection !== 'columns' || wcSource !== 'youtrack') return
+    setColumnsLoadingFromYT(true)
+    api.getYouTrackDefaultBoardColumns().then(res => {
+      const boardCols = (res as any).data as import('../services/api').YouTrackColumn[] ?? []
+      if (!boardCols?.length) return
+      const seen = new Set<string>()
+      const stateNames: string[] = []
+      boardCols.forEach(col => col.fieldValues.forEach(v => {
+        const k = v.toLowerCase()
+        if (!seen.has(k)) { seen.add(k); stateNames.push(v) }
+      }))
+      if (stateNames.length === 0) return
+      setEditColumns(prev => {
+        const storedMap = new Map(prev.map(c => [c.state.toLowerCase(), c]))
+        return stateNames.map((name, i) => {
+          const stored = storedMap.get(name.toLowerCase())
+          return stored ? { ...stored, state: name, rank: i } : { state: name, rank: i, aliases: [], role: '', is_lateral: false }
+        })
+      })
+    }).catch(() => {}).finally(() => setColumnsLoadingFromYT(false))
+  }, [wcSection, wcSource]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // For Report Defaults Open/Blocked States: use real Asana sections in Asana mode,
   // fall back to YouTrack states in YouTrack mode.
@@ -731,6 +759,38 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
       setWcSuccess('Reset to defaults!'); setTimeout(() => setWcSuccess(null), 3000)
     } catch (e) { setWcError(e instanceof Error ? e.message : 'Reset failed') }
     finally { setWcSaving(false) }
+  }
+
+  // Load priorities from YouTrack (Issue 11)
+  const handleLoadPrioritiesFromYT = async () => {
+    setPrioritiesLoadingFromYT(true)
+    try {
+      const res = await api.getYouTrackPriorities()
+      const vals = (res as any).data as { name: string; background?: string; foreground?: string }[] ?? []
+      if (vals.length === 0) return
+      setEditTags(vals.map((v, i) => ({
+        label: v.name,
+        color: v.background || '#6366f1',
+        display_order: i,
+        sla_hours: editTags.find(p => p.label === v.name)?.sla_hours ?? 48,
+        prefixes: editTags.find(p => p.label === v.name)?.prefixes ?? [],
+        yt_mappings: [v.name],
+      })))
+    } catch { /* ignore */ }
+    finally { setPrioritiesLoadingFromYT(false) }
+  }
+
+  // Load type field values from YouTrack (Issue 7G)
+  const handleLoadTypeFieldValues = async () => {
+    const fieldName = editHotfix.type_field_name
+    if (!fieldName?.trim()) return
+    setTypeFieldLoading(true)
+    try {
+      const res = await api.getYouTrackTypeFieldValues(fieldName)
+      const vals = (res as any).data as { name: string; background?: string }[] ?? []
+      setTypeFieldValues(vals)
+    } catch { /* ignore */ }
+    finally { setTypeFieldLoading(false) }
   }
 
   const addTag = () => setEditTags(prev => [...prev, { label: '', color: '#6366f1', display_order: prev.length, sla_hours: 24, prefixes: [], yt_mappings: [] }])
@@ -1396,6 +1456,11 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                   </div>
                   <div className="wc-actions">
                     <button className="int-btn int-btn-ghost int-btn-sm" onClick={addTag}><Plus size={13} /> Add Tag</button>
+                    {wcSource === 'youtrack' && (
+                      <button className="int-btn int-btn-secondary int-btn-sm" onClick={handleLoadPrioritiesFromYT} disabled={prioritiesLoadingFromYT}>
+                        {prioritiesLoadingFromYT ? <RefreshCw size={12} className="spin" /> : <Download size={12} />} Load from YouTrack
+                      </button>
+                    )}
                     <button className="int-btn int-btn-primary int-btn-sm" onClick={handleSavePriorities} disabled={wcSaving}>
                       {wcSaving ? 'Saving…' : <><Save size={13} /> Save</>}
                     </button>
@@ -1430,16 +1495,110 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
               {wcSection === 'hotfix' && (
                 <div className="wc-section">
                   <p className="int-help-text">
-                    A ticket is a hotfix when it jumps from <code>backlog</code>/<code>active</code> directly to <code>deployed</code>, skipping <code>dev_done</code> and <code>verified</code>. Leave empty to auto-derive from column roles.
+                    Classify tickets as hotfix or regression based on a YouTrack custom field (e.g. "Type"). If configured, field-based classification takes priority over transition-based detection.
                   </p>
-                  <div className="int-field">
-                    <label>From States <span className="int-label-hint">(empty = auto)</span></label>
-                    <input type="text" value={editHotfix.from_states.join(', ')} onChange={e => setEditHotfix(h => ({ ...h, from_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="int-input" placeholder="e.g. Backlog, In Progress" />
-                  </div>
-                  <div className="int-field">
-                    <label>To States <span className="int-label-hint">(empty = auto)</span></label>
-                    <input type="text" value={editHotfix.to_states.join(', ')} onChange={e => setEditHotfix(h => ({ ...h, to_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="int-input" placeholder="e.g. STAGE, PROD" />
-                  </div>
+
+                  {wcSource === 'youtrack' && (
+                    <>
+                      <div className="int-field">
+                        <label>Type Field Name</label>
+                        <div className="int-field-row">
+                          <input
+                            type="text"
+                            value={editHotfix.type_field_name ?? ''}
+                            onChange={e => setEditHotfix(h => ({ ...h, type_field_name: e.target.value }))}
+                            className="int-input"
+                            placeholder="e.g. Type"
+                          />
+                          <button
+                            className="int-btn int-btn-secondary int-btn-sm"
+                            onClick={handleLoadTypeFieldValues}
+                            disabled={typeFieldLoading || !editHotfix.type_field_name?.trim()}
+                          >
+                            {typeFieldLoading ? <RefreshCw size={12} className="spin" /> : <Download size={12} />} Load values
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="int-field">
+                        <label>Hotfix Values <span className="int-label-hint">(select which values indicate a hotfix)</span></label>
+                        <div className="wc-chip-group">
+                          {typeFieldValues.length === 0 && (editHotfix.hotfix_values ?? []).length === 0 && (
+                            <span className="int-label-hint">Enter field name and click "Load values" to see options</span>
+                          )}
+                          {[...typeFieldValues.map(v => v.name), ...(editHotfix.hotfix_values ?? []).filter(v => !typeFieldValues.find(t => t.name === v))].map(val => (
+                            <label key={val} className="wc-chip-label">
+                              <input
+                                type="checkbox"
+                                checked={(editHotfix.hotfix_values ?? []).includes(val)}
+                                onChange={e => setEditHotfix(h => {
+                                  const cur = h.hotfix_values ?? []
+                                  return { ...h, hotfix_values: e.target.checked ? [...cur, val] : cur.filter(x => x !== val) }
+                                })}
+                              />
+                              <span
+                                className="wc-chip"
+                                style={{ background: typeFieldValues.find(v => v.name === val)?.background }}
+                              >{val}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="int-field">
+                        <label>Regression Values <span className="int-label-hint">(select which values indicate a regression)</span></label>
+                        <div className="wc-chip-group">
+                          {typeFieldValues.length === 0 && (editHotfix.regression_values ?? []).length === 0 && (
+                            <span className="int-label-hint">Enter field name and click "Load values" to see options</span>
+                          )}
+                          {[...typeFieldValues.map(v => v.name), ...(editHotfix.regression_values ?? []).filter(v => !typeFieldValues.find(t => t.name === v))].map(val => (
+                            <label key={val} className="wc-chip-label">
+                              <input
+                                type="checkbox"
+                                checked={(editHotfix.regression_values ?? []).includes(val)}
+                                onChange={e => setEditHotfix(h => {
+                                  const cur = h.regression_values ?? []
+                                  return { ...h, regression_values: e.target.checked ? [...cur, val] : cur.filter(x => x !== val) }
+                                })}
+                              />
+                              <span
+                                className="wc-chip"
+                                style={{ background: typeFieldValues.find(v => v.name === val)?.background }}
+                              >{val}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      <details className="wc-advanced-section">
+                        <summary className="wc-advanced-summary">Advanced: Transition-based detection <span className="int-label-hint">(fallback when field not configured)</span></summary>
+                        <div className="wc-advanced-content">
+                          <div className="int-field">
+                            <label>From States <span className="int-label-hint">(empty = auto)</span></label>
+                            <input type="text" value={editHotfix.from_states.join(', ')} onChange={e => setEditHotfix(h => ({ ...h, from_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="int-input" placeholder="e.g. Backlog, In Progress" />
+                          </div>
+                          <div className="int-field">
+                            <label>To States <span className="int-label-hint">(empty = auto)</span></label>
+                            <input type="text" value={editHotfix.to_states.join(', ')} onChange={e => setEditHotfix(h => ({ ...h, to_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="int-input" placeholder="e.g. STAGE, PROD" />
+                          </div>
+                        </div>
+                      </details>
+                    </>
+                  )}
+
+                  {wcSource !== 'youtrack' && (
+                    <>
+                      <div className="int-field">
+                        <label>From States <span className="int-label-hint">(empty = auto)</span></label>
+                        <input type="text" value={editHotfix.from_states.join(', ')} onChange={e => setEditHotfix(h => ({ ...h, from_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="int-input" placeholder="e.g. Backlog, In Progress" />
+                      </div>
+                      <div className="int-field">
+                        <label>To States <span className="int-label-hint">(empty = auto)</span></label>
+                        <input type="text" value={editHotfix.to_states.join(', ')} onChange={e => setEditHotfix(h => ({ ...h, to_states: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} className="int-input" placeholder="e.g. STAGE, PROD" />
+                      </div>
+                    </>
+                  )}
+
                   <div className="wc-actions">
                     <button className="int-btn int-btn-primary int-btn-sm" onClick={handleSaveHotfix} disabled={wcSaving}>
                       {wcSaving ? 'Saving…' : <><Save size={13} /> Save</>}

@@ -178,7 +178,13 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 	}
 
 	// --- 1b. Hotfix tickets ---
-	hotfixIssues, err := h.reportRepo.GetHotfixIssues(r.Context(), yesterday, hotfixFromStates, hotfixToStates)
+	var hotfixTypeValues []string
+	if wfCfg != nil {
+		for _, v := range wfCfg.HotfixRules.HotfixValues {
+			hotfixTypeValues = append(hotfixTypeValues, strings.ToLower(v))
+		}
+	}
+	hotfixIssues, err := h.reportRepo.GetHotfixIssues(r.Context(), yesterday, hotfixFromStates, hotfixToStates, hotfixTypeValues)
 	if err != nil {
 		hotfixIssues = nil // non-fatal
 	}
@@ -193,8 +199,16 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 		ytClient, ytErr = h.getYouTrackClient(r.Context())
 		if ytErr == nil {
 			if sprintID != "" {
-				// Sprint-scoped: fetch all sprint issues and filter by state in Go
-				sprintIssues, _ := ytClient.GetAllSprintIssues(r.Context(), sprintID)
+				// Sprint-scoped: try agile endpoint first, fall back to query API with sprint name
+				sprintIssues, sprintErr := ytClient.GetAllSprintIssues(r.Context(), sprintID)
+				if sprintErr != nil && sprintName != "" {
+					// Agile endpoint failed — use query API with sprint name (more direct, no board ID needed)
+					sprintIssues, sprintErr = ytClient.GetIssuesByStateForSprint(r.Context(), sprintName, nil)
+				}
+				if sprintErr != nil {
+					ytErr = fmt.Errorf("could not fetch sprint issues: %w", sprintErr)
+				}
+
 				openStateSet := make(map[string]bool)
 				for _, s := range openStates {
 					openStateSet[strings.ToLower(s)] = true
@@ -203,7 +217,7 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 				for _, s := range blockedStates {
 					blockedStateSet[strings.ToLower(s)] = true
 				}
-				// Also build sprint issue ID set for filtering done/hotfix DB issues
+				// Build sprint issue ID set for filtering done/hotfix DB issues
 				sprintIDSet := make(map[string]bool)
 				for _, si := range sprintIssues {
 					sprintIDSet[si.ID] = true
@@ -288,12 +302,12 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 					}
 					sb.WriteString(fmt.Sprintf("@%s\n", g.name))
 					for _, issue := range g.issues {
-						sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+						sb.WriteString(fmt.Sprintf("%s - %s\n", issue.IssueID, issue.IssueSummary))
 					}
 				}
 			} else {
 				for _, issue := range doneIssues {
-					sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+					sb.WriteString(fmt.Sprintf("%s - %s\n", issue.IssueID, issue.IssueSummary))
 				}
 			}
 		}
@@ -312,9 +326,9 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 				if dest == "" {
 					dest = issue.ToState
 				}
-				line := fmt.Sprintf("• %s %s _(→ %s)_", issue.IssueID, issue.IssueSummary, dest)
+				line := fmt.Sprintf("%s - %s _(→ %s)_", issue.IssueID, issue.IssueSummary, dest)
 				if issue.Assignee != "" {
-					line += fmt.Sprintf(" (Assignee: %s)", issue.Assignee)
+					line += fmt.Sprintf(" (%s)", issue.Assignee)
 				}
 				sb.WriteString(line + "\n")
 			}
@@ -326,7 +340,7 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 		// Open items grouped by priority
 		if activeSections["open"] {
 			sb.WriteString("\n\n")
-			sb.WriteString("*These are the open items today:*\n\n")
+			sb.WriteString("*Currently Open Issues:*\n\n")
 			if ytErr != nil {
 				sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
 			} else if len(openIssues) == 0 {
@@ -360,23 +374,27 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 					}
 					label := p
 					if p == "Other" {
-						label = "Other Issues"
+						label = "Other Issues:"
 					}
-					sb.WriteString(fmt.Sprintf("*%s:*\n", label))
+					sb.WriteString(fmt.Sprintf("\n*%s*\n", label))
 					for _, issue := range issues {
-						sb.WriteString(fmt.Sprintf("• %s %s\n", issue.ID, issue.Summary))
+						id := issue.IDReadable
+						if id == "" {
+							id = issue.ID
+						}
+						sb.WriteString(fmt.Sprintf("%s: %s\n", id, issue.Summary))
 					}
-					sb.WriteString("\n")
 				}
 			}
 		}
 
 		// Blocked section
 		if activeSections["blocked"] {
-			sb.WriteString("*Blocked:*\n\n")
+			sb.WriteString("\n\n*Blockers:*\n\n")
 			if len(blockedIssues) == 0 {
 				sb.WriteString("_No blocked tickets_\n")
 			} else {
+				sb.WriteString("These are the issues where we are currently blocked:\n\n")
 				for _, issue := range blockedIssues {
 					assignee := ""
 					if u := youtrack.GetAssignee(issue); u != nil {
@@ -385,10 +403,15 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 							assignee = u.Login
 						}
 					}
-					line := fmt.Sprintf("• %s %s", issue.ID, issue.Summary)
-					if assignee != "" {
-						line += fmt.Sprintf(" (Assignee: %s)", assignee)
+					id := issue.IDReadable
+					if id == "" {
+						id = issue.ID
 					}
+					line := fmt.Sprintf("%s: %s", id, issue.Summary)
+					if assignee != "" {
+						line += fmt.Sprintf(" (%s)", assignee)
+					}
+					line += " --> waiting for reply"
 					sb.WriteString(line + "\n")
 				}
 			}
@@ -403,27 +426,8 @@ func (h *ReportHandler) GeneratePMReport(w http.ResponseWriter, r *http.Request)
 				sb.WriteString("_No overdue tickets in progress_\n")
 			} else {
 				for _, t := range delayedIssues {
-					days := int(t.TotalHours) / 24
-					hours := int(t.TotalHours) % 24
-					durationStr := ""
-					if days > 0 {
-						durationStr = fmt.Sprintf("%dd %dh", days, hours)
-					} else {
-						durationStr = fmt.Sprintf("%dh", int(t.TotalHours))
-					}
-					line := fmt.Sprintf("• %s %s", t.IssueID, t.IssueSummary)
-					meta := fmt.Sprintf("In Progress: %s | Threshold: %.0fh", durationStr, t.ThresholdHours)
-					if t.Assignee != "" {
-						meta = fmt.Sprintf("Assignee: %s | %s", t.Assignee, meta)
-					}
-					if t.MovedBackCount > 0 {
-						meta += fmt.Sprintf(" | Moved Back: %dx", t.MovedBackCount)
-					}
-					if t.TotalStints > 1 {
-						meta += fmt.Sprintf(" | Stints: %d", t.TotalStints)
-					}
-					sb.WriteString(line + "\n")
-					sb.WriteString(fmt.Sprintf("  _%s_\n", meta))
+					sinceStr := t.FirstEnteredAt.Format("2 Jan")
+					sb.WriteString(fmt.Sprintf("%s %s --> In \"In Progress\" column since %s\n", t.IssueID, t.IssueSummary, sinceStr))
 				}
 			}
 		}
@@ -1246,6 +1250,43 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 	wSprintID := r.URL.Query().Get("sprint_id")
 	wSprintName, _ := url.QueryUnescape(r.URL.Query().Get("sprint_name"))
 
+	// One-time overrides from query params
+	wActiveSections := map[string]bool{"done": true, "hotfixes": true, "open": true, "blocked": true, "overdue": true}
+	if qp := r.URL.Query().Get("priorities"); qp != "" {
+		requested := strings.Split(qp, ",")
+		var filtered []models.PriorityTag
+		for _, tag := range wPriorityTags {
+			for _, req := range requested {
+				if strings.EqualFold(strings.TrimSpace(req), tag.Label) {
+					filtered = append(filtered, tag)
+					break
+				}
+			}
+		}
+		if len(filtered) > 0 {
+			wPriorityTags = filtered
+		}
+	}
+	if qp := r.URL.Query().Get("open_states"); qp != "" {
+		var states []string
+		for _, s := range strings.Split(qp, ",") {
+			if t := strings.TrimSpace(s); t != "" {
+				states = append(states, t)
+			}
+		}
+		if len(states) > 0 {
+			wOpenStates = states
+		}
+	}
+	if qp := r.URL.Query().Get("sections"); qp != "" {
+		wActiveSections = map[string]bool{}
+		for _, s := range strings.Split(qp, ",") {
+			if t := strings.TrimSpace(s); t != "" {
+				wActiveSections[t] = true
+			}
+		}
+	}
+
 	// --- 1. Done tickets for the full week ---
 	doneIssues, err := h.reportRepo.GetDoneIssuesForWeek(r.Context(), weekStartDate, weekEndDate, wDoneStates)
 	if err != nil {
@@ -1253,7 +1294,13 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 	}
 
 	// --- 1b. Hotfix tickets for the full week ---
-	hotfixIssues, err := h.reportRepo.GetHotfixIssuesForWeek(r.Context(), weekStartDate, weekEndDate, wHotfixFrom, wHotfixTo)
+	var wHotfixTypeValues []string
+	if wfCfgW != nil {
+		for _, v := range wfCfgW.HotfixRules.HotfixValues {
+			wHotfixTypeValues = append(wHotfixTypeValues, strings.ToLower(v))
+		}
+	}
+	hotfixIssues, err := h.reportRepo.GetHotfixIssuesForWeek(r.Context(), weekStartDate, weekEndDate, wHotfixFrom, wHotfixTo, wHotfixTypeValues)
 	if err != nil {
 		hotfixIssues = nil
 	}
@@ -1268,7 +1315,13 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 		ytClient, ytErr = h.getYouTrackClient(r.Context())
 		if ytErr == nil {
 			if wSprintID != "" {
-				sprintIssues, _ := ytClient.GetAllSprintIssues(r.Context(), wSprintID)
+				sprintIssues, sprintErr := ytClient.GetAllSprintIssues(r.Context(), wSprintID)
+				if sprintErr != nil && wSprintName != "" {
+					sprintIssues, sprintErr = ytClient.GetIssuesByStateForSprint(r.Context(), wSprintName, nil)
+				}
+				if sprintErr != nil {
+					ytErr = fmt.Errorf("could not fetch sprint issues: %w", sprintErr)
+				}
 				wOpenSet := make(map[string]bool)
 				for _, s := range wOpenStates {
 					wOpenSet[strings.ToLower(s)] = true
@@ -1348,7 +1401,7 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 				sb.WriteString(fmt.Sprintf("@%s\n", name))
 				currentAssignee = name
 			}
-			sb.WriteString(fmt.Sprintf("• %s %s\n", issue.IssueID, issue.IssueSummary))
+			sb.WriteString(fmt.Sprintf("%s - %s\n", issue.IssueID, issue.IssueSummary))
 		}
 	}
 
@@ -1376,7 +1429,7 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 			if dest == "" {
 				dest = issue.ToState
 			}
-			sb.WriteString(fmt.Sprintf("• %s %s _(→ %s)_\n", issue.IssueID, issue.IssueSummary, dest))
+			sb.WriteString(fmt.Sprintf("%s - %s _(→ %s)_\n", issue.IssueID, issue.IssueSummary, dest))
 		}
 	}
 
@@ -1384,101 +1437,97 @@ func (h *ReportHandler) GenerateWeeklyPMReport(w http.ResponseWriter, r *http.Re
 	if scope == "full" {
 		sb.WriteString("\n\n")
 
-		// Open items grouped by priority — identical to daily report
-		sb.WriteString("*These are the open items:*\n\n")
-		if ytErr != nil {
-			sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
-		} else if len(openIssues) == 0 {
-			sb.WriteString("_No open items_\n")
-		} else {
-			priorityOrder := buildPriorityOrder(wPriorityTags)
-			if len(priorityOrder) == 0 {
-				priorityOrder = []string{"P0", "P1", "P2", "P3", "Other"}
-			}
-			priorityGroups := make(map[string][]youtrack.Issue)
-			for _, p := range priorityOrder {
-				priorityGroups[p] = []youtrack.Issue{}
-			}
-			for _, issue := range openIssues {
-				var p string
-				if len(wPriorityTags) > 0 {
-					p = extractPriorityFromConfig(issue.Summary, wPriorityTags)
-				} else {
-					p = extractPriority(issue.Summary)
+		// Open items grouped by priority
+		if wActiveSections["open"] {
+			sb.WriteString("*Currently Open Issues:*\n\n")
+			if ytErr != nil {
+				sb.WriteString(fmt.Sprintf("_Could not fetch open items: %s_\n", ytErr.Error()))
+			} else if len(openIssues) == 0 {
+				sb.WriteString("_No open items_\n")
+			} else {
+				priorityOrder := buildPriorityOrder(wPriorityTags)
+				if len(priorityOrder) == 0 {
+					priorityOrder = []string{"P0", "P1", "P2", "P3", "Other"}
 				}
-				if _, ok := priorityGroups[p]; !ok {
-					priorityGroups["Other"] = append(priorityGroups["Other"], issue)
-				} else {
-					priorityGroups[p] = append(priorityGroups[p], issue)
+				priorityGroups := make(map[string][]youtrack.Issue)
+				for _, p := range priorityOrder {
+					priorityGroups[p] = []youtrack.Issue{}
 				}
-			}
-			for _, p := range priorityOrder {
-				issues := priorityGroups[p]
-				if len(issues) == 0 {
-					continue
-				}
-				label := p
-				if p == "Other" {
-					label = "Other Issues"
-				}
-				sb.WriteString(fmt.Sprintf("*%s:*\n", label))
-				for _, issue := range issues {
-					sb.WriteString(fmt.Sprintf("• %s %s\n", issue.ID, issue.Summary))
-				}
-				sb.WriteString("\n")
-			}
-		}
-
-		// Blocked section — identical to daily report
-		sb.WriteString("*Blocked:*\n\n")
-		if len(blockedIssues) == 0 {
-			sb.WriteString("_No blocked tickets_\n")
-		} else {
-			for _, issue := range blockedIssues {
-				assignee := ""
-				if u := youtrack.GetAssignee(issue); u != nil {
-					assignee = u.FullName
-					if assignee == "" {
-						assignee = u.Login
+				for _, issue := range openIssues {
+					var p string
+					if len(wPriorityTags) > 0 {
+						p = extractPriorityFromConfig(issue.Summary, wPriorityTags)
+					} else {
+						p = extractPriority(issue.Summary)
+					}
+					if _, ok := priorityGroups[p]; !ok {
+						priorityGroups["Other"] = append(priorityGroups["Other"], issue)
+					} else {
+						priorityGroups[p] = append(priorityGroups[p], issue)
 					}
 				}
-				line := fmt.Sprintf("• %s %s", issue.ID, issue.Summary)
-				if assignee != "" {
-					line += fmt.Sprintf(" (Assignee: %s)", assignee)
+				for _, p := range priorityOrder {
+					issues := priorityGroups[p]
+					if len(issues) == 0 {
+						continue
+					}
+					label := p
+					if p == "Other" {
+						label = "Other Issues:"
+					}
+					sb.WriteString(fmt.Sprintf("\n*%s*\n", label))
+					for _, issue := range issues {
+						id := issue.IDReadable
+						if id == "" {
+							id = issue.ID
+						}
+						sb.WriteString(fmt.Sprintf("%s: %s\n", id, issue.Summary))
+					}
 				}
-				sb.WriteString(line + "\n")
 			}
 		}
-		sb.WriteString("\n\n")
 
-		// Delayed section — identical to daily report
-		sb.WriteString("*Tickets Getting Delayed:*\n\n")
-		delayedIssues, delayErr := h.reportRepo.GetDelayedIssues(r.Context())
-		if delayErr != nil || len(delayedIssues) == 0 {
-			sb.WriteString("_No overdue tickets in progress_\n")
-		} else {
-			for _, t := range delayedIssues {
-				days := int(t.TotalHours) / 24
-				hours := int(t.TotalHours) % 24
-				durationStr := ""
-				if days > 0 {
-					durationStr = fmt.Sprintf("%dd %dh", days, hours)
-				} else {
-					durationStr = fmt.Sprintf("%dh", int(t.TotalHours))
+		// Blocked section
+		if wActiveSections["blocked"] {
+			sb.WriteString("\n\n*Blockers:*\n\n")
+			if len(blockedIssues) == 0 {
+				sb.WriteString("_No blocked tickets_\n")
+			} else {
+				sb.WriteString("These are the issues where we are currently blocked:\n\n")
+				for _, issue := range blockedIssues {
+					assignee := ""
+					if u := youtrack.GetAssignee(issue); u != nil {
+						assignee = u.FullName
+						if assignee == "" {
+							assignee = u.Login
+						}
+					}
+					id := issue.IDReadable
+					if id == "" {
+						id = issue.ID
+					}
+					line := fmt.Sprintf("%s: %s", id, issue.Summary)
+					if assignee != "" {
+						line += fmt.Sprintf(" (%s)", assignee)
+					}
+					line += " --> waiting for reply"
+					sb.WriteString(line + "\n")
 				}
-				line := fmt.Sprintf("• %s %s", t.IssueID, t.IssueSummary)
-				meta := fmt.Sprintf("In Progress: %s | Threshold: %.0fh", durationStr, t.ThresholdHours)
-				if t.Assignee != "" {
-					meta = fmt.Sprintf("Assignee: %s | %s", t.Assignee, meta)
+			}
+			sb.WriteString("\n\n")
+		}
+
+		// Delayed section
+		if wActiveSections["overdue"] {
+			sb.WriteString("*Tickets Getting Delayed:*\n\n")
+			delayedIssues, delayErr := h.reportRepo.GetDelayedIssues(r.Context())
+			if delayErr != nil || len(delayedIssues) == 0 {
+				sb.WriteString("_No overdue tickets in progress_\n")
+			} else {
+				for _, t := range delayedIssues {
+					sinceStr := t.FirstEnteredAt.Format("2 Jan")
+					sb.WriteString(fmt.Sprintf("%s %s --> In \"In Progress\" column since %s\n", t.IssueID, t.IssueSummary, sinceStr))
 				}
-				if t.MovedBackCount > 0 {
-					meta += fmt.Sprintf(" | Moved Back: %dx", t.MovedBackCount)
-				}
-				if t.TotalStints > 1 {
-					meta += fmt.Sprintf(" | Stints: %d", t.TotalStints)
-				}
-				sb.WriteString(line + "\n")
-				sb.WriteString(fmt.Sprintf("  _%s_\n", meta))
 			}
 		}
 	}
@@ -1543,6 +1592,229 @@ func (h *ReportHandler) ListWeeklyReports(w http.ResponseWriter, r *http.Request
 	}
 
 	sendJSON(w, http.StatusOK, Response{Success: true, Data: reports})
+}
+
+// SprintBoardIssue is one issue in the sprint-board-status response
+type SprintBoardIssue struct {
+	ID              string  `json:"id"`
+	IDReadable      string  `json:"idReadable"`
+	Summary         string  `json:"summary"`
+	Priority        string  `json:"priority"`
+	Assignee        string  `json:"assignee"`
+	AssigneeLogin   string  `json:"assigneeLogin"`
+	AvatarURL       string  `json:"avatarUrl"`
+	IssueType       string  `json:"issue_type"`
+	CurrentState    string  `json:"current_state"`
+	FromState       string  `json:"from_state"`        // state before the most recent transition
+	SinceDate       string  `json:"since_date"`        // ISO date when issue entered current state
+	HoursInState    float64 `json:"hours_in_state"`
+	IsDelayed       bool    `json:"is_delayed"`
+	ThresholdHours  float64 `json:"threshold_hours"`
+	MoveType        string  `json:"move_type"`         // "qa_rejected" | "dev_stalled" | ""
+}
+
+// SprintBoardColumn is one column in the sprint-board-status response
+type SprintBoardColumn struct {
+	Name   string             `json:"name"`
+	Issues []SprintBoardIssue `json:"issues"`
+	Total  int                `json:"total"` // total issues in this column (before pagination)
+}
+
+// GetSprintBoardStatus returns current board status for a sprint, grouped by column.
+// GET /api/reports/sprint-board-status?sprint_id=xxx&sprint_name=xxx&limit=20&offset=0
+func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	sprintID := r.URL.Query().Get("sprint_id")
+	sprintName, _ := url.QueryUnescape(r.URL.Query().Get("sprint_name"))
+
+	// Load workflow config for SLA thresholds and priority mappings
+	wfCfg := h.loadWorkflowConfig(r.Context(), user.ID, "youtrack")
+
+	// Build SLA map from priority tags
+	slaMap := map[string]float64{}
+	if wfCfg != nil {
+		for _, pt := range wfCfg.PriorityTags {
+			slaMap[strings.ToLower(pt.Label)] = pt.SLAHours
+			for _, yt := range pt.YTMappings {
+				slaMap[strings.ToLower(yt)] = pt.SLAHours
+			}
+		}
+	}
+
+	ytClient, err := h.getYouTrackClient(r.Context())
+	if err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "YouTrack not configured: " + err.Error()})
+		return
+	}
+
+	// Fetch sprint issues
+	var sprintIssues []youtrack.Issue
+	if sprintID != "" {
+		sprintIssues, err = ytClient.GetAllSprintIssues(r.Context(), sprintID)
+		if err != nil && sprintName != "" {
+			sprintIssues, err = ytClient.GetIssuesByStateForSprint(r.Context(), sprintName, nil)
+		}
+	} else if sprintName != "" {
+		sprintIssues, err = ytClient.GetIssuesByStateForSprint(r.Context(), sprintName, nil)
+	}
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to fetch sprint issues: " + err.Error()})
+		return
+	}
+
+	// Fetch board columns for ordering
+	var columnOrder []string
+	boardID, boardErr := ytClient.ResolveBoard(r.Context())
+	if boardErr == nil {
+		cols, colErr := ytClient.GetBoardColumns(r.Context(), boardID)
+		if colErr == nil {
+			seen := map[string]bool{}
+			for _, col := range cols {
+				for _, fv := range col.FieldValues {
+					if !seen[strings.ToLower(fv)] {
+						seen[strings.ToLower(fv)] = true
+						columnOrder = append(columnOrder, fv)
+					}
+				}
+			}
+		}
+	}
+
+	// Group issues by current state, computing time-in-state from DB state log
+	now := time.Now()
+	type colData struct {
+		issues []SprintBoardIssue
+	}
+	columnMap := map[string]*colData{}
+	columnNames := []string{} // ordered
+
+	for _, issue := range sprintIssues {
+		currentState := youtrack.GetStatus(issue)
+		priority := youtrack.GetPriority(issue)
+		if wfCfg != nil {
+			priority = mapYTPriorityFromConfig(priority, wfCfg.PriorityTags)
+		}
+		assignee := youtrack.GetAssignee(issue)
+		assigneeName := ""
+		assigneeLogin := ""
+		avatarURL := ""
+		if assignee != nil {
+			assigneeName = assignee.FullName
+			if assigneeName == "" {
+				assigneeName = assignee.Login
+			}
+			assigneeLogin = assignee.Login
+			avatarURL = assignee.AvatarUrl
+		}
+		issueType := ""
+		if wfCfg != nil && wfCfg.HotfixRules.TypeFieldName != "" {
+			issueType = youtrack.GetCustomFieldValue(issue, wfCfg.HotfixRules.TypeFieldName)
+		}
+
+		// Determine when this issue entered its current state from DB log
+		sinceDate := ""
+		var hoursInState float64
+		fromState := ""
+		logs, logErr := h.reportRepo.GetStateLogForIssue(r.Context(), issue.IDReadable)
+		if logErr == nil && len(logs) > 0 {
+			// Find most recent log entry where to_state matches current state
+			for i := len(logs) - 1; i >= 0; i-- {
+				if strings.EqualFold(logs[i].ToState, currentState) {
+					sinceDate = logs[i].TransitionedAt.Format("2006-01-02T15:04:05Z")
+					hoursInState = now.Sub(logs[i].TransitionedAt).Hours()
+					fromState = logs[i].FromState
+					break
+				}
+			}
+		}
+		if sinceDate == "" {
+			// No log entry: use issue updated time as fallback
+			if issue.Updated > 0 {
+				updatedAt := time.UnixMilli(issue.Updated)
+				sinceDate = updatedAt.Format("2006-01-02T15:04:05Z")
+				hoursInState = now.Sub(updatedAt).Hours()
+			}
+		}
+
+		// Classify move type (backward move detection)
+		moveType := ""
+		if wfCfg != nil && fromState != "" {
+			if isBackwardMoveFromConfig(fromState, currentState, wfCfg.ColumnHierarchy) {
+				moveType = classifyBackwardMove(fromState, currentState, wfCfg.ColumnHierarchy)
+			}
+		}
+
+		// SLA-based delayed check
+		thresholdHours := 72.0
+		if v, ok := slaMap[strings.ToLower(priority)]; ok {
+			thresholdHours = v
+		}
+		isDelayed := hoursInState > thresholdHours
+
+		bi := SprintBoardIssue{
+			ID:             issue.ID,
+			IDReadable:     issue.IDReadable,
+			Summary:        issue.Summary,
+			Priority:       priority,
+			Assignee:       assigneeName,
+			AssigneeLogin:  assigneeLogin,
+			AvatarURL:      avatarURL,
+			IssueType:      issueType,
+			CurrentState:   currentState,
+			FromState:      fromState,
+			SinceDate:      sinceDate,
+			HoursInState:   hoursInState,
+			IsDelayed:      isDelayed,
+			ThresholdHours: thresholdHours,
+			MoveType:       moveType,
+		}
+
+		colKey := strings.ToLower(currentState)
+		if _, exists := columnMap[colKey]; !exists {
+			columnMap[colKey] = &colData{}
+			columnNames = append(columnNames, currentState)
+		}
+		columnMap[colKey].issues = append(columnMap[colKey].issues, bi)
+	}
+
+	// Build output columns in board order
+	var resultColumns []SprintBoardColumn
+	placed := map[string]bool{}
+
+	// First: emit columns that exist in board order
+	for _, boardCol := range columnOrder {
+		colKey := strings.ToLower(boardCol)
+		if data, ok := columnMap[colKey]; ok && !placed[colKey] {
+			placed[colKey] = true
+			resultColumns = append(resultColumns, SprintBoardColumn{
+				Name:   boardCol,
+				Issues: data.issues,
+				Total:  len(data.issues),
+			})
+		}
+	}
+	// Then: any remaining columns not on the board (e.g., unknown states)
+	for _, colName := range columnNames {
+		colKey := strings.ToLower(colName)
+		if !placed[colKey] {
+			data := columnMap[colKey]
+			resultColumns = append(resultColumns, SprintBoardColumn{
+				Name:   colName,
+				Issues: data.issues,
+				Total:  len(data.issues),
+			})
+		}
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data:    resultColumns,
+	})
 }
 
 // ResetStateLog deletes all rows from issue_state_log so tracking starts fresh.

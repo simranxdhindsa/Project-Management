@@ -72,6 +72,10 @@ export function getPMBoardColumns(boardId: string) {
     : api.getYouTrackBoardColumns(boardId)
 }
 
+export function getPMDefaultBoardColumns() {
+  return api.getYouTrackDefaultBoardColumns()
+}
+
 export function getPMStates() {
   return getActiveSource() === 'asana'
     ? api.getAsanaPMStates()
@@ -250,10 +254,10 @@ export function generatePMReport(date: string, scope: 'full' | 'summary' = 'full
     : api.generatePMReport(date, scope, overrides, sprintId, sprintName)
 }
 
-export function generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full', sprintId?: string, sprintName?: string) {
+export function generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }, sprintId?: string, sprintName?: string) {
   return getActiveSource() === 'asana'
     ? api.generateAsanaWeeklyPMReport(weekStart, scope)
-    : api.generateWeeklyPMReport(weekStart, scope, sprintId, sprintName)
+    : api.generateWeeklyPMReport(weekStart, scope, overrides, sprintId, sprintName)
 }
 
 export function listPMReports() {

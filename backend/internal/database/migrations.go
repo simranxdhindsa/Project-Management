@@ -238,6 +238,10 @@ func RunMigrations() error {
 		// Used for backward move explanation (In Progress → Backlog, DEV → In Progress, etc.)
 		`ALTER TABLE issue_state_log ADD COLUMN IF NOT EXISTS comment TEXT`,
 
+		// Add issue_type column — stores the YouTrack "Type" custom field value at transition time
+		// Used for field-based hotfix/regression classification (e.g. "Hotfix", "Regression")
+		`ALTER TABLE issue_state_log ADD COLUMN IF NOT EXISTS issue_type VARCHAR(100)`,
+
 		// PM reports — saved Slack-style daily status reports
 		`CREATE TABLE IF NOT EXISTS pm_reports (
 			id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid()::text,

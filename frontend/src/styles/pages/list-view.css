@@ -295,6 +295,7 @@
   color: #fff;
 }
 .lv-avatar-sm { width: 20px; height: 20px; font-size: 0.55rem; }
+.lv-avatar-img { object-fit: cover; background: transparent; }
 .lv-assignee-name {
   font-size: 0.78rem;
   color: var(--text-secondary);

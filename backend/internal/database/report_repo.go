@@ -21,6 +21,7 @@ type IssueStateLog struct {
 	TransitionedAt           time.Time  `json:"transitioned_at"`
 	DurationInPrevStateHours *float64   `json:"duration_in_prev_state_hours"`
 	Comment                  string     `json:"comment"`            // comment at transition time (backward moves)
+	IssueType                string     `json:"issue_type"`         // YouTrack type field value (e.g. "Hotfix", "Regression")
 	MovedByMismatch          bool       `json:"moved_by_mismatch"`
 	DueDate                  *time.Time `json:"due_date,omitempty"` // Asana: task due date for overdue detection
 }
@@ -107,9 +108,9 @@ func (r *ReportRepository) InsertStateLog(ctx context.Context, log *IssueStateLo
 	}
 
 	_, err := pool.Exec(ctx, `
-		INSERT INTO issue_state_log (issue_id, issue_summary, assignee, moved_by, from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, log.IssueID, log.IssueSummary, log.Assignee, log.MovedBy, log.FromState, log.ToState, log.Priority, log.TransitionedAt, durationHours, log.Comment)
+		INSERT INTO issue_state_log (issue_id, issue_summary, assignee, moved_by, from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment, issue_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, log.IssueID, log.IssueSummary, log.Assignee, log.MovedBy, log.FromState, log.ToState, log.Priority, log.TransitionedAt, durationHours, log.Comment, log.IssueType)
 	if err != nil {
 		return fmt.Errorf("failed to insert state log: %w", err)
 	}
@@ -152,9 +153,9 @@ func (r *ReportRepository) InsertStateLogIfNotExists(ctx context.Context, log *I
 	}
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO issue_state_log (issue_id, issue_summary, assignee, moved_by, from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, log.IssueID, log.IssueSummary, log.Assignee, log.MovedBy, log.FromState, log.ToState, log.Priority, log.TransitionedAt, durationHours, log.Comment)
+		INSERT INTO issue_state_log (issue_id, issue_summary, assignee, moved_by, from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment, issue_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, log.IssueID, log.IssueSummary, log.Assignee, log.MovedBy, log.FromState, log.ToState, log.Priority, log.TransitionedAt, durationHours, log.Comment, log.IssueType)
 	if err != nil {
 		return fmt.Errorf("failed to insert state log: %w", err)
 	}
@@ -163,7 +164,7 @@ func (r *ReportRepository) InsertStateLogIfNotExists(ctx context.Context, log *I
 
 // scanStateLog scans a row into IssueStateLog and computes MovedByMismatch
 // Column order must match all SELECT queries: id, issue_id, issue_summary, assignee, moved_by,
-// from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment
+// from_state, to_state, priority, transitioned_at, duration_in_prev_state_hours, comment, issue_type
 func scanStateLog(rows interface {
 	Scan(dest ...interface{}) error
 }) (IssueStateLog, error) {
@@ -172,7 +173,7 @@ func scanStateLog(rows interface {
 		&l.ID, &l.IssueID, &l.IssueSummary,
 		&l.Assignee, &l.MovedBy,
 		&l.FromState, &l.ToState, &l.Priority,
-		&l.TransitionedAt, &l.DurationInPrevStateHours, &l.Comment,
+		&l.TransitionedAt, &l.DurationInPrevStateHours, &l.Comment, &l.IssueType,
 	)
 	if err == nil && l.Assignee != "" && l.MovedBy != "" && l.Assignee != l.MovedBy {
 		l.MovedByMismatch = true
@@ -188,7 +189,7 @@ func (r *ReportRepository) GetStateLogForIssue(ctx context.Context, issueID stri
 		SELECT id, issue_id, issue_summary,
 		       COALESCE(assignee,''), COALESCE(moved_by,''),
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
-		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,''), COALESCE(issue_type,'')
 		FROM issue_state_log
 		WHERE issue_id = $1
 		ORDER BY transitioned_at ASC
@@ -229,7 +230,7 @@ func (r *ReportRepository) GetDoneIssues(ctx context.Context, date string, doneS
 		SELECT id, issue_id, issue_summary,
 		       COALESCE(assignee,''), COALESCE(moved_by,''),
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
-		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,''), COALESCE(issue_type,'')
 		FROM issue_state_log isl
 		WHERE LOWER(to_state) = ANY($2::text[])
 		  AND date(transitioned_at) = $1::date
@@ -274,7 +275,7 @@ func (r *ReportRepository) GetDoneIssuesForWeek(ctx context.Context, weekStart, 
 		SELECT id, issue_id, issue_summary,
 		       COALESCE(assignee,''), COALESCE(moved_by,''),
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
-		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,''), COALESCE(issue_type,'')
 		FROM issue_state_log isl
 		WHERE LOWER(to_state) = ANY($3::text[])
 		  AND date(transitioned_at) >= $1::date
@@ -305,7 +306,8 @@ func (r *ReportRepository) GetDoneIssuesForWeek(ctx context.Context, weekStart, 
 
 // GetHotfixIssues returns tickets that jumped directly from fromStates to toStates on a date.
 // fromStates defaults to ["backlog","in progress"], toStates to ["ready for stage","stage","ready for prod","prod"].
-func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string, fromStates, toStates []string) ([]IssueStateLog, error) {
+// hotfixTypeValues are optional issue_type values that also qualify as hotfixes (field-based classification).
+func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string, fromStates, toStates, hotfixTypeValues []string) ([]IssueStateLog, error) {
 	pool := GetPool()
 
 	if len(fromStates) == 0 {
@@ -322,18 +324,26 @@ func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string, fro
 	for i, s := range toStates {
 		lowerTo[i] = strings.ToLower(s)
 	}
+	lowerTypeVals := make([]string, len(hotfixTypeValues))
+	for i, s := range hotfixTypeValues {
+		lowerTypeVals[i] = strings.ToLower(s)
+	}
 
+	// Match by transition (from→to) OR by issue_type field value.
+	// When lowerTypeVals is empty, the ANY($4) clause never matches, preserving old behaviour.
 	rows, err := pool.Query(ctx, `
 		SELECT id, issue_id, issue_summary,
 		       COALESCE(assignee,''), COALESCE(moved_by,''),
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
-		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,''), COALESCE(issue_type,'')
 		FROM issue_state_log
-		WHERE LOWER(to_state) = ANY($2::text[])
-		  AND LOWER(from_state) = ANY($3::text[])
-		  AND date(transitioned_at) = $1::date
+		WHERE date(transitioned_at) = $1::date
+		  AND (
+		    (LOWER(to_state) = ANY($2::text[]) AND LOWER(from_state) = ANY($3::text[]))
+		    OR (array_length($4::text[], 1) > 0 AND LOWER(COALESCE(issue_type,'')) = ANY($4::text[]))
+		  )
 		ORDER BY transitioned_at DESC
-	`, date, lowerTo, lowerFrom)
+	`, date, lowerTo, lowerFrom, lowerTypeVals)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +362,8 @@ func (r *ReportRepository) GetHotfixIssues(ctx context.Context, date string, fro
 
 // GetHotfixIssuesForWeek returns hotfix tickets deployed to toStates during a week.
 // fromStates/toStates default to backlog/active → stage/prod if empty.
-func (r *ReportRepository) GetHotfixIssuesForWeek(ctx context.Context, weekStart, weekEnd string, fromStates, toStates []string) ([]IssueStateLog, error) {
+// hotfixTypeValues are optional issue_type values that also qualify as hotfixes.
+func (r *ReportRepository) GetHotfixIssuesForWeek(ctx context.Context, weekStart, weekEnd string, fromStates, toStates, hotfixTypeValues []string) ([]IssueStateLog, error) {
 	pool := GetPool()
 
 	if len(fromStates) == 0 {
@@ -369,19 +380,25 @@ func (r *ReportRepository) GetHotfixIssuesForWeek(ctx context.Context, weekStart
 	for i, s := range toStates {
 		lowerTo[i] = strings.ToLower(s)
 	}
+	lowerTypeVals := make([]string, len(hotfixTypeValues))
+	for i, s := range hotfixTypeValues {
+		lowerTypeVals[i] = strings.ToLower(s)
+	}
 
 	rows, err := pool.Query(ctx, `
 		SELECT id, issue_id, issue_summary,
 		       COALESCE(assignee,''), COALESCE(moved_by,''),
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
-		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,''), COALESCE(issue_type,'')
 		FROM issue_state_log
-		WHERE LOWER(to_state) = ANY($3::text[])
-		  AND LOWER(from_state) = ANY($4::text[])
-		  AND date(transitioned_at) >= $1::date
+		WHERE date(transitioned_at) >= $1::date
 		  AND date(transitioned_at) <= $2::date
+		  AND (
+		    (LOWER(to_state) = ANY($3::text[]) AND LOWER(from_state) = ANY($4::text[]))
+		    OR (array_length($5::text[], 1) > 0 AND LOWER(COALESCE(issue_type,'')) = ANY($5::text[]))
+		  )
 		ORDER BY assignee ASC, transitioned_at DESC
-	`, weekStart, weekEnd, lowerTo, lowerFrom)
+	`, weekStart, weekEnd, lowerTo, lowerFrom, lowerTypeVals)
 	if err != nil {
 		return nil, err
 	}
@@ -510,7 +527,7 @@ func (r *ReportRepository) GetTimeTracking(ctx context.Context, params TimeTrack
 					THEN EXTRACT(EPOCH FROM (NOW() - transitioned_at)) / 3600.0
 				ELSE duration_in_prev_state_hours
 			END AS duration_in_prev_state_hours,
-			COALESCE(comment,'') AS comment
+			COALESCE(comment,'') AS comment, COALESCE(issue_type,'') AS issue_type
 		FROM issue_state_log
 		%s
 		ORDER BY
@@ -585,7 +602,7 @@ func (r *ReportRepository) GetInProgressOlderThan(ctx context.Context, hours flo
 		       id, issue_id, issue_summary,
 		       COALESCE(assignee,''), COALESCE(moved_by,''),
 		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
-		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,'')
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,''), COALESCE(issue_type,'')
 		FROM issue_state_log
 		WHERE LOWER(to_state) = 'in progress'
 		  AND issue_id NOT IN (
@@ -780,7 +797,7 @@ func (r *ReportRepository) GetIssueTimelines(ctx context.Context, pinnedIDs []st
 			COALESCE(priority,'') AS priority,
 			transitioned_at,
 			duration_in_prev_state_hours,
-			COALESCE(comment,'') AS comment
+			COALESCE(comment,'') AS comment, COALESCE(issue_type,'') AS issue_type
 		FROM issue_state_log
 		WHERE issue_id IN (
 			SELECT DISTINCT issue_id FROM issue_state_log

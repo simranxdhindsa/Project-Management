@@ -35,6 +35,14 @@ type HotfixRules struct {
 	// ticket jumps from backlog/active role → deployed role (skipping dev_done/verified)
 	FromStates []string `json:"from_states"`
 	ToStates   []string `json:"to_states"`
+
+	// Field-based classification (preferred over transition-based when configured).
+	// TypeFieldName is the YouTrack custom field name (e.g. "Type") whose enum values
+	// identify hotfixes and regressions. HotfixValues / RegressionValues list which
+	// values in that field mean "this ticket is a hotfix / regression".
+	TypeFieldName    string   `json:"type_field_name"`    // e.g. "Type"
+	HotfixValues     []string `json:"hotfix_values"`      // e.g. ["Hotfix"]
+	RegressionValues []string `json:"regression_values"`  // e.g. ["Regression"]
 }
 
 // ReportConfig defines which data goes into generated reports

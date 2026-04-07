@@ -56,32 +56,6 @@ function isOverdue(issue: YouTrackIssue): boolean {
   return !isDone && (p.includes('critical') || p.includes('show-stopper') || p.includes('blocker'))
 }
 
-// Canonical YouTrack workflow column order
-const YT_COLUMN_ORDER: string[] = [
-  'Backlog',
-  'In Progress',
-  'DEV',
-  'Ready for Stage',
-  'STAGE',
-  'Ready for PROD',
-  'PROD',
-  'Mobile DONE',
-  'Done',
-  'Findings',
-  'Blocked',
-  'Closed',
-]
-
-function sortColumns(cols: string[]): string[] {
-  return [...cols].sort((a, b) => {
-    const ai = YT_COLUMN_ORDER.indexOf(a)
-    const bi = YT_COLUMN_ORDER.indexOf(b)
-    if (ai === -1 && bi === -1) return a.localeCompare(b)
-    if (ai === -1) return 1
-    if (bi === -1) return -1
-    return ai - bi
-  })
-}
 
 type SortKey = 'newest' | 'priority' | 'alpha'
 
@@ -146,10 +120,25 @@ export function BoardPage() {
     else setSyncing(true)
     setError(null)
     try {
-      const statesRes = await getPMStates()
-      const stateObjs = (statesRes.data as { name: string }[]) || []
-      const cols = stateObjs.map(s => s.name)
-      const sortedCols = getActiveSource() === 'asana' ? cols : sortColumns(cols)
+      let sortedCols: string[]
+      if (getActiveSource() === 'youtrack') {
+        try {
+          const boardRes = await api.getYouTrackDefaultBoardColumns()
+          const boardCols = (boardRes as any).data as import('../services/api').YouTrackColumn[] || []
+          const seen = new Set<string>()
+          const orderedCols: string[] = []
+          boardCols.forEach(col => col.fieldValues.forEach(v => {
+            if (!seen.has(v)) { seen.add(v); orderedCols.push(v) }
+          }))
+          sortedCols = orderedCols.length > 0 ? orderedCols : []
+        } catch {
+          sortedCols = []
+        }
+      } else {
+        const statesRes = await getPMStates()
+        const stateObjs = (statesRes.data as { name: string }[]) || []
+        sortedCols = stateObjs.map(s => s.name)
+      }
       setColumns(sortedCols)
 
       if (getActiveSource() === 'youtrack') {

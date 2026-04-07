@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
 import api from '../services/api'
-import type { IssueTimeline, IssueStint, YouTrackSprint } from '../services/api'
+import type { IssueTimeline, IssueStint, YouTrackSprint, SprintBoardColumn, SprintBoardIssue } from '../services/api'
 import {
   pmAssistantQuery, getCarryover, saveCarryoverPlan,
   getAssigneeStats, getAvatarMap,
@@ -531,7 +531,10 @@ function formatWeekLabel(mondayStr: string): string {
   return `${mo} – ${su}`
 }
 
-function DailyReportTab({ sprintId, sprintName }: { sprintId?: string; sprintName?: string }) {
+function DailyReportTab({ sprintId, sprintName }: {
+  sprintId?: string
+  sprintName?: string
+}) {
   const [mode, setMode] = useState<'daily' | 'weekly'>('daily')
   const [reportScope, setReportScope] = useState<'full' | 'summary'>('full')
   const [date, setDate] = useState(todayStr())
@@ -552,6 +555,9 @@ function DailyReportTab({ sprintId, sprintName }: { sprintId?: string; sprintNam
   const [cfgOpenStates, setCfgOpenStates] = useState<string[]>([])
   const [wfConfig, setWfConfig] = useState<{ priority_tags?: { label: string; color: string }[]; report_config?: { open_states?: string[]; sections?: string[]; priority_filters?: string[] } } | null>(null)
   const [ytStatesList, setYtStatesList] = useState<string[]>([])
+  const [ytPrioritiesList, setYtPrioritiesList] = useState<{ name: string; background?: string; foreground?: string }[]>([])
+  const [cfgSprintId, setCfgSprintId] = useState<string | undefined>(sprintId)
+  const [cfgSprintName, setCfgSprintName] = useState<string | undefined>(sprintName)
   const [cfgSaveState, setCfgSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   // snapshot of what's currently saved in DB — used to detect unsaved changes
   const [savedSnapshot, setSavedSnapshot] = useState<{ priorities: string[]; sections: string[]; openStates: string[] } | null>(null)
@@ -571,14 +577,50 @@ function DailyReportTab({ sprintId, sprintName }: { sprintId?: string; sprintNam
         setSavedSnapshot({ priorities: p, sections: s, openStates: o })
       }
     }).catch(() => {})
-    // States dropdown (for open_states config) — use source-aware getPMStates
-    import('../services/pmDataService').then(({ getPMStates }) => {
-      getPMStates().then(res => {
-        if ((res as any).success && (res as any).data)
-          setYtStatesList(((res as any).data as Array<{ name: string }>).map((s: { name: string }) => s.name))
+    // Priorities
+    import('../services/pmDataService').then(({ getPMPriorities }) => {
+      getPMPriorities().then(res => {
+        if ((res as any).success && (res as any).data) {
+          const data = (res as any).data as Array<{ name: string; background?: string; foreground?: string }>
+          if (Array.isArray(data) && data.length > 0)
+            setYtPrioritiesList(data.map(p => ({ name: p.name, background: p.background, foreground: p.foreground })))
+        }
       }).catch(() => {})
     })
   }, [])
+
+  // Sync page-level sprint prop into cfg state
+  useEffect(() => {
+    setCfgSprintId(sprintId)
+    setCfgSprintName(sprintName)
+  }, [sprintId, sprintName])
+
+  // Load Open States dynamically — board columns when sprint selected, all states otherwise
+  useEffect(() => {
+    setCfgOpenStates([])
+    if (cfgSprintId) {
+      import('../services/pmDataService').then(({ getPMDefaultBoardColumns }) => {
+        getPMDefaultBoardColumns().then(res => {
+          if ((res as any).success && (res as any).data) {
+            const cols = (res as any).data as Array<{ name: string; fieldValues: string[] }>
+            const seen = new Set<string>()
+            const states: string[] = []
+            cols.forEach(col => col.fieldValues.forEach(v => {
+              if (!seen.has(v)) { seen.add(v); states.push(v) }
+            }))
+            setYtStatesList(states)
+          }
+        }).catch(() => {})
+      })
+    } else {
+      import('../services/pmDataService').then(({ getPMStates }) => {
+        getPMStates().then(res => {
+          if ((res as any).success && (res as any).data)
+            setYtStatesList(((res as any).data as Array<{ name: string }>).map((s: { name: string }) => s.name))
+        }).catch(() => {})
+      })
+    }
+  }, [cfgSprintId])
 
   // Calendar dropdown state
   const [calOpen, setCalOpen] = useState(false)
@@ -672,8 +714,8 @@ function DailyReportTab({ sprintId, sprintName }: { sprintId?: string; sprintNam
     }
     try {
       const res = mode === 'daily'
-        ? await generatePMReport(date, reportScope, overrides, sprintId, sprintName)
-        : await generateWeeklyPMReport(weekStart as any, reportScope, sprintId, sprintName)
+        ? await generatePMReport(date, reportScope, overrides, cfgSprintId, cfgSprintName)
+        : await generateWeeklyPMReport(weekStart as any, reportScope, overrides, cfgSprintId, cfgSprintName)
       setReport((res as any).data)
       mode === 'daily' ? fetchHistory() : fetchWeeklyHistory()
     } catch (err) {
@@ -867,7 +909,13 @@ function DailyReportTab({ sprintId, sprintName }: { sprintId?: string; sprintNam
             {/* Config + Generate panel */}
             {configOpen && (() => {
               const allSections = ['done','hotfixes','open','blocked','overdue']
-              const basePriorities = (wfConfig?.priority_tags ?? [{label:'P0',color:'#ef4444'},{label:'P1',color:'#f97316'},{label:'P2',color:'#eab308'},{label:'P3',color:'#6366f1'}])
+              // Build priority list: use YouTrack colors if available, fall back to workflow config
+              const wfColorMap: Record<string, string> = {}
+              ;(wfConfig?.priority_tags ?? []).forEach(t => { wfColorMap[t.label] = t.color })
+              const fallbackColors: Record<string, string> = { P0:'#ef4444', P1:'#f97316', P2:'#eab308', P3:'#6366f1', A0:'#8b5cf6', A1:'#06b6d4' }
+              const basePriorities: { label: string; color: string }[] = ytPrioritiesList.length > 0
+                ? ytPrioritiesList.map(p => ({ label: p.name, color: p.background ?? wfColorMap[p.name] ?? fallbackColors[p.name] ?? '#94a3b8' }))
+                : (wfConfig?.priority_tags ?? [{label:'P0',color:'#ef4444'},{label:'P1',color:'#f97316'},{label:'P2',color:'#eab308'},{label:'P3',color:'#6366f1'}])
               // Always include "Other" for unassigned issues
               const allPriorities = [...basePriorities, { label: 'Other', color: '#94a3b8' }]
               const allPriorityLabels = allPriorities.map(t => t.label)
@@ -928,7 +976,7 @@ function DailyReportTab({ sprintId, sprintName }: { sprintId?: string; sprintNam
                       return availableStates.length > 0 ? (
                         <div className="pm-config-card">
                           <div className="pm-config-card-title">Open States</div>
-                          <div className="pm-config-chips">
+                          <div className="pm-config-chips pm-config-chips--scroll">
                             {availableStates.map(s => (
                               <button key={s} className={`cfg-chip${cfgOpenStates.includes(s) ? ' on' : ''}`}
                                 onClick={() => setCfgOpenStates(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])}>
@@ -1343,859 +1391,221 @@ function stintLabel(stint: IssueStint): string {
   return `→ ${stint.exited_to}`
 }
 
-// ─── Tab: Tracking (Logbook + Summary) ───────────────────────────────────────
+// ─── Tab: Tracking (Sprint Column-Section View) ──────────────────────────────
 
-type SortKey = 'time_asc' | 'time_desc' | 'priority' | 'entered_at' | 'status'
+function fmtHoursCompact(h: number): string {
+  if (h <= 0) return '0h'
+  const d = Math.floor(h / 24)
+  const hrs = Math.floor(h % 24)
+  if (d > 0) return `${d}d ${hrs}h`
+  return `${hrs}h`
+}
+
+function getInitialsFromName(name: string): string {
+  return (name || '?').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+}
+
+function ttPriorityClass(p: string): string {
+  const s = (p || '').toLowerCase()
+  if (s === 'p0' || s.includes('critical') || s.includes('show-stopper')) return 'tt-pri tt-pri-p0'
+  if (s === 'p1' || s.includes('major')) return 'tt-pri tt-pri-p1'
+  if (s === 'p2' || s.includes('normal') || s.includes('medium')) return 'tt-pri tt-pri-p2'
+  return 'tt-pri tt-pri-p3'
+}
 
 function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<string>; sprintId?: string }) {
-  const isAsana = getActiveSource() === 'asana'
-  const [mode, setMode] = useState<'logbook' | 'summary'>('logbook')
-
-  // ── Logbook state ─────────────────────────────────────────────────────────
-  const [selectedWeek, setSelectedWeek] = useState<Date>(() => getMondayOf(new Date()))
-  const [noWeekFilter, setNoWeekFilter] = useState(false)
-  const [rows, setRows] = useState<TimeTrackingRow[]>([])
+  const [boardColumns, setBoardColumns] = useState<SprintBoardColumn[]>([])
   const [loading, setLoading] = useState(false)
-  const [backfillMsg, setBackfillMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
-  const [resetting, setResetting] = useState(false)
-  const [resetConfirm, setResetConfirm] = useState(false)
+  const [statusMsg, setStatusMsg] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [reconciling, setReconciling] = useState(false)
-  const [togglingPin, setTogglingPin] = useState<string | null>(null)
-  const [sortKey, setSortKey] = useState<SortKey>('entered_at')
-  const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
-  const sortDropdownRef = useRef<HTMLButtonElement>(null)
-  const [sortDropdownRect, setSortDropdownRect] = useState<DOMRect | null>(null)
-  const [filterMismatch, setFilterMismatch] = useState(false)
-
-  // ── Summary state ─────────────────────────────────────────────────────────
-  const [timelines, setTimelines] = useState<IssueTimeline[]>([])
-  const [tlLoading, setTlLoading] = useState(false)
-  const [tlError, setTlError] = useState<string | null>(null)
-  const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
-  const [dismissing, setDismissing] = useState<string | null>(null)
-
-  // ── Workflow config (for column role filter) ──────────────────────────────
-  const { config: wfConfig, getColumnHierarchy } = useWorkflowConfig()
-
-  // ── Shared filter state ───────────────────────────────────────────────────
-  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-  const [filterOverdue, setFilterOverdue] = useState(false)
-  const [filterMovedBack, setFilterMovedBack] = useState(false)
-  const [filterLive, setFilterLive] = useState(false)
-  const [filterDelayed, setFilterDelayed] = useState(false)
-  const [filterPinned, setFilterPinned] = useState(false)
   const [filterAssignee, setFilterAssignee] = useState('')
-  const [filterPriorities, setFilterPriorities] = useState<string[]>([])
-  const [filterColumnRoles, setFilterColumnRoles] = useState<string[]>(() =>
-    wfConfig?.report_config?.tracked_column_roles ?? []
-  )
-  const [searchIssue, setSearchIssue] = useState('')
-  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false)
-  const assigneeDropdownRef = useRef<HTMLButtonElement>(null)
-  const [assigneeDropdownRect, setAssigneeDropdownRect] = useState<DOMRect | null>(null)
+  const [assigneeOpen, setAssigneeOpen] = useState(false)
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
+  const assigneeRef = useRef<HTMLDivElement>(null)
 
   // ── Data fetching ─────────────────────────────────────────────────────────
-  const fetchRows = useCallback(async (week: Date, skipWeek: boolean) => {
+
+  // ── Data fetching ─────────────────────────────────────────────────────────
+  const fetchBoardStatus = useCallback(async () => {
+    if (!sprintId) { setBoardColumns([]); return }
     setLoading(true)
     setError(null)
     try {
-      const params: { week?: string; sprint_id?: string } = {}
-      if (!skipWeek) params.week = toISODate(week)
-      if (sprintId) params.sprint_id = sprintId
-      const res = await getTimeTracking(params)
-      setRows((res as any).data || [])
+      const res = await api.getSprintBoardStatus({ sprint_id: sprintId })
+      setBoardColumns((res as any).data || [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load time tracking')
+      setError(err instanceof Error ? err.message : 'Failed to load sprint board status')
     } finally {
       setLoading(false)
     }
   }, [sprintId])
 
-  const fetchTimelines = useCallback(async () => {
-    setTlLoading(true)
-    setTlError(null)
-    try {
-      const res = await getIssueTimelines()
-      setTimelines((res as any).data || [])
-    } catch (err) {
-      setTlError(err instanceof Error ? err.message : 'Failed to load timelines')
-    } finally {
-      setTlLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { fetchRows(selectedWeek, noWeekFilter) }, [fetchRows, selectedWeek, noWeekFilter])
-  useEffect(() => { fetchTimelines() }, [fetchTimelines])
-  useEffect(() => {
-    const id = setInterval(() => { fetchTimelines() }, 2 * 60 * 1000)
-    return () => clearInterval(id)
-  }, [fetchTimelines])
+  useEffect(() => { fetchBoardStatus() }, [fetchBoardStatus])
   useEffect(() => { getAvatarMap().then(setAvatarMap) }, [])
-  // Sync column role filter from workflow config when config loads
-  useEffect(() => {
-    const configured = wfConfig?.report_config?.tracked_column_roles
-    if (configured && configured.length > 0) setFilterColumnRoles(configured)
-  }, [wfConfig])
 
-  // ── Close dropdowns on outside click ─────────────────────────────────────
+  // ── Close assignee dropdown on outside click ──────────────────────────────
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (assigneeDropdownRef.current && !assigneeDropdownRef.current.contains(e.target as Node))
-        setAssigneeDropdownOpen(false)
-      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node))
-        setSortDropdownOpen(false)
+      if (assigneeRef.current && !assigneeRef.current.contains(e.target as Node))
+        setAssigneeOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // ── Logbook handlers ──────────────────────────────────────────────────────
-  const changeWeek = (delta: number) => {
-    setSelectedWeek(w => { const next = new Date(w); next.setDate(next.getDate() + delta * 7); return next })
-    setNoWeekFilter(false)
-  }
-  const goThisWeek = () => { setSelectedWeek(getMondayOf(new Date())); setNoWeekFilter(false) }
-  const toggleRow = (id: string) => {
-    setExpandedRows(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
-  }
-  const togglePin = async (row: TimeTrackingRow) => {
-    setTogglingPin(row.issue_id)
-    try {
-      if (row.pinned) await api.unpinIssue(row.issue_id)
-      else await api.pinIssue(row.issue_id)
-      await fetchRows(selectedWeek, noWeekFilter)
-    } catch { /* ignore */ } finally { setTogglingPin(null) }
-  }
-  const runReset = async () => {
-    if (!resetConfirm) { setResetConfirm(true); setTimeout(() => setResetConfirm(false), 5000); return }
-    setResetConfirm(false); setResetting(true); setBackfillMsg(null)
-    try {
-      const res = await api.resetStateLog()
-      setBackfillMsg(`State log cleared: ${res.data?.deleted ?? 0} rows deleted.`)
-      setRows([])
-    } catch (err) { setBackfillMsg(`Reset failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
-    } finally { setResetting(false) }
-  }
+  // ── Action handlers ───────────────────────────────────────────────────────
   const runReconcile = async () => {
-    setReconciling(true); setBackfillMsg(null)
+    setReconciling(true); setStatusMsg(null)
     try {
       const res = await api.reconcileStateLog()
       const d = res.data
-      setBackfillMsg(`Reconcile: ${d?.reconciled ?? 0} exit rows inserted, ${d?.skipped ?? 0} up-to-date.`)
-      fetchRows(selectedWeek, noWeekFilter)
-    } catch (err) { setBackfillMsg(`Reconcile failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      setStatusMsg(`Reconcile: ${d?.reconciled ?? 0} exit rows inserted, ${d?.skipped ?? 0} up-to-date.`)
+    } catch (err) { setStatusMsg(`Reconcile failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally { setReconciling(false) }
   }
   const runImportHistory = async () => {
-    setImporting(true); setBackfillMsg(null)
+    setImporting(true); setStatusMsg(null)
     try {
       const res = await api.importHistory()
       const d = res.data
-      setBackfillMsg(`Sync done: ${d?.inserted ?? 0} transitions inserted. ${d?.skipped ?? 0} already existed.`)
-      fetchRows(selectedWeek, noWeekFilter)
-    } catch (err) { setBackfillMsg(`Import failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      setStatusMsg(`Sync done: ${d?.inserted ?? 0} transitions inserted. ${d?.skipped ?? 0} already existed.`)
+      fetchBoardStatus()
+    } catch (err) { setStatusMsg(`Import failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally { setImporting(false) }
   }
 
-  // ── Summary handlers ──────────────────────────────────────────────────────
-  const toggleExpand = (issueID: string) => {
-    setExpandedIssues(prev => { const next = new Set(prev); next.has(issueID) ? next.delete(issueID) : next.add(issueID); return next })
-  }
-  const handleDismiss = async (issueID: string) => {
-    setDismissing(issueID)
-    try {
-      await api.dismissAlert(issueID)
-      setTimelines(prev => prev.map(t => t.issue_id === issueID ? { ...t, alert_dismissed: true } : t))
-    } finally { setDismissing(null) }
-  }
-  const handleUndismiss = async (issueID: string) => {
-    setDismissing(issueID)
-    try {
-      await api.undismissAlert(issueID)
-      setTimelines(prev => prev.map(t => t.issue_id === issueID ? { ...t, alert_dismissed: false } : t))
-    } finally { setDismissing(null) }
-  }
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const allAssignees = useMemo(() => {
+    const s = new Set<string>()
+    boardColumns.forEach(col => col.issues.forEach(i => { if (i.assignee) s.add(i.assignee) }))
+    return Array.from(s).sort()
+  }, [boardColumns])
 
-  // ── Logbook derived values ────────────────────────────────────────────────
-  const getStateRole = (stateName: string): string | undefined => {
-    const hierarchy = getColumnHierarchy()
-    const col = hierarchy.find(c =>
-      c.state.toLowerCase() === stateName.toLowerCase() ||
-      (c.aliases ?? []).some(a => a.toLowerCase() === stateName.toLowerCase())
-    )
-    return col?.role
-  }
-
-  let displayed = rows
-  if (filterColumnRoles.length > 0) displayed = displayed.filter(r => {
-    const role = getStateRole(r.to_state)
-    return role ? filterColumnRoles.includes(role) : true
-  })
-  if (filterOverdue)   displayed = displayed.filter(r => r.overdue)
-  if (filterMismatch)  displayed = displayed.filter(r => r.moved_by_mismatch)
-  if (filterMovedBack) displayed = displayed.filter(r => isMovedBack(r.from_state, r.to_state))
-  if (filterLive)      displayed = displayed.filter(r => r.duration_in_prev_state_hours === null)
-  if (filterDelayed)   displayed = displayed.filter(r => r.duration_in_prev_state_hours !== null && r.duration_in_prev_state_hours > r.threshold_hours)
-  if (filterPinned)    displayed = displayed.filter(r => r.pinned)
-  if (filterAssignee)  displayed = displayed.filter(r => r.assignee.toLowerCase() === filterAssignee.toLowerCase())
-  if (filterPriorities.length > 0) displayed = displayed.filter(r => filterPriorities.includes(r.priority))
-  if (searchIssue) {
-    const q = searchIssue.toLowerCase()
-    displayed = displayed.filter(r => r.issue_id.toLowerCase().includes(q) || r.issue_summary.toLowerCase().includes(q))
-  }
-  displayed = [...displayed].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-    switch (sortKey) {
-      case 'time_asc':  return (a.duration_in_prev_state_hours ?? 0) - (b.duration_in_prev_state_hours ?? 0)
-      case 'time_desc': return (b.duration_in_prev_state_hours ?? 0) - (a.duration_in_prev_state_hours ?? 0)
-      case 'priority': { const O: Record<string,number> = {P0:0,P1:1,P2:2,P3:3,Other:4}; return (O[a.priority]??4)-(O[b.priority]??4) }
-      case 'status': {
-        const s = (r: TimeTrackingRow) => r.overdue ? 0 : r.duration_in_prev_state_hours === null ? 1 : isMovedBack(r.from_state, r.to_state) ? 2 : 3
-        return s(a) - s(b)
-      }
-      default: return new Date(b.transitioned_at).getTime() - new Date(a.transitioned_at).getTime()
-    }
-  })
-  const groupedIssues: { rep: TimeTrackingRow; all: TimeTrackingRow[] }[] = []
-  const seenIssues = new Map<string, number>()
-  for (const row of displayed) {
-    const idx = seenIssues.get(row.issue_id)
-    if (idx === undefined) {
-      seenIssues.set(row.issue_id, groupedIssues.length)
-      groupedIssues.push({ rep: row, all: [row] })
-    } else {
-      groupedIssues[idx].all.push(row)
-      const cur = groupedIssues[idx].rep
-      const cs = cur.overdue ? 0 : cur.duration_in_prev_state_hours === null ? 1 : isMovedBack(cur.from_state, cur.to_state) ? 2 : 3
-      const ns = row.overdue ? 0 : row.duration_in_prev_state_hours === null ? 1 : isMovedBack(row.from_state, row.to_state) ? 2 : 3
-      if (ns < cs) groupedIssues[idx].rep = row
-    }
-  }
-  const overdueCount   = rows.filter(r => r.overdue).length
-  const mismatchCount  = rows.filter(r => r.moved_by_mismatch).length
-  const lbMovedBack    = rows.filter(r => isMovedBack(r.from_state, r.to_state)).length
-  const pinnedCount    = rows.filter(r => r.pinned).length
-  const liveCount      = rows.filter(r => r.duration_in_prev_state_hours === null).length
-  const delayedCount   = rows.filter(r => r.duration_in_prev_state_hours !== null && r.duration_in_prev_state_hours > r.threshold_hours).length
-
-  // ── Summary derived values ────────────────────────────────────────────────
-  const movedBackAlerts = timelines.filter(t => t.is_live && t.moved_back_count > 0 && !t.alert_dismissed)
-  let tlDisplayed = timelines
-  if (searchIssue) {
-    const q = searchIssue.toLowerCase()
-    tlDisplayed = tlDisplayed.filter(t => t.issue_id.toLowerCase().includes(q) || t.issue_summary.toLowerCase().includes(q))
-  }
-  if (filterLive)       tlDisplayed = tlDisplayed.filter(t => t.is_live)
-  if (filterOverdue)    tlDisplayed = tlDisplayed.filter(t => t.is_overdue)
-  if (filterMovedBack)  tlDisplayed = tlDisplayed.filter(t => t.moved_back_count > 0)
-  if (filterDelayed)    tlDisplayed = tlDisplayed.filter(t => t.total_hours > t.threshold_hours)
-  if (filterPinned)     tlDisplayed = tlDisplayed.filter(t => t.pinned)
-  if (filterAssignee)   tlDisplayed = tlDisplayed.filter(t => t.assignee?.toLowerCase() === filterAssignee.toLowerCase())
-  if (filterPriorities.length > 0) tlDisplayed = tlDisplayed.filter(t => filterPriorities.includes(t.priority))
-  const tlOverdueCount   = timelines.filter(t => t.is_overdue).length
-  const tlMovedBackCount = timelines.filter(t => t.moved_back_count > 0).length
-  const tlLiveCount      = timelines.filter(t => t.is_live).length
-  const tlDelayedCount   = timelines.filter(t => t.total_hours > t.threshold_hours).length
-  const tlPinnedCount    = timelines.filter(t => t.pinned).length
-
-  // ── Shared/active counts for filter bar ──────────────────────────────────
-  const activeOverdueCount   = mode === 'logbook' ? overdueCount   : tlOverdueCount
-  const activeLiveCount      = mode === 'logbook' ? liveCount      : tlLiveCount
-  const activeDelayedCount   = mode === 'logbook' ? delayedCount   : tlDelayedCount
-  const activeMovedBackCount = mode === 'logbook' ? lbMovedBack    : tlMovedBackCount
-  const activePinnedCount    = mode === 'logbook' ? pinnedCount    : tlPinnedCount
-  const allAssignees = Array.from(new Set(
-    mode === 'logbook'
-      ? rows.map(r => r.assignee).filter(Boolean)
-      : timelines.map(t => t.assignee).filter(Boolean)
-  )).sort()
-  const activeFilterCount = [
-    filterOverdue, filterMovedBack, filterLive, filterDelayed, filterPinned,
-    filterAssignee !== '', filterPriorities.length > 0, filterColumnRoles.length > 0,
-    ...(mode === 'logbook' ? [filterMismatch] : []),
-  ].filter(Boolean).length
+  const filteredColumns = useMemo(() => {
+    if (!filterAssignee) return boardColumns
+    return boardColumns
+      .map(col => ({ ...col, issues: col.issues.filter(i => i.assignee === filterAssignee) }))
+      .filter(col => col.issues.length > 0)
+  }, [boardColumns, filterAssignee])
 
   return (
     <div className="pm-tab-content pm-tracking-tab">
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="pm-tab-header">
-        <h3 className="pm-section-title"><Activity size={18} /> Tracking</h3>
+      {/* ── Header ── */}
+      <div className="pm-tracking-header">
+        <h3 className="pm-section-title"><Activity size={16} /> Tracking</h3>
         <div className="pm-tracking-controls">
-          {mode === 'logbook' && (
-            <>
-              <button
-                className={`btn-sm ${resetConfirm ? 'btn-danger-active' : 'btn-secondary'}`}
-                onClick={runReset}
-                disabled={resetting || importing || loading}
-                title={resetConfirm ? 'Click again to confirm' : 'Clear all rows'}
-              >
-                {resetting ? <Loader2 size={14} className="animate-spin" /> : <AlertTriangle size={14} />}
-                {resetting ? 'Clearing…' : resetConfirm ? 'Confirm?' : 'Clear'}
+          {/* Assignee filter */}
+          {allAssignees.length > 0 && (
+            <div className="pm-custom-dropdown" ref={assigneeRef}>
+              <button className="pm-custom-dropdown-trigger" onClick={() => setAssigneeOpen(o => !o)}>
+                <span>{filterAssignee || 'All Assignees'}</span>
+                <ChevronDown size={11} className={`dropdown-chevron ${assigneeOpen ? 'open' : ''}`} />
               </button>
-              <button className="btn-secondary btn-sm" onClick={runReconcile} disabled={reconciling || importing || loading}
-                title="Reconcile: close any In Progress entries whose ticket has since moved">
-                {reconciling ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                {reconciling ? 'Reconciling…' : 'Reconcile'}
-              </button>
-              <button className="btn-primary btn-sm" onClick={runImportHistory} disabled={importing || resetting || loading}>
-                {importing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                {importing ? 'Syncing…' : 'Sync History'}
-              </button>
-              <button className="btn-secondary btn-sm" onClick={() => fetchRows(selectedWeek, noWeekFilter)} disabled={loading || importing}>
-                {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              </button>
-            </>
-          )}
-          {mode === 'summary' && (
-            <button className="btn-secondary btn-sm" onClick={fetchTimelines} disabled={tlLoading}>
-              {tlLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              Refresh
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Mode toggle ────────────────────────────────────────────────────── */}
-      <div className="tracking-mode-toggle">
-        <button className={mode === 'logbook' ? 'active' : ''} onClick={() => setMode('logbook')}>
-          <RotateCcw size={13} /> Logbook
-        </button>
-        <button className={mode === 'summary' ? 'active' : ''} onClick={() => setMode('summary')}>
-          <Activity size={13} /> Summary
-        </button>
-      </div>
-
-      {(error || tlError || backfillMsg) && (
-        <>
-          {error && <div className="pm-report-error"><AlertTriangle size={16} />{error}</div>}
-          {tlError && <div className="pm-report-error"><AlertTriangle size={16} />{tlError}</div>}
-          {backfillMsg && (
-            <div className={`pm-backfill-msg ${backfillMsg.includes('failed') ? 'error' : 'success'}`}>
-              {backfillMsg}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* ── Week navigator (Logbook only) ───────────────────────────────────── */}
-      {mode === 'logbook' && (
-        <div className="pm-week-nav glass-card">
-          <button className="btn-icon" onClick={() => changeWeek(-1)} title="Previous week"><ChevronLeft size={16} /></button>
-          <div className="week-label">
-            {noWeekFilter
-              ? <span className="week-all">All Time</span>
-              : <><Calendar size={14} /><span>{formatWeekRange(selectedWeek)}</span></>
-            }
-          </div>
-          <button className="btn-icon" onClick={() => changeWeek(1)} title="Next week"><ChevronRight size={16} /></button>
-          <button className={`btn-sm ${noWeekFilter ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setNoWeekFilter(f => !f)}>
-            {noWeekFilter ? 'By Week' : 'All Time'}
-          </button>
-          <button className="btn-sm btn-secondary" onClick={goThisWeek} disabled={noWeekFilter}>This Week</button>
-          {pinnedCount > 0 && <span className="pinned-count-badge"><Pin size={12} /> {pinnedCount} pinned</span>}
-        </div>
-      )}
-
-      {/* ── Moved-back alerts (Summary only) ───────────────────────────────── */}
-      {mode === 'summary' && movedBackAlerts.length > 0 && (
-        <div className="tl-alert-section">
-          <div className="tl-alert-header">
-            <TriangleAlert size={16} />
-            <span>{movedBackAlerts.length} ticket{movedBackAlerts.length > 1 ? 's' : ''} moved back and still In Progress</span>
-          </div>
-          {movedBackAlerts.map(t => (
-            <div key={t.issue_id} className="tl-alert-card">
-              <div className="tl-alert-card-body">
-                <span className="tl-alert-issue-id">{t.issue_id}</span>
-                <span className="tl-alert-summary">{t.issue_summary}</span>
-                {t.assignee && (
-                  <span className="tl-alert-assignee">
-                    {avatarMap[t.assignee]
-                      ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" />
-                      : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>}
-                    {t.assignee.split(' ')[0]}
-                  </span>
-                )}
-                <span className="tl-alert-meta">
-                  Moved back {t.moved_back_count}× · {formatHoursDetailed(t.total_hours)} total
-                  {t.stints.filter(s => s.moved_back).slice(-1).map(s => s.comment).filter(Boolean).map(c => (
-                    <span key={c} className="tl-alert-reason"> · "{c}"</span>
+              {assigneeOpen && (
+                <div className="pm-custom-dropdown-menu">
+                  <button className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`}
+                    onClick={() => { setFilterAssignee(''); setAssigneeOpen(false) }}>All Assignees</button>
+                  {allAssignees.map(a => (
+                    <button key={a} className={`pm-dropdown-item ${filterAssignee === a ? 'active' : ''}`}
+                      onClick={() => { setFilterAssignee(a); setAssigneeOpen(false) }}>{a}</button>
                   ))}
-                </span>
-              </div>
-              <div className="tl-alert-actions">
-                <button className="btn-sm btn-primary" onClick={() => toggleExpand(t.issue_id)} title="See full timeline">View Timeline</button>
-                <button className="btn-sm btn-secondary" onClick={() => handleDismiss(t.issue_id)} disabled={dismissing === t.issue_id} title="Dismiss alert">
-                  {dismissing === t.issue_id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
-                  Dismiss
-                </button>
-              </div>
+                </div>
+              )}
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── Shared filter bar ──────────────────────────────────────────────── */}
-      <div className="pm-filter-bar">
-        <div className="pm-search-box">
-          <Search size={13} />
-          <input
-            type="text"
-            placeholder="Search issue…"
-            value={searchIssue}
-            onChange={e => setSearchIssue(e.target.value)}
-          />
-        </div>
-
-        <div className="pm-custom-dropdown">
-          <button ref={assigneeDropdownRef} className="pm-custom-dropdown-trigger" onClick={() => {
-            const rect = assigneeDropdownRef.current?.getBoundingClientRect() ?? null
-            setAssigneeDropdownRect(rect)
-            setAssigneeDropdownOpen(o => !o)
-          }}>
-            {filterAssignee ? (
-              <>
-                {avatarMap[filterAssignee]
-                  ? <img src={avatarMap[filterAssignee]} alt={filterAssignee} className="filter-avatar-img" />
-                  : <span className="filter-avatar-placeholder">{filterAssignee.charAt(0).toUpperCase()}</span>}
-                <span className="filter-assignee-name">{filterAssignee.split(' ')[0]}</span>
-              </>
-            ) : (
-              <><Users size={14} /><span>All Assignees</span></>
-            )}
-            <ChevronDown size={12} className={`dropdown-chevron ${assigneeDropdownOpen ? 'open' : ''}`} />
+          )}
+          <button className="btn-secondary btn-sm" onClick={runReconcile} disabled={reconciling || loading}
+            title="Reconcile: close any In Progress entries whose ticket has since moved">
+            {reconciling ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+            {reconciling ? 'Reconciling…' : 'Reconcile'}
           </button>
-          {assigneeDropdownOpen && assigneeDropdownRect && createPortal(
-            <div className="pm-custom-dropdown-menu" style={{ position: 'fixed', top: assigneeDropdownRect.bottom + 4, left: assigneeDropdownRect.left, minWidth: assigneeDropdownRect.width, zIndex: 9999 }}>
-              <button className={`pm-dropdown-item ${!filterAssignee ? 'active' : ''}`} onClick={() => { setFilterAssignee(''); setAssigneeDropdownOpen(false) }}>
-                <Users size={14} /><span>All Assignees</span>
-              </button>
-              {allAssignees.map(a => (
-                <button key={a} className={`pm-dropdown-item ${filterAssignee === a ? 'active' : ''}`} onClick={() => { setFilterAssignee(a); setAssigneeDropdownOpen(false) }}>
-                  {avatarMap[a] ? <img src={avatarMap[a]} alt={a} className="filter-avatar-img" /> : <span className="filter-avatar-placeholder">{a.charAt(0).toUpperCase()}</span>}
-                  <span>{a}</span>
-                </button>
-              ))}
-            </div>,
-            document.body
-          )}
-        </div>
-
-        <div className="pm-priority-chips">
-          {['P0','P1','P2','P3'].map(p => (
-            <button key={p} className={`priority-chip ${filterPriorities.includes(p) ? 'active' : ''} ${priorityBadgeClass(p)}`}
-              onClick={() => setFilterPriorities(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])}>
-              {p}
-            </button>
-          ))}
-        </div>
-
-        {getColumnHierarchy().length > 0 && (
-          <div className="pm-column-role-chips">
-            {getColumnHierarchy().filter(c => c.role).map(col => (
-              <button
-                key={col.state}
-                className={`column-role-chip${filterColumnRoles.includes(col.role) ? ' active' : ''}`}
-                onClick={() => setFilterColumnRoles(prev =>
-                  prev.includes(col.role) ? prev.filter(x => x !== col.role) : [...prev, col.role]
-                )}
-              >
-                {col.state}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {mode === 'logbook' && (
-          <div className="pm-custom-dropdown">
-            <button ref={sortDropdownRef} className="pm-custom-dropdown-trigger" onClick={() => {
-              const rect = sortDropdownRef.current?.getBoundingClientRect() ?? null
-              setSortDropdownRect(rect)
-              setSortDropdownOpen(o => !o)
-            }}>
-              {sortKey === 'entered_at'  && <><ArrowDownUp size={14} /><span>Newest First</span></>}
-              {sortKey === 'time_asc'    && <><ArrowUpNarrowWide size={14} /><span>Time ↑</span></>}
-              {sortKey === 'time_desc'   && <><ArrowDownNarrowWide size={14} /><span>Time ↓</span></>}
-              {sortKey === 'priority'    && <><Star size={14} /><span>Priority</span></>}
-              {sortKey === 'status'      && <><Activity size={14} /><span>Status</span></>}
-              <ChevronDown size={12} className={`dropdown-chevron ${sortDropdownOpen ? 'open' : ''}`} />
-            </button>
-            {sortDropdownOpen && sortDropdownRect && createPortal(
-              <div className="pm-custom-dropdown-menu" style={{ position: 'fixed', top: sortDropdownRect.bottom + 4, left: sortDropdownRect.left, minWidth: sortDropdownRect.width, zIndex: 9999 }}>
-                {([
-                  { key: 'entered_at', label: 'Newest First',              Icon: ArrowDownUp },
-                  { key: 'status',     label: 'Status (Overdue→Live→Done)', Icon: Activity },
-                  { key: 'time_asc',   label: 'Time ↑ (low→high)',         Icon: ArrowUpNarrowWide },
-                  { key: 'time_desc',  label: 'Time ↓ (high→low)',         Icon: ArrowDownNarrowWide },
-                  { key: 'priority',   label: 'Priority',                   Icon: Star },
-                ] as { key: SortKey; label: string; Icon: React.ElementType }[]).map(({ key, label, Icon }) => (
-                  <button key={key} className={`pm-dropdown-item ${sortKey === key ? 'active' : ''}`}
-                    onClick={() => { setSortKey(key); setSortDropdownOpen(false) }}>
-                    <Icon size={14} /><span>{label}</span>
-                  </button>
-                ))}
-              </div>,
-              document.body
-            )}
-          </div>
-        )}
-
-        <div className="pm-toggle-filters">
-          {activeLiveCount > 0 && (
-            <button className={`btn-sm ${filterLive ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilterLive(f => !f)}>
-              <Timer size={13} /> Live ({activeLiveCount})
-            </button>
-          )}
-          {activeDelayedCount > 0 && (
-            <button className={`btn-sm ${filterDelayed ? 'btn-danger-active' : 'btn-secondary'}`} onClick={() => setFilterDelayed(f => !f)}>
-              <Zap size={13} /> Delayed ({activeDelayedCount})
-            </button>
-          )}
-          {activeOverdueCount > 0 && (
-            <button className={`btn-sm ${filterOverdue ? 'btn-danger-active' : 'btn-secondary'}`} onClick={() => setFilterOverdue(f => !f)}>
-              <AlertTriangle size={13} /> Overdue ({activeOverdueCount})
-            </button>
-          )}
-          {mode === 'logbook' && mismatchCount > 0 && (
-            <button className={`btn-sm ${filterMismatch ? 'btn-warning-active' : 'btn-secondary'}`} onClick={() => setFilterMismatch(f => !f)}>
-              <AlertTriangle size={13} /> Mismatch ({mismatchCount})
-            </button>
-          )}
-          {activeMovedBackCount > 0 && (
-            <button className={`btn-sm ${filterMovedBack ? 'btn-warning-active' : 'btn-secondary'}`} onClick={() => setFilterMovedBack(f => !f)}>
-              <RotateCcw size={13} /> Moved Back ({activeMovedBackCount})
-            </button>
-          )}
-          {activePinnedCount > 0 && (
-            <button className={`btn-sm ${filterPinned ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFilterPinned(f => !f)}>
-              <Pin size={13} /> Pinned ({activePinnedCount})
-            </button>
-          )}
-          {activeFilterCount > 0 && (
-            <button className="btn-sm btn-ghost tl-clear-filters" onClick={() => {
-              setFilterOverdue(false); setFilterMismatch(false); setFilterMovedBack(false)
-              setFilterLive(false); setFilterDelayed(false); setFilterPinned(false)
-              setFilterAssignee(''); setFilterPriorities([]); setFilterColumnRoles([]); setSearchIssue('')
-            }}>
-              <X size={12} /> Clear filters
-            </button>
-          )}
+          <button className="btn-primary btn-sm" onClick={runImportHistory} disabled={importing || loading}>
+            {importing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            {importing ? 'Syncing…' : 'Import History'}
+          </button>
+          <button className="btn-secondary btn-sm" onClick={fetchBoardStatus} disabled={loading}>
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+          </button>
         </div>
       </div>
 
-      {/* ── List ───────────────────────────────────────────────────────────── */}
-      {mode === 'logbook' ? (
-        loading && rows.length === 0 ? (() => {
-          const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
-          const titleW = ['65%','80%','55%','72%','48%','85%','60%','75%','52%','68%','78%','44%']
-          const barW   = [40, 65, 28, 78, 50, 88, 35, 72, 55, 45, 92, 38]
-          return (
-            <div className="pm-card-list glass-card">
-              <div className="pm-list-summary" style={{ display: 'flex', gap: 8 }}>
-                {sk(100, 13, 4)}{sk(80, 18, 10)}{sk(90, 18, 10)}
-              </div>
-              <div className="pm-col-header">
-                <span className="tt-col-pin" />
-                <span className="tt-col-issue">Issue</span>
-                <span className="tt-col-regression">Regression</span>
-                <span className="tt-col-priority">Priority</span>
-                <span className="tt-col-status">Status</span>
-                <span className="tt-col-time">{isAsana ? 'Time / Due Date' : 'Time / Threshold'}</span>
-                <span className="tt-col-assignee">Assignee</span>
-                <span className="tt-col-chevron" />
-              </div>
-              <div className="pm-rows-scroll">
-                {Array.from({ length: 12 }).map((_, i) => (
-                  <div key={i} className="pm-row" style={{ cursor: 'default' }}>
-                    <div className="pm-row-main" style={{ display: 'contents' }}>
-                      <span className="tt-col-pin" />
-                      <span className="tt-col-issue" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {sk(54, 13, 4)}{sk(titleW[i % titleW.length], 11, 4)}
-                      </span>
-                      <span className="tt-col-regression">{sk(30, 18, 10)}</span>
-                      <span className="tt-col-priority">{sk(44, 18, 12)}</span>
-                      <span className="tt-col-status">{sk(62, 18, 10)}</span>
-                      <span className="tt-col-time">
-                        <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.06)', width: '80%', overflow: 'hidden' }}>
-                          <div className="skeleton" style={{ height: '100%', width: `${barW[i % barW.length]}%`, borderRadius: 4 }} />
-                        </div>
-                      </span>
-                      <span className="tt-col-assignee">{sk(24, 24, '50%')}</span>
-                      <span className="tt-col-chevron" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })()
-        : rows.length === 0 ? (
-          <div className="pm-empty-state">
-            <Clock size={40} />
-            <p>No time tracking data for this week.</p>
-            <p style={{ fontSize: '0.8rem' }}>Try <strong>All Time</strong> view or click <strong>Sync History</strong>.</p>
-          </div>
-        ) : (
-          <div className="pm-card-list glass-card">
-            <div className="pm-list-summary">
-              <span>{groupedIssues.length} issues · {displayed.length} transitions</span>
-              {overdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {overdueCount} overdue</span>}
-              {mismatchCount > 0 && <span className="mismatch-summary-badge"><AlertTriangle size={12} /> {mismatchCount} mismatch</span>}
-              {lbMovedBack > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {lbMovedBack} moved back</span>}
-            </div>
-            <div className="pm-col-header">
-              <span className="tt-col-pin" />
-              <span className="tt-col-issue">Issue</span>
-              <span className="tt-col-regression">Regression</span>
-              <span className="tt-col-priority">Priority</span>
-              <span className="tt-col-status">Status</span>
-              <span className="tt-col-time">{isAsana ? 'Time / Due Date' : 'Time / Threshold'}</span>
-              <span className="tt-col-assignee">Assignee</span>
-              <span className="tt-col-chevron" />
-            </div>
-            <div className="pm-rows-scroll">
-              {groupedIssues.map(({ rep: row, all: transitions }) => {
-                const isLive    = row.to_state.toLowerCase() === 'in progress'
-                const isBlocked = row.to_state.toLowerCase() === 'blocked'
-                const movedBack = isMovedBack(row.from_state, row.to_state)
-                const isExpanded = expandedRows.has(row.issue_id)
-                const isDone    = ['dev','done','mobile done','stage','prod'].includes(row.to_state.toLowerCase())
-                const showOverdue = row.overdue && !isDone && !isBlocked
-                const hasRegression = transitions.some(t => isMovedBack(t.from_state, t.to_state))
-                const ratio = isAsana
-                  ? (row.overdue ? 1 : row.duration_in_prev_state_hours != null ? 0.5 : 0)
-                  : (row.duration_in_prev_state_hours != null && row.threshold_hours > 0
-                      ? Math.min(row.duration_in_prev_state_hours / row.threshold_hours, 1) : 0)
-                const barColor = row.overdue ? '#ef4444' : isLive ? '#22c55e' : '#6366f1'
-                return (
-                  <div key={row.issue_id} className={['pm-row', showOverdue ? 'pm-row-overdue' : '', row.pinned ? 'pm-row-pinned' : '', movedBack ? 'pm-row-movedback' : ''].filter(Boolean).join(' ')}>
-                    <div className="pm-row-main" onClick={() => toggleRow(row.issue_id)}>
-                      <button className={`tt-pin-btn ${row.pinned ? 'pinned' : ''}`} onClick={e => { e.stopPropagation(); togglePin(row) }} disabled={togglingPin === row.issue_id} title={row.pinned ? 'Unpin' : 'Pin'}>
-                        {togglingPin === row.issue_id ? <Loader2 size={12} className="animate-spin" /> : row.pinned ? <Pin size={12} /> : <PinOff size={12} />}
-                      </button>
-                      <div className="tt-issue">
-                        {row.pinned && <Pin size={10} className="tt-pin-indicator" />}
-                        <span className="tt-issue-id">{row.issue_id}</span>
-                        <span className="tt-issue-summary">{row.issue_summary}</span>
-                        {transitions.length > 1 && <span className="tt-transition-count" title={`${transitions.length} transitions`}>{transitions.length}</span>}
-                        {blockerIssueIds?.has(row.issue_id) && <span className="do-overdue-chip">⚠ Blocked</span>}
-                      </div>
-                      <span className="tt-col-regression">
-                        {hasRegression && <span className="tt-regression-chip" title="Regression">↩R</span>}
-                      </span>
-                      <span className={`tt-priority ${priorityBadgeClass(row.priority)}`}>{row.priority || '—'}</span>
-                      <span className="tt-col-status">
-                        {isBlocked && <span className="tt-badge tt-badge-blocked">⊘ Blocked</span>}
-                        {isLive && !showOverdue && !isBlocked && <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>}
-                        {showOverdue && <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>}
-                        {movedBack && !showOverdue && !isBlocked && <span className="tt-badge tt-badge-mb"><RotateCcw size={11} /> Back</span>}
-                        {!isLive && !isBlocked && !showOverdue && !movedBack && <span className="tt-badge tt-badge-done">✓ Done</span>}
-                      </span>
-                      <div className="tt-time-bar-wrap">
-                        <div className="tt-time-bar">
-                          <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
-                        </div>
-                        <span className="tt-time-label">{formatHours(row.duration_in_prev_state_hours)}
-                          {isAsana
-                            ? <span className="tt-threshold"> / {row.due_date ? new Date(row.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</span>
-                            : <span className="tt-threshold"> / {row.threshold_hours}h</span>
-                          }
-                        </span>
-                      </div>
-                      <div className="tt-assignee">
-                        {avatarMap[row.assignee] ? <img src={avatarMap[row.assignee]} alt={row.assignee} className="filter-avatar-img" /> : <span className="filter-avatar-placeholder">{(row.assignee || '?').charAt(0).toUpperCase()}</span>}
-                        <span className="tt-assignee-name">{row.assignee ? row.assignee.split(' ')[0] : '—'}</span>
-                      </div>
-                      <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
-                    </div>
-                    {isExpanded && (
-                      <div className="tt-row-detail">
-                        {[...transitions].sort((a, b) => new Date(a.transitioned_at).getTime() - new Date(b.transitioned_at).getTime()).map((t, i) => {
-                          const tMovedBack = isMovedBack(t.from_state, t.to_state)
-                          const tIsLive = t.duration_in_prev_state_hours === null
-                          const isMostRecent = i === transitions.length - 1
-                          return (
-                            <div key={t.id} className="tt-transition-row">
-                              <span className="tt-tr-index">{i + 1}</span>
-                              <span className="tt-tr-transition">
-                                <span className="tt-from-state">{t.from_state || 'Backlog'}</span>
-                                <span className={`tt-arrow ${tMovedBack ? 'tt-arrow-back' : ''}`}>→</span>
-                                <span className={`tt-to-state${tIsLive && isMostRecent ? ' live' : ''}${tMovedBack ? ' tt-to-state-back' : ''}${isMostRecent && !tMovedBack ? ' tt-to-state-current' : ''}`}>
-                                  {t.to_state}{tIsLive && isMostRecent ? ' ●' : ''}
-                                </span>
-                                {tMovedBack && <span className="tt-regression-tag">regression</span>}
-                              </span>
-                              <span className="tt-tr-time">{formatHours(t.duration_in_prev_state_hours)}</span>
-                              <span className="tt-tr-by">
-                                {t.moved_by || '—'}
-                                {t.moved_by_mismatch && <AlertTriangle size={10} className="tt-mismatch-icon" />}
-                              </span>
-                              <span className="tt-tr-at">
-                                {new Date(t.transitioned_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}
-                              </span>
-                              {t.comment && !/^activity:[^\s]+$/.test(t.comment.trim()) && (
-                                <span className="tt-tr-comment">{t.comment}</span>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      ) : (
-        tlLoading && timelines.length === 0 ? (() => {
-          const sk = (w: number | string, h: number, r = 5) => <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
-          const titleW = ['60%','75%','50%','82%','45%','70%','58%','88%','52%','65%']
-          const stintW = [[30,45,20],[50,25,35],[20,60,15],[40,30,50],[25,55,20],[55,20,40],[35,45,25],[45,35,30],[20,50,35],[60,20,30]]
-          return (
-            <div className="pm-card-list glass-card">
-              <div className="pm-list-summary" style={{ display: 'flex', gap: 8 }}>
-                {sk(90, 13, 4)}{sk(75, 18, 10)}
-              </div>
-              <div className="pm-rows-scroll">
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <div key={i} className="pm-row" style={{ padding: '0.65rem 0.75rem', display: 'flex', flexDirection: 'column', gap: 8, cursor: 'default' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {sk(52, 13, 4)}{sk(titleW[i % titleW.length], 12, 4)}
-                      <div style={{ marginLeft: 'auto' }}>{sk(24, 24, '50%')}</div>
-                    </div>
-                    {/* Timeline bar with stints */}
-                    <div style={{ display: 'flex', gap: 3, height: 8 }}>
-                      {stintW[i % stintW.length].map((w, si) => (
-                        <div key={si} className="skeleton" style={{ width: `${w}%`, height: 8, borderRadius: 4 }} />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })()
-        : tlDisplayed.length === 0 ? (
-          <div className="pm-empty-state"><Activity size={40} /><p>No issues found.</p></div>
-        ) : (
-          <div className="pm-card-list glass-card">
-            <div className="pm-list-summary">
-              <span>{tlDisplayed.length} of {timelines.length} issues</span>
-              {tlOverdueCount > 0 && <span className="overdue-summary-badge"><AlertTriangle size={12} /> {tlOverdueCount} overdue</span>}
-              {tlMovedBackCount > 0 && <span className="moved-back-summary-badge"><RotateCcw size={12} /> {tlMovedBackCount} moved back</span>}
-            </div>
-            <div className="pm-col-header">
-              <span className="pm-col-pin" />
-              <span className="pm-col-issue">Issue</span>
-              <span className="pm-col-priority">Priority</span>
-              <span className="pm-col-status">Status</span>
-              <span className="pm-col-time">{isAsana ? 'Time / Due Date' : 'Time / Threshold'}</span>
-              <span className="pm-col-stints">Stints</span>
-              <span className="pm-col-assignee">Assignee</span>
-              <span className="pm-col-chevron" />
-            </div>
-            <div className="pm-rows-scroll">
-              {tlDisplayed.map(t => {
-                const isExpanded = expandedIssues.has(t.issue_id)
-                const lastMovedBackStint = [...t.stints].reverse().find(s => s.moved_back)
-                const ratio = isAsana
-                  ? (t.is_overdue ? 1 : t.is_live ? 0.5 : 0)
-                  : (t.threshold_hours > 0 ? Math.min(t.total_hours / t.threshold_hours, 1) : 0)
-                const barColor = t.is_overdue ? '#ef4444' : t.total_hours > t.threshold_hours ? '#f97316' : t.is_live ? '#22c55e' : '#6366f1'
-                return (
-                  <div key={t.issue_id} className={['pm-row', t.is_overdue ? 'pm-row-overdue' : '', t.is_live ? 'pm-row-live' : '', t.pinned ? 'pm-row-pinned' : ''].filter(Boolean).join(' ')}>
-                    <div className="pm-row-main" onClick={() => toggleExpand(t.issue_id)}>
-                      <span className="pm-col-pin">
-                        {t.pinned && <Pin size={10} className="tt-pin-indicator" />}
-                      </span>
-                      <div className="pm-col-issue pm-issue-cell">
-                        <span className="pm-issue-id">{t.issue_id}</span>
-                        <span className="pm-issue-summary">{t.issue_summary}</span>
-                        {t.moved_back_count > 0 && <span className="tt-regression-chip" title={`Moved back ${t.moved_back_count}×`}>↩{t.moved_back_count}</span>}
-                        {blockerIssueIds?.has(t.issue_id) && <span className="do-overdue-chip">⚠ Blocked</span>}
-                      </div>
-                      <span className={`pm-col-priority tt-priority ${priorityBadgeClass(t.priority)}`}>{t.priority || '—'}</span>
-                      <span className="pm-col-status">
-                        {t.is_live && !t.is_overdue && <span className="tt-badge tt-badge-live"><span className="live-dot-pulse" />Live</span>}
-                        {t.is_overdue && <span className="tt-badge tt-badge-overdue"><AlertTriangle size={11} /> Overdue</span>}
-                        {!t.is_live && !t.is_overdue && <span className="tt-badge tt-badge-done">✓ Done</span>}
-                      </span>
-                      <div className="pm-col-time tt-time-bar-wrap">
-                        <div className="tt-time-bar">
-                          <div className="tt-time-bar-fill" style={{ width: `${ratio * 100}%`, background: barColor }} />
-                        </div>
-                        <span className="tt-time-label">{formatHoursDetailed(t.total_hours)}
-                          {isAsana
-                            ? <span className="tt-threshold"> / {t.due_date ? new Date(t.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</span>
-                            : <span className="tt-threshold"> / {t.threshold_hours}h</span>
-                          }
-                        </span>
-                      </div>
-                      <span className="pm-col-stints">
-                        {t.total_stints > 1 && <span className="tt-transition-count" title={`${t.total_stints} stints`}>{t.total_stints}</span>}
-                      </span>
-                      <div className="pm-col-assignee tt-assignee">
-                        {t.assignee && (avatarMap[t.assignee] ? <img src={avatarMap[t.assignee]} alt={t.assignee} className="filter-avatar-img" /> : <span className="filter-avatar-placeholder">{t.assignee.charAt(0).toUpperCase()}</span>)}
-                        <span className="tt-assignee-name">{t.assignee ? t.assignee.split(' ')[0] : '—'}</span>
-                      </div>
-                      <ChevronDown size={13} className={`tt-chevron ${isExpanded ? 'open' : ''}`} />
-                    </div>
-                    {isExpanded && (
-                      <div className="tt-row-detail">
-                        {t.stints.map(stint => (
-                          <div key={stint.stint_number} className={`tl-stint ${stintStatusClass(stint)}`}>
-                            <div className="tl-stint-marker">
-                              {!stint.exited_at
-                                ? <span className="stint-dot live-dot-pulse" />
-                                : stint.moved_back ? <RotateCcw size={12} /> : <CheckCircle2 size={12} />
-                              }
-                              {stint.stint_number < t.total_stints && <div className="tl-stint-line" />}
-                            </div>
-                            <div className="tl-stint-body">
-                              <div className="tl-stint-header">
-                                <span className="tl-stint-num">#{stint.stint_number}</span>
-                                <span className={`tl-stint-label ${stintStatusClass(stint)}`}>{stintLabel(stint)}</span>
-                                <span className="tl-stint-duration">{formatHoursDetailed(stint.duration_hours)}</span>
-                              </div>
-                              <div className="tl-stint-dates">
-                                <span>
-                                  {new Date(stint.entered_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                  {stint.exited_at && <> → {new Date(stint.exited_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</>}
-                                </span>
-                                {stint.moved_by && <span className="tl-stint-movedby">by {stint.moved_by}</span>}
-                              </div>
-                              {stint.comment && <div className="tl-stint-comment">"{stint.comment}"</div>}
-                            </div>
-                          </div>
-                        ))}
-                        <div className="tl-stint-summary">
-                          <span>Total: <strong>{formatHoursDetailed(t.total_hours)}</strong></span>
-                          {isAsana
-                            ? <span>Due Date: <strong>{t.due_date ? new Date(t.due_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</strong></span>
-                            : <span>Threshold: <strong>{t.threshold_hours}h</strong></span>
-                          }
-                          {lastMovedBackStint && (
-                            <span className="tl-last-reason">Last moved back: {lastMovedBackStint.comment || `→ ${lastMovedBackStint.exited_to}`}</span>
-                          )}
-                          {t.alert_dismissed && t.moved_back_count > 0 && (
-                            <button className="tl-undismiss-btn" onClick={e => { e.stopPropagation(); handleUndismiss(t.issue_id) }} title="Restore alert">
-                              {dismissing === t.issue_id ? <Loader2 size={10} className="animate-spin" /> : '↺ Restore alert'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )
+      {statusMsg && (
+        <div className="pm-backfill-msg">{statusMsg}</div>
       )}
+      {error && <div className="pm-report-error"><AlertTriangle size={14} />{error}</div>}
+
+      {!sprintId && (
+        <div className="pm-empty-state">
+          <Activity size={36} />
+          <p>Select a sprint to view board status</p>
+        </div>
+      )}
+
+      {sprintId && loading && (
+        <div className="pm-empty-state">
+          <Loader2 size={28} className="animate-spin" />
+          <p>Loading board status…</p>
+        </div>
+      )}
+
+      {sprintId && !loading && filteredColumns.length === 0 && !error && (
+        <div className="pm-empty-state">
+          <Activity size={36} />
+          <p>No issues found for this sprint.</p>
+          <p style={{ fontSize: '0.8rem' }}>Try clicking <strong>Import History</strong> to sync transitions.</p>
+        </div>
+      )}
+
+      {/* ── Column sections ── */}
+      <div className="pm-tracking-board">
+        {filteredColumns.map(col => (
+          <div key={col.name} className="pm-tracking-column-section">
+            <div className="pm-tracking-col-header">
+              <span className="pm-tracking-col-name">{col.name}</span>
+              <span className="pm-tracking-col-count">{col.issues.length}</span>
+              {col.issues.filter(i => i.is_delayed).length > 0 && (
+                <span className="pm-tracking-col-delayed">
+                  <AlertTriangle size={11} /> {col.issues.filter(i => i.is_delayed).length} delayed
+                </span>
+              )}
+            </div>
+            {col.issues.map(issue => {
+              const avatarUrl = avatarMap[issue.assignee]
+              return (
+                <div key={issue.id} className={`pm-tracking-issue-row${issue.is_delayed ? ' pm-tracking-issue-row--delayed' : ''}${blockerIssueIds?.has(issue.idReadable) ? ' pm-tracking-issue-row--blocked' : ''}`}>
+                  <span className="pm-tracking-issue-id">{issue.idReadable || issue.id}</span>
+                  <span className={ttPriorityClass(issue.priority)}>{issue.priority}</span>
+                  <span className="pm-tracking-issue-summary" title={issue.summary}>{issue.summary}</span>
+                  <span className={`pm-tracking-time${issue.is_delayed ? ' pm-tracking-time--overdue' : ''}`}>
+                    {fmtHoursCompact(issue.hours_in_state)}
+                    {issue.is_delayed && <AlertTriangle size={10} style={{ marginLeft: 3 }} />}
+                  </span>
+                  {issue.assignee && (
+                    <div className="pm-tracking-assignee" title={issue.assignee}>
+                      {avatarUrl
+                        ? <img className="pm-tracking-avatar" src={avatarUrl} alt={issue.assignee} />
+                        : <div className="pm-tracking-avatar pm-tracking-avatar--initials">{getInitialsFromName(issue.assignee)}</div>
+                      }
+                    </div>
+                  )}
+                  {issue.issue_type && (
+                    <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase()}`}>
+                      {issue.issue_type}
+                    </span>
+                  )}
+                  {issue.move_type === 'qa_rejected' && (
+                    <span className="pm-tracking-move-badge pm-tracking-move-badge--qa">QA Rejected</span>
+                  )}
+                  {issue.move_type === 'dev_stalled' && (
+                    <span className="pm-tracking-move-badge pm-tracking-move-badge--dev">Dev Stalled</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/dhindsa/project-management/internal/models"
+	"github.com/dhindsa/project-management/internal/services/youtrack"
 )
 
 // extractPriorityFromConfig checks ticket summary against configured priority prefixes.
@@ -138,9 +139,71 @@ func getStatesByRole(role string, hierarchy []models.ColumnState) []string {
 	return states
 }
 
-// getDoneStates returns all state names (including aliases) that match the done_role from report config.
+// getDoneStates returns all state names (including aliases) for columns considered "done".
+// Includes dev_done, verified, deployed, and closed roles so that tickets reaching
+// DEV, Ready for Stage, STAGE, Ready for PROD, PROD, or Done all count as done.
 func getDoneStates(cfg *models.WorkflowConfig) []string {
-	return getStatesByRole(cfg.ReportConfig.DoneRole, cfg.ColumnHierarchy)
+	postDevRoles := map[string]bool{
+		"dev_done": true, "verified": true, "deployed": true, "closed": true,
+	}
+	var states []string
+	for _, col := range cfg.ColumnHierarchy {
+		if postDevRoles[col.Role] {
+			states = append(states, col.State)
+			states = append(states, col.Aliases...)
+		}
+	}
+	// Fallback to done_role only if hierarchy is empty
+	if len(states) == 0 {
+		return getStatesByRole(cfg.ReportConfig.DoneRole, cfg.ColumnHierarchy)
+	}
+	return states
+}
+
+// classifyBackwardMove returns "qa_rejected" when a ticket moves back from a post-dev column
+// (rank >= dev_done role rank), or "dev_stalled" when it moves back from an early column.
+func classifyBackwardMove(fromState, toState string, hierarchy []models.ColumnState) string {
+	// Find the rank of the first dev_done column
+	devDoneRank := -1
+	for _, col := range hierarchy {
+		if col.Role == "dev_done" {
+			devDoneRank = col.Rank
+			break
+		}
+	}
+	fromRank := getStateIndexFromConfig(fromState, hierarchy)
+	if devDoneRank >= 0 && fromRank >= devDoneRank {
+		return "qa_rejected"
+	}
+	return "dev_stalled"
+}
+
+// isHotfixIssueByField returns true if the issue's type custom field matches a configured hotfix value.
+func isHotfixIssueByField(issue youtrack.Issue, rules models.HotfixRules) bool {
+	if rules.TypeFieldName == "" || len(rules.HotfixValues) == 0 {
+		return false
+	}
+	val := youtrack.GetCustomFieldValue(issue, rules.TypeFieldName)
+	for _, hv := range rules.HotfixValues {
+		if strings.EqualFold(val, hv) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRegressionIssueByField returns true if the issue's type custom field matches a configured regression value.
+func isRegressionIssueByField(issue youtrack.Issue, rules models.HotfixRules) bool {
+	if rules.TypeFieldName == "" || len(rules.RegressionValues) == 0 {
+		return false
+	}
+	val := youtrack.GetCustomFieldValue(issue, rules.TypeFieldName)
+	for _, rv := range rules.RegressionValues {
+		if strings.EqualFold(val, rv) {
+			return true
+		}
+	}
+	return false
 }
 
 // getHotfixFromStates returns the "from" states for hotfix detection.

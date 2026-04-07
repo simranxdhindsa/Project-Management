@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { api } from '../services/api'
 import type { DailyBrief, EODSummary, DeveloperLoad, DailyOpsIssue, CarryoverItem, CarryoverData } from '../services/api'
-import { getDailyBrief, getEODSummary, getDeveloperLoad, getBlockerReasons, saveCarryoverPlan, getCarryover } from '../services/pmDataService'
+import { getDailyBrief, getEODSummary, getDeveloperLoad, getBlockerReasons, saveCarryoverPlan, getCarryover, generatePMReport } from '../services/pmDataService'
 
 interface Props {
   onBlockersChange: (ids: Set<string>) => void
@@ -459,7 +459,17 @@ function CarryoverChecklist({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+type DailyOpsTabId = 'morning' | 'devload' | 'preview'
+
 export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
+  // ── tab state
+  const [activeTab, setActiveTab] = useState<DailyOpsTabId>('morning')
+
+  // ── report preview state
+  const [previewText, setPreviewText] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
+
   // ── data state
   const [brief, setBrief] = useState<DailyBrief | null>(null)
   const [briefLoading, setBriefLoading] = useState(false)
@@ -692,6 +702,28 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
     onExpandRow: setExpandedRowId,
   }
 
+  // ── generate report preview
+  async function handleGeneratePreview() {
+    setPreviewLoading(true)
+    setPreviewError('')
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      const res = await generatePMReport(today, 'full', undefined, sprintId)
+      const r = res as any
+      if (r.data?.report_text) {
+        setPreviewText(r.data.report_text)
+      } else if (r.report_text) {
+        setPreviewText(r.report_text)
+      } else {
+        setPreviewError('No report data returned')
+      }
+    } catch (e: any) {
+      setPreviewError(e.message || 'Failed to generate report')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
   // ── EOD visible data based on filter
   const eodVisible = eod ? (() => {
     if (eodFilter === 'no_movement') return { completed: [], still: [], noMove: eod.no_movement, blockers: [] }
@@ -711,7 +743,29 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
   return (
     <div className="do-scroll">
 
-      {/* ══ MORNING BRIEF ═══════════════════════════════════════ */}
+      {/* ── Tab bar ── */}
+      <div className="dot-tab-bar">
+        {([
+          { id: 'morning', label: 'Morning Brief' },
+          { id: 'devload', label: 'Developer Load' },
+          { id: 'preview', label: 'Report Preview' },
+        ] as { id: DailyOpsTabId; label: string }[]).map(t => (
+          <button
+            key={t.id}
+            className={`dot-tab ${activeTab === t.id ? 'dot-tab--active' : ''}`}
+            onClick={() => setActiveTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="dot-tab-content">
+
+      {/* ══ MORNING BRIEF TAB ═══════════════════════════════════════ */}
+      {activeTab === 'morning' && (<>
+
+      {/* ── Morning Brief ── */}
       <div className="do-block">
         <div className="do-block-header">
           <span className="do-block-title">☀ Morning Brief</span>
@@ -945,7 +999,10 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
         )}
       </div>
 
-      {/* ══ DEVELOPER LOAD ═══════════════════════════════════════ */}
+      </>)}
+
+      {/* ══ DEVELOPER LOAD TAB ═══════════════════════════════════════ */}
+      {activeTab === 'devload' && (<>
       <div className="do-block">
         <div className="do-block-header">
           <span className="do-block-title">
@@ -1063,7 +1120,39 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
             ))}
         </div>
       </div>
+      </>)}
 
+      {/* ══ REPORT PREVIEW TAB ═══════════════════════════════════════ */}
+      {activeTab === 'preview' && (
+        <div className="do-block">
+          <div className="do-block-header">
+            <span className="do-block-title">📊 Report Preview</span>
+            <div className="do-block-actions">
+              <button className="do-post-btn do-post-btn--primary" onClick={handleGeneratePreview} disabled={previewLoading}>
+                <RefreshCw size={12} className={previewLoading ? 'spin' : ''} />
+                {previewLoading ? 'Generating…' : 'Generate'}
+              </button>
+              {previewText && <CopyBtn text={previewText} label="Copy" />}
+            </div>
+          </div>
+          {previewError && <div className="do-error">{previewError}</div>}
+          {!previewText && !previewLoading && (
+            <div className="do-loading">Click Generate to create today's PM report for the active sprint</div>
+          )}
+          {previewText && (
+            <div className="do-report-wrap">
+              <textarea
+                className="do-report-textarea"
+                value={previewText}
+                onChange={e => setPreviewText(e.target.value)}
+                style={{ minHeight: '420px' }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      </div>{/* dot-tab-content */}
     </div>
   )
 }

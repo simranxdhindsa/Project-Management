@@ -14,11 +14,12 @@ import (
 
 // Client is the YouTrack API client
 type Client struct {
-	baseURL    string
-	token      string
-	projectID  string
-	boardID    string
-	httpClient *http.Client
+	baseURL         string
+	token           string
+	projectID       string
+	boardID         string
+	resolvedBoardID string // auto-detected board, cached after first resolution
+	httpClient      *http.Client
 }
 
 // NewClient creates a new YouTrack API client
@@ -39,6 +40,73 @@ func NewClient(baseURL, token, projectID string) *Client {
 // SetBoardID sets the agile board ID
 func (c *Client) SetBoardID(boardID string) {
 	c.boardID = boardID
+}
+
+// ResolveBoard exposes resolveBoard for handlers that need the board ID directly.
+func (c *Client) ResolveBoard(ctx context.Context) (string, error) {
+	return c.resolveBoard(ctx)
+}
+
+// resolveBoard returns the board ID to use for sprint operations.
+// Priority: explicit boardID > cached resolvedBoardID > auto-detected from project.
+func (c *Client) resolveBoard(ctx context.Context) (string, error) {
+	if c.boardID != "" {
+		return c.boardID, nil
+	}
+	if c.resolvedBoardID != "" {
+		return c.resolvedBoardID, nil
+	}
+
+	// Fetch all agile boards with their project associations and sprint settings
+	body, err := c.doRequest(ctx, http.MethodGet,
+		"/api/agiles?$top=-1&fields=id,name,projects(id,shortName),sprintsSettings(disableSprints)", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch agile boards: %w", err)
+	}
+
+	var rawBoards []map[string]interface{}
+	if err := json.Unmarshal(body, &rawBoards); err != nil {
+		return "", fmt.Errorf("failed to unmarshal agile boards: %w", err)
+	}
+
+	// Find boards that belong to our project; prefer sprint-enabled ones
+	var firstMatch, firstSprintMatch string
+	for _, board := range rawBoards {
+		id, _ := board["id"].(string)
+		if id == "" {
+			continue
+		}
+		projects, _ := board["projects"].([]interface{})
+		for _, p := range projects {
+			pm, _ := p.(map[string]interface{})
+			pid, _ := pm["id"].(string)
+			pshort, _ := pm["shortName"].(string)
+			if pid == c.projectID || pshort == c.projectID {
+				if firstMatch == "" {
+					firstMatch = id
+				}
+				// Prefer boards that have sprints enabled
+				sprintsDisabled := false
+				if ss, ok := board["sprintsSettings"].(map[string]interface{}); ok {
+					sprintsDisabled, _ = ss["disableSprints"].(bool)
+				}
+				if !sprintsDisabled && firstSprintMatch == "" {
+					firstSprintMatch = id
+				}
+			}
+		}
+	}
+
+	chosen := firstSprintMatch
+	if chosen == "" {
+		chosen = firstMatch
+	}
+	if chosen == "" {
+		return "", fmt.Errorf("no agile board found for project %q — configure one in Integrations → YouTrack", c.projectID)
+	}
+
+	c.resolvedBoardID = chosen
+	return chosen, nil
 }
 
 // GetBaseURL returns the YouTrack instance base URL (used for prefixing relative avatar URLs)
@@ -307,15 +375,17 @@ func (c *Client) GetStates(ctx context.Context) ([]State, error) {
 	}
 
 	// If no states found from custom fields, try board columns
-	if len(states) == 0 && c.boardID != "" {
-		columns, err := c.GetBoardColumns(ctx, c.boardID)
-		if err == nil {
-			seen := make(map[string]bool)
-			for _, col := range columns {
-				for _, fv := range col.FieldValues {
-					if !seen[fv] {
-						seen[fv] = true
-						states = append(states, State{Name: fv})
+	if len(states) == 0 {
+		if bid, berr := c.resolveBoard(ctx); berr == nil {
+			columns, err := c.GetBoardColumns(ctx, bid)
+			if err == nil {
+				seen := make(map[string]bool)
+				for _, col := range columns {
+					for _, fv := range col.FieldValues {
+						if !seen[fv] {
+							seen[fv] = true
+							states = append(states, State{Name: fv})
+						}
 					}
 				}
 			}
@@ -325,9 +395,16 @@ func (c *Client) GetStates(ctx context.Context) ([]State, error) {
 	return states, nil
 }
 
-// GetPriorities returns the Priority field values from YouTrack custom fields
-func (c *Client) GetPriorities(ctx context.Context) ([]string, error) {
-	path := fmt.Sprintf("/api/admin/projects/%s/customFields?fields=field(name,fieldType(id)),bundle(values(name))",
+// PriorityValue represents a YouTrack priority with its display color
+type PriorityValue struct {
+	Name       string `json:"name"`
+	Background string `json:"background,omitempty"`
+	Foreground string `json:"foreground,omitempty"`
+}
+
+// GetPriorities returns the Priority field values with colors from YouTrack
+func (c *Client) GetPriorities(ctx context.Context) ([]PriorityValue, error) {
+	path := fmt.Sprintf("/api/admin/projects/%s/customFields?fields=field(name,fieldType(id)),bundle(values(name,color(background,foreground)))",
 		c.projectID)
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -345,12 +422,16 @@ func (c *Client) GetPriorities(ctx context.Context) ([]string, error) {
 			if fieldName, ok := fieldInfo["name"].(string); ok && fieldName == "Priority" {
 				if bundle, ok := field["bundle"].(map[string]interface{}); ok {
 					if values, ok := bundle["values"].([]interface{}); ok {
-						var priorities []string
+						var priorities []PriorityValue
 						for _, val := range values {
 							if valMap, ok := val.(map[string]interface{}); ok {
-								if name, ok := valMap["name"].(string); ok {
-									priorities = append(priorities, name)
+								name, _ := valMap["name"].(string)
+								pv := PriorityValue{Name: name}
+								if colorMap, ok := valMap["color"].(map[string]interface{}); ok {
+									pv.Background, _ = colorMap["background"].(string)
+									pv.Foreground, _ = colorMap["foreground"].(string)
 								}
+								priorities = append(priorities, pv)
 							}
 						}
 						return priorities, nil
@@ -360,7 +441,49 @@ func (c *Client) GetPriorities(ctx context.Context) ([]string, error) {
 		}
 	}
 
-	return []string{}, nil
+	return []PriorityValue{}, nil
+}
+
+// GetCustomFieldValues returns enum values (with colors) for any named custom field.
+// Works identically to GetPriorities but parameterised by field name.
+func (c *Client) GetCustomFieldValues(ctx context.Context, fieldName string) ([]PriorityValue, error) {
+	path := fmt.Sprintf("/api/admin/projects/%s/customFields?fields=field(name,fieldType(id)),bundle(values(name,color(background,foreground)))",
+		c.projectID)
+
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var customFields []map[string]interface{}
+	if err := json.Unmarshal(body, &customFields); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal custom fields: %w", err)
+	}
+
+	for _, field := range customFields {
+		if fieldInfo, ok := field["field"].(map[string]interface{}); ok {
+			if name, ok := fieldInfo["name"].(string); ok && strings.EqualFold(name, fieldName) {
+				if bundle, ok := field["bundle"].(map[string]interface{}); ok {
+					if values, ok := bundle["values"].([]interface{}); ok {
+						var result []PriorityValue
+						for _, val := range values {
+							if valMap, ok := val.(map[string]interface{}); ok {
+								vName, _ := valMap["name"].(string)
+								pv := PriorityValue{Name: vName}
+								if colorMap, ok := valMap["color"].(map[string]interface{}); ok {
+									pv.Background, _ = colorMap["background"].(string)
+									pv.Foreground, _ = colorMap["foreground"].(string)
+								}
+								result = append(result, pv)
+							}
+						}
+						return result, nil
+					}
+				}
+			}
+		}
+	}
+	return []PriorityValue{}, nil
 }
 
 // GetIssues returns all issues from the project
@@ -391,10 +514,11 @@ func (c *Client) GetIssues(ctx context.Context) ([]Issue, error) {
 
 // GetSprints returns all sprints for the configured agile board.
 func (c *Client) GetSprints(ctx context.Context) ([]Sprint, error) {
-	if c.boardID == "" {
-		return nil, fmt.Errorf("no board ID configured — set a board in Integrations → YouTrack")
+	boardID, err := c.resolveBoard(ctx)
+	if err != nil {
+		return nil, err
 	}
-	path := fmt.Sprintf("/api/agiles/%s/sprints?fields=id,name,start,finish,isCompleted&$top=50", c.boardID)
+	path := fmt.Sprintf("/api/agiles/%s/sprints?fields=id,name,start,finish,isCompleted&$top=50", boardID)
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -465,8 +589,9 @@ func (c *Client) GetSprintIssuesByStatePaginated(ctx context.Context, sprintID, 
 // GetAllSprintIssues returns all issues in a sprint (all states) without pagination.
 // Used for assignee stats, daily brief, time tracking and report filtering.
 func (c *Client) GetAllSprintIssues(ctx context.Context, sprintID string) ([]Issue, error) {
-	if c.boardID == "" {
-		return nil, fmt.Errorf("no board ID configured")
+	boardID, err := c.resolveBoard(ctx)
+	if err != nil {
+		return nil, err
 	}
 	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
 	var all []Issue
@@ -474,7 +599,7 @@ func (c *Client) GetAllSprintIssues(ctx context.Context, sprintID string) ([]Iss
 	pageSize := 500
 	for {
 		path := fmt.Sprintf("/api/agiles/%s/sprints/%s/issues?fields=%s&$top=%d&$skip=%d",
-			c.boardID, sprintID, fields, pageSize, skip)
+			boardID, sprintID, fields, pageSize, skip)
 		body, err := c.doRequest(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			return nil, err
@@ -642,6 +767,27 @@ func (c *Client) UpdateIssueState(ctx context.Context, issueID, newState string)
 }
 
 // GetStatus extracts the status/state from an issue's custom fields
+// GetCustomFieldValue returns the string value of any named custom field on an issue.
+// Works for enum, state, and simple string fields. Returns "" if not found.
+func GetCustomFieldValue(issue Issue, fieldName string) string {
+	for _, field := range issue.CustomFields {
+		if strings.EqualFold(field.Name, fieldName) {
+			if valueMap, ok := field.Value.(map[string]interface{}); ok {
+				if name, ok := valueMap["name"].(string); ok {
+					return name
+				}
+				if presentation, ok := valueMap["presentation"].(string); ok {
+					return presentation
+				}
+			}
+			if str, ok := field.Value.(string); ok {
+				return str
+			}
+		}
+	}
+	return ""
+}
+
 func GetStatus(issue Issue) string {
 	for _, field := range issue.CustomFields {
 		if field.Name == "State" {
@@ -812,6 +958,36 @@ func (c *Client) GetIssuesByState(ctx context.Context, states []string) ([]Issue
 	var issues []Issue
 	if err := json.Unmarshal(body, &issues); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal issues: %w", err)
+	}
+	return issues, nil
+}
+
+// GetIssuesByStateForSprint returns issues in a sprint filtered by state using YouTrack's query API.
+// Uses sprint name in the query (e.g. "project: ARD sprint: {Sprint 1} State: {To Do}, {In Progress}").
+// This is more reliable than the agile endpoint when the board ID is uncertain.
+// Pass nil/empty states to get ALL issues in the sprint (excluding none by state).
+func (c *Client) GetIssuesByStateForSprint(ctx context.Context, sprintName string, states []string) ([]Issue, error) {
+	var query string
+	if len(states) > 0 {
+		stateFilters := make([]string, len(states))
+		for i, s := range states {
+			stateFilters[i] = "{" + s + "}"
+		}
+		query = fmt.Sprintf("project: %s sprint: {%s} State: %s", c.projectID, sprintName, strings.Join(stateFilters, ", "))
+	} else {
+		query = fmt.Sprintf("project: %s sprint: {%s}", c.projectID, sprintName)
+	}
+	fields := "id,idReadable,summary,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),project(shortName)"
+	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=500", fields, url.QueryEscape(query))
+
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []Issue
+	if err := json.Unmarshal(body, &issues); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal sprint issues: %w", err)
 	}
 	return issues, nil
 }

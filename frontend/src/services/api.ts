@@ -253,6 +253,10 @@ class ApiService {
     return this.request<YouTrackColumn[]>(`/youtrack/boards/${boardId}/columns`)
   }
 
+  async getYouTrackDefaultBoardColumns() {
+    return this.request<YouTrackColumn[]>('/youtrack/board/columns')
+  }
+
   async getYouTrackSprints() {
     return this.request<YouTrackSprint[]>('/youtrack/sprints')
   }
@@ -262,7 +266,11 @@ class ApiService {
   }
 
   async getYouTrackPriorities() {
-    return this.request<string[]>('/youtrack/priorities')
+    return this.request<{ name: string; background?: string; foreground?: string }[]>('/youtrack/priorities')
+  }
+
+  async getYouTrackTypeFieldValues(fieldName: string) {
+    return this.request<{ name: string; background?: string; foreground?: string }[]>(`/youtrack/type-field-values?field_name=${encodeURIComponent(fieldName)}`)
   }
 
   async getYouTrackUsers() {
@@ -1059,8 +1067,11 @@ class ApiService {
     return this.request<{ message: string }>(`/reports/pm-report/${id}/delete`, { method: 'DELETE' })
   }
 
-  async generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full', sprintId?: string, sprintName?: string) {
+  async generateWeeklyPMReport(weekStart: string, scope: 'full' | 'summary' = 'full', overrides?: { priorities?: string[]; open_states?: string[]; sections?: string[] }, sprintId?: string, sprintName?: string) {
     const params = new URLSearchParams({ scope })
+    if (overrides?.priorities?.length) params.set('priorities', overrides.priorities.join(','))
+    if (overrides?.open_states?.length) params.set('open_states', overrides.open_states.join(','))
+    if (overrides?.sections?.length) params.set('sections', overrides.sections.join(','))
     if (sprintId) params.set('sprint_id', sprintId)
     if (sprintName) params.set('sprint_name', encodeURIComponent(sprintName))
     return this.request<PMReport>(`/reports/pm-report/weekly/${weekStart}?${params}`)
@@ -1073,6 +1084,13 @@ class ApiService {
   async getAssigneeStats(sprintId?: string) {
     const qs = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : ''
     return this.request<AssigneeStat[]>(`/reports/assignee-stats${qs}`)
+  }
+
+  async getSprintBoardStatus(params: { sprint_id?: string; sprint_name?: string }) {
+    const qs = new URLSearchParams()
+    if (params.sprint_id) qs.set('sprint_id', params.sprint_id)
+    if (params.sprint_name) qs.set('sprint_name', encodeURIComponent(params.sprint_name))
+    return this.request<SprintBoardColumn[]>(`/reports/sprint-board-status?${qs.toString()}`)
   }
 
   async getTimeTracking(params?: { week?: string; assignee?: string; priority?: string; sprint_id?: string }) {
@@ -1971,6 +1989,30 @@ export interface TimeTrackingRow {
   pinned: boolean
 }
 
+export interface SprintBoardIssue {
+  id: string
+  idReadable: string
+  summary: string
+  priority: string
+  assignee: string
+  assigneeLogin: string
+  avatarUrl: string
+  issue_type: string
+  current_state: string
+  from_state: string
+  since_date: string
+  hours_in_state: number
+  is_delayed: boolean
+  threshold_hours: number
+  move_type: string  // "qa_rejected" | "dev_stalled" | ""
+}
+
+export interface SprintBoardColumn {
+  name: string
+  issues: SprintBoardIssue[]
+  total: number
+}
+
 // ── Workflow Config API ───────────────────────────────────────────────────
 export interface PriorityTag {
   label: string
@@ -1992,6 +2034,9 @@ export interface ColumnState {
 export interface HotfixRules {
   from_states: string[]
   to_states: string[]
+  type_field_name?: string
+  hotfix_values?: string[]
+  regression_values?: string[]
 }
 
 export interface ReportConfig {

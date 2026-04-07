@@ -7,7 +7,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext'
 import type { YouTrackIssue } from '@/services/api'
 import { getPMIssues, getPMStates, getActiveSource } from '@/services/pmDataService'
-import api, { type YouTrackSprint } from '@/services/api'
+import api, { type YouTrackSprint, getYouTrackAvatarMap } from '@/services/api'
 import { CalendarDays } from 'lucide-react'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 
@@ -120,11 +120,12 @@ interface SectionGroupProps {
   onRowClick: (e: React.MouseEvent, issue: YouTrackIssue, globalIndex: number) => void
   onRowDblClick: (issue: YouTrackIssue) => void
   globalIndexOffset: number
+  avatarMap?: Record<string, string>
 }
 
 function SectionGroup({
   name, issues, sortField, sortDir,
-  selectedIds, onRowClick, onRowDblClick, globalIndexOffset,
+  selectedIds, onRowClick, onRowDblClick, globalIndexOffset, avatarMap = {},
 }: SectionGroupProps) {
   const [expanded, setExpanded] = useState(true)
 
@@ -176,7 +177,11 @@ function SectionGroup({
                 <div className="lv-cell lv-cell-assignee">
                   {issue.assignee ? (
                     <div className="lv-assignee">
-                      <div className="lv-avatar">{getInitials(issue.assignee.fullName)}</div>
+                      {avatarMap[issue.assignee.fullName] ? (
+                        <img className="lv-avatar lv-avatar-img" src={avatarMap[issue.assignee.fullName]} alt={issue.assignee.fullName} />
+                      ) : (
+                        <div className="lv-avatar">{getInitials(issue.assignee.fullName)}</div>
+                      )}
                       <span className="lv-assignee-name">{issue.assignee.fullName}</span>
                     </div>
                   ) : (
@@ -224,10 +229,17 @@ export function ListViewPage({ showMyTasks }: ListViewPageProps) {
   const [copied, setCopied]           = useState(false)
   const lastClickedIndex = useRef<number>(-1)
 
+  const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
+
   const [sprints, setSprints]         = useState<YouTrackSprint[]>([])
   const [activeSprint, setActiveSprint] = useState<YouTrackSprint | null>(null)
   const [sprintDropdownOpen, setSprintDropdownOpen] = useState(false)
   const sprintDropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (getActiveSource() !== 'youtrack') return
+    getYouTrackAvatarMap().then(setAvatarMap).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (getActiveSource() !== 'youtrack') return
@@ -570,6 +582,7 @@ export function ListViewPage({ showMyTasks }: ListViewPageProps) {
                   onRowClick={handleRowClick}
                   onRowDblClick={i => { setSelectedIds(new Set()); setSelectedIssue(i) }}
                   globalIndexOffset={offset}
+                  avatarMap={avatarMap}
                 />
               )
             })
