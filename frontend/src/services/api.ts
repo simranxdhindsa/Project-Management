@@ -467,8 +467,9 @@ class ApiService {
     return this.request<EODSummary>('/youtrack/eod-summary')
   }
 
-  async getDeveloperLoad() {
-    return this.request<DeveloperLoad[]>('/youtrack/developer-load')
+  async getDeveloperLoad(sprintId?: string) {
+    const qs = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : ''
+    return this.request<DeveloperLoad[]>(`/youtrack/developer-load${qs}`)
   }
 
   async postMorningReport(reportText: string, channelIds: string[]) {

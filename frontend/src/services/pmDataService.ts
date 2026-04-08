@@ -197,10 +197,10 @@ export function getEODSummary() {
     : api.getEODSummary()
 }
 
-export function getDeveloperLoad() {
+export function getDeveloperLoad(sprintId?: string) {
   return getActiveSource() === 'asana'
     ? api.getAsanaPMDeveloperLoad()
-    : api.getDeveloperLoad()
+    : api.getDeveloperLoad(sprintId)
 }
 
 export function getBlockerReasons(issueIds: string[]) {

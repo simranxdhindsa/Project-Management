@@ -584,14 +584,14 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
   const loadDevLoad = useCallback(async () => {
     setDevLoading(true)
     try {
-      const res = await getDeveloperLoad()
+      const res = await getDeveloperLoad(sprintId)
       if (res.data) setDevLoad(res.data)
     } catch {
       // non-critical
     } finally {
       setDevLoading(false)
     }
-  }, [])
+  }, [sprintId])
 
   const loadCarryover = useCallback(async () => {
     try {

@@ -2755,7 +2755,24 @@ func (h *YouTrackHandler) GetDeveloperLoad(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	issues, err := client.GetIssues(r.Context())
+	sprintID := r.URL.Query().Get("sprint_id")
+	var issues []youtrack.Issue
+	if sprintID != "" {
+		issues, err = client.GetAllSprintIssues(r.Context(), sprintID)
+		if err != nil {
+			// fallback: try resolving sprint name
+			if sprints, sErr := client.GetSprints(r.Context()); sErr == nil {
+				for _, s := range sprints {
+					if s.ID == sprintID {
+						issues, err = client.GetIssuesByStateForSprint(r.Context(), s.Name, nil)
+						break
+					}
+				}
+			}
+		}
+	} else {
+		issues, err = client.GetIssues(r.Context())
+	}
 	if err != nil {
 		http.Error(w, "Failed to get issues: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -2809,6 +2826,9 @@ func (h *YouTrackHandler) GetDeveloperLoad(w http.ResponseWriter, r *http.Reques
 		}
 		if strings.EqualFold(status, "Blocked") {
 			dl.BlockedIssues = append(dl.BlockedIssues, row)
+		} else if sprintID != "" {
+			// Sprint-scoped: all non-closed, non-blocked issues count as active
+			dl.ActiveIssues = append(dl.ActiveIssues, row)
 		} else if strings.EqualFold(status, "In Progress") {
 			dl.ActiveIssues = append(dl.ActiveIssues, row)
 		}
