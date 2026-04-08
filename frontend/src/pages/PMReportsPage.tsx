@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
 import api from '../services/api'
-import type { IssueTimeline, IssueStint, YouTrackSprint, SprintBoardColumn, SprintBoardIssue } from '../services/api'
+import type { IssueTimeline, IssueStint, YouTrackSprint, SprintBoardColumn, SprintBoardIssue, IssueStateLogEntry } from '../services/api'
 import {
   pmAssistantQuery, getCarryover, saveCarryoverPlan,
   getAssigneeStats, getAvatarMap,
@@ -1435,6 +1435,193 @@ function ttPriorityClass(p: string): string {
   return 'tt-pri tt-pri-p3'
 }
 
+// ── IssueTransitionInline: fetches + renders full transition history for one issue ──
+function IssueTransitionInline({
+  issueId,
+  onViewDetails,
+  columnHierarchy,
+}: {
+  issueId: string
+  onViewDetails: (logs: IssueStateLogEntry[]) => void
+  columnHierarchy?: { state: string; rank: number }[]
+}) {
+  const [logs, setLogs] = useState<IssueStateLogEntry[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    api.getIssueTransitions(issueId)
+      .then(res => { setLogs((res as any).data || []) })
+      .catch(() => setLogs([]))
+      .finally(() => setLoading(false))
+  }, [issueId])
+
+  const isBounce = (entry: IssueStateLogEntry) => {
+    if (!columnHierarchy) return false
+    const fromRank = columnHierarchy.find(c => c.state.toLowerCase() === entry.from_state.toLowerCase())?.rank ?? -1
+    const toRank = columnHierarchy.find(c => c.state.toLowerCase() === entry.to_state.toLowerCase())?.rank ?? -1
+    return toRank < fromRank && fromRank !== -1 && toRank !== -1
+  }
+
+  const sk = (w: number | string, h: number, r = 4) => (
+    <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+  )
+
+  return (
+    <div className="pm-tracking-expand-area">
+      {loading ? (
+        <div className="pm-tracking-timeline-list">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="pm-tracking-timeline-entry">
+              {sk(80, 11)}{sk(60, 11)}{sk(60, 11)}{sk('30%', 11)}{sk(50, 11)}
+            </div>
+          ))}
+        </div>
+      ) : logs.length === 0 ? (
+        <p className="pm-tracking-expand-empty">No transition history found in state log.</p>
+      ) : (
+        <div className="pm-tracking-timeline-list">
+          {logs.map((entry, i) => {
+            const bounce = isBounce(entry)
+            return (
+              <div key={i} className={`pm-tracking-timeline-entry${bounce ? ' pm-tracking-timeline-entry--bounce' : ''}`}>
+                <span className="pm-tracking-tl-time">
+                  {new Date(entry.transitioned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className="pm-tracking-tl-states">
+                  <span className="pm-tracking-tl-from">{entry.from_state || '—'}</span>
+                  <span className="pm-tracking-tl-arrow">→</span>
+                  <span className="pm-tracking-tl-to">{entry.to_state}</span>
+                </span>
+                {entry.duration_in_prev_state_hours != null && (
+                  <span className="pm-tracking-tl-dur">{fmtHoursCompact(entry.duration_in_prev_state_hours)}</span>
+                )}
+                {entry.moved_by && (
+                  <span className="pm-tracking-tl-mover">{entry.moved_by}</span>
+                )}
+                {bounce && <span className="pm-tracking-tl-bounce-label">↩ Bounce</span>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {!loading && logs.length > 0 && (
+        <button className="pm-tracking-view-details-btn" onClick={() => onViewDetails(logs)}>
+          View full details →
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── IssueDetailModal: full transition history modal ──────────────────────────
+function IssueDetailModal({
+  issue,
+  logs,
+  onClose,
+  columnHierarchy,
+}: {
+  issue: SprintBoardIssue
+  logs: IssueStateLogEntry[]
+  onClose: () => void
+  columnHierarchy?: { state: string; rank: number }[]
+}) {
+  const isBounce = (entry: IssueStateLogEntry) => {
+    if (!columnHierarchy) return false
+    const fromRank = columnHierarchy.find(c => c.state.toLowerCase() === entry.from_state.toLowerCase())?.rank ?? -1
+    const toRank = columnHierarchy.find(c => c.state.toLowerCase() === entry.to_state.toLowerCase())?.rank ?? -1
+    return toRank < fromRank && fromRank !== -1 && toRank !== -1
+  }
+
+  const bounceCount = logs.filter(isBounce).length
+  const firstEntry = logs[0]
+  const lastEntry = logs[logs.length - 1]
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return createPortal(
+    <div className="pm-tracking-detail-overlay" onClick={onClose}>
+      <div className="pm-tracking-detail-modal" onClick={e => e.stopPropagation()}>
+        <div className="pm-tracking-detail-header">
+          <div className="pm-tracking-detail-title">
+            <span className="pm-tracking-detail-id">{issue.idReadable}</span>
+            <span className="pm-tracking-detail-summary">{issue.summary}</span>
+          </div>
+          <button className="pm-tracking-detail-close" onClick={onClose} aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="pm-tracking-detail-stats">
+          <div className="pm-tracking-detail-stat">
+            <span className="pm-tracking-detail-stat-label">Active time</span>
+            <span className="pm-tracking-detail-stat-value">{fmtHoursCompact(issue.total_active_hours)}</span>
+          </div>
+          <div className="pm-tracking-detail-stat">
+            <span className="pm-tracking-detail-stat-label">Bounces</span>
+            <span className="pm-tracking-detail-stat-value pm-tracking-detail-stat--bounce">{bounceCount}</span>
+          </div>
+          <div className="pm-tracking-detail-stat">
+            <span className="pm-tracking-detail-stat-label">First seen</span>
+            <span className="pm-tracking-detail-stat-value">
+              {firstEntry ? new Date(firstEntry.transitioned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+            </span>
+          </div>
+          <div className="pm-tracking-detail-stat">
+            <span className="pm-tracking-detail-stat-label">Last moved</span>
+            <span className="pm-tracking-detail-stat-value">
+              {lastEntry ? new Date(lastEntry.transitioned_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'}
+            </span>
+          </div>
+          <div className="pm-tracking-detail-stat">
+            <span className="pm-tracking-detail-stat-label">Current state</span>
+            <span className="pm-tracking-detail-stat-value">{issue.current_state}</span>
+          </div>
+          <div className="pm-tracking-detail-stat">
+            <span className="pm-tracking-detail-stat-label">Assignee</span>
+            <span className="pm-tracking-detail-stat-value">{issue.assignee || '—'}</span>
+          </div>
+        </div>
+
+        <div className="pm-tracking-detail-timeline">
+          <div className="pm-tracking-detail-tl-header">
+            <span>Time</span>
+            <span>From → To</span>
+            <span>Duration in prev state</span>
+            <span>Moved by</span>
+            <span></span>
+          </div>
+          {logs.map((entry, i) => {
+            const bounce = isBounce(entry)
+            return (
+              <div key={i} className={`pm-tracking-detail-tl-row${bounce ? ' pm-tracking-detail-tl-row--bounce' : ''}`}>
+                <span className="pm-tracking-detail-tl-ts">
+                  {new Date(entry.transitioned_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className="pm-tracking-detail-tl-states">
+                  <span className="pm-tracking-tl-from">{entry.from_state || '—'}</span>
+                  <span className="pm-tracking-tl-arrow">→</span>
+                  <span className="pm-tracking-tl-to">{entry.to_state}</span>
+                </span>
+                <span className="pm-tracking-detail-tl-dur">
+                  {entry.duration_in_prev_state_hours != null ? fmtHoursCompact(entry.duration_in_prev_state_hours) : '—'}
+                </span>
+                <span className="pm-tracking-detail-tl-mover">{entry.moved_by || '—'}</span>
+                <span>{bounce && <span className="pm-tracking-tl-bounce-label">↩ Bounce</span>}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<string>; sprintId?: string }) {
   const [boardColumns, setBoardColumns] = useState<SprintBoardColumn[]>([])
   const [loading, setLoading] = useState(false)
@@ -1445,6 +1632,9 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
   const [filterAssignee, setFilterAssignee] = useState('')
   const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
+  const [viewMode, setViewMode] = useState<'column' | 'assignee'>('column')
+  const [expandedIssue, setExpandedIssue] = useState<string | null>(null)
+  const [detailIssue, setDetailIssue] = useState<{ issue: SprintBoardIssue; logs: IssueStateLogEntry[] } | null>(null)
   const assigneeRef = useRef<HTMLDivElement>(null)
 
   // ── Data fetching ─────────────────────────────────────────────────────────
@@ -1498,6 +1688,12 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
     } finally { setImporting(false) }
   }
 
+  const { config: wfConfig } = useWorkflowConfig()
+  const columnHierarchy = useMemo(
+    () => wfConfig?.column_hierarchy?.map((c: any) => ({ state: c.state, rank: c.rank })) ?? [],
+    [wfConfig]
+  )
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const allAssignees = useMemo(() => {
     const s = new Set<string>()
@@ -1511,6 +1707,19 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
       .map(col => ({ ...col, issues: col.issues.filter(i => i.assignee === filterAssignee) }))
       .filter(col => col.issues.length > 0)
   }, [boardColumns, filterAssignee])
+
+  const byAssignee = useMemo(() => {
+    const map = new Map<string, { assignee: string; login: string; avatarUrl: string; issues: SprintBoardIssue[] }>()
+    const src = filterAssignee
+      ? filteredColumns.flatMap(c => c.issues)
+      : boardColumns.flatMap(c => c.issues)
+    src.forEach(issue => {
+      const key = issue.assignee || 'Unassigned'
+      if (!map.has(key)) map.set(key, { assignee: key, login: issue.assigneeLogin, avatarUrl: issue.avatarUrl, issues: [] })
+      map.get(key)!.issues.push(issue)
+    })
+    return Array.from(map.values()).sort((a, b) => a.assignee.localeCompare(b.assignee))
+  }, [boardColumns, filteredColumns, filterAssignee])
 
   const sk = (w: number | string, h: number, r = 5) => (
     <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
@@ -1547,12 +1756,86 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
     </div>
   )
 
+  // ── Issue row renderer (shared by column + assignee views) ────────────────
+  const renderIssueRow = (issue: SprintBoardIssue) => {
+    const avatarUrl = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
+    const isExpanded = expandedIssue === issue.idReadable
+    return (
+      <React.Fragment key={issue.id}>
+        <div
+          className={`pm-tracking-issue-row pm-tracking-issue-row--clickable${issue.is_delayed ? ' pm-tracking-issue-row--delayed' : ''}${blockerIssueIds?.has(issue.idReadable) ? ' pm-tracking-issue-row--blocked' : ''}${isExpanded ? ' pm-tracking-issue-row--expanded' : ''}`}
+          onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
+        >
+          <span className="pm-tracking-issue-id">{issue.idReadable || issue.id}</span>
+          <span className={ttPriorityClass(issue.priority)}>{issue.priority}</span>
+          <span className="pm-tracking-issue-summary" title={issue.summary}>
+            {issue.summary}
+            {issue.bounce_count > 0 && (
+              <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>
+            )}
+          </span>
+          <span className={`pm-tracking-time${issue.is_delayed ? ' pm-tracking-time--overdue' : ''}`}>
+            {fmtHoursCompact(issue.hours_in_state)}
+            {issue.is_delayed && <AlertTriangle size={10} style={{ marginLeft: 3 }} />}
+          </span>
+          {issue.assignee ? (
+            <div className="pm-tracking-assignee-cell">
+              {avatarUrl
+                ? <img className="pm-tracking-avatar" src={avatarUrl} alt={issue.assignee} />
+                : <div className="pm-tracking-avatar pm-tracking-avatar--initials">{getInitialsFromName(issue.assignee)}</div>
+              }
+              <span className="pm-tracking-assignee-name">{issue.assignee}</span>
+            </div>
+          ) : <span className="pm-tracking-assignee-cell" />}
+          {issue.issue_type && (
+            <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase()}`}>
+              {issue.issue_type}
+            </span>
+          )}
+          {issue.move_type === 'qa_rejected' && (
+            <span className="pm-tracking-move-badge pm-tracking-move-badge--qa">QA Rejected</span>
+          )}
+          {issue.move_type === 'dev_stalled' && (
+            <span className="pm-tracking-move-badge pm-tracking-move-badge--dev">Dev Stalled</span>
+          )}
+          <span className="pm-tracking-expand-chevron">
+            <ChevronDown size={12} className={`dropdown-chevron${isExpanded ? ' open' : ''}`} />
+          </span>
+        </div>
+        {isExpanded && (
+          <div className="pm-tracking-expand-wrapper">
+            <IssueTransitionInline
+              issueId={issue.idReadable || issue.id}
+              columnHierarchy={columnHierarchy}
+              onViewDetails={(logs) => setDetailIssue({ issue, logs })}
+            />
+          </div>
+        )}
+      </React.Fragment>
+    )
+  }
+
   return (
     <div className="pm-tab-content pm-tracking-tab">
       {/* ── Header ── */}
       <div className="pm-tracking-header">
         <h3 className="pm-section-title"><Activity size={16} /> Tracking</h3>
         <div className="pm-tracking-controls">
+          {/* View toggle */}
+          <div className="pm-tracking-view-toggle">
+            <button
+              className={`pm-tracking-view-toggle-btn${viewMode === 'column' ? ' active' : ''}`}
+              onClick={() => setViewMode('column')}
+            >
+              <Layers size={12} /> By Column
+            </button>
+            <button
+              className={`pm-tracking-view-toggle-btn${viewMode === 'assignee' ? ' active' : ''}`}
+              onClick={() => setViewMode('assignee')}
+            >
+              <Users size={12} /> By Assignee
+            </button>
+          </div>
           {allAssignees.length > 0 && (
             <div className="pm-custom-dropdown" ref={assigneeRef}>
               <button className="pm-custom-dropdown-trigger" onClick={() => setAssigneeOpen(o => !o)}>
@@ -1578,6 +1861,7 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
       </div>
 
       {error && <div className="pm-report-error"><AlertTriangle size={14} />{error}</div>}
+      {statusMsg && <div className="pm-report-status">{statusMsg}</div>}
 
       {!sprintId && (
         <div className="pm-empty-state">
@@ -1595,8 +1879,8 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
         </div>
       )}
 
-      {/* ── Column sections ── */}
-      {!loading && (
+      {/* ── Column view ── */}
+      {!loading && viewMode === 'column' && (
         <div className="pm-tracking-board">
           {filteredColumns.map(col => (
             <div key={col.name} className="pm-tracking-column-section">
@@ -1608,52 +1892,69 @@ function TrackingTab({ blockerIssueIds, sprintId }: { blockerIssueIds?: Set<stri
                     <AlertTriangle size={11} /> {col.issues.filter(i => i.is_delayed).length} delayed
                   </span>
                 )}
+                {col.issues.filter(i => i.bounce_count > 0).length > 0 && (
+                  <span className="pm-tracking-col-bounced">
+                    ↩ {col.issues.filter(i => i.bounce_count > 0).length} bounced
+                  </span>
+                )}
               </div>
-              {/* Column row headings */}
               <div className="pm-tracking-issue-row pm-tracking-col-header-row">
                 <span className="pm-tracking-issue-id pm-tracking-col-heading">Ticket</span>
                 <span className="pm-tracking-col-heading">Priority</span>
                 <span className="pm-tracking-issue-summary pm-tracking-col-heading">Title</span>
-                <span className="pm-tracking-time pm-tracking-col-heading">Time</span>
+                <span className="pm-tracking-time pm-tracking-col-heading">Time in state</span>
                 <span className="pm-tracking-assignee-cell pm-tracking-col-heading">Assignee</span>
               </div>
-              {col.issues.map(issue => {
-                const avatarUrl = avatarMap[issue.assignee]
-                return (
-                  <div key={issue.id} className={`pm-tracking-issue-row${issue.is_delayed ? ' pm-tracking-issue-row--delayed' : ''}${blockerIssueIds?.has(issue.idReadable) ? ' pm-tracking-issue-row--blocked' : ''}`}>
-                    <span className="pm-tracking-issue-id">{issue.idReadable || issue.id}</span>
-                    <span className={ttPriorityClass(issue.priority)}>{issue.priority}</span>
-                    <span className="pm-tracking-issue-summary" title={issue.summary}>{issue.summary}</span>
-                    <span className={`pm-tracking-time${issue.is_delayed ? ' pm-tracking-time--overdue' : ''}`}>
-                      {fmtHoursCompact(issue.hours_in_state)}
-                      {issue.is_delayed && <AlertTriangle size={10} style={{ marginLeft: 3 }} />}
-                    </span>
-                    {issue.assignee ? (
-                      <div className="pm-tracking-assignee-cell">
-                        {avatarUrl
-                          ? <img className="pm-tracking-avatar" src={avatarUrl} alt={issue.assignee} />
-                          : <div className="pm-tracking-avatar pm-tracking-avatar--initials">{getInitialsFromName(issue.assignee)}</div>
-                        }
-                        <span className="pm-tracking-assignee-name">{issue.assignee}</span>
-                      </div>
-                    ) : <span className="pm-tracking-assignee-cell" />}
-                    {issue.issue_type && (
-                      <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase()}`}>
-                        {issue.issue_type}
-                      </span>
-                    )}
-                    {issue.move_type === 'qa_rejected' && (
-                      <span className="pm-tracking-move-badge pm-tracking-move-badge--qa">QA Rejected</span>
-                    )}
-                    {issue.move_type === 'dev_stalled' && (
-                      <span className="pm-tracking-move-badge pm-tracking-move-badge--dev">Dev Stalled</span>
-                    )}
-                  </div>
-                )
-              })}
+              {col.issues.map(issue => renderIssueRow(issue))}
             </div>
           ))}
         </div>
+      )}
+
+      {/* ── Assignee view ── */}
+      {!loading && viewMode === 'assignee' && (
+        <div className="pm-tracking-board">
+          {byAssignee.map(group => (
+            <div key={group.assignee} className="pm-tracking-column-section">
+              <div className="pm-tracking-col-header pm-tracking-assignee-group-header">
+                {group.avatarUrl
+                  ? <img className="pm-tracking-avatar" src={group.avatarUrl} alt={group.assignee} />
+                  : <div className="pm-tracking-avatar pm-tracking-avatar--initials">{getInitialsFromName(group.assignee)}</div>
+                }
+                <span className="pm-tracking-col-name">{group.assignee}</span>
+                <span className="pm-tracking-col-count">{group.issues.length}</span>
+                {group.issues.filter(i => i.is_delayed).length > 0 && (
+                  <span className="pm-tracking-col-delayed">
+                    <AlertTriangle size={11} /> {group.issues.filter(i => i.is_delayed).length} delayed
+                  </span>
+                )}
+                {group.issues.filter(i => i.bounce_count > 0).length > 0 && (
+                  <span className="pm-tracking-col-bounced">
+                    ↩ {group.issues.filter(i => i.bounce_count > 0).length} bounced
+                  </span>
+                )}
+              </div>
+              <div className="pm-tracking-issue-row pm-tracking-col-header-row">
+                <span className="pm-tracking-issue-id pm-tracking-col-heading">Ticket</span>
+                <span className="pm-tracking-col-heading">Priority</span>
+                <span className="pm-tracking-issue-summary pm-tracking-col-heading">Title</span>
+                <span className="pm-tracking-time pm-tracking-col-heading">Time in state</span>
+                <span className="pm-tracking-assignee-cell pm-tracking-col-heading">Column</span>
+              </div>
+              {group.issues.map(issue => renderIssueRow(issue))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Detail modal ── */}
+      {detailIssue && (
+        <IssueDetailModal
+          issue={detailIssue.issue}
+          logs={detailIssue.logs}
+          columnHierarchy={columnHierarchy}
+          onClose={() => setDetailIssue(null)}
+        />
       )}
     </div>
   )

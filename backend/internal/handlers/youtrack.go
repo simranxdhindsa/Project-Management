@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -467,6 +468,18 @@ func (h *YouTrackHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to get users: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Rewrite avatar URLs to go through our proxy (YouTrack Hub requires auth)
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	baseProxyURL := scheme + "://" + r.Host + "/api/youtrack/proxy?url="
+	for i := range users {
+		if users[i].AvatarUrl != "" {
+			users[i].AvatarUrl = baseProxyURL + url.QueryEscape(base64.StdEncoding.EncodeToString([]byte(users[i].AvatarUrl)))
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

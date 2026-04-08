@@ -1094,6 +1094,10 @@ class ApiService {
     return this.request<SprintBoardColumn[]>(`/reports/sprint-board-status?${qs.toString()}`)
   }
 
+  async getIssueTransitions(issueId: string) {
+    return this.request<IssueStateLogEntry[]>(`/reports/issue-transitions?issue_id=${encodeURIComponent(issueId)}`)
+  }
+
   async getTimeTracking(params?: { week?: string; assignee?: string; priority?: string; sprint_id?: string }) {
     const qs = new URLSearchParams()
     if (params?.week) qs.set('week', params.week)
@@ -2006,6 +2010,23 @@ export interface SprintBoardIssue {
   is_delayed: boolean
   threshold_hours: number
   move_type: string  // "qa_rejected" | "dev_stalled" | ""
+  bounce_count: number
+  total_active_hours: number
+}
+
+export interface IssueStateLogEntry {
+  id: string
+  issue_id: string
+  issue_summary: string
+  assignee: string
+  moved_by: string
+  from_state: string
+  to_state: string
+  priority: string
+  transitioned_at: string
+  duration_in_prev_state_hours: number | null
+  comment: string
+  issue_type: string
 }
 
 export interface SprintBoardColumn {

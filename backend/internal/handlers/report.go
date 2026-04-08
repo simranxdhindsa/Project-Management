@@ -1652,7 +1652,9 @@ type SprintBoardIssue struct {
 	HoursInState    float64 `json:"hours_in_state"`
 	IsDelayed       bool    `json:"is_delayed"`
 	ThresholdHours  float64 `json:"threshold_hours"`
-	MoveType        string  `json:"move_type"`         // "qa_rejected" | "dev_stalled" | ""
+	MoveType         string  `json:"move_type"`         // "qa_rejected" | "dev_stalled" | ""
+	BounceCount      int     `json:"bounce_count"`      // number of backward moves across full history
+	TotalActiveHours float64 `json:"total_active_hours"` // sum of time spent in active states
 }
 
 // SprintBoardColumn is one column in the sprint-board-status response
@@ -1823,6 +1825,30 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			}
 		}
 
+		// Compute bounce count and total active hours from full state log history
+		bounceCount := 0
+		totalActiveHours := 0.0
+		if logs, ok := stateLogMap[issue.IDReadable]; ok {
+			for _, entry := range logs {
+				if wfCfg != nil && entry.FromState != "" && entry.ToState != "" {
+					if isBackwardMoveFromConfig(entry.FromState, entry.ToState, wfCfg.ColumnHierarchy) {
+						bounceCount++
+					}
+				}
+				if entry.DurationInPrevStateHours != nil && *entry.DurationInPrevStateHours > 0 {
+					// Count time spent in active (In Progress) states
+					if wfCfg != nil {
+						for _, col := range wfCfg.ColumnHierarchy {
+							if strings.EqualFold(col.State, entry.FromState) && col.Role == "active" {
+								totalActiveHours += *entry.DurationInPrevStateHours
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// SLA-based delayed check
 		thresholdHours := 72.0
 		if v, ok := slaMap[strings.ToLower(priority)]; ok {
@@ -1831,21 +1857,23 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		isDelayed := hoursInState > thresholdHours
 
 		bi := SprintBoardIssue{
-			ID:             issue.ID,
-			IDReadable:     issue.IDReadable,
-			Summary:        issue.Summary,
-			Priority:       priority,
-			Assignee:       assigneeName,
-			AssigneeLogin:  assigneeLogin,
-			AvatarURL:      avatarURL,
-			IssueType:      issueType,
-			CurrentState:   currentState,
-			FromState:      fromState,
-			SinceDate:      sinceDate,
-			HoursInState:   hoursInState,
-			IsDelayed:      isDelayed,
-			ThresholdHours: thresholdHours,
-			MoveType:       moveType,
+			ID:               issue.ID,
+			IDReadable:       issue.IDReadable,
+			Summary:          issue.Summary,
+			Priority:         priority,
+			Assignee:         assigneeName,
+			AssigneeLogin:    assigneeLogin,
+			AvatarURL:        avatarURL,
+			IssueType:        issueType,
+			CurrentState:     currentState,
+			FromState:        fromState,
+			SinceDate:        sinceDate,
+			HoursInState:     hoursInState,
+			IsDelayed:        isDelayed,
+			ThresholdHours:   thresholdHours,
+			MoveType:         moveType,
+			BounceCount:      bounceCount,
+			TotalActiveHours: totalActiveHours,
 		}
 
 		colKey := strings.ToLower(currentState)
@@ -1889,6 +1917,31 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		Success: true,
 		Data:    resultColumns,
 	})
+}
+
+// GetIssueTransitions returns the full state-transition history for a single issue.
+// GET /api/reports/issue-transitions?issue_id=ARD-123
+func (h *ReportHandler) GetIssueTransitions(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+	issueID := r.URL.Query().Get("issue_id")
+	if issueID == "" {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "issue_id is required"})
+		return
+	}
+	logsMap, err := h.reportRepo.GetStateLogsForIssues(r.Context(), []string{issueID})
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: err.Error()})
+		return
+	}
+	logs := logsMap[issueID]
+	if logs == nil {
+		logs = []database.IssueStateLog{}
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: logs})
 }
 
 // ResetStateLog deletes all rows from issue_state_log so tracking starts fresh.
