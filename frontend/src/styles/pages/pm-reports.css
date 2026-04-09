@@ -2443,7 +2443,7 @@
 
 .pm-tracking-issue-row {
   display: grid;
-  grid-template-columns: 80px 44px 1fr 52px 140px auto;
+  grid-template-columns: 80px 44px 1fr 52px 52px 80px 140px auto;
   align-items: center;
   gap: 0.5rem;
   padding: 0.38rem 0.75rem;
@@ -2663,6 +2663,160 @@
 .pm-tracking-assignee-group-header .pm-tracking-avatar {
   width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
 }
+
+/* ── KPI Bar ──────────────────────────────────────────────────────────── */
+.pm-tracking-kpi-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.pm-tracking-kpi-card {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 0.75rem 1rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+}
+.pm-tracking-kpi-card--warning {
+  border-color: rgba(245,158,11,0.4);
+  background: rgba(245,158,11,0.06);
+}
+.pm-tracking-kpi-label {
+  font-size: 0.65rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: rgba(255,255,255,0.4);
+}
+.pm-tracking-kpi-value {
+  font-size: 1.25rem; font-weight: 700; color: rgba(255,255,255,0.9); line-height: 1.2;
+}
+.pm-tracking-kpi-sub {
+  font-size: 0.7rem; color: rgba(255,255,255,0.4);
+}
+
+/* ── Cycle time cell ──────────────────────────────────────────────────── */
+.pm-tracking-cycle-time {
+  font-size: 0.72rem; color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pm-tracking-cycle-time--empty { color: rgba(255,255,255,0.2); }
+
+/* ── Verification badges ──────────────────────────────────────────────── */
+.pm-tracking-verif-badges {
+  display: flex; align-items: center; gap: 3px; flex-wrap: nowrap;
+}
+.pm-tracking-verif-chip {
+  display: inline-flex; align-items: center;
+  font-size: 0.6rem; font-weight: 700; letter-spacing: 0.02em;
+  padding: 1px 5px; border-radius: 4px; white-space: nowrap;
+}
+.pm-tracking-verif-chip--dev   { background: rgba(34,197,94,0.15); color: #4ade80; }
+.pm-tracking-verif-chip--stage { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.pm-tracking-verif-chip--prod  { background: rgba(168,85,247,0.15); color: #c084fc; }
+
+/* ── Hotfix chip ──────────────────────────────────────────────────────── */
+.pm-tracking-hotfix-chip {
+  display: inline-flex; align-items: center;
+  font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em;
+  padding: 1px 5px; border-radius: 4px;
+  background: rgba(251,146,60,0.18); color: #fb923c;
+  margin-left: 5px;
+}
+
+/* ── Stint count ──────────────────────────────────────────────────────── */
+.pm-tracking-stint-count {
+  font-size: 0.58rem; font-weight: 600; color: rgba(245,158,11,0.7);
+  margin-left: 1px;
+}
+
+/* ── Overdue levels ───────────────────────────────────────────────────── */
+.pm-tracking-issue-row--overdue-deadline { background: rgba(239,68,68,0.07); border-left: 2px solid #ef4444; }
+.pm-tracking-issue-row--overdue-deadline:hover { background: rgba(239,68,68,0.11); }
+.pm-tracking-issue-row--overdue-sprint { background: rgba(245,158,11,0.05); border-left: 2px solid rgba(245,158,11,0.5); }
+.pm-tracking-issue-row--overdue-sprint:hover { background: rgba(245,158,11,0.08); }
+
+/* ── Assignee stats inline ────────────────────────────────────────────── */
+.pm-tracking-assignee-stats {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.2rem 0.75rem 0.4rem;
+  font-size: 0.68rem; color: rgba(255,255,255,0.4);
+}
+.pm-tracking-assignee-stats span { white-space: nowrap; }
+
+/* ── QA verified subsection ───────────────────────────────────────────── */
+.pm-tracking-qa-section {
+  padding: 0.5rem 0.75rem 0.75rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.pm-tracking-qa-label {
+  font-size: 0.65rem; font-weight: 600; color: rgba(255,255,255,0.35);
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.1rem;
+}
+.pm-tracking-qa-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.7rem; color: rgba(255,255,255,0.55);
+}
+
+/* ── Row-level indicators ─────────────────────────────────────────────── */
+.pm-tracking-issue-row--bounced { border-left: 3px solid rgba(245,158,11,0.5); }
+.pm-tracking-issue-row--hotfix  { border-left: 3px solid rgba(251,146,60,0.7); }
+
+/* When both bounced + hotfix — hotfix wins */
+.pm-tracking-issue-row--hotfix.pm-tracking-issue-row--bounced { border-left-color: rgba(251,146,60,0.8); }
+
+/* ── Clickable col header ──────────────────────────────────────────────── */
+.pm-tracking-col-header--clickable { cursor: pointer; user-select: none; }
+.pm-tracking-col-header--clickable:hover { background: rgba(255,255,255,0.05); }
+.pm-tracking-col-chevron { transition: transform 200ms ease; flex-shrink: 0; }
+.pm-tracking-col-chevron.open { transform: rotate(0deg); }
+.pm-tracking-col-chevron:not(.open) { transform: rotate(-90deg); }
+
+/* ── Hotfix count in col header ───────────────────────────────────────── */
+.pm-tracking-col-hotfix {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 0.65rem; font-weight: 700;
+  color: #fb923c; background: rgba(251,146,60,0.12);
+  padding: 1px 6px; border-radius: 8px;
+}
+
+/* ── Ticket ID as link ────────────────────────────────────────────────── */
+.pm-tracking-issue-id--link {
+  cursor: pointer; text-decoration: underline; text-decoration-style: dotted;
+  text-underline-offset: 2px; transition: color 150ms;
+}
+.pm-tracking-issue-id--link:hover { color: #818cf8; }
+
+/* ── Dev time secondary label ─────────────────────────────────────────── */
+.pm-tracking-dev-time {
+  font-size: 0.6rem; color: rgba(255,255,255,0.3); margin-left: 2px;
+}
+
+/* ── Light mode overrides ─────────────────────────────────────────────── */
+[data-theme="light"] .pm-tracking-kpi-card {
+  background: #fff; border-color: rgba(0,0,0,0.08);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+[data-theme="light"] .pm-tracking-kpi-card--warning { border-color: #f59e0b; background: rgba(245,158,11,0.05); }
+[data-theme="light"] .pm-tracking-kpi-label { color: #94a3b8; }
+[data-theme="light"] .pm-tracking-kpi-value { color: #0f172a; }
+[data-theme="light"] .pm-tracking-kpi-sub { color: #94a3b8; }
+[data-theme="light"] .pm-tracking-cycle-time { color: #64748b; }
+[data-theme="light"] .pm-tracking-cycle-time--empty { color: #cbd5e1; }
+[data-theme="light"] .pm-tracking-verif-chip--dev   { background: rgba(34,197,94,0.12); color: #16a34a; }
+[data-theme="light"] .pm-tracking-verif-chip--stage { background: rgba(59,130,246,0.12); color: #2563eb; }
+[data-theme="light"] .pm-tracking-verif-chip--prod  { background: rgba(168,85,247,0.12); color: #9333ea; }
+[data-theme="light"] .pm-tracking-hotfix-chip { background: rgba(251,146,60,0.12); color: #ea580c; }
+[data-theme="light"] .pm-tracking-assignee-stats { color: #94a3b8; }
+[data-theme="light"] .pm-tracking-qa-section { border-top-color: rgba(0,0,0,0.06); }
+[data-theme="light"] .pm-tracking-qa-label { color: #94a3b8; }
+[data-theme="light"] .pm-tracking-qa-row { color: #475569; }
+[data-theme="light"] .pm-tracking-issue-row--overdue-sprint { border-left-color: #f59e0b; background: rgba(245,158,11,0.04); }
+[data-theme="light"] .pm-tracking-issue-row--bounced { border-left-color: rgba(245,158,11,0.6); }
+[data-theme="light"] .pm-tracking-issue-row--hotfix  { border-left-color: rgba(234,88,12,0.7); }
+[data-theme="light"] .pm-tracking-col-header--clickable:hover { background: rgba(0,0,0,0.03); }
+[data-theme="light"] .pm-tracking-col-hotfix { color: #ea580c; background: rgba(234,88,12,0.08); }
+[data-theme="light"] .pm-tracking-issue-id--link:hover { color: #4f46e5; }
+[data-theme="light"] .pm-tracking-dev-time { color: #94a3b8; }
 
 /* ── Detail Modal ─────────────────────────────────────────────────────── */
 .pm-tracking-detail-overlay {

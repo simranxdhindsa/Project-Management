@@ -197,7 +197,9 @@ func main() {
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/state", youtrackHandler.UpdateIssueState).Methods("PATCH")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/comments", youtrackHandler.GetIssueComments).Methods("GET")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/comments", youtrackHandler.AddIssueComment).Methods("POST")
-	youtrackRoutes.HandleFunc("/proxy", youtrackHandler.ProxyAttachment).Methods("GET", "HEAD")
+	// Proxy is public (no JWT) — browser <img> tags can't send Authorization headers.
+	// Security is enforced inside ProxyAttachment by checking the URL matches the YouTrack instance.
+	api.HandleFunc("/youtrack/proxy", youtrackHandler.ProxyAttachment).Methods("GET", "HEAD")
 	youtrackRoutes.HandleFunc("/sections", youtrackHandler.GetProjectSectionsFromDB).Methods("GET") // Get synced sections from DB
 	youtrackRoutes.HandleFunc("/import", youtrackHandler.ImportFromYouTrack).Methods("POST")       // Import issues from YouTrack
 	youtrackRoutes.HandleFunc("/match-analysis", youtrackHandler.MatchAnalysis).Methods("POST")

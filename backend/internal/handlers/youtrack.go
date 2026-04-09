@@ -708,12 +708,6 @@ func (h *YouTrackHandler) AddIssueComment(w http.ResponseWriter, r *http.Request
 // ProxyAttachment fetches a YouTrack attachment using the stored token and streams it back.
 // This is needed because YouTrack attachment URLs require Bearer auth that the browser can't provide.
 func (h *YouTrackHandler) ProxyAttachment(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.GetUserID(r.Context())
-	if userID == "" {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
 	encodedURL := r.URL.Query().Get("url")
 	if encodedURL == "" {
 		http.Error(w, "Missing url param", http.StatusBadRequest)

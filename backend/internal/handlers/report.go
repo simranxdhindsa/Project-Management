@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"sort"
 	"strings"
 	"time"
@@ -1652,9 +1654,29 @@ type SprintBoardIssue struct {
 	HoursInState    float64 `json:"hours_in_state"`
 	IsDelayed       bool    `json:"is_delayed"`
 	ThresholdHours  float64 `json:"threshold_hours"`
-	MoveType         string  `json:"move_type"`         // "qa_rejected" | "dev_stalled" | ""
-	BounceCount      int     `json:"bounce_count"`      // number of backward moves across full history
-	TotalActiveHours float64 `json:"total_active_hours"` // sum of time spent in active states
+	MoveType            string  `json:"move_type"`             // "qa_rejected" | "dev_stalled" | ""
+	BounceCount         int     `json:"bounce_count"`          // number of backward moves across full history
+	TotalActiveHours    float64 `json:"total_active_hours"`    // sum of time spent in active states
+	CycleTimeHours      float64 `json:"cycle_time_hours"`      // first active → first done transition
+	VerifiedOnDev       string  `json:"verified_on_dev"`       // who moved to first verified-role state
+	VerifiedOnStage     string  `json:"verified_on_stage"`     // who moved to second verified-role state
+	VerifiedOnProd      string  `json:"verified_on_prod"`      // who moved to closed-role state
+	IsHotfix            bool    `json:"is_hotfix"`             // jumped from active → deployed/verified directly
+	StintCount          int     `json:"stint_count"`           // how many separate In Progress sessions
+	OverdueLevel        string  `json:"overdue_level"`         // "deadline" | "sprint" | "sla" | ""
+}
+
+// SprintSummary aggregates sprint-level metrics
+type SprintSummary struct {
+	TotalIssues     int     `json:"total_issues"`
+	DoneIssues      int     `json:"done_issues"`
+	InProgressCount int     `json:"in_progress_count"`
+	BlockedCount    int     `json:"blocked_count"`
+	BouncedCount    int     `json:"bounced_count"`
+	HotfixCount     int     `json:"hotfix_count"`
+	OverdueCount    int     `json:"overdue_count"`
+	SprintFinishMs  int64   `json:"sprint_finish_ms"`
+	CompletionPct   float64 `json:"completion_pct"`
 }
 
 // SprintBoardColumn is one column in the sprint-board-status response
@@ -1675,6 +1697,7 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 
 	sprintID := r.URL.Query().Get("sprint_id")
 	sprintName, _ := url.QueryUnescape(r.URL.Query().Get("sprint_name"))
+	sprintFinishMs, _ := strconv.ParseInt(r.URL.Query().Get("sprint_finish_ms"), 10, 64)
 
 	// Load workflow config for SLA thresholds and priority mappings
 	wfCfg := h.loadWorkflowConfig(r.Context(), user.ID, "youtrack")
@@ -1689,6 +1712,13 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	}
+
+	// Build proxy base URL for avatar rewriting
+	scheme := "https"
+	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") == "" {
+		scheme = "http"
+	}
+	proxyBase := scheme + "://" + r.Host + "/api/youtrack/proxy?url="
 
 	ytClient, err := h.getYouTrackClient(r.Context())
 	if err != nil {
@@ -1787,6 +1817,13 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			}
 			assigneeLogin = assignee.Login
 			avatarURL = assignee.AvatarUrl
+			if avatarURL != "" {
+				// Make relative URLs absolute before proxying
+				if strings.HasPrefix(avatarURL, "/") {
+					avatarURL = ytClient.GetBaseURL() + avatarURL
+				}
+				avatarURL = proxyBase + url.QueryEscape(base64.StdEncoding.EncodeToString([]byte(avatarURL)))
+			}
 		}
 		issueType := ""
 		if wfCfg != nil && wfCfg.HotfixRules.TypeFieldName != "" {
@@ -1856,6 +1893,129 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		}
 		isDelayed := hoursInState > thresholdHours
 
+		// ── New fields: cycle time, QA verification, hotfix, stint count ────────
+		var cycleTimeHours float64
+		var verifiedOnDev, verifiedOnStage, verifiedOnProd string
+		isHotfix := false
+		stintCount := 0
+		overdueLevel := ""
+
+		// Per-ticket due date from YouTrack custom field "Due Date"
+		dueDate := youtrack.GetCustomFieldValueAsTime(issue, "Due Date")
+
+		// Overdue level: per-ticket date > sprint deadline > SLA
+		currentStateRole := ""
+		if wfCfg != nil {
+			currentStateRole = getStateRole(currentState, wfCfg.ColumnHierarchy)
+		}
+		isActiveNow := currentStateRole == "active"
+		isDoneNow := currentStateRole == "dev_done" || currentStateRole == "verified" || currentStateRole == "deployed" || currentStateRole == "closed"
+		_ = isDoneNow
+
+		if dueDate != nil && dueDate.Before(now) && !isDoneNow {
+			isDelayed = true
+			overdueLevel = "deadline"
+		} else if sprintFinishMs > 0 && time.UnixMilli(sprintFinishMs).Before(now) && isActiveNow {
+			isDelayed = true
+			overdueLevel = "sprint"
+		} else if hoursInState > thresholdHours {
+			isDelayed = true
+			overdueLevel = "sla"
+		}
+
+		if logs, ok := stateLogMap[issue.IDReadable]; ok && wfCfg != nil {
+			// Scan full log for cycle time, stints, QA verification, hotfix
+			var firstActiveAt *time.Time
+			var firstDoneAt *time.Time
+			verifiedRanksSeen := []int{} // ranks of verified-role states hit, in order
+
+			for _, entry := range logs {
+				toRole := getStateRole(entry.ToState, wfCfg.ColumnHierarchy)
+				fromRole := getStateRole(entry.FromState, wfCfg.ColumnHierarchy)
+
+				// Stint count: each entry to "active" role
+				if toRole == "active" {
+					stintCount++
+					t := entry.TransitionedAt
+					if firstActiveAt == nil {
+						firstActiveAt = &t
+					}
+				}
+
+				// First done transition for cycle time
+				if firstDoneAt == nil && (toRole == "dev_done" || toRole == "verified" || toRole == "deployed" || toRole == "closed") {
+					t := entry.TransitionedAt
+					firstDoneAt = &t
+				}
+
+				// QA verification: who moved to each verified-role state
+				if toRole == "verified" {
+					toRank := getStateIndexFromConfig(entry.ToState, wfCfg.ColumnHierarchy)
+					// Assign to dev/stage/prod slot based on order seen
+					slot := len(verifiedRanksSeen)
+					verifiedRanksSeen = append(verifiedRanksSeen, toRank)
+					mover := entry.MovedBy
+					if mover == "" {
+						mover = entry.Assignee
+					}
+					switch slot {
+					case 0:
+						verifiedOnDev = mover
+					case 1:
+						verifiedOnStage = mover
+					default:
+						verifiedOnProd = mover
+					}
+				}
+				// Also track "closed" role as prod verification
+				if toRole == "closed" && verifiedOnProd == "" {
+					mover := entry.MovedBy
+					if mover == "" {
+						mover = entry.Assignee
+					}
+					verifiedOnProd = mover
+				}
+
+				// Hotfix: active → deployed/verified directly (skipping dev_done)
+				if fromRole == "active" && (toRole == "deployed" || toRole == "verified") {
+					// Check that no dev_done role was hit before this
+					devDoneHit := false
+					for _, prev := range logs {
+						if prev.TransitionedAt.Before(entry.TransitionedAt) {
+							if getStateRole(prev.ToState, wfCfg.ColumnHierarchy) == "dev_done" {
+								devDoneHit = true
+								break
+							}
+						}
+					}
+					if !devDoneHit {
+						isHotfix = true
+					}
+				}
+			}
+
+			// Also check issue_type field for hotfix
+			if wfCfg.HotfixRules.TypeFieldName != "" {
+				for _, hv := range wfCfg.HotfixRules.HotfixValues {
+					if strings.EqualFold(issueType, hv) {
+						isHotfix = true
+					}
+				}
+			}
+
+			// Compute cycle time
+			if firstActiveAt != nil {
+				end := now
+				if firstDoneAt != nil {
+					end = *firstDoneAt
+				}
+				cycleTimeHours = end.Sub(*firstActiveAt).Hours()
+				if cycleTimeHours < 0 {
+					cycleTimeHours = 0
+				}
+			}
+		}
+
 		bi := SprintBoardIssue{
 			ID:               issue.ID,
 			IDReadable:       issue.IDReadable,
@@ -1874,6 +2034,13 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			MoveType:         moveType,
 			BounceCount:      bounceCount,
 			TotalActiveHours: totalActiveHours,
+			CycleTimeHours:   cycleTimeHours,
+			VerifiedOnDev:    verifiedOnDev,
+			VerifiedOnStage:  verifiedOnStage,
+			VerifiedOnProd:   verifiedOnProd,
+			IsHotfix:         isHotfix,
+			StintCount:       stintCount,
+			OverdueLevel:     overdueLevel,
 		}
 
 		colKey := strings.ToLower(currentState)
@@ -1913,9 +2080,47 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Build SprintSummary from resultColumns
+	var summary SprintSummary
+	summary.SprintFinishMs = sprintFinishMs
+	doneRoles := map[string]bool{"dev_done": true, "verified": true, "deployed": true, "closed": true}
+	for _, col := range resultColumns {
+		colRole := ""
+		if wfCfg != nil {
+			colRole = getStateRole(col.Name, wfCfg.ColumnHierarchy)
+		}
+		for _, iss := range col.Issues {
+			summary.TotalIssues++
+			if doneRoles[colRole] {
+				summary.DoneIssues++
+			}
+			if colRole == "active" {
+				summary.InProgressCount++
+			}
+			if colRole == "blocked" {
+				summary.BlockedCount++
+			}
+			if iss.BounceCount > 0 {
+				summary.BouncedCount++
+			}
+			if iss.IsHotfix {
+				summary.HotfixCount++
+			}
+			if iss.IsDelayed {
+				summary.OverdueCount++
+			}
+		}
+	}
+	if summary.TotalIssues > 0 {
+		summary.CompletionPct = float64(summary.DoneIssues) / float64(summary.TotalIssues) * 100
+	}
+
 	sendJSON(w, http.StatusOK, Response{
 		Success: true,
-		Data:    resultColumns,
+		Data: map[string]interface{}{
+			"summary": summary,
+			"columns": resultColumns,
+		},
 	})
 }
 
@@ -1938,6 +2143,57 @@ func (h *ReportHandler) GetIssueTransitions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	logs := logsMap[issueID]
+
+	// If no DB logs, fall back to fetching live activity from YouTrack
+	if len(logs) == 0 {
+		ytClient, ytErr := h.getYouTrackClient(r.Context())
+		if ytErr == nil {
+			activities, actErr := ytClient.GetIssueActivities(r.Context(), issueID)
+			if actErr == nil {
+				// Convert YouTrack activities to IssueStateLog format
+				var prevState string
+				var prevTime time.Time
+				for _, act := range activities {
+					if act.Field.Presentation != "State" {
+						continue
+					}
+					fromState := prevState
+					toState := ""
+					if len(act.Added) > 0 {
+						toState = act.Added[0].Name
+					}
+					if toState == "" {
+						continue
+					}
+					ts := time.UnixMilli(act.Timestamp)
+					var durPtr *float64
+					if !prevTime.IsZero() && fromState != "" {
+						dur := ts.Sub(prevTime).Hours()
+						durPtr = &dur
+					}
+					movedBy := ""
+					if act.Author != nil {
+						movedBy = act.Author.FullName
+						if movedBy == "" {
+							movedBy = act.Author.Login
+						}
+					}
+					entry := database.IssueStateLog{
+						IssueID:                  issueID,
+						FromState:                fromState,
+						ToState:                  toState,
+						TransitionedAt:           ts,
+						DurationInPrevStateHours: durPtr,
+						MovedBy:                  movedBy,
+					}
+					logs = append(logs, entry)
+					prevState = toState
+					prevTime = ts
+				}
+			}
+		}
+	}
+
 	if logs == nil {
 		logs = []database.IssueStateLog{}
 	}

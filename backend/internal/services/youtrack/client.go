@@ -804,6 +804,28 @@ func GetCustomFieldValue(issue Issue, fieldName string) string {
 	return ""
 }
 
+// GetCustomFieldValueAsTime returns the time.Time value of a date custom field.
+// Returns nil if the field is not found or not a date (millisecond timestamp).
+func GetCustomFieldValueAsTime(issue Issue, fieldName string) *time.Time {
+	for _, field := range issue.CustomFields {
+		if strings.EqualFold(field.Name, fieldName) {
+			switch v := field.Value.(type) {
+			case float64:
+				if v > 0 {
+					t := time.UnixMilli(int64(v))
+					return &t
+				}
+			case int64:
+				if v > 0 {
+					t := time.UnixMilli(v)
+					return &t
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func GetStatus(issue Issue) string {
 	for _, field := range issue.CustomFields {
 		if field.Name == "State" {

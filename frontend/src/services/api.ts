@@ -1087,11 +1087,12 @@ class ApiService {
     return this.request<AssigneeStat[]>(`/reports/assignee-stats${qs}`)
   }
 
-  async getSprintBoardStatus(params: { sprint_id?: string; sprint_name?: string }) {
+  async getSprintBoardStatus(params: { sprint_id?: string; sprint_name?: string; sprint_finish_ms?: number }) {
     const qs = new URLSearchParams()
     if (params.sprint_id) qs.set('sprint_id', params.sprint_id)
     if (params.sprint_name) qs.set('sprint_name', encodeURIComponent(params.sprint_name))
-    return this.request<SprintBoardColumn[]>(`/reports/sprint-board-status?${qs.toString()}`)
+    if (params.sprint_finish_ms) qs.set('sprint_finish_ms', String(params.sprint_finish_ms))
+    return this.request<SprintBoardStatusResponse>(`/reports/sprint-board-status?${qs.toString()}`)
   }
 
   async getIssueTransitions(issueId: string) {
@@ -2012,6 +2013,30 @@ export interface SprintBoardIssue {
   move_type: string  // "qa_rejected" | "dev_stalled" | ""
   bounce_count: number
   total_active_hours: number
+  cycle_time_hours: number
+  verified_on_dev: string
+  verified_on_stage: string
+  verified_on_prod: string
+  is_hotfix: boolean
+  stint_count: number
+  overdue_level: string  // "deadline" | "sprint" | "sla" | ""
+}
+
+export interface SprintSummary {
+  total_issues: number
+  done_issues: number
+  in_progress_count: number
+  blocked_count: number
+  bounced_count: number
+  hotfix_count: number
+  overdue_count: number
+  sprint_finish_ms: number
+  completion_pct: number
+}
+
+export interface SprintBoardStatusResponse {
+  summary: SprintSummary
+  columns: SprintBoardColumn[]
 }
 
 export interface IssueStateLogEntry {
