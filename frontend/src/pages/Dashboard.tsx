@@ -60,14 +60,15 @@ import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
 import { SlackIntelligencePage } from './SlackIntelligencePage'
 import { ActivityPage } from './ActivityPage'
+import { DayTrackPage } from './DayTrackPage'
 import { JellySwitch } from '../components/JellySwitch'
 import { RightPanel } from '../components/notifications/RightPanel'
 import type { LocalNotification } from '../components/notifications/RightPanel'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-tasks', 'activity', 'calendar', 'ai-analysis', 'daily-analysis', 'pm-reports']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-tasks', 'activity', 'calendar', 'ai-analysis', 'daily-analysis', 'pm-reports', 'daytrack']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -150,6 +151,7 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'integrations': 'integrations',
   'slack': 'slack',
   'activity': 'activity',
+  'daytrack': 'daytrack',
 }
 
 const PM_REPORTS_TABS = ['tracking', 'daily', 'assignees', 'dailyops', 'deployment'] as const
@@ -567,6 +569,13 @@ export default function Dashboard() {
               <span>Activity</span>
             </button>
             <button
+              className={`sidebar-nav-item ${currentPage === 'daytrack' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('daytrack')}
+            >
+              <Clock size={20} />
+              <span>DayTrack</span>
+            </button>
+            <button
               className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
               onClick={() => setCurrentPage('calendar')}
             >
@@ -696,6 +705,7 @@ export default function Dashboard() {
             {currentPage === 'integrations' && 'Integrations'}
             {currentPage === 'slack' && 'Slack Intelligence'}
             {currentPage === 'activity' && 'Activity'}
+            {currentPage === 'daytrack' && 'DayTrack'}
           </h1>
         </div>
         <div className="header-actions">
@@ -1107,6 +1117,9 @@ export default function Dashboard() {
         )}
           </>
         )}
+
+        {/* DayTrack */}
+        {currentPage === 'daytrack' && <DayTrackPage />}
 
         {/* Board View */}
         {currentPage === 'board' && <BoardPage />}

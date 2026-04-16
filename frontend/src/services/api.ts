@@ -2109,6 +2109,79 @@ export interface WorkflowConfig {
 export const api = new ApiService()
 export default api
 
+// ── DayTrack interfaces ───────────────────────────────────────────────────────
+
+export interface DayTrackEntry {
+  id: string
+  user_id: string
+  entry_date: string
+  name: string
+  category: string
+  start_time: string
+  end_time: string
+  duration_mins: number | null
+  notes: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DayTrackPlanned {
+  id: string
+  user_id: string
+  entry_date: string
+  name: string
+  category: string
+  scheduled_time: string
+  when_type: string
+  notes: string
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+function dtHeaders(): Record<string, string> {
+  const token = localStorage.getItem('token')
+  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) h['Authorization'] = `Bearer ${token}`
+  return h
+}
+
+async function dtFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const res = await fetch(url, { ...options, headers: { ...dtHeaders(), ...(options.headers as Record<string, string> || {}) } })
+  if (res.status === 204) return undefined as unknown as T
+  const text = await res.text()
+  if (!res.ok) throw new Error(text || `Request failed ${res.status}`)
+  return JSON.parse(text) as T
+}
+
+export const dayTrackApi = {
+  getEntries: (date: string) =>
+    dtFetch<DayTrackEntry[]>(`${API_URL}/daytrack/entries?date=${date}`),
+  createEntry: (data: Partial<DayTrackEntry>) =>
+    dtFetch<DayTrackEntry>(`${API_URL}/daytrack/entries`, { method: 'POST', body: JSON.stringify(data) }),
+  updateEntry: (id: string, data: Partial<DayTrackEntry>) =>
+    dtFetch<DayTrackEntry>(`${API_URL}/daytrack/entries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteEntry: (id: string) =>
+    dtFetch<void>(`${API_URL}/daytrack/entries/${id}`, { method: 'DELETE' }),
+
+  getPlanned: (date: string) =>
+    dtFetch<DayTrackPlanned[]>(`${API_URL}/daytrack/planned?date=${date}`),
+  createPlanned: (data: Partial<DayTrackPlanned>) =>
+    dtFetch<DayTrackPlanned>(`${API_URL}/daytrack/planned`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePlanned: (id: string, data: Partial<DayTrackPlanned>) =>
+    dtFetch<DayTrackPlanned>(`${API_URL}/daytrack/planned/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePlanned: (id: string) =>
+    dtFetch<void>(`${API_URL}/daytrack/planned/${id}`, { method: 'DELETE' }),
+
+  getCategories: () =>
+    dtFetch<string[]>(`${API_URL}/daytrack/categories`),
+  addCategory: (name: string) =>
+    dtFetch<{ name: string }>(`${API_URL}/daytrack/categories`, { method: 'POST', body: JSON.stringify({ name }) }),
+  deleteCategory: (name: string) =>
+    dtFetch<void>(`${API_URL}/daytrack/categories/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+}
+
 // ── YouTrack avatar cache ─────────────────────────────────────────────────
 // Maps fullName → absolute avatarUrl. Fetched once per session, reused everywhere.
 let _ytAvatarCache: Record<string, string> | null = null

@@ -617,6 +617,43 @@ func RunMigrations() error {
 			E'You are a technical writer creating client-facing deployment reports.\n\nYou will receive a ticket title and description. The description may be a rough internal note written by a developer (e.g. "is now fixed", "added support for X").\n\nYour job is to rewrite it as a single polished, professional fix statement for a client deployment report. Rules:\n- Write in past tense, from the user''s perspective (what they now experience)\n- Be 1-2 sentences. Do not pad or over-explain.\n- Remove ALL internal prefixes: priority tags (P0, P1, A2, etc.), platform tags (FE, BE, UI, MC, Studio), ticket IDs, and jargon\n- Start with the subject of what changed (e.g. "The restart conversation button...", "Avatar playback...")\n- If the description already says what was fixed clearly, use it as the basis — do not invent details\n- Sound polished and client-ready\n\nRespond with ONLY the fix statement. No preamble, no labels, no quotes.',
 			'[]', true, 'system'
 		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'deployment_report')`,
+
+		// ── DayTrack: per-user daily time-sheet ──────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS daytrack_entries (
+			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			entry_date    DATE NOT NULL DEFAULT CURRENT_DATE,
+			name          TEXT NOT NULL,
+			category      TEXT NOT NULL DEFAULT 'General',
+			start_time    VARCHAR(5),
+			end_time      VARCHAR(5),
+			duration_mins INT,
+			notes         TEXT,
+			status        VARCHAR(20) NOT NULL DEFAULT 'done',
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_daytrack_entries_user_date ON daytrack_entries(user_id, entry_date)`,
+		`CREATE TABLE IF NOT EXISTS daytrack_planned (
+			id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			entry_date     DATE NOT NULL DEFAULT CURRENT_DATE,
+			name           TEXT NOT NULL,
+			category       TEXT NOT NULL DEFAULT 'General',
+			scheduled_time VARCHAR(5),
+			when_type      VARCHAR(20) NOT NULL DEFAULT 'today',
+			notes          TEXT,
+			status         VARCHAR(20) NOT NULL DEFAULT 'planned',
+			created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_daytrack_planned_user_date ON daytrack_planned(user_id, entry_date)`,
+		`CREATE TABLE IF NOT EXISTS daytrack_categories (
+			user_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name     TEXT NOT NULL,
+			position INT NOT NULL DEFAULT 0,
+			PRIMARY KEY (user_id, name)
+		)`,
 	}
 
 	for i, migration := range migrations {

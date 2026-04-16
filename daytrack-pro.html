@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DayTrack Pro – Daily Time Sheet</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0D1117;--surface:#161B22;--surface2:#1C2230;--surface3:#222A3A;
+  --border:#2A3447;--border2:#334155;
+  --text:#E2E8F0;--text2:#94A3B8;--text3:#64748B;
+  --blue:#3B82F6;--blue2:#2563EB;--blue-glow:rgba(59,130,246,0.18);
+  --green:#10B981;--amber:#F59E0B;--red:#EF4444;--purple:#8B5CF6;--pink:#EC4899;--cyan:#06B6D4;--orange:#F97316;
+  --radius:12px;--radius-sm:8px;
+  --shadow:0 4px 24px rgba(0,0,0,0.4);
+  --transition:all 0.18s ease;
+}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.6}
+input,select,textarea,button{font-family:inherit}
+
+/* ── LAYOUT ── */
+.app{max-width:1280px;margin:0 auto;padding:20px 16px 60px}
+
+/* ── HEADER ── */
+.header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px;padding:20px 24px;background:var(--surface);border:1px solid var(--border);border-radius:16px}
+.header-left{display:flex;align-items:center;gap:14px}
+.logo{width:40px;height:40px;background:var(--blue);border-radius:10px;display:flex;align-items:center;justify-content:center}
+.logo svg{width:22px;height:22px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.header-title h1{font-size:18px;font-weight:700;color:var(--text)}
+.header-title p{font-size:12px;color:var(--text2);margin-top:1px}
+.header-center{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.stat-pill{background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px}
+.stat-pill b{color:var(--text);font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dot-green{background:var(--green)}
+.dot-amber{background:var(--amber)}
+.dot-blue{background:var(--blue)}
+.header-right{display:flex;align-items:center;gap:10px}
+.name-input{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px;width:140px;transition:var(--transition)}
+.name-input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-glow)}
+.date-badge{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;font-size:13px;color:var(--text2);font-weight:500;white-space:nowrap}
+.date-badge b{color:var(--blue)}
+
+/* ── LIVE CLOCK ── */
+.live-clock{font-size:11px;color:var(--text3);font-variant-numeric:tabular-nums}
+
+/* ── GRID LAYOUT ── */
+.main-grid{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
+@media(max-width:900px){.main-grid{grid-template-columns:1fr}}
+
+/* ── CARDS ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.card-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:0.05em}
+.card-title svg{width:15px;height:15px;stroke:var(--blue);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+/* ── FORM FIELDS ── */
+.field{margin-bottom:12px}
+.field label{display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:5px;text-transform:uppercase;letter-spacing:0.04em}
+.field input,.field select,.field textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 11px;color:var(--text);font-size:13px;transition:var(--transition)}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-glow)}
+.field select option{background:var(--surface2)}
+.field textarea{resize:vertical;min-height:56px;line-height:1.5}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.time-field-wrap{position:relative}
+.time-field-wrap input{padding-right:68px}
+.now-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:var(--blue);color:#fff;border:none;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;cursor:pointer;transition:var(--transition)}
+.now-btn:hover{background:var(--blue2)}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:7px;border:none;border-radius:var(--radius-sm);padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:var(--transition);white-space:nowrap}
+.btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:hover{background:var(--blue2);transform:translateY(-1px);box-shadow:0 4px 16px rgba(59,130,246,0.35)}
+.btn-green{background:var(--green);color:#fff}
+.btn-green:hover{background:#059669;transform:translateY(-1px)}
+.btn-amber{background:var(--amber);color:#000}
+.btn-amber:hover{background:#D97706}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--surface2);color:var(--text);border-color:var(--border2)}
+.btn-red{background:rgba(239,68,68,0.12);color:var(--red);border:1px solid rgba(239,68,68,0.2)}
+.btn-red:hover{background:rgba(239,68,68,0.22)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn-full{width:100%;justify-content:center}
+.btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+
+/* ── TIMER WIDGET ── */
+.timer-widget{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+.timer-display{font-size:36px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;text-align:center;letter-spacing:2px;margin:10px 0}
+.timer-task-name{font-size:13px;color:var(--text2);text-align:center;min-height:18px;margin-bottom:8px;font-weight:500}
+.timer-controls{display:flex;gap:8px;justify-content:center}
+.timer-pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}}
+.timer-status-row{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--text3);margin-bottom:8px;min-height:20px}
+
+/* ── TASK TABLE ── */
+.task-section{margin-bottom:16px}
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.section-header h3{font-size:13px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}
+.count-badge{background:var(--surface3);border-radius:20px;padding:2px 10px;font-size:11px;font-weight:600;color:var(--text2)}
+.table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;min-width:640px}
+thead tr{background:var(--surface2)}
+th{padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid var(--border);white-space:nowrap}
+tbody tr{border-bottom:1px solid var(--border);transition:background 0.15s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:var(--surface2)}
+td{padding:10px 14px;font-size:13px;color:var(--text);vertical-align:middle}
+.td-task{font-weight:600;max-width:180px}
+.td-task span{display:block;font-size:11px;color:var(--text3);font-weight:400;margin-top:2px}
+.td-time{font-variant-numeric:tabular-nums;color:var(--text2);font-size:13px}
+.td-dur{font-weight:700;color:var(--blue);font-variant-numeric:tabular-nums}
+.td-actions{display:flex;gap:6px;align-items:center}
+.icon-btn{width:30px;height:30px;border-radius:6px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:var(--transition)}
+.icon-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn-edit{background:rgba(59,130,246,0.12);color:var(--blue)}
+.icon-btn-edit:hover{background:rgba(59,130,246,0.25)}
+.icon-btn-del{background:rgba(239,68,68,0.1);color:var(--red)}
+.icon-btn-del:hover{background:rgba(239,68,68,0.22)}
+.icon-btn-carry{background:rgba(245,158,11,0.12);color:var(--amber)}
+.icon-btn-carry:hover{background:rgba(245,158,11,0.25)}
+.icon-btn-stop{background:rgba(16,185,129,0.12);color:var(--green)}
+.icon-btn-stop:hover{background:rgba(16,185,129,0.25)}
+.empty-state{padding:40px;text-align:center;color:var(--text3);font-size:13px}
+.empty-state svg{width:36px;height:36px;stroke:var(--border2);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;margin:0 auto 12px;display:block}
+
+/* ── CATEGORY PILL ── */
+.cat-pill{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;white-space:nowrap}
+
+/* ── STATUS BADGE ── */
+.status-badge{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;white-space:nowrap}
+.status-done{background:rgba(16,185,129,0.12);color:var(--green)}
+.status-active{background:rgba(59,130,246,0.12);color:var(--blue)}
+.status-planned{background:rgba(148,163,184,0.12);color:var(--text2)}
+.status-carry{background:rgba(245,158,11,0.12);color:var(--amber)}
+
+/* ── SUMMARY ── */
+.summary-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+.summary-stat{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;text-align:center}
+.summary-stat .val{font-size:22px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums}
+.summary-stat .lbl{font-size:11px;color:var(--text3);margin-top:2px;font-weight:500}
+.cat-bar-section{margin-bottom:16px}
+.cat-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.cat-bar-label{width:110px;font-size:12px;color:var(--text2);flex-shrink:0;font-weight:500}
+.cat-bar-track{flex:1;background:var(--surface3);border-radius:4px;height:8px;overflow:hidden}
+.cat-bar-fill{height:100%;border-radius:4px;transition:width 0.5s ease}
+.cat-bar-val{width:50px;font-size:11px;color:var(--text3);text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
+.standup-box{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:12px}
+.standup-box h4{font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px}
+.standup-box pre{font-size:12px;color:var(--text2);white-space:pre-wrap;line-height:1.7;font-family:inherit}
+.copy-success{color:var(--green);font-size:12px;margin-left:8px;display:none}
+
+/* ── CATEGORIES MANAGER ── */
+.cats-manager{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.cat-tag{display:inline-flex;align-items:center;gap:6px;border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:default}
+.cat-tag .remove-cat{background:none;border:none;cursor:pointer;color:inherit;opacity:0.6;padding:0;display:flex;line-height:1}
+.cat-tag .remove-cat:hover{opacity:1}
+.add-cat-row{display:flex;gap:8px}
+.add-cat-row input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;color:var(--text);font-size:13px}
+.add-cat-row input:focus{outline:none;border-color:var(--blue)}
+
+/* ── TABS ── */
+.tabs{display:flex;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:4px;margin-bottom:16px}
+.tab{flex:1;padding:8px;border:none;background:transparent;color:var(--text2);font-size:12px;font-weight:600;border-radius:7px;cursor:pointer;transition:var(--transition);text-align:center}
+.tab.active{background:var(--blue);color:#fff;box-shadow:0 2px 8px rgba(59,130,246,0.35)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+/* ── TOAST ── */
+.toast-container{position:fixed;bottom:24px;right:24px;z-index:999;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;color:var(--text);box-shadow:var(--shadow);display:flex;align-items:center;gap:8px;animation:slideIn 0.25s ease;min-width:220px}
+.toast svg{width:16px;height:16px;flex-shrink:0;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.toast-success svg{stroke:var(--green)}
+.toast-info svg{stroke:var(--blue)}
+.toast-warn svg{stroke:var(--amber)}
+@keyframes slideIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:200;display:none;align-items:center;justify-content:center;padding:16px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:480px;box-shadow:var(--shadow)}
+.modal h3{font-size:16px;font-weight:700;margin-bottom:20px;color:var(--text)}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+
+/* ── DIVIDER ── */
+.divider{height:1px;background:var(--border);margin:16px 0}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/><circle cx="6" cy="6" r="1" fill="#fff"/></svg>
+      </div>
+      <div class="header-title">
+        <h1>DayTrack Pro</h1>
+        <p>Daily Time Recording Sheet</p>
+      </div>
+    </div>
+    <div class="header-center" id="headerStats">
+      <div class="stat-pill"><span class="dot dot-green"></span>Total: <b id="hStatTotal">0h 0m</b></div>
+      <div class="stat-pill"><span class="dot dot-blue"></span>Tasks: <b id="hStatTasks">0</b></div>
+      <div class="stat-pill"><span class="dot dot-amber"></span>Pending: <b id="hStatPending">0</b></div>
+    </div>
+    <div class="header-right">
+      <input class="name-input" id="memberName" placeholder="Your name…" autocomplete="off"/>
+      <div class="date-badge" id="dateBadge"></div>
+      <div class="live-clock" id="liveClock"></div>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="main-grid">
+
+    <!-- LEFT COLUMN -->
+    <div>
+
+      <!-- ADD TASK CARD -->
+      <div class="card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          Add Task / Entry
+        </div>
+
+        <!-- TABS -->
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab('manual')">Manual Entry</button>
+          <button class="tab" onclick="switchTab('timer')">Live Timer</button>
+          <button class="tab" onclick="switchTab('planned')">Plan Ahead</button>
+        </div>
+
+        <!-- MANUAL TAB -->
+        <div class="tab-panel active" id="tab-manual">
+          <div class="field">
+            <label>Task Name *</label>
+            <input id="m-name" placeholder="What did you work on?" autocomplete="off"/>
+          </div>
+          <div class="field">
+            <label>Category</label>
+            <select id="m-cat"></select>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Start Time</label>
+              <div class="time-field-wrap">
+                <input type="time" id="m-start"/>
+                <button class="now-btn" onclick="setNow('m-start')" title="Set to current time">Now</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>End Time</label>
+              <div class="time-field-wrap">
+                <input type="time" id="m-end"/>
+                <button class="now-btn" onclick="setNow('m-end')" title="Set to current time">Now</button>
+              </div>
+            </div>
+          </div>
+          <div class="field">
+            <label>Notes (optional)</label>
+            <textarea id="m-notes" placeholder="Any context or blockers…"></textarea>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="addManualTask()">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            Add to Timesheet
+          </button>
+        </div>
+
+        <!-- TIMER TAB -->
+        <div class="tab-panel" id="tab-timer">
+          <div class="timer-widget">
+            <div class="timer-status-row" id="timerStatusRow"><span style="color:var(--text3);font-size:12px">No active timer</span></div>
+            <div class="timer-display" id="timerDisplay">00:00:00</div>
+            <div class="timer-task-name" id="timerTaskName"></div>
+            <div class="timer-controls">
+              <button class="btn btn-green btn-sm" id="timerStartBtn" onclick="timerStart()">
+                <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start
+              </button>
+              <button class="btn btn-ghost btn-sm" id="timerPauseBtn" onclick="timerPause()" disabled>
+                <svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause
+              </button>
+              <button class="btn btn-red btn-sm" id="timerStopBtn" onclick="timerStop()" disabled>
+                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Stop
+              </button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Task Name *</label>
+            <input id="t-name" placeholder="What are you working on?" autocomplete="off"/>
+          </div>
+          <div class="field">
+            <label>Category</label>
+            <select id="t-cat"></select>
+          </div>
+          <div class="field">
+            <label>Notes</label>
+            <textarea id="t-notes" placeholder="Any notes…"></textarea>
+          </div>
+        </div>
+
+        <!-- PLAN AHEAD TAB -->
+        <div class="tab-panel" id="tab-planned">
+          <div class="field">
+            <label>Task Name *</label>
+            <input id="p-name" placeholder="Plan a task for today or tomorrow…" autocomplete="off"/>
+          </div>
+          <div class="field">
+            <label>Category</label>
+            <select id="p-cat"></select>
+          </div>
+          <div class="field">
+            <label>Scheduled Time (optional)</label>
+            <div class="time-field-wrap">
+              <input type="time" id="p-time"/>
+              <button class="now-btn" onclick="setNow('p-time')">Now</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Schedule For</label>
+            <select id="p-when">
+              <option value="today">Today</option>
+              <option value="tomorrow">Tomorrow (Carry Over)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Notes</label>
+            <textarea id="p-notes" placeholder="Description or priority…"></textarea>
+          </div>
+          <button class="btn btn-amber btn-full" onclick="addPlannedTask()">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+            Schedule Task
+          </button>
+        </div>
+      </div>
+
+      <!-- CATEGORIES CARD -->
+      <div class="card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
+          Categories
+        </div>
+        <div class="cats-manager" id="catsManager"></div>
+        <div class="add-cat-row">
+          <input id="newCatInput" placeholder="Add custom category…" autocomplete="off" onkeydown="if(event.key==='Enter')addCategory()"/>
+          <button class="btn btn-primary btn-sm" onclick="addCategory()">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Add
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div>
+
+      <!-- COMPLETED TASKS -->
+      <div class="task-section card">
+        <div class="section-header">
+          <h3>
+            <svg style="width:15px;height:15px;stroke:var(--green);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Today's Log
+            <span class="count-badge" id="doneCount">0</span>
+          </h3>
+          <button class="btn btn-ghost btn-sm" onclick="clearCompleted()">
+            <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            Clear Done
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Task</th><th>Category</th><th>Start</th><th>End</th><th>Duration</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="taskTableBody">
+              <tr><td colspan="7"><div class="empty-state">
+                <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+                No tasks recorded yet. Add your first entry!
+              </div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- PLANNED / CARRY OVER -->
+      <div class="task-section card">
+        <div class="section-header">
+          <h3>
+            <svg style="width:15px;height:15px;stroke:var(--amber);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Planned & Carry Over
+            <span class="count-badge" id="plannedCount">0</span>
+          </h3>
+          <button class="btn btn-ghost btn-sm" onclick="carryAllUnfinished()">
+            <svg viewBox="0 0 24 24" style="width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            Carry All Unfinished
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Task</th><th>Category</th><th>Scheduled</th><th>For</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="plannedTableBody">
+              <tr><td colspan="6"><div class="empty-state">
+                <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                No planned tasks. Use "Plan Ahead" to schedule tasks.
+              </div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- END OF DAY SUMMARY -->
+      <div class="summary-card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+          End-of-Day Summary
+        </div>
+
+        <div class="summary-grid" id="summaryGrid">
+          <div class="summary-stat"><div class="val" id="sTotalHrs">0h 0m</div><div class="lbl">Total Logged</div></div>
+          <div class="summary-stat"><div class="val" id="sCompleted">0</div><div class="lbl">Completed</div></div>
+          <div class="summary-stat"><div class="val" id="sPending">0</div><div class="lbl">Pending</div></div>
+          <div class="summary-stat"><div class="val" id="sProductivity">—</div><div class="lbl">Focus Rate</div></div>
+        </div>
+
+        <div class="cat-bar-section" id="catBars"></div>
+
+        <div class="divider"></div>
+
+        <div class="standup-box">
+          <h4>Standup Summary – Copy to Clipboard</h4>
+          <pre id="standupText">Add tasks to generate your standup summary…</pre>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="copyStandup()">
+            <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy Standup
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="exportCSV()">
+            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export CSV
+          </button>
+          <span class="copy-success" id="copySuccess">
+            <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:var(--green);fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;display:inline-block;vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg>
+            Copied!
+          </span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- EDIT MODAL -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <h3>Edit Task</h3>
+    <div class="field"><label>Task Name</label><input id="e-name" autocomplete="off"/></div>
+    <div class="field"><label>Category</label><select id="e-cat"></select></div>
+    <div class="row2">
+      <div class="field"><label>Start Time</label><div class="time-field-wrap"><input type="time" id="e-start"/><button class="now-btn" onclick="setNow('e-start')">Now</button></div></div>
+      <div class="field"><label>End Time</label><div class="time-field-wrap"><input type="time" id="e-end"/><button class="now-btn" onclick="setNow('e-end')">Now</button></div></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="e-notes"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEdit()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+const STORAGE_KEY = 'daytrack_pro_v2';
+let state = {
+  name:'',
+  tasks:[],       // completed / in-progress tasks
+  planned:[],     // planned / carry over tasks
+  categories:['Development','Testing','Meetings','Breaks','Review','Research']
+};
+let editId = null;
+
+// CATEGORY COLORS
+const CAT_COLORS = {
+  'Development':'#3B82F6','Testing':'#10B981','Meetings':'#8B5CF6',
+  'Breaks':'#F59E0B','Review':'#06B6D4','Research':'#EC4899'
+};
+const PALETTE = ['#3B82F6','#10B981','#8B5CF6','#F59E0B','#06B6D4','#EC4899','#F97316','#EF4444','#84CC16','#14B8A6'];
+function catColor(cat){
+  if(CAT_COLORS[cat]) return CAT_COLORS[cat];
+  const idx = state.categories.indexOf(cat);
+  return PALETTE[idx % PALETTE.length] || '#64748B';
+}
+function catPillHTML(cat){
+  const c = catColor(cat);
+  return `<span class="cat-pill" style="background:${c}20;color:${c}">${cat}</span>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  PERSISTENCE
+// ═══════════════════════════════════════════════════════
+function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}
+function load(){
+  const d = localStorage.getItem(STORAGE_KEY);
+  if(d){try{const p=JSON.parse(d);state={...state,...p}}catch(e){}}
+}
+
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
+load();
+document.getElementById('memberName').value = state.name;
+document.getElementById('memberName').oninput = e=>{state.name=e.target.value;save()};
+setupDateHeader();
+startClock();
+renderCategories();
+renderAll();
+
+function setupDateHeader(){
+  const now = new Date();
+  const days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('dateBadge').innerHTML=`<b>${days[now.getDay()]}</b>, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+}
+function startClock(){
+  const el=document.getElementById('liveClock');
+  function tick(){const n=new Date();el.textContent=n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+  tick();setInterval(tick,1000);
+}
+function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+
+// ═══════════════════════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════════════════════
+function switchTab(t){
+  document.querySelectorAll('.tab').forEach((b,i)=>b.classList.toggle('active',['manual','timer','planned'][i]===t));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+t).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════
+//  TIME HELPERS
+// ═══════════════════════════════════════════════════════
+function setNow(id){
+  const n=new Date();
+  const h=String(n.getHours()).padStart(2,'0');
+  const m=String(n.getMinutes()).padStart(2,'0');
+  document.getElementById(id).value=`${h}:${m}`;
+}
+function timeToMins(t){if(!t)return 0;const[h,m]=t.split(':').map(Number);return h*60+m}
+function minsToLabel(m){const h=Math.floor(m/60),min=m%60;return h>0?`${h}h ${min}m`:`${min}m`}
+function calcDuration(s,e){
+  if(!s||!e)return null;
+  let diff=timeToMins(e)-timeToMins(s);
+  if(diff<0)diff+=24*60;
+  return diff>0?diff:null;
+}
+
+// ═══════════════════════════════════════════════════════
+//  CATEGORIES
+// ═══════════════════════════════════════════════════════
+function renderCategories(){
+  // Manager
+  const mgr=document.getElementById('catsManager');
+  mgr.innerHTML=state.categories.map(c=>{
+    const col=catColor(c);
+    return `<span class="cat-tag" style="background:${col}20;color:${col}">${c}
+      <button class="remove-cat" onclick="removeCategory('${c}')" title="Remove">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button></span>`}).join('');
+  // Selects
+  ['m-cat','t-cat','p-cat','e-cat'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    const prev=el.value;
+    el.innerHTML=state.categories.map(c=>`<option value="${c}">${c}</option>`).join('');
+    if(prev&&state.categories.includes(prev))el.value=prev;
+  });
+}
+function addCategory(){
+  const inp=document.getElementById('newCatInput');
+  const v=inp.value.trim();
+  if(!v)return;
+  if(state.categories.includes(v)){toast('Category already exists','warn');return}
+  state.categories.push(v);
+  inp.value='';
+  save();renderCategories();toast(`Category "${v}" added`,'success');
+}
+function removeCategory(c){
+  state.categories=state.categories.filter(x=>x!==c);
+  save();renderCategories();
+}
+
+// ═══════════════════════════════════════════════════════
+//  ADD TASKS
+// ═══════════════════════════════════════════════════════
+function addManualTask(){
+  const name=document.getElementById('m-name').value.trim();
+  if(!name){toast('Please enter a task name','warn');return}
+  const start=document.getElementById('m-start').value;
+  const end=document.getElementById('m-end').value;
+  const dur=calcDuration(start,end);
+  const task={
+    id:genId(),name,cat:document.getElementById('m-cat').value,
+    start,end,dur,notes:document.getElementById('m-notes').value.trim(),
+    status:dur?'done':'active',addedAt:Date.now()
+  };
+  state.tasks.unshift(task);
+  save();renderAll();
+  document.getElementById('m-name').value='';
+  document.getElementById('m-start').value='';
+  document.getElementById('m-end').value='';
+  document.getElementById('m-notes').value='';
+  toast(`Task "${name}" logged`,'success');
+}
+
+function addPlannedTask(){
+  const name=document.getElementById('p-name').value.trim();
+  if(!name){toast('Please enter a task name','warn');return}
+  const task={
+    id:genId(),name,cat:document.getElementById('p-cat').value,
+    scheduledTime:document.getElementById('p-time').value,
+    when:document.getElementById('p-when').value,
+    notes:document.getElementById('p-notes').value.trim(),
+    status:'planned',addedAt:Date.now()
+  };
+  state.planned.unshift(task);
+  save();renderAll();
+  document.getElementById('p-name').value='';
+  document.getElementById('p-time').value='';
+  document.getElementById('p-notes').value='';
+  toast(`"${name}" scheduled for ${task.when}`,'success');
+}
+
+// ═══════════════════════════════════════════════════════
+//  TIMER
+// ═══════════════════════════════════════════════════════
+let timerInterval=null,timerStart_=null,timerPaused=false,pausedMs=0,pauseStart=null;
+
+function timerStart(){
+  const name=document.getElementById('t-name').value.trim();
+  if(!name){toast('Enter a task name first','warn');return}
+  if(timerPaused){
+    pausedMs+=(Date.now()-pauseStart);
+    timerPaused=false;
+    document.getElementById('timerPauseBtn').innerHTML='<svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Pause';
+    timerInterval=setInterval(updateTimerDisplay,1000);
+    return;
+  }
+  timerStart_=Date.now();pausedMs=0;timerPaused=false;
+  document.getElementById('timerTaskName').textContent=name;
+  document.getElementById('timerStatusRow').innerHTML='<span class="timer-pulse"></span><span style="color:var(--green);font-size:12px;font-weight:600">Running</span>';
+  document.getElementById('timerStartBtn').disabled=true;
+  document.getElementById('timerPauseBtn').disabled=false;
+  document.getElementById('timerStopBtn').disabled=false;
+  timerInterval=setInterval(updateTimerDisplay,1000);
+  toast(`Timer started for "${name}"`,'info');
+}
+function updateTimerDisplay(){
+  const elapsed=Date.now()-timerStart_-pausedMs;
+  const s=Math.floor(elapsed/1000);
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
+  document.getElementById('timerDisplay').textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+function timerPause(){
+  if(timerPaused)return;
+  clearInterval(timerInterval);timerPaused=true;pauseStart=Date.now();
+  document.getElementById('timerStatusRow').innerHTML='<span style="color:var(--amber);font-size:12px;font-weight:600">Paused</span>';
+  document.getElementById('timerPauseBtn').innerHTML='<svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Resume';
+  document.getElementById('timerStartBtn').disabled=false;
+  document.getElementById('timerStartBtn').onclick=timerStart;
+}
+function timerStop(){
+  clearInterval(timerInterval);
+  const elapsed=Date.now()-timerStart_-pausedMs;
+  const mins=Math.round(elapsed/60000);
+  const name=document.getElementById('t-name').value.trim();
+  const now=new Date();
+  const startD=new Date(timerStart_);
+  const fmt=d=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  const task={
+    id:genId(),name,cat:document.getElementById('t-cat').value,
+    start:fmt(startD),end:fmt(now),dur:mins,
+    notes:document.getElementById('t-notes').value.trim(),
+    status:'done',addedAt:Date.now()
+  };
+  state.tasks.unshift(task);save();renderAll();
+  // Reset
+  document.getElementById('timerDisplay').textContent='00:00:00';
+  document.getElementById('timerTaskName').textContent='';
+  document.getElementById('timerStatusRow').innerHTML='<span style="color:var(--text3);font-size:12px">No active timer</span>';
+  document.getElementById('timerStartBtn').disabled=false;
+  document.getElementById('timerPauseBtn').disabled=true;
+  document.getElementById('timerStopBtn').disabled=true;
+  document.getElementById('t-name').value='';
+  document.getElementById('t-notes').value='';
+  timerStart_=null;pausedMs=0;timerPaused=false;
+  toast(`"${name}" logged — ${minsToLabel(mins)}`,'success');
+}
+
+// ═══════════════════════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════════════════════
+function renderAll(){
+  renderTaskTable();
+  renderPlannedTable();
+  renderSummary();
+  renderHeaderStats();
+}
+
+function renderTaskTable(){
+  const tbody=document.getElementById('taskTableBody');
+  if(!state.tasks.length){
+    tbody.innerHTML=`<tr><td colspan="7"><div class="empty-state"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>No tasks recorded yet. Add your first entry!</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML=state.tasks.map(t=>{
+    const dur=t.dur!=null?`<span class="td-dur">${minsToLabel(t.dur)}</span>`:`<span style="color:var(--text3)">—</span>`;
+    const statusMap={done:'status-done',active:'status-active',planned:'status-planned'};
+    const badge=`<span class="status-badge ${statusMap[t.status]||'status-planned'}">${t.status}</span>`;
+    return `<tr>
+      <td class="td-task">${esc(t.name)}${t.notes?`<span>${esc(t.notes)}</span>`:''}
+      </td>
+      <td>${catPillHTML(t.cat)}</td>
+      <td class="td-time">${t.start||'—'}</td>
+      <td class="td-time">${t.end||'—'}</td>
+      <td>${dur}</td>
+      <td>${badge}</td>
+      <td><div class="td-actions">
+        <button class="icon-btn icon-btn-edit" onclick="openEdit('${t.id}')" title="Edit">
+          <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+        </button>
+        <button class="icon-btn icon-btn-carry" onclick="carryTask('${t.id}')" title="Carry to tomorrow">
+          <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+        <button class="icon-btn icon-btn-del" onclick="deleteTask('${t.id}')" title="Delete">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+        </button>
+      </div></td>
+    </tr>`}).join('');
+  document.getElementById('doneCount').textContent=state.tasks.length;
+}
+
+function renderPlannedTable(){
+  const tbody=document.getElementById('plannedTableBody');
+  if(!state.planned.length){
+    tbody.innerHTML=`<tr><td colspan="6"><div class="empty-state"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>No planned tasks.</div></td></tr>`;
+    document.getElementById('plannedCount').textContent=0;return;
+  }
+  tbody.innerHTML=state.planned.map(t=>{
+    const whenColor=t.when==='tomorrow'?'var(--amber)':'var(--blue)';
+    const whenLabel=t.when==='tomorrow'?'Tomorrow':'Today';
+    return `<tr>
+      <td class="td-task">${esc(t.name)}${t.notes?`<span>${esc(t.notes)}</span>`:''}
+      </td>
+      <td>${catPillHTML(t.cat)}</td>
+      <td class="td-time">${t.scheduledTime||'—'}</td>
+      <td><span class="status-badge" style="background:${whenColor}20;color:${whenColor}">${whenLabel}</span></td>
+      <td><span class="status-badge status-planned">${t.status}</span></td>
+      <td><div class="td-actions">
+        <button class="icon-btn icon-btn-stop" onclick="startPlanned('${t.id}')" title="Start this task">
+          <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </button>
+        <button class="icon-btn icon-btn-del" onclick="deletePlanned('${t.id}')" title="Remove">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+        </button>
+      </div></td>
+    </tr>`}).join('');
+  document.getElementById('plannedCount').textContent=state.planned.length;
+}
+
+function renderSummary(){
+  const totalMins=state.tasks.reduce((a,t)=>a+(t.dur||0),0);
+  const completed=state.tasks.filter(t=>t.status==='done').length;
+  const pending=state.planned.filter(t=>t.when==='today').length;
+  const focusMins=state.tasks.filter(t=>!['Meetings','Breaks'].includes(t.cat)).reduce((a,t)=>a+(t.dur||0),0);
+  const focusRate=totalMins>0?Math.round(focusMins/totalMins*100):null;
+
+  document.getElementById('sTotalHrs').textContent=totalMins?minsToLabel(totalMins):'0m';
+  document.getElementById('sCompleted').textContent=completed;
+  document.getElementById('sPending').textContent=pending;
+  document.getElementById('sProductivity').textContent=focusRate!=null?focusRate+'%':'—';
+
+  // Cat bars
+  const catMap={};
+  state.tasks.forEach(t=>{if(t.dur)catMap[t.cat]=(catMap[t.cat]||0)+t.dur});
+  const maxMins=Math.max(...Object.values(catMap),1);
+  const bars=document.getElementById('catBars');
+  bars.innerHTML=Object.keys(catMap).length?Object.entries(catMap).sort((a,b)=>b[1]-a[1]).map(([cat,mins])=>{
+    const pct=Math.round(mins/maxMins*100);
+    const col=catColor(cat);
+    return `<div class="cat-bar-row">
+      <div class="cat-bar-label">${cat}</div>
+      <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+      <div class="cat-bar-val">${minsToLabel(mins)}</div>
+    </div>`}).join(''):'<div style="color:var(--text3);font-size:12px;padding:8px 0">No time data yet.</div>';
+
+  // Standup
+  const name=state.name||'Team Member';
+  const today=new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'});
+  const doneList=state.tasks.filter(t=>t.status==='done').map(t=>`  ✅ ${t.name} (${t.cat}) – ${t.dur?minsToLabel(t.dur):'n/a'}`).join('\n');
+  const activeList=state.tasks.filter(t=>t.status==='active').map(t=>`  🔄 ${t.name} (${t.cat})`).join('\n');
+  const plannedToday=state.planned.filter(t=>t.when==='today').map(t=>`  📌 ${t.name} (${t.cat})`).join('\n');
+  const blockers='  None';
+  let text=`📋 Daily Standup – ${name} – ${today}\n`;
+  text+=`⏱ Total: ${totalMins?minsToLabel(totalMins):'—'} | Focus Rate: ${focusRate!=null?focusRate+'%':'—'}\n\n`;
+  text+=`✅ Done Today:\n${doneList||'  (none)'}\n\n`;
+  if(activeList)text+=`🔄 In Progress:\n${activeList}\n\n`;
+  text+=`📌 Planned / Upcoming:\n${plannedToday||'  (none)'}\n\n`;
+  text+=`🚧 Blockers:\n${blockers}`;
+  document.getElementById('standupText').textContent=text;
+}
+
+function renderHeaderStats(){
+  const total=state.tasks.reduce((a,t)=>a+(t.dur||0),0);
+  document.getElementById('hStatTotal').textContent=total?minsToLabel(total):'0m';
+  document.getElementById('hStatTasks').textContent=state.tasks.length;
+  document.getElementById('hStatPending').textContent=state.planned.filter(t=>t.when==='today').length;
+}
+
+// ═══════════════════════════════════════════════════════
+//  TASK ACTIONS
+// ═══════════════════════════════════════════════════════
+function deleteTask(id){state.tasks=state.tasks.filter(t=>t.id!==id);save();renderAll();toast('Task removed','info')}
+function deletePlanned(id){state.planned=state.planned.filter(t=>t.id!==id);save();renderAll()}
+
+function carryTask(id){
+  const t=state.tasks.find(x=>x.id===id);
+  if(!t)return;
+  state.planned.unshift({id:genId(),name:t.name,cat:t.cat,scheduledTime:'',when:'tomorrow',notes:t.notes||'',status:'carry',addedAt:Date.now()});
+  state.tasks=state.tasks.filter(x=>x.id!==id);
+  save();renderAll();toast(`"${t.name}" carried to tomorrow`,'success');
+}
+function carryAllUnfinished(){
+  const active=state.tasks.filter(t=>t.status==='active');
+  active.forEach(t=>{
+    state.planned.unshift({id:genId(),name:t.name,cat:t.cat,scheduledTime:'',when:'tomorrow',notes:t.notes||'Carried over',status:'carry',addedAt:Date.now()});
+    state.tasks=state.tasks.filter(x=>x.id!==t.id);
+  });
+  save();renderAll();toast(`${active.length} task(s) carried to tomorrow`,'success');
+}
+function startPlanned(id){
+  const t=state.planned.find(x=>x.id===id);
+  if(!t)return;
+  const now=new Date();
+  const fmt=d=>`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  state.tasks.unshift({id:genId(),name:t.name,cat:t.cat,start:fmt(now),end:'',dur:null,notes:t.notes||'',status:'active',addedAt:Date.now()});
+  state.planned=state.planned.filter(x=>x.id!==id);
+  save();renderAll();toast(`Started "${t.name}"`,'success');
+}
+function clearCompleted(){
+  state.tasks=state.tasks.filter(t=>t.status!=='done');
+  save();renderAll();toast('Completed tasks cleared','info');
+}
+
+// ═══════════════════════════════════════════════════════
+//  EDIT MODAL
+// ═══════════════════════════════════════════════════════
+function openEdit(id){
+  const t=state.tasks.find(x=>x.id===id);
+  if(!t)return;
+  editId=id;
+  renderCategories();
+  document.getElementById('e-name').value=t.name;
+  document.getElementById('e-cat').value=t.cat;
+  document.getElementById('e-start').value=t.start||'';
+  document.getElementById('e-end').value=t.end||'';
+  document.getElementById('e-notes').value=t.notes||'';
+  document.getElementById('editModal').classList.add('open');
+}
+function closeModal(){document.getElementById('editModal').classList.remove('open');editId=null}
+function saveEdit(){
+  const idx=state.tasks.findIndex(x=>x.id===editId);
+  if(idx<0)return;
+  const t=state.tasks[idx];
+  t.name=document.getElementById('e-name').value.trim()||t.name;
+  t.cat=document.getElementById('e-cat').value;
+  t.start=document.getElementById('e-start').value;
+  t.end=document.getElementById('e-end').value;
+  t.dur=calcDuration(t.start,t.end);
+  t.notes=document.getElementById('e-notes').value.trim();
+  if(t.dur)t.status='done';
+  save();renderAll();closeModal();toast('Task updated','success');
+}
+document.getElementById('editModal').addEventListener('click',e=>{if(e.target===document.getElementById('editModal'))closeModal()});
+
+// ═══════════════════════════════════════════════════════
+//  EXPORT
+// ═══════════════════════════════════════════════════════
+function copyStandup(){
+  const txt=document.getElementById('standupText').textContent;
+  navigator.clipboard.writeText(txt).then(()=>{
+    const el=document.getElementById('copySuccess');
+    el.style.display='inline-flex';
+    setTimeout(()=>el.style.display='none',2500);
+    toast('Standup copied to clipboard!','success');
+  });
+}
+function exportCSV(){
+  const rows=[['Task','Category','Start','End','Duration (min)','Status','Notes']];
+  state.tasks.forEach(t=>rows.push([t.name,t.cat,t.start||'',t.end||'',t.dur||'',t.status,t.notes||'']));
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const b=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');
+  const d=new Date();
+  a.href=URL.createObjectURL(b);
+  a.download=`daytrack-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.csv`;
+  a.click();
+  toast('CSV exported!','success');
+}
+
+// ═══════════════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════════════
+function toast(msg,type='info'){
+  const icons={success:'<polyline points="20 6 9 17 4 12"/>',info:'<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="8"/>',warn:'<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17"/>'};
+  const el=document.createElement('div');
+  el.className=`toast toast-${type}`;
+  el.innerHTML=`<svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0">${icons[type]||icons.info}</svg>${msg}`;
+  document.getElementById('toastContainer').appendChild(el);
+  setTimeout(()=>el.remove(),3000);
+}
+
+// ═══════════════════════════════════════════════════════
+//  UTIL
+// ═══════════════════════════════════════════════════════
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+</script>
+</body>
+</html>
