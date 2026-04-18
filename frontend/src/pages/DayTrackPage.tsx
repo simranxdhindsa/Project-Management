@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { dayTrackApi, type DayTrackEntry, type DayTrackPlanned } from '../services/api'
 import '../styles/pages/daytrack.css'
 
@@ -27,14 +28,44 @@ function fmtDate(d: Date): string {
   return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`
 }
 
+function to12h(hhmm: string): string {
+  if (!hhmm) return ''
+  const [h, m] = hhmm.split(':').map(Number)
+  if (isNaN(h) || isNaN(m)) return hhmm
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 || 12
+  return `${h12}:${String(m).padStart(2, '0')} ${ampm}`
+}
+
+function to24h(time12: string): string {
+  if (!time12) return ''
+  const match = time12.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+  if (!match) return time12
+  let h = parseInt(match[1])
+  const m = match[2]
+  const ampm = match[3].toUpperCase()
+  if (ampm === 'AM' && h === 12) h = 0
+  if (ampm === 'PM' && h !== 12) h += 12
+  return `${String(h).padStart(2, '0')}:${m}`
+}
+
 function nowHHMM(): string {
   const n = new Date()
-  return `${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`
+  return to12h(`${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`)
 }
 
 function timeToMins(t: string): number {
   if (!t) return 0
-  const [h,m] = t.split(':').map(Number)
+  const match = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
+  if (match) {
+    let h = parseInt(match[1])
+    const m = parseInt(match[2])
+    const ampm = match[3].toUpperCase()
+    if (ampm === 'AM' && h === 12) h = 0
+    if (ampm === 'PM' && h !== 12) h += 12
+    return h * 60 + m
+  }
+  const [h, m] = t.split(':').map(Number)
   return h * 60 + m
 }
 
@@ -124,12 +155,41 @@ export function DayTrackPage() {
   const [eEnd, setEEnd] = useState('')
   const [eNotes, setENotes] = useState('')
 
+  // Category dropdown open state (one at a time)
+  const [openDrop, setOpenDrop] = useState<'mCat'|'tCat'|'pCat'|'eCat'|null>(null)
+  const mCatRef = useRef<HTMLDivElement>(null)
+  const tCatRef = useRef<HTMLDivElement>(null)
+  const pCatRef = useRef<HTMLDivElement>(null)
+  const eCatRef = useRef<HTMLDivElement>(null)
+
+  // Calendar
+  const [calOpen, setCalOpen] = useState(false)
+  const [calDate, setCalDate] = useState(new Date())
+  const calTriggerRef = useRef<HTMLButtonElement>(null)
+  const calDropRef = useRef<HTMLDivElement>(null)
+  // calRef kept for API compat but unused — portal approach used instead
+  const [calPos, setCalPos] = useState<{ top: number; left: number } | null>(null)
+
   // Toasts
   const [toasts, setToasts] = useState<Toast[]>([])
   const toastId = useRef(0)
 
   // Live clock
   const [clock, setClock] = useState('')
+
+  // Close dropdowns / calendar on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (mCatRef.current && !mCatRef.current.contains(t)) setOpenDrop(prev => prev === 'mCat' ? null : prev)
+      if (tCatRef.current && !tCatRef.current.contains(t)) setOpenDrop(prev => prev === 'tCat' ? null : prev)
+      if (pCatRef.current && !pCatRef.current.contains(t)) setOpenDrop(prev => prev === 'pCat' ? null : prev)
+      if (eCatRef.current && !eCatRef.current.contains(t)) setOpenDrop(prev => prev === 'eCat' ? null : prev)
+      if (!calTriggerRef.current?.contains(t) && !calDropRef.current?.contains(t)) setCalOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   useEffect(() => {
     const tick = () => {
@@ -242,7 +302,7 @@ export function DayTrackPage() {
     const mins = Math.round(elapsed / 60000)
     const now = new Date()
     const startD = new Date(timerStartRef.current)
-    const fmt = (d: Date) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+    const fmt = (d: Date) => to12h(`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`)
     const name = tName.trim()
     try {
       await dayTrackApi.createEntry({
@@ -297,11 +357,9 @@ export function DayTrackPage() {
   }
 
   async function carryEntry(entry: DayTrackEntry) {
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
     try {
       await dayTrackApi.createPlanned({
-        entry_date: toDateStr(tomorrow),
+        entry_date: date,
         name: entry.name,
         category: entry.category,
         scheduled_time: '',
@@ -364,12 +422,10 @@ export function DayTrackPage() {
 
   async function carryAllUnfinished() {
     const active = entries.filter(e => e.status === 'active')
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
     try {
       await Promise.all(active.flatMap(e => [
         dayTrackApi.createPlanned({
-          entry_date: toDateStr(tomorrow),
+          entry_date: date,
           name: e.name, category: e.category,
           scheduled_time: '', when_type: 'tomorrow',
           notes: e.notes || 'Carried over', status: 'carry',
@@ -510,18 +566,68 @@ export function DayTrackPage() {
         </div>
 
         <div className="dt-header-right">
-          <label className="dt-date-trigger pm-custom-dropdown-trigger" title="Pick a date">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
-            </svg>
-            <span>{fmtDate(dateObj)}</span>
-            <input
-              type="date"
-              value={date}
-              onChange={e => setDate(e.target.value)}
-              className="dt-date-hidden-input"
-            />
-          </label>
+          {/* Date navigation + calendar picker */}
+          <div className="dt-date-nav">
+            <div className="dr-cal-wrap">
+              <button className="dr-cal-trigger" ref={calTriggerRef} onClick={() => {
+                if (calTriggerRef.current) {
+                  const r = calTriggerRef.current.getBoundingClientRect()
+                  setCalPos({ top: r.bottom + 6, left: r.left })
+                }
+                setCalOpen(o => !o)
+                setCalDate(new Date(date + 'T00:00:00'))
+              }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+                </svg>
+                <span>{fmtDate(dateObj)}</span>
+              </button>
+              {calOpen && calPos && createPortal((() => {
+                const y = calDate.getFullYear(), m = calDate.getMonth()
+                const firstDay = new Date(y, m, 1).getDay()
+                const daysInMonth = new Date(y, m + 1, 0).getDate()
+                const todayStr = toDateStr(new Date())
+                const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December']
+                return (
+                  <div ref={calDropRef} className="dr-cal-dropdown glass-card"
+                    style={{ position: 'fixed', top: calPos.top, left: calPos.left, zIndex: 9999, minWidth: 240, padding: 12 }}>
+                    <div className="calendar-nav">
+                      <button onClick={() => setCalDate(new Date(y, m - 1, 1))}>
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+                      </button>
+                      <span className="calendar-month-label">{monthNames[m]} {y}</span>
+                      <button onClick={() => setCalDate(new Date(y, m + 1, 1))}>
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+                      </button>
+                    </div>
+                    <div className="calendar-grid">
+                      <div className="calendar-header-row">
+                        {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => <span key={d}>{d}</span>)}
+                      </div>
+                      <div className="calendar-body">
+                        {Array.from({ length: firstDay }).map((_, i) => <span key={`e${i}`}/>)}
+                        {Array.from({ length: daysInMonth }).map((_, i) => {
+                          const dayStr = `${y}-${String(m+1).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`
+                          return (
+                            <button key={i}
+                              className={`calendar-day${dayStr === date ? ' selected' : ''}${dayStr === todayStr ? ' today' : ''}`}
+                              onClick={() => { setDate(dayStr); setCalOpen(false) }}>
+                              {i + 1}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'center', marginTop: 6 }}>
+                      <button className="dt-btn dt-btn-ghost dt-btn-sm" style={{ fontSize: 11 }}
+                        onClick={() => { setDate(todayStr); setCalOpen(false) }}>Today</button>
+                    </div>
+                  </div>
+                )
+              })(), document.body)}
+            </div>
+          </div>
+
           <div className="dt-clock">{clock}</div>
         </div>
       </div>
@@ -559,22 +665,36 @@ export function DayTrackPage() {
               </div>
               <div className="form-group">
                 <label className="form-label">Category</label>
-                <select className="form-input" value={mCat} onChange={e => setMCat(e.target.value)}>
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <div className="pm-custom-dropdown" ref={mCatRef}>
+                  <button className="pm-custom-dropdown-trigger" onClick={() => setOpenDrop(o => o === 'mCat' ? null : 'mCat')}>
+                    <span className="dt-cat-dot" style={{ background: catColor(mCat, categories) }}/>
+                    <span>{mCat || 'Select category'}</span>
+                    <svg className={`dropdown-chevron${openDrop === 'mCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                  {openDrop === 'mCat' && (
+                    <div className="pm-custom-dropdown-menu">
+                      {categories.map(c => (
+                        <button key={c} className={`pm-dropdown-item${mCat === c ? ' active' : ''}`}
+                          onClick={() => { setMCat(c); setOpenDrop(null) }}>
+                          <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="dt-row2">
                 <div className="form-group">
                   <label className="form-label">Start Time</label>
                   <div className="dt-time-wrap">
-                    <input className="form-input" type="time" value={mStart} onChange={e => setMStart(e.target.value)} />
+                    <input className="form-input" type="time" value={to24h(mStart)} onChange={e => setMStart(to12h(e.target.value))} />
                     <button className="dt-now-btn" onClick={() => setMStart(nowHHMM())}>Now</button>
                   </div>
                 </div>
                 <div className="form-group">
                   <label className="form-label">End Time</label>
                   <div className="dt-time-wrap">
-                    <input className="form-input" type="time" value={mEnd} onChange={e => setMEnd(e.target.value)} />
+                    <input className="form-input" type="time" value={to24h(mEnd)} onChange={e => setMEnd(to12h(e.target.value))} />
                     <button className="dt-now-btn" onClick={() => setMEnd(nowHHMM())}>Now</button>
                   </div>
                 </div>
@@ -629,9 +749,24 @@ export function DayTrackPage() {
               </div>
               <div className="form-group">
                 <label className="form-label">Category</label>
-                <select className="form-input" value={tCat} onChange={e => setTCat(e.target.value)} disabled={timerStatus === 'running'}>
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <div className="pm-custom-dropdown" ref={tCatRef}>
+                  <button className="pm-custom-dropdown-trigger" disabled={timerStatus === 'running'}
+                    onClick={() => setOpenDrop(o => o === 'tCat' ? null : 'tCat')}>
+                    <span className="dt-cat-dot" style={{ background: catColor(tCat, categories) }}/>
+                    <span>{tCat || 'Select category'}</span>
+                    <svg className={`dropdown-chevron${openDrop === 'tCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                  {openDrop === 'tCat' && (
+                    <div className="pm-custom-dropdown-menu">
+                      {categories.map(c => (
+                        <button key={c} className={`pm-dropdown-item${tCat === c ? ' active' : ''}`}
+                          onClick={() => { setTCat(c); setOpenDrop(null) }}>
+                          <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="form-group">
                 <label className="form-label">Notes</label>
@@ -650,14 +785,28 @@ export function DayTrackPage() {
               </div>
               <div className="form-group">
                 <label className="form-label">Category</label>
-                <select className="form-input" value={pCat} onChange={e => setPCat(e.target.value)}>
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <div className="pm-custom-dropdown" ref={pCatRef}>
+                  <button className="pm-custom-dropdown-trigger" onClick={() => setOpenDrop(o => o === 'pCat' ? null : 'pCat')}>
+                    <span className="dt-cat-dot" style={{ background: catColor(pCat, categories) }}/>
+                    <span>{pCat || 'Select category'}</span>
+                    <svg className={`dropdown-chevron${openDrop === 'pCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                  {openDrop === 'pCat' && (
+                    <div className="pm-custom-dropdown-menu">
+                      {categories.map(c => (
+                        <button key={c} className={`pm-dropdown-item${pCat === c ? ' active' : ''}`}
+                          onClick={() => { setPCat(c); setOpenDrop(null) }}>
+                          <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="form-group">
                 <label className="form-label">Scheduled Time (optional)</label>
                 <div className="dt-time-wrap">
-                  <input className="form-input" type="time" value={pTime} onChange={e => setPTime(e.target.value)} />
+                  <input className="form-input" type="time" value={to24h(pTime)} onChange={e => setPTime(to12h(e.target.value))} />
                   <button className="dt-now-btn" onClick={() => setPTime(nowHHMM())}>Now</button>
                 </div>
               </div>
@@ -944,22 +1093,36 @@ export function DayTrackPage() {
             </div>
             <div className="form-group">
               <label className="form-label">Category</label>
-              <select className="form-input" value={eCat} onChange={e => setECat(e.target.value)}>
-                {categories.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <div className="pm-custom-dropdown" ref={eCatRef}>
+                <button className="pm-custom-dropdown-trigger" onClick={() => setOpenDrop(o => o === 'eCat' ? null : 'eCat')}>
+                  <span className="dt-cat-dot" style={{ background: catColor(eCat, categories) }}/>
+                  <span>{eCat || 'Select category'}</span>
+                  <svg className={`dropdown-chevron${openDrop === 'eCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                {openDrop === 'eCat' && (
+                  <div className="pm-custom-dropdown-menu">
+                    {categories.map(c => (
+                      <button key={c} className={`pm-dropdown-item${eCat === c ? ' active' : ''}`}
+                        onClick={() => { setECat(c); setOpenDrop(null) }}>
+                        <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="dt-row2">
               <div className="form-group">
                 <label className="form-label">Start Time</label>
                 <div className="dt-time-wrap">
-                  <input className="form-input" type="time" value={eStart} onChange={e => setEStart(e.target.value)} />
+                  <input className="form-input" type="time" value={to24h(eStart)} onChange={e => setEStart(to12h(e.target.value))} />
                   <button className="dt-now-btn" onClick={() => setEStart(nowHHMM())}>Now</button>
                 </div>
               </div>
               <div className="form-group">
                 <label className="form-label">End Time</label>
                 <div className="dt-time-wrap">
-                  <input className="form-input" type="time" value={eEnd} onChange={e => setEEnd(e.target.value)} />
+                  <input className="form-input" type="time" value={to24h(eEnd)} onChange={e => setEEnd(to12h(e.target.value))} />
                   <button className="dt-now-btn" onClick={() => setEEnd(nowHHMM())}>Now</button>
                 </div>
               </div>

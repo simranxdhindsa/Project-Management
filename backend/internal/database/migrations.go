@@ -621,12 +621,12 @@ func RunMigrations() error {
 		// ── DayTrack: per-user daily time-sheet ──────────────────────────────────
 		`CREATE TABLE IF NOT EXISTS daytrack_entries (
 			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			user_id       VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			entry_date    DATE NOT NULL DEFAULT CURRENT_DATE,
 			name          TEXT NOT NULL,
 			category      TEXT NOT NULL DEFAULT 'General',
-			start_time    VARCHAR(5),
-			end_time      VARCHAR(5),
+			start_time    VARCHAR(10),
+			end_time      VARCHAR(10),
 			duration_mins INT,
 			notes         TEXT,
 			status        VARCHAR(20) NOT NULL DEFAULT 'done',
@@ -636,11 +636,11 @@ func RunMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_daytrack_entries_user_date ON daytrack_entries(user_id, entry_date)`,
 		`CREATE TABLE IF NOT EXISTS daytrack_planned (
 			id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			user_id        VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			entry_date     DATE NOT NULL DEFAULT CURRENT_DATE,
 			name           TEXT NOT NULL,
 			category       TEXT NOT NULL DEFAULT 'General',
-			scheduled_time VARCHAR(5),
+			scheduled_time VARCHAR(10),
 			when_type      VARCHAR(20) NOT NULL DEFAULT 'today',
 			notes          TEXT,
 			status         VARCHAR(20) NOT NULL DEFAULT 'planned',
@@ -649,7 +649,7 @@ func RunMigrations() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_daytrack_planned_user_date ON daytrack_planned(user_id, entry_date)`,
 		`CREATE TABLE IF NOT EXISTS daytrack_categories (
-			user_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			user_id  VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			name     TEXT NOT NULL,
 			position INT NOT NULL DEFAULT 0,
 			PRIMARY KEY (user_id, name)

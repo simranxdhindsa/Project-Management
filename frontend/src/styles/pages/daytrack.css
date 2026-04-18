@@ -100,24 +100,47 @@
   white-space: nowrap;
 }
 
-/* Date trigger — wraps a hidden native date input; inherits pm-custom-dropdown-trigger look */
-.dt-date-trigger {
-  position: relative;
-  cursor: pointer;
-  user-select: none;
+/* Date navigation row */
+.dt-date-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
-.dt-date-trigger:hover {
+.dt-date-nav .dr-cal-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.dt-date-nav .dr-cal-trigger:hover {
   background: rgba(255,255,255,0.09);
   border-color: rgba(255,255,255,0.18);
   color: var(--text-primary);
 }
-.dt-date-hidden-input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  width: 100%;
-  cursor: pointer;
-  font-size: 0; /* hide text — only the calendar picker shows */
+.dt-date-nav .dr-cal-wrap {
+  position: relative;
+}
+.dt-date-nav .dr-cal-dropdown {
+  padding: 12px;
+  min-width: 240px;
+}
+
+/* Category dot in custom dropdown */
+.dt-cat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 /* ── Main Grid ── */
@@ -760,12 +783,12 @@
   border-color: rgba(0,0,0,0.1);
   color: #1e293b;
 }
-[data-theme="light"] .dt-date-trigger {
+[data-theme="light"] .dt-date-nav .dr-cal-trigger {
   background: rgba(255,255,255,0.95);
   border-color: rgba(0,0,0,0.1);
   color: #334155;
 }
-[data-theme="light"] .dt-date-trigger:hover {
+[data-theme="light"] .dt-date-nav .dr-cal-trigger:hover {
   background: #f1f5f9;
   border-color: rgba(99,102,241,0.25);
   color: #0f172a;
