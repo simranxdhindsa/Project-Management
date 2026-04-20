@@ -2133,6 +2133,8 @@ export interface DayTrackPlanned {
   name: string
   category: string
   scheduled_time: string
+  start_time: string
+  end_time: string
   when_type: string
   notes: string
   status: string

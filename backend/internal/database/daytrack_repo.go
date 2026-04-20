@@ -29,6 +29,8 @@ type DayTrackPlanned struct {
 	Name          string    `json:"name"`
 	Category      string    `json:"category"`
 	ScheduledTime string    `json:"scheduled_time"`
+	StartTime     string    `json:"start_time"`
+	EndTime       string    `json:"end_time"`
 	WhenType      string    `json:"when_type"` // today | tomorrow
 	Notes         string    `json:"notes"`
 	Status        string    `json:"status"`
@@ -108,6 +110,7 @@ func (r *DayTrackRepository) GetPlanned(ctx context.Context, userID, date string
 	pool := GetPool()
 	rows, err := pool.Query(ctx,
 		`SELECT id, user_id, entry_date::text, name, category, COALESCE(scheduled_time,''),
+		        COALESCE(start_time,''), COALESCE(end_time,''),
 		        when_type, COALESCE(notes,''), status, created_at, updated_at
 		 FROM daytrack_planned WHERE user_id=$1 AND entry_date=$2::date ORDER BY created_at DESC`,
 		userID, date)
@@ -119,7 +122,7 @@ func (r *DayTrackRepository) GetPlanned(ctx context.Context, userID, date string
 	for rows.Next() {
 		var p DayTrackPlanned
 		if err := rows.Scan(&p.ID, &p.UserID, &p.EntryDate, &p.Name, &p.Category,
-			&p.ScheduledTime, &p.WhenType, &p.Notes, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.ScheduledTime, &p.StartTime, &p.EndTime, &p.WhenType, &p.Notes, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, p)
@@ -130,31 +133,31 @@ func (r *DayTrackRepository) GetPlanned(ctx context.Context, userID, date string
 	return items, nil
 }
 
-func (r *DayTrackRepository) CreatePlanned(ctx context.Context, userID, date, name, category, scheduledTime, whenType, notes, status string) (*DayTrackPlanned, error) {
+func (r *DayTrackRepository) CreatePlanned(ctx context.Context, userID, date, name, category, scheduledTime, startTime, endTime, whenType, notes, status string) (*DayTrackPlanned, error) {
 	pool := GetPool()
 	var p DayTrackPlanned
 	err := pool.QueryRow(ctx,
-		`INSERT INTO daytrack_planned (user_id, entry_date, name, category, scheduled_time, when_type, notes, status)
-		 VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO daytrack_planned (user_id, entry_date, name, category, scheduled_time, start_time, end_time, when_type, notes, status)
+		 VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10)
 		 RETURNING id, user_id, entry_date::text, name, category, COALESCE(scheduled_time,''),
-		           when_type, COALESCE(notes,''), status, created_at, updated_at`,
-		userID, date, name, category, nullStr(scheduledTime), whenType, notes, status,
+		           COALESCE(start_time,''), COALESCE(end_time,''), when_type, COALESCE(notes,''), status, created_at, updated_at`,
+		userID, date, name, category, nullStr(scheduledTime), nullStr(startTime), nullStr(endTime), whenType, notes, status,
 	).Scan(&p.ID, &p.UserID, &p.EntryDate, &p.Name, &p.Category,
-		&p.ScheduledTime, &p.WhenType, &p.Notes, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+		&p.ScheduledTime, &p.StartTime, &p.EndTime, &p.WhenType, &p.Notes, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	return &p, err
 }
 
-func (r *DayTrackRepository) UpdatePlanned(ctx context.Context, id, userID, name, category, scheduledTime, whenType, notes, status string) (*DayTrackPlanned, error) {
+func (r *DayTrackRepository) UpdatePlanned(ctx context.Context, id, userID, name, category, scheduledTime, startTime, endTime, whenType, notes, status string) (*DayTrackPlanned, error) {
 	pool := GetPool()
 	var p DayTrackPlanned
 	err := pool.QueryRow(ctx,
-		`UPDATE daytrack_planned SET name=$3, category=$4, scheduled_time=$5, when_type=$6, notes=$7, status=$8, updated_at=NOW()
+		`UPDATE daytrack_planned SET name=$3, category=$4, scheduled_time=$5, start_time=$6, end_time=$7, when_type=$8, notes=$9, status=$10, updated_at=NOW()
 		 WHERE id=$1 AND user_id=$2
 		 RETURNING id, user_id, entry_date::text, name, category, COALESCE(scheduled_time,''),
-		           when_type, COALESCE(notes,''), status, created_at, updated_at`,
-		id, userID, name, category, nullStr(scheduledTime), whenType, notes, status,
+		           COALESCE(start_time,''), COALESCE(end_time,''), when_type, COALESCE(notes,''), status, created_at, updated_at`,
+		id, userID, name, category, nullStr(scheduledTime), nullStr(startTime), nullStr(endTime), whenType, notes, status,
 	).Scan(&p.ID, &p.UserID, &p.EntryDate, &p.Name, &p.Category,
-		&p.ScheduledTime, &p.WhenType, &p.Notes, &p.Status, &p.CreatedAt, &p.UpdatedAt)
+		&p.ScheduledTime, &p.StartTime, &p.EndTime, &p.WhenType, &p.Notes, &p.Status, &p.CreatedAt, &p.UpdatedAt)
 	return &p, err
 }
 

@@ -232,12 +232,23 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+  min-width: 0;
+}
+.dt-row2 > * {
+  min-width: 0;
 }
 .dt-time-wrap {
   position: relative;
+  min-width: 0;
 }
 .dt-time-wrap .form-input {
-  padding-right: 52px;
+  padding-right: 56px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+.dt-time-wrap .form-input::-webkit-calendar-picker-indicator {
+  display: none;
 }
 .dt-now-btn {
   position: absolute;

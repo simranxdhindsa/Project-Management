@@ -134,6 +134,8 @@ func (h *DayTrackHandler) CreatePlanned(w http.ResponseWriter, r *http.Request) 
 		Name          string `json:"name"`
 		Category      string `json:"category"`
 		ScheduledTime string `json:"scheduled_time"`
+		StartTime     string `json:"start_time"`
+		EndTime       string `json:"end_time"`
 		WhenType      string `json:"when_type"`
 		Notes         string `json:"notes"`
 		Status        string `json:"status"`
@@ -155,7 +157,7 @@ func (h *DayTrackHandler) CreatePlanned(w http.ResponseWriter, r *http.Request) 
 	if body.Status == "" {
 		body.Status = "planned"
 	}
-	item, err := h.repo.CreatePlanned(r.Context(), userID, body.Date, body.Name, body.Category, body.ScheduledTime, body.WhenType, body.Notes, body.Status)
+	item, err := h.repo.CreatePlanned(r.Context(), userID, body.Date, body.Name, body.Category, body.ScheduledTime, body.StartTime, body.EndTime, body.WhenType, body.Notes, body.Status)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -172,6 +174,8 @@ func (h *DayTrackHandler) UpdatePlanned(w http.ResponseWriter, r *http.Request) 
 		Name          string `json:"name"`
 		Category      string `json:"category"`
 		ScheduledTime string `json:"scheduled_time"`
+		StartTime     string `json:"start_time"`
+		EndTime       string `json:"end_time"`
 		WhenType      string `json:"when_type"`
 		Notes         string `json:"notes"`
 		Status        string `json:"status"`
@@ -180,7 +184,7 @@ func (h *DayTrackHandler) UpdatePlanned(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	item, err := h.repo.UpdatePlanned(r.Context(), id, userID, body.Name, body.Category, body.ScheduledTime, body.WhenType, body.Notes, body.Status)
+	item, err := h.repo.UpdatePlanned(r.Context(), id, userID, body.Name, body.Category, body.ScheduledTime, body.StartTime, body.EndTime, body.WhenType, body.Notes, body.Status)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

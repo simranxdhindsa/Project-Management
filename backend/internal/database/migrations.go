@@ -654,6 +654,11 @@ func RunMigrations() error {
 			position INT NOT NULL DEFAULT 0,
 			PRIMARY KEY (user_id, name)
 		)`,
+		`ALTER TABLE daytrack_entries ALTER COLUMN start_time TYPE VARCHAR(10)`,
+		`ALTER TABLE daytrack_entries ALTER COLUMN end_time TYPE VARCHAR(10)`,
+		`ALTER TABLE daytrack_planned ALTER COLUMN scheduled_time TYPE VARCHAR(10)`,
+		`ALTER TABLE daytrack_planned ADD COLUMN IF NOT EXISTS start_time VARCHAR(10)`,
+		`ALTER TABLE daytrack_planned ADD COLUMN IF NOT EXISTS end_time VARCHAR(10)`,
 	}
 
 	for i, migration := range migrations {
