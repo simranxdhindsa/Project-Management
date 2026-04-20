@@ -143,6 +143,44 @@
   flex-shrink: 0;
 }
 
+/* ── Month picker grid ── */
+.dt-month-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+.dt-month-cell {
+  padding: 8px 4px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.12s, color 0.12s;
+}
+.dt-month-cell:hover {
+  background: rgba(99,102,241,0.12);
+  color: var(--text-primary);
+}
+.dt-month-cell.today {
+  border-color: var(--color-primary-light);
+  color: var(--color-primary-light);
+}
+.dt-month-cell.selected {
+  background: var(--color-primary-light);
+  color: #fff;
+  border-color: var(--color-primary-light);
+}
+
+[data-theme="light"] .dt-month-cell { color: #475569; }
+[data-theme="light"] .dt-month-cell:hover { background: #f1f5f9; color: #1e293b; }
+[data-theme="light"] .dt-month-cell.today { border-color: #6366f1; color: #6366f1; }
+[data-theme="light"] .dt-month-cell.selected { background: #6366f1; color: #fff; }
+
 /* ── Main Grid ── */
 .dt-grid {
   display: grid;

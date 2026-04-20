@@ -110,6 +110,22 @@ func (h *DayTrackHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *DayTrackHandler) GetEntriesRange(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	start := r.URL.Query().Get("start")
+	end := r.URL.Query().Get("end")
+	if start == "" || end == "" {
+		http.Error(w, "start and end required", http.StatusBadRequest)
+		return
+	}
+	entries, err := h.repo.GetEntriesRange(r.Context(), userID, start, end)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dtJSON(w, entries)
+}
+
 // ── Planned ───────────────────────────────────────────────────────────────────
 
 func (h *DayTrackHandler) GetPlanned(w http.ResponseWriter, r *http.Request) {

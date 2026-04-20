@@ -107,6 +107,166 @@ function ToastContainer({ toasts }: { toasts: Toast[] }) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
+// ── Month picker ──────────────────────────────────────────────────────────────
+
+function MonthPicker({ value, onChange }: { value: string; onChange: (m: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [year, setYear] = useState(() => value ? parseInt(value.slice(0, 4)) : new Date().getFullYear())
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!triggerRef.current?.contains(t) && !dropRef.current?.contains(t)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const fmtDisplay = (v: string) => {
+    if (!v) return 'Select month'
+    const [y, m] = v.split('-')
+    return `${months[parseInt(m) - 1]} ${y}`
+  }
+
+  return (
+    <div className="form-group">
+      <label className="form-label">Select Month</label>
+      <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+        <button ref={triggerRef} className="dr-cal-trigger" style={{ width: '100%', justifyContent: 'flex-start' }}
+          onClick={() => {
+            if (triggerRef.current) {
+              const r = triggerRef.current.getBoundingClientRect()
+              setPos({ top: r.bottom + 6, left: r.left })
+            }
+            if (value) setYear(parseInt(value.slice(0, 4)))
+            setOpen(o => !o)
+          }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <span>{fmtDisplay(value)}</span>
+        </button>
+        {open && pos && createPortal(
+          <div ref={dropRef} className="dr-cal-dropdown glass-card"
+            style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999, minWidth: 240, padding: 12 }}>
+            <div className="calendar-nav">
+              <button onClick={() => setYear(y => y - 1)}>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <span className="calendar-month-label">{year}</span>
+              <button onClick={() => setYear(y => y + 1)}>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+            <div className="dt-month-grid">
+              {months.map((m, i) => {
+                const val = `${year}-${String(i + 1).padStart(2, '0')}`
+                const isSelected = val === value
+                const isCurrent = val === toDateStr(new Date()).slice(0, 7)
+                return (
+                  <button key={m}
+                    className={`dt-month-cell${isSelected ? ' selected' : ''}${isCurrent ? ' today' : ''}`}
+                    onClick={() => { onChange(val); setOpen(false) }}>
+                    {m}
+                  </button>
+                )
+              })}
+            </div>
+          </div>,
+          document.body
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Reusable calendar date picker ────────────────────────────────────────────
+
+function CalendarPicker({ value, onChange, label }: { value: string; onChange: (d: string) => void; label: string }) {
+  const [open, setOpen] = useState(false)
+  const [calDate, setCalDate] = useState(() => value ? new Date(value + 'T00:00:00') : new Date())
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!triggerRef.current?.contains(t) && !dropRef.current?.contains(t)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December']
+  const todayStr = toDateStr(new Date())
+
+  const fmtDisplay = (d: string) => {
+    if (!d) return 'Select date'
+    const obj = new Date(d + 'T00:00:00')
+    return obj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  return (
+    <div className="form-group">
+      <label className="form-label">{label}</label>
+      <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+        <button ref={triggerRef} className="dr-cal-trigger" style={{ width: '100%', justifyContent: 'flex-start' }}
+          onClick={() => {
+            if (triggerRef.current) {
+              const r = triggerRef.current.getBoundingClientRect()
+              setPos({ top: r.bottom + 6, left: r.left })
+            }
+            if (value) setCalDate(new Date(value + 'T00:00:00'))
+            setOpen(o => !o)
+          }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <span>{fmtDisplay(value)}</span>
+        </button>
+        {open && pos && createPortal(
+          <div ref={dropRef} className="dr-cal-dropdown glass-card"
+            style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999, minWidth: 240, padding: 12 }}>
+            <div className="calendar-nav">
+              <button onClick={() => setCalDate(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))}>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+              </button>
+              <span className="calendar-month-label">{monthNames[calDate.getMonth()]} {calDate.getFullYear()}</span>
+              <button onClick={() => setCalDate(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))}>
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+            <div className="calendar-grid">
+              <div className="calendar-header-row">
+                {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => <span key={d}>{d}</span>)}
+              </div>
+              <div className="calendar-body">
+                {Array.from({ length: new Date(calDate.getFullYear(), calDate.getMonth(), 1).getDay() }).map((_, i) => <span key={`e${i}`}/>)}
+                {Array.from({ length: new Date(calDate.getFullYear(), calDate.getMonth() + 1, 0).getDate() }).map((_, i) => {
+                  const dayStr = `${calDate.getFullYear()}-${String(calDate.getMonth()+1).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`
+                  return (
+                    <button key={i}
+                      className={`calendar-day${dayStr === value ? ' selected' : ''}${dayStr === todayStr ? ' today' : ''}`}
+                      onClick={() => { onChange(dayStr); setOpen(false) }}>
+                      {i + 1}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div style={{ textAlign: 'center', marginTop: 6 }}>
+              <button className="dt-btn dt-btn-ghost dt-btn-sm" style={{ fontSize: 11 }}
+                onClick={() => { onChange(todayStr); setOpen(false) }}>Today</button>
+            </div>
+          </div>,
+          document.body
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function DayTrackPage() {
   const [date, setDate] = useState<string>(toDateStr(new Date()))
   const [entries, setEntries] = useState<DayTrackEntry[]>([])
@@ -143,6 +303,14 @@ export function DayTrackPage() {
   const [pTime, setPTime] = useState('')
   const [pWhen, setPWhen] = useState<'today'|'tomorrow'>('today')
   const [pNotes, setPNotes] = useState('')
+
+  // Export modal
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportMode, setExportMode] = useState<'month'|'custom'>('month')
+  const [exportMonth, setExportMonth] = useState(() => date.slice(0, 7))
+  const [exportStart, setExportStart] = useState(date)
+  const [exportEnd, setExportEnd] = useState(date)
+  const [exportLoading, setExportLoading] = useState(false)
 
   // Category manager
   const [newCat, setNewCat] = useState('')
@@ -486,6 +654,126 @@ export function DayTrackPage() {
   function copyStandup() {
     const text = buildStandup()
     navigator.clipboard.writeText(text).then(() => toast('Standup copied!'))
+  }
+
+  async function runExport(format: 'pdf' | 'doc') {
+    setExportLoading(true)
+    try {
+      let start: string, end: string
+      if (exportMode === 'month') {
+        start = `${exportMonth}-01`
+        const [y, m] = exportMonth.split('-').map(Number)
+        const last = new Date(y, m, 0).getDate()
+        end = `${exportMonth}-${String(last).padStart(2, '0')}`
+      } else {
+        start = exportStart; end = exportEnd
+      }
+
+      const token = localStorage.getItem('token')
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/daytrack/entries/range?start=${start}&end=${end}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to fetch range')
+      const allEntries: DayTrackEntry[] = await res.json()
+
+      // Group by date
+      const byDate = new Map<string, DayTrackEntry[]>()
+      allEntries.forEach(e => {
+        if (!byDate.has(e.entry_date)) byDate.set(e.entry_date, [])
+        byDate.get(e.entry_date)!.push(e)
+      })
+
+      const fmtDateStr = (d: string) => {
+        const obj = new Date(d + 'T00:00:00')
+        return fmtDate(obj)
+      }
+      const totalAll = allEntries.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
+      const doneAll = allEntries.filter(e => e.status === 'done').length
+      const focusAll = allEntries.filter(e => !['Meetings','Breaks'].includes(e.category)).reduce((a, e) => a + (e.duration_mins ?? 0), 0)
+
+      const catTotals: Record<string, number> = {}
+      allEntries.forEach(e => { if (e.duration_mins) catTotals[e.category] = (catTotals[e.category] || 0) + e.duration_mins })
+
+      const rangeLabel = exportMode === 'month'
+        ? new Date(start + 'T00:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' })
+        : `${start} to ${end}`
+
+      const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>DayTrack Export — ${rangeLabel}</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; margin: 40px; font-size: 13px; }
+  h1 { font-size: 22px; color: #4f46e5; margin-bottom: 4px; }
+  .subtitle { color: #64748b; font-size: 13px; margin-bottom: 28px; }
+  h2 { font-size: 15px; color: #1e293b; margin: 24px 0 8px; border-bottom: 2px solid #e2e8f0; padding-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  th { background: #f1f5f9; text-align: left; padding: 6px 10px; font-size: 11px; text-transform: uppercase; color: #64748b; border: 1px solid #e2e8f0; }
+  td { padding: 6px 10px; border: 1px solid #e2e8f0; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  .day-total { font-size: 12px; color: #64748b; margin-bottom: 16px; }
+  .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin-top: 28px; }
+  .summary-box h3 { margin: 0 0 12px; font-size: 14px; color: #4f46e5; }
+  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat { text-align: center; }
+  .stat-val { font-size: 20px; font-weight: 700; color: #1e293b; }
+  .stat-lbl { font-size: 11px; color: #64748b; margin-top: 2px; }
+  .cat-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; border-bottom: 1px solid #f1f5f9; }
+  .badge-done { background: #d1fae5; color: #065f46; padding: 1px 7px; border-radius: 10px; font-size: 11px; }
+  .badge-active { background: #dbeafe; color: #1e40af; padding: 1px 7px; border-radius: 10px; font-size: 11px; }
+  @media print { body { margin: 20px; } }
+</style></head><body>
+<h1>📋 DayTrack Export</h1>
+<div class="subtitle">Period: ${rangeLabel} &nbsp;·&nbsp; Generated: ${new Date().toLocaleDateString('en-US', { dateStyle: 'long' })}</div>
+${Array.from(byDate.entries()).map(([d, entries]) => {
+  const dayTotal = entries.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
+  return `<h2>${fmtDateStr(d)}</h2>
+<table>
+  <thead><tr><th>Task</th><th>Category</th><th>Start</th><th>End</th><th>Duration</th><th>Status</th><th>Notes</th></tr></thead>
+  <tbody>${entries.map(e => `<tr>
+    <td>${e.name}</td><td>${e.category}</td>
+    <td>${e.start_time || '—'}</td><td>${e.end_time || '—'}</td>
+    <td>${e.duration_mins != null ? minsLabel(e.duration_mins) : '—'}</td>
+    <td><span class="${e.status === 'done' ? 'badge-done' : 'badge-active'}">${e.status}</span></td>
+    <td>${e.notes || ''}</td>
+  </tr>`).join('')}
+  </tbody>
+</table>
+<div class="day-total">Daily total: <b>${minsLabel(dayTotal)}</b> &nbsp;·&nbsp; ${entries.length} task(s) &nbsp;·&nbsp; ${entries.filter(e => e.status === 'done').length} done</div>`
+}).join('')}
+<div class="summary-box">
+  <h3>Overall Summary</h3>
+  <div class="summary-grid">
+    <div class="stat"><div class="stat-val">${minsLabel(totalAll)}</div><div class="stat-lbl">Total Logged</div></div>
+    <div class="stat"><div class="stat-val">${allEntries.length}</div><div class="stat-lbl">Total Tasks</div></div>
+    <div class="stat"><div class="stat-val">${doneAll}</div><div class="stat-lbl">Completed</div></div>
+    <div class="stat"><div class="stat-val">${totalAll > 0 ? Math.round(focusAll / totalAll * 100) : 0}%</div><div class="stat-lbl">Focus Rate</div></div>
+  </div>
+  <div style="margin-top:16px"><b style="font-size:12px;color:#64748b">TIME BY CATEGORY</b>
+    <div style="margin-top:6px">${Object.entries(catTotals).sort((a,b)=>b[1]-a[1]).map(([cat,mins]) =>
+      `<div class="cat-row"><span>${cat}</span><span><b>${minsLabel(mins)}</b></span></div>`
+    ).join('')}</div>
+  </div>
+</div>
+</body></html>`
+
+      if (format === 'pdf') {
+        const w = window.open('', '_blank')
+        if (!w) { toast('Allow popups to export PDF', 'warn'); return }
+        w.document.write(html)
+        w.document.close()
+        w.focus()
+        setTimeout(() => { w.print(); }, 400)
+      } else {
+        const blob = new Blob([html], { type: 'application/msword' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `daytrack-${exportMode === 'month' ? exportMonth : `${exportStart}-to-${exportEnd}`}.doc`
+        a.click()
+      }
+      setExportOpen(false)
+      toast(`Export ready`, 'success')
+    } catch { toast('Export failed', 'warn') }
+    finally { setExportLoading(false) }
   }
 
   function exportCSV() {
@@ -1068,6 +1356,10 @@ export function DayTrackPage() {
             </div>
 
             <div className="dt-summary-actions">
+              <button className="dt-btn dt-btn-ghost dt-btn-sm" onClick={() => setExportOpen(true)}>
+                <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                Export Report
+              </button>
               <button className="dt-btn dt-btn-primary dt-btn-sm" onClick={copyStandup}>
                 <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
@@ -1138,6 +1430,42 @@ export function DayTrackPage() {
             <div className="dt-modal-footer">
               <button className="dt-btn dt-btn-ghost" onClick={() => setEditEntry(null)}>Cancel</button>
               <button className="dt-btn dt-btn-primary" onClick={saveEdit}>Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {exportOpen && (
+        <div className="dt-modal-overlay open" onClick={e => { if (e.target === e.currentTarget) setExportOpen(false) }}>
+          <div className="dt-modal">
+            <h3>Export Report</h3>
+
+            {/* Mode toggle */}
+            <div className="dt-tabs" style={{ marginBottom: 16 }}>
+              <button className={`dt-tab ${exportMode === 'month' ? 'active' : ''}`} onClick={() => setExportMode('month')}>By Month</button>
+              <button className={`dt-tab ${exportMode === 'custom' ? 'active' : ''}`} onClick={() => setExportMode('custom')}>Custom Range</button>
+            </div>
+
+            {exportMode === 'month' ? (
+              <MonthPicker value={exportMonth} onChange={setExportMonth} />
+            ) : (
+              <div className="dt-row2">
+                <CalendarPicker label="Start Date" value={exportStart} onChange={setExportStart} />
+                <CalendarPicker label="End Date" value={exportEnd} onChange={setExportEnd} />
+              </div>
+            )}
+
+            <div className="dt-modal-footer" style={{ marginTop: 20 }}>
+              <button className="dt-btn dt-btn-ghost" onClick={() => setExportOpen(false)}>Cancel</button>
+              <button className="dt-btn dt-btn-ghost dt-btn-sm" onClick={() => runExport('doc')} disabled={exportLoading}>
+                <svg viewBox="0 0 24 24" width="14" height="14"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                {exportLoading ? 'Generating…' : 'Export DOC'}
+              </button>
+              <button className="dt-btn dt-btn-primary" onClick={() => runExport('pdf')} disabled={exportLoading}>
+                <svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+                {exportLoading ? 'Generating…' : 'Export PDF'}
+              </button>
             </div>
           </div>
         </div>

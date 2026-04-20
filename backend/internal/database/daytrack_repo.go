@@ -167,6 +167,36 @@ func (r *DayTrackRepository) DeletePlanned(ctx context.Context, id, userID strin
 	return err
 }
 
+// ── Range export ─────────────────────────────────────────────────────────────
+
+func (r *DayTrackRepository) GetEntriesRange(ctx context.Context, userID, startDate, endDate string) ([]DayTrackEntry, error) {
+	pool := GetPool()
+	rows, err := pool.Query(ctx,
+		`SELECT id, user_id, entry_date::text, name, category, COALESCE(start_time,''), COALESCE(end_time,''),
+		        duration_mins, COALESCE(notes,''), status, created_at, updated_at
+		 FROM daytrack_entries
+		 WHERE user_id=$1 AND entry_date BETWEEN $2::date AND $3::date
+		 ORDER BY entry_date ASC, created_at ASC`,
+		userID, startDate, endDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []DayTrackEntry
+	for rows.Next() {
+		var e DayTrackEntry
+		if err := rows.Scan(&e.ID, &e.UserID, &e.EntryDate, &e.Name, &e.Category,
+			&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	if entries == nil {
+		entries = []DayTrackEntry{}
+	}
+	return entries, nil
+}
+
 // ── Categories ────────────────────────────────────────────────────────────────
 
 func (r *DayTrackRepository) GetCategories(ctx context.Context, userID string) ([]string, error) {

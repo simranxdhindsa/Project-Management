@@ -369,6 +369,7 @@ func main() {
 	dayTrackHandler := handlers.NewDayTrackHandler()
 	dayTrackRoutes := api.PathPrefix("/daytrack").Subrouter()
 	dayTrackRoutes.Use(middleware.AuthMiddleware)
+	dayTrackRoutes.HandleFunc("/entries/range", dayTrackHandler.GetEntriesRange).Methods("GET")
 	dayTrackRoutes.HandleFunc("/entries", dayTrackHandler.GetEntries).Methods("GET")
 	dayTrackRoutes.HandleFunc("/entries", dayTrackHandler.CreateEntry).Methods("POST")
 	dayTrackRoutes.HandleFunc("/entries/{id}", dayTrackHandler.UpdateEntry).Methods("PUT")
