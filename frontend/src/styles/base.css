@@ -41,23 +41,6 @@ body::before {
   opacity: 0.5;
 }
 
-/* Cursor spotlight */
-body::after {
-  content: '';
-  position: fixed;
-  width: 600px;
-  height: 600px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(99,102,241,0.10) 0%, rgba(139,92,246,0.06) 30%, transparent 70%);
-  pointer-events: none;
-  z-index: 0;
-  transform: translate(-50%, -50%);
-  left: var(--mouse-x, 50%);
-  top:  var(--mouse-y, 50%);
-  transition: left 0.12s ease, top 0.12s ease;
-  filter: blur(40px);
-}
-
 #root {
   position: relative;
   z-index: 1;
