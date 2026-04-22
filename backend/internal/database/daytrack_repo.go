@@ -214,6 +214,30 @@ func (r *DayTrackRepository) GetEntriesRange(ctx context.Context, userID, startD
 	return entries, nil
 }
 
+// ── Suggestions ──────────────────────────────────────────────────────────────
+
+func (r *DayTrackRepository) GetSuggestions(ctx context.Context, userID string) ([]string, error) {
+	pool := GetPool()
+	rows, err := pool.Query(ctx,
+		`SELECT DISTINCT name FROM daytrack_entries WHERE user_id=$1 ORDER BY name`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	if names == nil {
+		names = []string{}
+	}
+	return names, nil
+}
+
 // ── Categories ────────────────────────────────────────────────────────────────
 
 func (r *DayTrackRepository) GetCategories(ctx context.Context, userID string) ([]string, error) {

@@ -949,3 +949,22 @@
 [data-theme="light"] .dt-subtask-row td { background: #f8fafc !important; }
 [data-theme="light"] .dt-subtask-indent { color: #64748b; }
 [data-theme="light"] .dt-subtask-parent-label { background: rgba(99,102,241,0.05); color: #475569; }
+
+/* ── Task name autocomplete (ghost text) ── */
+.dt-suggest-wrap { position: relative; }
+.dt-suggest-ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 13px;
+  pointer-events: none;
+  white-space: pre;
+  overflow: hidden;
+}
+.dt-suggest-ghost-typed { color: transparent; }
+.dt-suggest-ghost-hint { color: var(--text-muted); opacity: 0.5; }
+.dt-suggest-input { position: relative; background: transparent !important; }
+
+[data-theme="light"] .dt-suggest-ghost-hint { color: #94a3b8; opacity: 0.7; }

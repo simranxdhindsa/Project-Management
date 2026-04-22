@@ -267,6 +267,42 @@ function CalendarPicker({ value, onChange, label }: { value: string; onChange: (
   )
 }
 
+function TaskNameInput({ value, onChange, suggestions, placeholder, onEnter }: {
+  value: string
+  onChange: (v: string) => void
+  suggestions: string[]
+  placeholder?: string
+  onEnter?: () => void
+}) {
+  const ghost = value.trim().length > 0
+    ? (suggestions.find(s => s.toLowerCase().startsWith(value.toLowerCase()) && s.toLowerCase() !== value.toLowerCase()) ?? '')
+    : ''
+  const ghostSuffix = ghost ? ghost.slice(value.length) : ''
+
+  return (
+    <div className="dt-suggest-wrap">
+      {ghostSuffix && (
+        <div className="dt-suggest-ghost" aria-hidden>
+          <span className="dt-suggest-ghost-typed">{value}</span>
+          <span className="dt-suggest-ghost-hint">{ghostSuffix}</span>
+        </div>
+      )}
+      <input
+        className="form-input dt-suggest-input"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={ghostSuffix ? '' : placeholder}
+        autoComplete="off"
+        onKeyDown={e => {
+          if ((e.key === 'Tab') && ghostSuffix) { e.preventDefault(); onChange(ghost) }
+          if (e.key === 'Enter') { onEnter?.() }
+          if (e.key === 'Escape') onChange(value)
+        }}
+      />
+    </div>
+  )
+}
+
 export function DayTrackPage() {
   const [date, setDate] = useState<string>(toDateStr(new Date()))
   const [entries, setEntries] = useState<DayTrackEntry[]>([])
@@ -348,6 +384,11 @@ export function DayTrackPage() {
   // calRef kept for API compat but unused — portal approach used instead
   const [calPos, setCalPos] = useState<{ top: number; left: number } | null>(null)
 
+  // Suggestions
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [mSuggest, setMSuggest] = useState<string[]>([])
+  const [tSuggest, setTSuggest] = useState<string[]>([])
+
   // Toasts
   const [toasts, setToasts] = useState<Toast[]>([])
   const toastId = useRef(0)
@@ -409,6 +450,10 @@ export function DayTrackPage() {
 
   useEffect(() => { loadAll() }, [loadAll])
 
+  useEffect(() => {
+    dayTrackApi.getSuggestions().then(setSuggestions).catch(() => {})
+  }, [])
+
   // Default category to first in list
   useEffect(() => {
     if (categories.length > 0 && !mCat) setMCat(categories[0])
@@ -449,6 +494,7 @@ export function DayTrackPage() {
       })
       setMName(''); setMStart(''); setMEnd(''); setMNotes('')
       await loadAll()
+      dayTrackApi.getSuggestions().then(setSuggestions).catch(() => {})
       toast(`"${mName.trim()}" logged`)
     } catch { toast('Failed to add entry', 'warn') }
   }
@@ -1072,9 +1118,8 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
             <div className={`dt-tab-panel ${activeTab === 'manual' ? 'active' : ''}`}>
               <div className="form-group">
                 <label className="form-label">Task Name *</label>
-                <input className="form-input" value={mName} onChange={e => setMName(e.target.value)}
-                  placeholder="What did you work on?" autoComplete="off"
-                  onKeyDown={e => e.key === 'Enter' && addManualEntry()} />
+                <TaskNameInput value={mName} onChange={setMName} suggestions={suggestions}
+                  placeholder="What did you work on?" onEnter={addManualEntry} />
               </div>
               <div className="form-group">
                 <label className="form-label">Category</label>
@@ -1156,9 +1201,8 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
               </div>
               <div className="form-group">
                 <label className="form-label">Task Name *</label>
-                <input className="form-input" value={tName} onChange={e => setTName(e.target.value)}
-                  placeholder="What are you working on?" autoComplete="off"
-                  disabled={timerStatus === 'running'} />
+                <TaskNameInput value={tName} onChange={setTName} suggestions={suggestions}
+                  placeholder="What are you working on?" />
               </div>
               <div className="form-group">
                 <label className="form-label">Category</label>

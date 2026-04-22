@@ -2177,6 +2177,8 @@ export const dayTrackApi = {
   deletePlanned: (id: string) =>
     dtFetch<void>(`${API_URL}/daytrack/planned/${id}`, { method: 'DELETE' }),
 
+  getSuggestions: () =>
+    dtFetch<string[]>(`${API_URL}/daytrack/suggestions`),
   getCategories: () =>
     dtFetch<string[]>(`${API_URL}/daytrack/categories`),
   addCategory: (name: string) =>

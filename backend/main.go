@@ -378,6 +378,7 @@ func main() {
 	dayTrackRoutes.HandleFunc("/planned", dayTrackHandler.CreatePlanned).Methods("POST")
 	dayTrackRoutes.HandleFunc("/planned/{id}", dayTrackHandler.UpdatePlanned).Methods("PUT")
 	dayTrackRoutes.HandleFunc("/planned/{id}", dayTrackHandler.DeletePlanned).Methods("DELETE")
+	dayTrackRoutes.HandleFunc("/suggestions", dayTrackHandler.GetSuggestions).Methods("GET")
 	dayTrackRoutes.HandleFunc("/categories", dayTrackHandler.GetCategories).Methods("GET")
 	dayTrackRoutes.HandleFunc("/categories", dayTrackHandler.AddCategory).Methods("POST")
 	dayTrackRoutes.HandleFunc("/categories/{name}", dayTrackHandler.DeleteCategory).Methods("DELETE")

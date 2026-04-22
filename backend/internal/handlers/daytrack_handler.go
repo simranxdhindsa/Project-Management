@@ -255,6 +255,18 @@ func (h *DayTrackHandler) DeletePlanned(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ── Suggestions ──────────────────────────────────────────────────────────────
+
+func (h *DayTrackHandler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	names, err := h.repo.GetSuggestions(r.Context(), userID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dtJSON(w, names)
+}
+
 // ── Categories ────────────────────────────────────────────────────────────────
 
 func (h *DayTrackHandler) GetCategories(w http.ResponseWriter, r *http.Request) {
