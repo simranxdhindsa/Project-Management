@@ -361,11 +361,21 @@ export function DayTrackPage() {
 
   // Category dropdown open state (one at a time)
   const [openDrop, setOpenDrop] = useState<'mCat'|'tCat'|'pCat'|'eCat'|'stCat'|null>(null)
+  const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const mCatRef = useRef<HTMLDivElement>(null)
   const tCatRef = useRef<HTMLDivElement>(null)
   const pCatRef = useRef<HTMLDivElement>(null)
   const eCatRef = useRef<HTMLDivElement>(null)
   const stCatRef = useRef<HTMLDivElement>(null)
+
+  function openDropdown(key: 'mCat'|'tCat'|'pCat'|'eCat'|'stCat', ref: React.RefObject<HTMLDivElement | null>) {
+    if (openDrop === key) { setOpenDrop(null); return }
+    if (ref.current) {
+      const r = ref.current.getBoundingClientRect()
+      setDropPos({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+    setOpenDrop(key)
+  }
 
   // Subtask state
   const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
@@ -400,11 +410,8 @@ export function DayTrackPage() {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       const t = e.target as Node
-      if (mCatRef.current && !mCatRef.current.contains(t)) setOpenDrop(prev => prev === 'mCat' ? null : prev)
-      if (tCatRef.current && !tCatRef.current.contains(t)) setOpenDrop(prev => prev === 'tCat' ? null : prev)
-      if (pCatRef.current && !pCatRef.current.contains(t)) setOpenDrop(prev => prev === 'pCat' ? null : prev)
-      if (eCatRef.current && !eCatRef.current.contains(t)) setOpenDrop(prev => prev === 'eCat' ? null : prev)
-      if (stCatRef.current && !stCatRef.current.contains(t)) setOpenDrop(prev => prev === 'stCat' ? null : prev)
+      const inTrigger = [mCatRef, tCatRef, pCatRef, eCatRef, stCatRef].some(r => r.current?.contains(t))
+      if (!inTrigger) setOpenDrop(null)
       if (!calTriggerRef.current?.contains(t) && !calDropRef.current?.contains(t)) setCalOpen(false)
     }
     document.addEventListener('mousedown', handler)
@@ -1124,21 +1131,11 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
               <div className="form-group">
                 <label className="form-label">Category</label>
                 <div className="pm-custom-dropdown" ref={mCatRef}>
-                  <button className="pm-custom-dropdown-trigger" onClick={() => setOpenDrop(o => o === 'mCat' ? null : 'mCat')}>
+                  <button className="pm-custom-dropdown-trigger" onClick={() => openDropdown('mCat', mCatRef)}>
                     <span className="dt-cat-dot" style={{ background: catColor(mCat, categories) }}/>
                     <span>{mCat || 'Select category'}</span>
                     <svg className={`dropdown-chevron${openDrop === 'mCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
                   </button>
-                  {openDrop === 'mCat' && (
-                    <div className="pm-custom-dropdown-menu">
-                      {categories.map(c => (
-                        <button key={c} className={`pm-dropdown-item${mCat === c ? ' active' : ''}`}
-                          onClick={() => { setMCat(c); setOpenDrop(null) }}>
-                          <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
               <div className="dt-row2">
@@ -1208,21 +1205,11 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
                 <label className="form-label">Category</label>
                 <div className="pm-custom-dropdown" ref={tCatRef}>
                   <button className="pm-custom-dropdown-trigger" disabled={timerStatus === 'running'}
-                    onClick={() => setOpenDrop(o => o === 'tCat' ? null : 'tCat')}>
+                    onClick={() => openDropdown('tCat', tCatRef)}>
                     <span className="dt-cat-dot" style={{ background: catColor(tCat, categories) }}/>
                     <span>{tCat || 'Select category'}</span>
                     <svg className={`dropdown-chevron${openDrop === 'tCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
                   </button>
-                  {openDrop === 'tCat' && (
-                    <div className="pm-custom-dropdown-menu">
-                      {categories.map(c => (
-                        <button key={c} className={`pm-dropdown-item${tCat === c ? ' active' : ''}`}
-                          onClick={() => { setTCat(c); setOpenDrop(null) }}>
-                          <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
               <div className="form-group">
@@ -1243,21 +1230,11 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
               <div className="form-group">
                 <label className="form-label">Category</label>
                 <div className="pm-custom-dropdown" ref={pCatRef}>
-                  <button className="pm-custom-dropdown-trigger" onClick={() => setOpenDrop(o => o === 'pCat' ? null : 'pCat')}>
+                  <button className="pm-custom-dropdown-trigger" onClick={() => openDropdown('pCat', pCatRef)}>
                     <span className="dt-cat-dot" style={{ background: catColor(pCat, categories) }}/>
                     <span>{pCat || 'Select category'}</span>
                     <svg className={`dropdown-chevron${openDrop === 'pCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
                   </button>
-                  {openDrop === 'pCat' && (
-                    <div className="pm-custom-dropdown-menu">
-                      {categories.map(c => (
-                        <button key={c} className={`pm-dropdown-item${pCat === c ? ' active' : ''}`}
-                          onClick={() => { setPCat(c); setOpenDrop(null) }}>
-                          <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
               <div className="form-group">
@@ -1618,21 +1595,11 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
             <div className="form-group">
               <label className="form-label">Category</label>
               <div className="pm-custom-dropdown" ref={eCatRef}>
-                <button className="pm-custom-dropdown-trigger" onClick={() => setOpenDrop(o => o === 'eCat' ? null : 'eCat')}>
+                <button className="pm-custom-dropdown-trigger" onClick={() => openDropdown('eCat', eCatRef)}>
                   <span className="dt-cat-dot" style={{ background: catColor(eCat, categories) }}/>
                   <span>{eCat || 'Select category'}</span>
                   <svg className={`dropdown-chevron${openDrop === 'eCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
-                {openDrop === 'eCat' && (
-                  <div className="pm-custom-dropdown-menu">
-                    {categories.map(c => (
-                      <button key={c} className={`pm-dropdown-item${eCat === c ? ' active' : ''}`}
-                        onClick={() => { setECat(c); setOpenDrop(null) }}>
-                        <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
             <div className="dt-row2">
@@ -1681,21 +1648,11 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
             <div className="form-group">
               <label className="form-label">Category</label>
               <div className="pm-custom-dropdown" ref={stCatRef}>
-                <button className="pm-custom-dropdown-trigger" onClick={() => setOpenDrop(o => o === 'stCat' ? null : 'stCat')}>
+                <button className="pm-custom-dropdown-trigger" onClick={() => openDropdown('stCat', stCatRef)}>
                   <span className="dt-cat-dot" style={{ background: catColor(stCat, categories) }}/>
                   <span>{stCat || 'Select category'}</span>
                   <svg className={`dropdown-chevron${openDrop === 'stCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
-                {openDrop === 'stCat' && (
-                  <div className="pm-custom-dropdown-menu">
-                    {categories.map(c => (
-                      <button key={c} className={`pm-dropdown-item${stCat === c ? ' active' : ''}`}
-                        onClick={() => { setStCat(c); setOpenDrop(null) }}>
-                        <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
             <div className="dt-row2">
@@ -1763,6 +1720,38 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Portal category dropdown — renders above all stacking contexts */}
+      {openDrop && dropPos && createPortal(
+        <div
+          className="pm-custom-dropdown-menu"
+          style={{ position: 'fixed', top: dropPos.top, left: dropPos.left, width: 'max-content', maxWidth: 260, zIndex: 9999 }}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          {categories.map(c => {
+            const active =
+              (openDrop === 'mCat' && mCat === c) ||
+              (openDrop === 'tCat' && tCat === c) ||
+              (openDrop === 'pCat' && pCat === c) ||
+              (openDrop === 'eCat' && eCat === c) ||
+              (openDrop === 'stCat' && stCat === c)
+            const select = (v: string) => {
+              if (openDrop === 'mCat') setMCat(v)
+              else if (openDrop === 'tCat') setTCat(v)
+              else if (openDrop === 'pCat') setPCat(v)
+              else if (openDrop === 'eCat') setECat(v)
+              else if (openDrop === 'stCat') setStCat(v)
+              setOpenDrop(null)
+            }
+            return (
+              <button key={c} className={`pm-dropdown-item${active ? ' active' : ''}`} onClick={() => select(c)}>
+                <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
+              </button>
+            )
+          })}
+        </div>,
+        document.body
       )}
 
       <ToastContainer toasts={toasts} />
