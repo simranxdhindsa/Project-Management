@@ -950,6 +950,65 @@
 [data-theme="light"] .dt-subtask-indent { color: #64748b; }
 [data-theme="light"] .dt-subtask-parent-label { background: rgba(99,102,241,0.05); color: #475569; }
 
+/* ── Category chips ── */
+.dt-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1.5px solid var(--glass-border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+}
+.dt-chip:hover {
+  border-color: rgba(99,102,241,0.4);
+  color: var(--text-primary);
+  background: rgba(99,102,241,0.08);
+}
+.dt-chip--selected {
+  font-weight: 600;
+}
+.dt-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Collapsible category manager ── */
+.dt-cat-mgr-card { padding: 0; overflow: hidden; }
+.dt-cat-mgr-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+}
+.dt-cat-mgr-toggle:hover { background: rgba(99,102,241,0.04); }
+.dt-cat-mgr-chevron { transition: transform 0.2s ease; color: var(--text-muted); }
+.dt-cat-mgr-chevron.open { transform: rotate(180deg); }
+.dt-cat-mgr-body { padding: 0 18px 14px; border-top: 1px solid var(--glass-border); padding-top: 12px; }
+
+[data-theme="light"] .dt-chip { border-color: rgba(0,0,0,0.12); color: #64748b; }
+[data-theme="light"] .dt-chip:hover { border-color: rgba(99,102,241,0.35); color: #1e293b; background: rgba(99,102,241,0.06); }
+[data-theme="light"] .dt-cat-mgr-toggle:hover { background: rgba(99,102,241,0.03); }
+[data-theme="light"] .dt-cat-mgr-body { border-color: rgba(0,0,0,0.07); }
+
 /* ── Task name autocomplete (ghost text) ── */
 .dt-suggest-wrap { position: relative; }
 .dt-suggest-ghost {

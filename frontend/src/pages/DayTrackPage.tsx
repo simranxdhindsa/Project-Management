@@ -267,6 +267,42 @@ function CalendarPicker({ value, onChange, label }: { value: string; onChange: (
   )
 }
 
+function CategoryChips({ value, onChange, categories }: {
+  value: string
+  onChange: (v: string) => void
+  categories: string[]
+}) {
+  return (
+    <div className="dt-chip-group">
+      {categories.map(c => {
+        const col = (() => {
+          const fixed: Record<string,string> = {
+            Development: '#6366f1', Testing: '#10b981', Meetings: '#8b5cf6',
+            Breaks: '#f59e0b', Review: '#06b6d4', Research: '#ec4899',
+          }
+          if (fixed[c]) return fixed[c]
+          const PALETTE = ['#6366f1','#10b981','#8b5cf6','#f59e0b','#06b6d4','#ec4899','#f97316','#ef4444','#84cc16','#14b8a6']
+          const idx = categories.indexOf(c)
+          return PALETTE[(idx < 0 ? 0 : idx) % PALETTE.length]
+        })()
+        const selected = value === c
+        return (
+          <button
+            key={c}
+            type="button"
+            className={`dt-chip${selected ? ' dt-chip--selected' : ''}`}
+            style={selected ? { background: col + '25', borderColor: col, color: col } : {}}
+            onClick={() => onChange(c)}
+          >
+            <span className="dt-chip-dot" style={{ background: col }}/>
+            {c}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function TaskNameInput({ value, onChange, suggestions, placeholder, onEnter }: {
   value: string
   onChange: (v: string) => void
@@ -350,6 +386,7 @@ export function DayTrackPage() {
 
   // Category manager
   const [newCat, setNewCat] = useState('')
+  const [catMgrOpen, setCatMgrOpen] = useState(false)
 
   // Edit modal
   const [editEntry, setEditEntry] = useState<DayTrackEntry | null>(null)
@@ -1130,13 +1167,7 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
               </div>
               <div className="form-group">
                 <label className="form-label">Category</label>
-                <div className="pm-custom-dropdown" ref={mCatRef}>
-                  <button className="pm-custom-dropdown-trigger" onClick={() => openDropdown('mCat', mCatRef)}>
-                    <span className="dt-cat-dot" style={{ background: catColor(mCat, categories) }}/>
-                    <span>{mCat || 'Select category'}</span>
-                    <svg className={`dropdown-chevron${openDrop === 'mCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
-                  </button>
-                </div>
+                <CategoryChips value={mCat} onChange={setMCat} categories={categories} />
               </div>
               <div className="dt-row2">
                 <div className="form-group">
@@ -1203,14 +1234,7 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
               </div>
               <div className="form-group">
                 <label className="form-label">Category</label>
-                <div className="pm-custom-dropdown" ref={tCatRef}>
-                  <button className="pm-custom-dropdown-trigger" disabled={timerStatus === 'running'}
-                    onClick={() => openDropdown('tCat', tCatRef)}>
-                    <span className="dt-cat-dot" style={{ background: catColor(tCat, categories) }}/>
-                    <span>{tCat || 'Select category'}</span>
-                    <svg className={`dropdown-chevron${openDrop === 'tCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
-                  </button>
-                </div>
+                <CategoryChips value={tCat} onChange={timerStatus === 'running' ? () => {} : setTCat} categories={categories} />
               </div>
               <div className="form-group">
                 <label className="form-label">Notes</label>
@@ -1229,13 +1253,7 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
               </div>
               <div className="form-group">
                 <label className="form-label">Category</label>
-                <div className="pm-custom-dropdown" ref={pCatRef}>
-                  <button className="pm-custom-dropdown-trigger" onClick={() => openDropdown('pCat', pCatRef)}>
-                    <span className="dt-cat-dot" style={{ background: catColor(pCat, categories) }}/>
-                    <span>{pCat || 'Select category'}</span>
-                    <svg className={`dropdown-chevron${openDrop === 'pCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
-                  </button>
-                </div>
+                <CategoryChips value={pCat} onChange={setPCat} categories={categories} />
               </div>
               <div className="form-group">
                 <label className="form-label">Scheduled Time (optional)</label>
@@ -1263,36 +1281,49 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
             </div>
           </div>
 
-          {/* Categories Card */}
-          <div className="dt-card">
-            <div className="dt-card-title">
-              <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
-              Categories
-            </div>
-            <div className="dt-cats-wrap">
-              {categories.map(c => {
-                const col = catColor(c, categories)
-                return (
-                  <span key={c} className="dt-cat-tag" style={{ background: col + '20', color: col }}>
-                    {c}
-                    <button className="dt-cat-tag-remove" onClick={() => removeCategory(c)} title="Remove">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                        <path d="M18 6L6 18M6 6l12 12"/>
-                      </svg>
-                    </button>
-                  </span>
-                )
-              })}
-            </div>
-            <div className="dt-add-cat-row">
-              <input className="form-input" value={newCat} onChange={e => setNewCat(e.target.value)}
-                placeholder="Add custom category…" autoComplete="off"
-                onKeyDown={e => e.key === 'Enter' && addCategory()} />
-              <button className="dt-btn dt-btn-primary dt-btn-sm" onClick={addCategory}>
-                <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-                Add
-              </button>
-            </div>
+          {/* Categories — collapsible */}
+          <div className="dt-card dt-cat-mgr-card">
+            <button className="dt-cat-mgr-toggle" onClick={() => setCatMgrOpen(o => !o)}>
+              <div className="dt-card-title" style={{ margin: 0 }}>
+                <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h7"/></svg>
+                Manage Categories
+                <span className="dt-sub-count">{categories.length}</span>
+              </div>
+              <svg className={`dt-cat-mgr-chevron${catMgrOpen ? ' open' : ''}`} viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+            </button>
+            {catMgrOpen && (
+              <div className="dt-cat-mgr-body">
+                <div className="dt-cats-wrap">
+                  {categories.map(c => {
+                    const col = catColor(c, categories)
+                    const isDefault = ['Development','Testing','Meetings','Breaks','Review','Research'].includes(c)
+                    return (
+                      <span key={c} className="dt-cat-tag" style={{ background: col + '20', color: col }}>
+                        {c}
+                        {!isDefault && (
+                          <button className="dt-cat-tag-remove" onClick={() => removeCategory(c)} title="Remove">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                              <path d="M18 6L6 18M6 6l12 12"/>
+                            </svg>
+                          </button>
+                        )}
+                      </span>
+                    )
+                  })}
+                </div>
+                <div className="dt-add-cat-row">
+                  <input className="form-input" value={newCat} onChange={e => setNewCat(e.target.value)}
+                    placeholder="Add custom category…" autoComplete="off"
+                    onKeyDown={e => e.key === 'Enter' && addCategory()} />
+                  <button className="dt-btn dt-btn-primary dt-btn-sm" onClick={addCategory}>
+                    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                    Add
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
         </div>
@@ -1594,13 +1625,7 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
             </div>
             <div className="form-group">
               <label className="form-label">Category</label>
-              <div className="pm-custom-dropdown" ref={eCatRef}>
-                <button className="pm-custom-dropdown-trigger" onClick={() => openDropdown('eCat', eCatRef)}>
-                  <span className="dt-cat-dot" style={{ background: catColor(eCat, categories) }}/>
-                  <span>{eCat || 'Select category'}</span>
-                  <svg className={`dropdown-chevron${openDrop === 'eCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-              </div>
+              <CategoryChips value={eCat} onChange={setECat} categories={categories} />
             </div>
             <div className="dt-row2">
               <div className="form-group">
@@ -1647,13 +1672,7 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
             </div>
             <div className="form-group">
               <label className="form-label">Category</label>
-              <div className="pm-custom-dropdown" ref={stCatRef}>
-                <button className="pm-custom-dropdown-trigger" onClick={() => openDropdown('stCat', stCatRef)}>
-                  <span className="dt-cat-dot" style={{ background: catColor(stCat, categories) }}/>
-                  <span>{stCat || 'Select category'}</span>
-                  <svg className={`dropdown-chevron${openDrop === 'stCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
-                </button>
-              </div>
+              <CategoryChips value={stCat} onChange={setStCat} categories={categories} />
             </div>
             <div className="dt-row2">
               <div className="form-group">
