@@ -660,7 +660,20 @@ export function DayTrackPage() {
     setSubtaskParent(parent)
     setStName('')
     setStCat(parent.category)
-    setStStart(parent.start_time || '')
+    // Default start = latest subtask end_time + 1 min, else parent start_time
+    const subs = subtaskMap.get(parent.id) ?? []
+    const latestEnd = subs
+      .map(s => s.end_time)
+      .filter(Boolean)
+      .sort((a, b) => timeToMins(b) - timeToMins(a))[0]
+    if (latestEnd) {
+      const mins = timeToMins(latestEnd) + 1
+      const h = Math.floor(mins / 60) % 24
+      const m = mins % 60
+      setStStart(to12h(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`))
+    } else {
+      setStStart(parent.start_time || '')
+    }
     setStEnd('')
     setStNotes('')
   }
