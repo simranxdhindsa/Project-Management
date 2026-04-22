@@ -659,6 +659,8 @@ func RunMigrations() error {
 		`ALTER TABLE daytrack_planned ALTER COLUMN scheduled_time TYPE VARCHAR(10)`,
 		`ALTER TABLE daytrack_planned ADD COLUMN IF NOT EXISTS start_time VARCHAR(10)`,
 		`ALTER TABLE daytrack_planned ADD COLUMN IF NOT EXISTS end_time VARCHAR(10)`,
+		`ALTER TABLE daytrack_entries ADD COLUMN IF NOT EXISTS parent_entry_id UUID REFERENCES daytrack_entries(id) ON DELETE CASCADE`,
+		`CREATE INDEX IF NOT EXISTS idx_daytrack_entries_parent ON daytrack_entries(parent_entry_id) WHERE parent_entry_id IS NOT NULL`,
 	}
 
 	for i, migration := range migrations {

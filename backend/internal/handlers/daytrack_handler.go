@@ -3,12 +3,38 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
 	"github.com/gorilla/mux"
 )
+
+// timeToMins converts "2:30 PM" or "14:30" to total minutes for comparison
+func timeToMins(t string) int {
+	t = strings.TrimSpace(t)
+	if t == "" {
+		return -1
+	}
+	isPM := strings.Contains(strings.ToUpper(t), "PM")
+	isAM := strings.Contains(strings.ToUpper(t), "AM")
+	t = strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(t, "PM", ""), "AM", ""))
+	t = strings.TrimSpace(t)
+	parts := strings.Split(t, ":")
+	if len(parts) != 2 {
+		return -1
+	}
+	h, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+	m, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if isPM && h != 12 {
+		h += 12
+	}
+	if isAM && h == 12 {
+		h = 0
+	}
+	return h*60 + m
+}
 
 type DayTrackHandler struct {
 	repo *database.DayTrackRepository
@@ -43,14 +69,15 @@ func (h *DayTrackHandler) GetEntries(w http.ResponseWriter, r *http.Request) {
 func (h *DayTrackHandler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	var body struct {
-		Date         string `json:"entry_date"`
-		Name         string `json:"name"`
-		Category     string `json:"category"`
-		StartTime    string `json:"start_time"`
-		EndTime      string `json:"end_time"`
-		DurationMins *int   `json:"duration_mins"`
-		Notes        string `json:"notes"`
-		Status       string `json:"status"`
+		Date          string  `json:"entry_date"`
+		Name          string  `json:"name"`
+		Category      string  `json:"category"`
+		StartTime     string  `json:"start_time"`
+		EndTime       string  `json:"end_time"`
+		DurationMins  *int    `json:"duration_mins"`
+		Notes         string  `json:"notes"`
+		Status        string  `json:"status"`
+		ParentEntryID *string `json:"parent_entry_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -66,7 +93,17 @@ func (h *DayTrackHandler) CreateEntry(w http.ResponseWriter, r *http.Request) {
 	if body.Status == "" {
 		body.Status = "done"
 	}
-	entry, err := h.repo.CreateEntry(r.Context(), userID, body.Date, body.Name, body.Category, body.StartTime, body.EndTime, body.DurationMins, body.Notes, body.Status)
+	// Validate subtask start time is not earlier than parent start time
+	if body.ParentEntryID != nil {
+		parent, err := h.repo.GetEntryByID(r.Context(), *body.ParentEntryID, userID)
+		if err == nil && parent != nil && parent.StartTime != "" && body.StartTime != "" {
+			if timeToMins(body.StartTime) < timeToMins(parent.StartTime) {
+				http.Error(w, "subtask start time cannot be earlier than parent start time", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+	entry, err := h.repo.CreateEntry(r.Context(), userID, body.Date, body.Name, body.Category, body.StartTime, body.EndTime, body.DurationMins, body.Notes, body.Status, body.ParentEntryID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

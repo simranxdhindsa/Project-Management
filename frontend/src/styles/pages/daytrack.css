@@ -854,3 +854,98 @@
 [data-theme="light"] .dt-tabs { background: #f1f5f9; border-color: rgba(0,0,0,0.06); }
 [data-theme="light"] .dt-tab { color: #64748b; }
 [data-theme="light"] .dt-tab.active { background: var(--color-primary); color: #fff; }
+
+/* ── Subtask ── */
+.dt-td-name-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.dt-expand-btn {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  padding: 0;
+  margin-top: 2px;
+}
+.dt-expand-btn:hover { background: rgba(99,102,241,0.12); color: var(--color-primary); }
+
+.dt-sub-count {
+  display: inline-block;
+  margin-left: 6px;
+  background: rgba(99,102,241,0.15);
+  color: var(--color-primary);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.dt-sub-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(99,102,241,0.35);
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.dt-sub-add-btn:hover { background: rgba(99,102,241,0.12); }
+
+.dt-subtask-row td {
+  background: rgba(99,102,241,0.04) !important;
+  border-top: none !important;
+}
+.dt-subtask-indent {
+  padding-left: 24px;
+  position: relative;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+.dt-subtask-indent::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: rgba(99,102,241,0.25);
+  border-radius: 1px;
+}
+
+.dt-subtask-parent-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  background: rgba(99,102,241,0.06);
+  border-radius: 6px;
+  border-left: 3px solid var(--color-primary);
+}
+.dt-subtask-parent-time { color: var(--text-muted); }
+.dt-subtask-time-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+[data-theme="light"] .dt-expand-btn { color: #94a3b8; }
+[data-theme="light"] .dt-expand-btn:hover { background: rgba(99,102,241,0.08); color: #6366f1; }
+[data-theme="light"] .dt-sub-count { background: rgba(99,102,241,0.12); }
+[data-theme="light"] .dt-subtask-row td { background: #f8fafc !important; }
+[data-theme="light"] .dt-subtask-indent { color: #64748b; }
+[data-theme="light"] .dt-subtask-parent-label { background: rgba(99,102,241,0.05); color: #475569; }

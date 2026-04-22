@@ -2122,6 +2122,7 @@ export interface DayTrackEntry {
   duration_mins: number | null
   notes: string
   status: string
+  parent_entry_id: string | null
   created_at: string
   updated_at: string
 }

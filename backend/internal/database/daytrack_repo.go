@@ -8,18 +8,19 @@ import (
 // ── Models ────────────────────────────────────────────────────────────────────
 
 type DayTrackEntry struct {
-	ID           string     `json:"id"`
-	UserID       string     `json:"user_id"`
-	EntryDate    string     `json:"entry_date"` // YYYY-MM-DD
-	Name         string     `json:"name"`
-	Category     string     `json:"category"`
-	StartTime    string     `json:"start_time"`
-	EndTime      string     `json:"end_time"`
-	DurationMins *int       `json:"duration_mins"`
-	Notes        string     `json:"notes"`
-	Status       string     `json:"status"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID            string     `json:"id"`
+	UserID        string     `json:"user_id"`
+	EntryDate     string     `json:"entry_date"` // YYYY-MM-DD
+	Name          string     `json:"name"`
+	Category      string     `json:"category"`
+	StartTime     string     `json:"start_time"`
+	EndTime       string     `json:"end_time"`
+	DurationMins  *int       `json:"duration_mins"`
+	Notes         string     `json:"notes"`
+	Status        string     `json:"status"`
+	ParentEntryID *string    `json:"parent_entry_id"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 type DayTrackPlanned struct {
@@ -48,7 +49,7 @@ func (r *DayTrackRepository) GetEntries(ctx context.Context, userID, date string
 	pool := GetPool()
 	rows, err := pool.Query(ctx,
 		`SELECT id, user_id, entry_date::text, name, category, COALESCE(start_time,''), COALESCE(end_time,''),
-		        duration_mins, COALESCE(notes,''), status, created_at, updated_at
+		        duration_mins, COALESCE(notes,''), status, parent_entry_id, created_at, updated_at
 		 FROM daytrack_entries WHERE user_id=$1 AND entry_date=$2::date ORDER BY created_at DESC`,
 		userID, date)
 	if err != nil {
@@ -59,7 +60,7 @@ func (r *DayTrackRepository) GetEntries(ctx context.Context, userID, date string
 	for rows.Next() {
 		var e DayTrackEntry
 		if err := rows.Scan(&e.ID, &e.UserID, &e.EntryDate, &e.Name, &e.Category,
-			&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.ParentEntryID, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)
@@ -70,17 +71,17 @@ func (r *DayTrackRepository) GetEntries(ctx context.Context, userID, date string
 	return entries, nil
 }
 
-func (r *DayTrackRepository) CreateEntry(ctx context.Context, userID, date, name, category, startTime, endTime string, durationMins *int, notes, status string) (*DayTrackEntry, error) {
+func (r *DayTrackRepository) CreateEntry(ctx context.Context, userID, date, name, category, startTime, endTime string, durationMins *int, notes, status string, parentEntryID *string) (*DayTrackEntry, error) {
 	pool := GetPool()
 	var e DayTrackEntry
 	err := pool.QueryRow(ctx,
-		`INSERT INTO daytrack_entries (user_id, entry_date, name, category, start_time, end_time, duration_mins, notes, status)
-		 VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9)
+		`INSERT INTO daytrack_entries (user_id, entry_date, name, category, start_time, end_time, duration_mins, notes, status, parent_entry_id)
+		 VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10)
 		 RETURNING id, user_id, entry_date::text, name, category, COALESCE(start_time,''), COALESCE(end_time,''),
-		           duration_mins, COALESCE(notes,''), status, created_at, updated_at`,
-		userID, date, name, category, nullStr(startTime), nullStr(endTime), durationMins, notes, status,
+		           duration_mins, COALESCE(notes,''), status, parent_entry_id, created_at, updated_at`,
+		userID, date, name, category, nullStr(startTime), nullStr(endTime), durationMins, notes, status, parentEntryID,
 	).Scan(&e.ID, &e.UserID, &e.EntryDate, &e.Name, &e.Category,
-		&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.CreatedAt, &e.UpdatedAt)
+		&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.ParentEntryID, &e.CreatedAt, &e.UpdatedAt)
 	return &e, err
 }
 
@@ -91,10 +92,10 @@ func (r *DayTrackRepository) UpdateEntry(ctx context.Context, id, userID, name, 
 		`UPDATE daytrack_entries SET name=$3, category=$4, start_time=$5, end_time=$6, duration_mins=$7, notes=$8, status=$9, updated_at=NOW()
 		 WHERE id=$1 AND user_id=$2
 		 RETURNING id, user_id, entry_date::text, name, category, COALESCE(start_time,''), COALESCE(end_time,''),
-		           duration_mins, COALESCE(notes,''), status, created_at, updated_at`,
+		           duration_mins, COALESCE(notes,''), status, parent_entry_id, created_at, updated_at`,
 		id, userID, name, category, nullStr(startTime), nullStr(endTime), durationMins, notes, status,
 	).Scan(&e.ID, &e.UserID, &e.EntryDate, &e.Name, &e.Category,
-		&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.CreatedAt, &e.UpdatedAt)
+		&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.ParentEntryID, &e.CreatedAt, &e.UpdatedAt)
 	return &e, err
 }
 
@@ -102,6 +103,22 @@ func (r *DayTrackRepository) DeleteEntry(ctx context.Context, id, userID string)
 	pool := GetPool()
 	_, err := pool.Exec(ctx, `DELETE FROM daytrack_entries WHERE id=$1 AND user_id=$2`, id, userID)
 	return err
+}
+
+func (r *DayTrackRepository) GetEntryByID(ctx context.Context, id, userID string) (*DayTrackEntry, error) {
+	pool := GetPool()
+	var e DayTrackEntry
+	err := pool.QueryRow(ctx,
+		`SELECT id, user_id, entry_date::text, name, category, COALESCE(start_time,''), COALESCE(end_time,''),
+		        duration_mins, COALESCE(notes,''), status, parent_entry_id, created_at, updated_at
+		 FROM daytrack_entries WHERE id=$1 AND user_id=$2`,
+		id, userID,
+	).Scan(&e.ID, &e.UserID, &e.EntryDate, &e.Name, &e.Category,
+		&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.ParentEntryID, &e.CreatedAt, &e.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
 
 // ── Planned ───────────────────────────────────────────────────────────────────
@@ -173,7 +190,7 @@ func (r *DayTrackRepository) GetEntriesRange(ctx context.Context, userID, startD
 	pool := GetPool()
 	rows, err := pool.Query(ctx,
 		`SELECT id, user_id, entry_date::text, name, category, COALESCE(start_time,''), COALESCE(end_time,''),
-		        duration_mins, COALESCE(notes,''), status, created_at, updated_at
+		        duration_mins, COALESCE(notes,''), status, parent_entry_id, created_at, updated_at
 		 FROM daytrack_entries
 		 WHERE user_id=$1 AND entry_date BETWEEN $2::date AND $3::date
 		 ORDER BY entry_date ASC, created_at ASC`,
@@ -186,7 +203,7 @@ func (r *DayTrackRepository) GetEntriesRange(ctx context.Context, userID, startD
 	for rows.Next() {
 		var e DayTrackEntry
 		if err := rows.Scan(&e.ID, &e.UserID, &e.EntryDate, &e.Name, &e.Category,
-			&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			&e.StartTime, &e.EndTime, &e.DurationMins, &e.Notes, &e.Status, &e.ParentEntryID, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		entries = append(entries, e)

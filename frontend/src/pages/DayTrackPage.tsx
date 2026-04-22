@@ -324,11 +324,21 @@ export function DayTrackPage() {
   const [eNotes, setENotes] = useState('')
 
   // Category dropdown open state (one at a time)
-  const [openDrop, setOpenDrop] = useState<'mCat'|'tCat'|'pCat'|'eCat'|null>(null)
+  const [openDrop, setOpenDrop] = useState<'mCat'|'tCat'|'pCat'|'eCat'|'stCat'|null>(null)
   const mCatRef = useRef<HTMLDivElement>(null)
   const tCatRef = useRef<HTMLDivElement>(null)
   const pCatRef = useRef<HTMLDivElement>(null)
   const eCatRef = useRef<HTMLDivElement>(null)
+  const stCatRef = useRef<HTMLDivElement>(null)
+
+  // Subtask state
+  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
+  const [subtaskParent, setSubtaskParent] = useState<DayTrackEntry | null>(null)
+  const [stName, setStName] = useState('')
+  const [stCat, setStCat] = useState('')
+  const [stStart, setStStart] = useState('')
+  const [stEnd, setStEnd] = useState('')
+  const [stNotes, setStNotes] = useState('')
 
   // Calendar
   const [calOpen, setCalOpen] = useState(false)
@@ -353,6 +363,7 @@ export function DayTrackPage() {
       if (tCatRef.current && !tCatRef.current.contains(t)) setOpenDrop(prev => prev === 'tCat' ? null : prev)
       if (pCatRef.current && !pCatRef.current.contains(t)) setOpenDrop(prev => prev === 'pCat' ? null : prev)
       if (eCatRef.current && !eCatRef.current.contains(t)) setOpenDrop(prev => prev === 'eCat' ? null : prev)
+      if (stCatRef.current && !stCatRef.current.contains(t)) setOpenDrop(prev => prev === 'stCat' ? null : prev)
       if (!calTriggerRef.current?.contains(t) && !calDropRef.current?.contains(t)) setCalOpen(false)
     }
     document.addEventListener('mousedown', handler)
@@ -432,7 +443,7 @@ export function DayTrackPage() {
         end_time: mEnd,
         duration_mins: dur,
         notes: mNotes,
-        status: dur ? 'done' : 'active',
+        status: (mStart && mEnd) ? 'done' : 'active',
       })
       setMName(''); setMStart(''); setMEnd(''); setMNotes('')
       await loadAll()
@@ -526,6 +537,23 @@ export function DayTrackPage() {
 
   async function carryEntry(entry: DayTrackEntry) {
     try {
+      const subs = subtaskMap.get(entry.id) ?? []
+      // Carry subtasks first (as separate planned items), then delete them individually
+      for (const s of subs) {
+        await dayTrackApi.createPlanned({
+          entry_date: date,
+          name: s.name,
+          category: s.category,
+          scheduled_time: s.start_time || '',
+          start_time: s.start_time,
+          end_time: s.end_time,
+          when_type: 'tomorrow',
+          notes: s.notes ? `[subtask of ${entry.name}] ${s.notes}` : `[subtask of ${entry.name}]`,
+          status: 'carry',
+        })
+        await dayTrackApi.deleteEntry(s.id)
+      }
+      // Now carry parent (no subtasks remain to cascade-delete)
       await dayTrackApi.createPlanned({
         entry_date: date,
         name: entry.name,
@@ -539,7 +567,7 @@ export function DayTrackPage() {
       })
       await dayTrackApi.deleteEntry(entry.id)
       await loadAll()
-      toast(`"${entry.name}" carried to tomorrow`)
+      toast(`"${entry.name}" carried to tomorrow${subs.length > 0 ? ` (+${subs.length} subtask${subs.length > 1 ? 's' : ''})` : ''}`)
     } catch { toast('Failed to carry entry', 'warn') }
   }
 
@@ -563,17 +591,19 @@ export function DayTrackPage() {
   }
 
   async function rollbackPlanned(item: DayTrackPlanned) {
-    // Move the planned item back into today's log as an entry, restoring all saved info
+    const s = item.start_time || item.scheduled_time || ''
+    const e = item.end_time || ''
+    const dur = calcDuration(s, e)
     try {
       await dayTrackApi.createEntry({
         entry_date: date,
         name: item.name,
         category: item.category,
-        start_time: item.start_time || item.scheduled_time || '',
-        end_time: item.end_time || '',
-        duration_mins: null,
+        start_time: s,
+        end_time: e,
+        duration_mins: dur,
         notes: item.notes,
-        status: 'active',
+        status: (s && e) ? 'done' : 'active',
       })
       await dayTrackApi.deletePlanned(item.id)
       await loadAll()
@@ -591,20 +621,11 @@ export function DayTrackPage() {
   }
 
   async function carryAllUnfinished() {
-    const active = entries.filter(e => e.status === 'active')
+    const active = entries.filter(e => e.status === 'active' && !e.parent_entry_id)
     try {
-      await Promise.all(active.flatMap(e => [
-        dayTrackApi.createPlanned({
-          entry_date: date,
-          name: e.name, category: e.category,
-          scheduled_time: e.start_time || '',
-          start_time: e.start_time, end_time: e.end_time,
-          when_type: 'tomorrow',
-          notes: e.notes || 'Carried over', status: 'carry',
-        }),
-        dayTrackApi.deleteEntry(e.id),
-      ]))
-      await loadAll()
+      for (const e of active) {
+        await carryEntry(e)
+      }
       toast(`${active.length} task(s) carried to tomorrow`)
     } catch { toast('Failed to carry tasks', 'warn') }
   }
@@ -630,6 +651,54 @@ export function DayTrackPage() {
       await loadAll()
       toast('Entry updated')
     } catch { toast('Failed to update', 'warn') }
+  }
+
+  function openSubtask(parent: DayTrackEntry) {
+    setSubtaskParent(parent)
+    setStName('')
+    setStCat(parent.category)
+    setStStart(parent.start_time || '')
+    setStEnd('')
+    setStNotes('')
+  }
+
+  async function saveSubtask() {
+    if (!subtaskParent) return
+    if (!stName.trim()) { toast('Enter a subtask name', 'warn'); return }
+    if (stStart && subtaskParent.start_time && timeToMins(stStart) < timeToMins(subtaskParent.start_time)) {
+      toast(`Start time must be ≥ parent start (${subtaskParent.start_time})`, 'warn'); return
+    }
+    const dur = calcDuration(stStart, stEnd)
+    try {
+      await dayTrackApi.createEntry({
+        entry_date: date,
+        name: stName.trim(),
+        category: stCat || subtaskParent.category,
+        start_time: stStart,
+        end_time: stEnd,
+        duration_mins: dur,
+        notes: stNotes,
+        status: (stStart && stEnd) ? 'done' : 'active',
+        parent_entry_id: subtaskParent.id,
+      })
+      // Auto-update parent end_time if subtask end is later
+      if (stEnd && (!subtaskParent.end_time || timeToMins(stEnd) > timeToMins(subtaskParent.end_time))) {
+        const newDur = calcDuration(subtaskParent.start_time, stEnd)
+        await dayTrackApi.updateEntry(subtaskParent.id, {
+          name: subtaskParent.name,
+          category: subtaskParent.category,
+          start_time: subtaskParent.start_time,
+          end_time: stEnd,
+          duration_mins: newDur,
+          notes: subtaskParent.notes,
+          status: subtaskParent.status,
+        })
+      }
+      setExpandedEntries(prev => { const s = new Set(prev); s.add(subtaskParent.id); return s })
+      setSubtaskParent(null)
+      await loadAll()
+      toast(`Subtask "${stName.trim()}" added`)
+    } catch { toast('Failed to add subtask', 'warn') }
   }
 
   async function addCategory() {
@@ -676,7 +745,7 @@ export function DayTrackPage() {
       if (!res.ok) throw new Error('Failed to fetch range')
       const allEntries: DayTrackEntry[] = await res.json()
 
-      // Group by date
+      // Group by date, then by parent/subtask
       const byDate = new Map<string, DayTrackEntry[]>()
       allEntries.forEach(e => {
         if (!byDate.has(e.entry_date)) byDate.set(e.entry_date, [])
@@ -687,12 +756,45 @@ export function DayTrackPage() {
         const obj = new Date(d + 'T00:00:00')
         return fmtDate(obj)
       }
-      const totalAll = allEntries.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
-      const doneAll = allEntries.filter(e => e.status === 'done').length
-      const focusAll = allEntries.filter(e => !['Meetings','Breaks'].includes(e.category)).reduce((a, e) => a + (e.duration_mins ?? 0), 0)
+      const renderExportRows = (dayEntries: DayTrackEntry[]) => {
+        const dayParents = dayEntries.filter(e => !e.parent_entry_id)
+        const daySubs = new Map<string, DayTrackEntry[]>()
+        dayEntries.filter(e => e.parent_entry_id).forEach(e => {
+          const l = daySubs.get(e.parent_entry_id!) ?? []; l.push(e); daySubs.set(e.parent_entry_id!, l)
+        })
+        return dayParents.flatMap(e => {
+          const subs = daySubs.get(e.id) ?? []
+          const rows = [`<tr>
+    <td><strong>${e.name}</strong></td><td>${e.category}</td>
+    <td>${e.start_time || '—'}</td><td>${e.end_time || '—'}</td>
+    <td>${e.duration_mins != null ? minsLabel(e.duration_mins) : '—'}</td>
+    <td><span class="${e.status === 'done' ? 'badge-done' : 'badge-active'}">${e.status}</span></td>
+    <td>${e.notes || ''}</td>
+  </tr>`]
+          subs.forEach(s => rows.push(`<tr style="background:#f8fafc">
+    <td style="padding-left:28px;border-left:3px solid #e2e8f0;color:#64748b">↳ ${s.name}</td>
+    <td style="color:#64748b">${s.category}</td>
+    <td style="color:#64748b">${s.start_time || '—'}</td><td style="color:#64748b">${s.end_time || '—'}</td>
+    <td style="color:#64748b">${s.duration_mins != null ? minsLabel(s.duration_mins) : '—'}</td>
+    <td><span class="${s.status === 'done' ? 'badge-done' : 'badge-active'}">${s.status}</span></td>
+    <td style="color:#64748b">${s.notes || ''}</td>
+  </tr>`))
+          return rows
+        }).join('')
+      }
+      const parentAllEntries = allEntries.filter(e => !e.parent_entry_id)
+      const subMapExport = new Map<string, DayTrackEntry[]>()
+      allEntries.filter(e => e.parent_entry_id).forEach(e => {
+        const list = subMapExport.get(e.parent_entry_id!) ?? []; list.push(e)
+        subMapExport.set(e.parent_entry_id!, list)
+      })
+
+      const totalAll = parentAllEntries.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
+      const doneAll = parentAllEntries.filter(e => e.status === 'done').length
+      const focusAll = parentAllEntries.filter(e => !['Meetings','Breaks'].includes(e.category)).reduce((a, e) => a + (e.duration_mins ?? 0), 0)
 
       const catTotals: Record<string, number> = {}
-      allEntries.forEach(e => { if (e.duration_mins) catTotals[e.category] = (catTotals[e.category] || 0) + e.duration_mins })
+      parentAllEntries.forEach(e => { if (e.duration_mins) catTotals[e.category] = (catTotals[e.category] || 0) + e.duration_mins })
 
       const rangeLabel = exportMode === 'month'
         ? new Date(start + 'T00:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' })
@@ -724,21 +826,15 @@ export function DayTrackPage() {
 </style></head><body>
 <h1>📋 DayTrack Export</h1>
 <div class="subtitle">Period: ${rangeLabel} &nbsp;·&nbsp; Generated: ${new Date().toLocaleDateString('en-US', { dateStyle: 'long' })}</div>
-${Array.from(byDate.entries()).map(([d, entries]) => {
-  const dayTotal = entries.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
+${Array.from(byDate.entries()).map(([d, dayEntries]) => {
+  const dayParents = dayEntries.filter(e => !e.parent_entry_id)
+  const dayTotal = dayParents.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
   return `<h2>${fmtDateStr(d)}</h2>
 <table>
   <thead><tr><th>Task</th><th>Category</th><th>Start</th><th>End</th><th>Duration</th><th>Status</th><th>Notes</th></tr></thead>
-  <tbody>${entries.map(e => `<tr>
-    <td>${e.name}</td><td>${e.category}</td>
-    <td>${e.start_time || '—'}</td><td>${e.end_time || '—'}</td>
-    <td>${e.duration_mins != null ? minsLabel(e.duration_mins) : '—'}</td>
-    <td><span class="${e.status === 'done' ? 'badge-done' : 'badge-active'}">${e.status}</span></td>
-    <td>${e.notes || ''}</td>
-  </tr>`).join('')}
-  </tbody>
+  <tbody>${renderExportRows(dayEntries)}</tbody>
 </table>
-<div class="day-total">Daily total: <b>${minsLabel(dayTotal)}</b> &nbsp;·&nbsp; ${entries.length} task(s) &nbsp;·&nbsp; ${entries.filter(e => e.status === 'done').length} done</div>`
+<div class="day-total">Daily total: <b>${minsLabel(dayTotal)}</b> &nbsp;·&nbsp; ${dayParents.length} task(s) &nbsp;·&nbsp; ${dayParents.filter(e => e.status === 'done').length} done</div>`
 }).join('')}
 <div class="summary-box">
   <h3>Overall Summary</h3>
@@ -801,6 +897,15 @@ ${Array.from(byDate.entries()).map(([d, entries]) => {
   const catMap: Record<string, number> = {}
   entries.forEach(e => { if (e.duration_mins) catMap[e.category] = (catMap[e.category] || 0) + e.duration_mins })
   const maxCatMins = Math.max(...Object.values(catMap), 1)
+
+  // Subtask grouping
+  const parentEntries = entries.filter(e => !e.parent_entry_id)
+  const subtaskMap = new Map<string, DayTrackEntry[]>()
+  entries.filter(e => e.parent_entry_id).forEach(e => {
+    const list = subtaskMap.get(e.parent_entry_id!) ?? []
+    list.push(e)
+    subtaskMap.set(e.parent_entry_id!, list)
+  })
 
   function buildStandup(): string {
     const today = fmtDate(new Date(date))
@@ -1186,7 +1291,7 @@ ${Array.from(byDate.entries()).map(([d, entries]) => {
                     </tr>
                   </thead>
                   <tbody>
-                    {entries.length === 0 ? (
+                    {parentEntries.length === 0 ? (
                       <tr><td colSpan={7}>
                         <div className="dt-empty">
                           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/>
@@ -1195,39 +1300,102 @@ ${Array.from(byDate.entries()).map(([d, entries]) => {
                           No tasks recorded yet. Add your first entry!
                         </div>
                       </td></tr>
-                    ) : entries.map(e => (
-                      <tr key={e.id}>
-                        <td className="dt-td-name">
-                          {e.name}
-                          {e.notes && <span className="dt-td-note">{e.notes}</span>}
-                        </td>
-                        <td><CatPill cat={e.category} /></td>
-                        <td className="dt-td-time">{e.start_time || '—'}</td>
-                        <td className="dt-td-time">{e.end_time || '—'}</td>
-                        <td>{e.duration_mins != null
-                          ? <span className="dt-td-dur">{minsLabel(e.duration_mins)}</span>
-                          : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                        </td>
-                        <td>
-                          <span className={`dt-status dt-status--${e.status}`}>{e.status}</span>
-                        </td>
-                        <td>
-                          <div className="dt-td-actions">
-                            <button className="dt-icon-btn dt-icon-btn-edit" onClick={() => openEdit(e)} title="Edit">
-                              <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/>
-                              </svg>
-                            </button>
-                            <button className="dt-icon-btn dt-icon-btn-carry" onClick={() => carryEntry(e)} title="Carry to tomorrow">
-                              <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                            </button>
-                            <button className="dt-icon-btn dt-icon-btn-del" onClick={() => deleteEntry(e.id)} title="Delete">
-                              <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    ) : parentEntries.map(e => {
+                      const subs = subtaskMap.get(e.id) ?? []
+                      const isExpanded = expandedEntries.has(e.id)
+                      const subDurTotal = subs.reduce((a, s) => a + (s.duration_mins ?? 0), 0)
+                      const displayDur = subs.length > 0 && subDurTotal > 0 ? subDurTotal : e.duration_mins
+                      return (
+                        <>
+                          <tr key={e.id}>
+                            <td className="dt-td-name">
+                              <div className="dt-td-name-row">
+                                <button
+                                  className="dt-expand-btn"
+                                  style={{ visibility: subs.length > 0 ? 'visible' : 'hidden' }}
+                                  onClick={() => setExpandedEntries(prev => {
+                                    const s = new Set(prev)
+                                    if (s.has(e.id)) s.delete(e.id); else s.add(e.id)
+                                    return s
+                                  })}
+                                  title={isExpanded ? 'Collapse subtasks' : 'Expand subtasks'}>
+                                  <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                                    {isExpanded
+                                      ? <path d="M6 9l6 6 6-6"/>
+                                      : <path d="M9 18l6-6-6-6"/>}
+                                  </svg>
+                                </button>
+                                <span>
+                                  {e.name}
+                                  {!isExpanded && subs.length > 0 && <span className="dt-sub-count">{subs.length} sub</span>}
+                                  {e.notes && <span className="dt-td-note">{e.notes}</span>}
+                                </span>
+                              </div>
+                            </td>
+                            <td><CatPill cat={e.category} /></td>
+                            <td className="dt-td-time">{e.start_time || '—'}</td>
+                            <td className="dt-td-time">{e.end_time || '—'}</td>
+                            <td>{displayDur != null
+                              ? <span className="dt-td-dur">{minsLabel(displayDur)}</span>
+                              : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                            </td>
+                            <td>
+                              <span className={`dt-status dt-status--${e.status}`}>{e.status}</span>
+                            </td>
+                            <td>
+                              <div className="dt-td-actions">
+                                <button className="dt-icon-btn dt-icon-btn-edit" onClick={() => openEdit(e)} title="Edit">
+                                  <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                    <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/>
+                                  </svg>
+                                </button>
+                                <button className="dt-sub-add-btn" onClick={() => openSubtask(e)} title="Add subtask">
+                                  + Sub
+                                </button>
+                                <button className="dt-icon-btn dt-icon-btn-carry" onClick={() => carryEntry(e)} title="Carry to tomorrow">
+                                  <svg viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                </button>
+                                <button className="dt-icon-btn dt-icon-btn-del" onClick={() => deleteEntry(e.id)} title="Delete">
+                                  <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          {isExpanded && subs.map(s => (
+                            <tr key={s.id} className="dt-subtask-row">
+                              <td className="dt-td-name">
+                                <div className="dt-subtask-indent">
+                                  ↳ {s.name}
+                                  {s.notes && <span className="dt-td-note">{s.notes}</span>}
+                                </div>
+                              </td>
+                              <td><CatPill cat={s.category} /></td>
+                              <td className="dt-td-time">{s.start_time || '—'}</td>
+                              <td className="dt-td-time">{s.end_time || '—'}</td>
+                              <td>{s.duration_mins != null
+                                ? <span className="dt-td-dur">{minsLabel(s.duration_mins)}</span>
+                                : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                              </td>
+                              <td>
+                                <span className={`dt-status dt-status--${s.status}`}>{s.status}</span>
+                              </td>
+                              <td>
+                                <div className="dt-td-actions">
+                                  <button className="dt-icon-btn dt-icon-btn-edit" onClick={() => openEdit(s)} title="Edit">
+                                    <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                      <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/>
+                                    </svg>
+                                  </button>
+                                  <button className="dt-icon-btn dt-icon-btn-del" onClick={() => deleteEntry(s.id)} title="Delete">
+                                    <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1430,6 +1598,72 @@ ${Array.from(byDate.entries()).map(([d, entries]) => {
             <div className="dt-modal-footer">
               <button className="dt-btn dt-btn-ghost" onClick={() => setEditEntry(null)}>Cancel</button>
               <button className="dt-btn dt-btn-primary" onClick={saveEdit}>Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Subtask Modal */}
+      {subtaskParent && (
+        <div className="dt-modal-overlay open" onClick={e => { if (e.target === e.currentTarget) setSubtaskParent(null) }}>
+          <div className="dt-modal">
+            <h3>Add Subtask</h3>
+            <div className="dt-subtask-parent-label">
+              Parent: <strong>{subtaskParent.name}</strong>
+              {subtaskParent.start_time && <span className="dt-subtask-parent-time"> · starts {subtaskParent.start_time}</span>}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Subtask Name *</label>
+              <input className="form-input" value={stName} onChange={e => setStName(e.target.value)}
+                placeholder="What's the subtask?" autoComplete="off"
+                onKeyDown={e => e.key === 'Enter' && saveSubtask()} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Category</label>
+              <div className="pm-custom-dropdown" ref={stCatRef}>
+                <button className="pm-custom-dropdown-trigger" onClick={() => setOpenDrop(o => o === 'stCat' ? null : 'stCat')}>
+                  <span className="dt-cat-dot" style={{ background: catColor(stCat, categories) }}/>
+                  <span>{stCat || 'Select category'}</span>
+                  <svg className={`dropdown-chevron${openDrop === 'stCat' ? ' open' : ''}`} viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                {openDrop === 'stCat' && (
+                  <div className="pm-custom-dropdown-menu">
+                    {categories.map(c => (
+                      <button key={c} className={`pm-dropdown-item${stCat === c ? ' active' : ''}`}
+                        onClick={() => { setStCat(c); setOpenDrop(null) }}>
+                        <span className="dt-cat-dot" style={{ background: catColor(c, categories) }}/>{c}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="dt-row2">
+              <div className="form-group">
+                <label className="form-label">
+                  Start Time
+                  {subtaskParent.start_time && <span className="dt-subtask-time-hint"> (min: {subtaskParent.start_time})</span>}
+                </label>
+                <div className="dt-time-wrap">
+                  <input className="form-input" type="time" value={to24h(stStart)} onChange={e => setStStart(to12h(e.target.value))} />
+                  <button className="dt-now-btn" onClick={() => setStStart(nowHHMM())}>Now</button>
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">End Time</label>
+                <div className="dt-time-wrap">
+                  <input className="form-input" type="time" value={to24h(stEnd)} onChange={e => setStEnd(to12h(e.target.value))} />
+                  <button className="dt-now-btn" onClick={() => setStEnd(nowHHMM())}>Now</button>
+                </div>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Notes</label>
+              <textarea className="form-input" value={stNotes} onChange={e => setStNotes(e.target.value)} rows={2} />
+            </div>
+            <div className="dt-modal-footer">
+              <button className="dt-btn dt-btn-ghost" onClick={() => setSubtaskParent(null)}>Cancel</button>
+              <button className="dt-btn dt-btn-primary" onClick={saveSubtask}>Add Subtask</button>
             </div>
           </div>
         </div>
