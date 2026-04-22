@@ -50,7 +50,7 @@ func (r *DayTrackRepository) GetEntries(ctx context.Context, userID, date string
 	rows, err := pool.Query(ctx,
 		`SELECT id, user_id, entry_date::text, name, category, COALESCE(start_time,''), COALESCE(end_time,''),
 		        duration_mins, COALESCE(notes,''), status, parent_entry_id, created_at, updated_at
-		 FROM daytrack_entries WHERE user_id=$1 AND entry_date=$2::date ORDER BY created_at DESC`,
+		 FROM daytrack_entries WHERE user_id=$1 AND entry_date=$2::date ORDER BY end_time DESC NULLS LAST, start_time DESC NULLS LAST, created_at DESC`,
 		userID, date)
 	if err != nil {
 		return nil, err
@@ -237,11 +237,16 @@ func (r *DayTrackRepository) GetCategories(ctx context.Context, userID string) (
 
 func (r *DayTrackRepository) AddCategory(ctx context.Context, userID, name string) error {
 	pool := GetPool()
-	_, err := pool.Exec(ctx,
-		`INSERT INTO daytrack_categories (user_id, name, position)
-		 VALUES ($1, $2, (SELECT COALESCE(MAX(position),0)+1 FROM daytrack_categories WHERE user_id=$1))
-		 ON CONFLICT DO NOTHING`,
-		userID, name)
+	// Get next position first to avoid $1 type ambiguity in a single query
+	var pos int
+	err := pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(position),0)+1 FROM daytrack_categories WHERE user_id=$1`, userID).Scan(&pos)
+	if err != nil {
+		return err
+	}
+	_, err = pool.Exec(ctx,
+		`INSERT INTO daytrack_categories (user_id, name, position) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+		userID, name, pos)
 	return err
 }
 

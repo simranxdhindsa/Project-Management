@@ -397,7 +397,9 @@ export function DayTrackPage() {
       ])
       setEntries(e)
       setPlanned(p)
-      if (c.length > 0) setCategories(c)
+      // Always show defaults + any custom categories from DB (deduped)
+      const custom = c.filter(cat => !DEFAULT_CATS.includes(cat))
+      setCategories([...DEFAULT_CATS, ...custom])
     } catch {
       // silently ignore — show empty state
     } finally {
@@ -639,13 +641,14 @@ export function DayTrackPage() {
   async function saveEdit() {
     if (!editEntry) return
     const dur = calcDuration(eStart, eEnd)
+    const newStatus = (eStart && eEnd) ? 'done' : editEntry.status
     try {
       await dayTrackApi.updateEntry(editEntry.id, {
         name: eName || editEntry.name,
         category: eCat,
         start_time: eStart, end_time: eEnd,
         duration_mins: dur, notes: eNotes,
-        status: editEntry.status,
+        status: newStatus,
       })
       setEditEntry(null)
       await loadAll()
