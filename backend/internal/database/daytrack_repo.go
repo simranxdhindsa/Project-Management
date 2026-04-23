@@ -50,7 +50,7 @@ func (r *DayTrackRepository) GetEntries(ctx context.Context, userID, date string
 	rows, err := pool.Query(ctx,
 		`SELECT id, user_id, entry_date::text, name, category, COALESCE(start_time,''), COALESCE(end_time,''),
 		        duration_mins, COALESCE(notes,''), status, parent_entry_id, created_at, updated_at
-		 FROM daytrack_entries WHERE user_id=$1 AND entry_date=$2::date ORDER BY end_time DESC NULLS LAST, start_time DESC NULLS LAST, created_at DESC`,
+		 FROM daytrack_entries WHERE user_id=$1 AND entry_date=$2::date ORDER BY end_time DESC NULLS FIRST, start_time DESC NULLS LAST, created_at DESC`,
 		userID, date)
 	if err != nil {
 		return nil, err

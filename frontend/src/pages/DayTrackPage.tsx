@@ -69,6 +69,14 @@ function timeToMins(t: string): number {
   return h * 60 + m
 }
 
+function addMinute(time12: string): string {
+  const mins = timeToMins(time12)
+  const total = mins + 1
+  const h = Math.floor(total / 60) % 24
+  const m = total % 60
+  return to12h(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`)
+}
+
 function calcDuration(s: string, e: string): number | null {
   if (!s || !e) return null
   let diff = timeToMins(e) - timeToMins(s)
@@ -536,7 +544,8 @@ export function DayTrackPage() {
         notes: mNotes,
         status: (mStart && mEnd) ? 'done' : 'active',
       })
-      setMName(''); setMStart(''); setMEnd(''); setMNotes('')
+      const nextStart = mEnd ? addMinute(mEnd) : ''
+      setMName(''); setMStart(nextStart); setMEnd(''); setMNotes('')
       await loadAll()
       dayTrackApi.getSuggestions().then(setSuggestions).catch(() => {})
       toast(`"${mName.trim()}" logged`)
@@ -703,14 +712,6 @@ export function DayTrackPage() {
     } catch { toast('Failed to roll back task', 'warn') }
   }
 
-  async function clearDoneEntries() {
-    const done = entries.filter(e => e.status === 'done')
-    try {
-      await Promise.all(done.map(e => dayTrackApi.deleteEntry(e.id)))
-      await loadAll()
-      toast('Completed entries cleared', 'info')
-    } catch { toast('Failed to clear', 'warn') }
-  }
 
   async function carryAllUnfinished() {
     const active = entries.filter(e => e.status === 'active' && !e.parent_entry_id)
@@ -1003,6 +1004,13 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
   const catMap: Record<string, number> = {}
   entries.forEach(e => { if (e.duration_mins) catMap[e.category] = (catMap[e.category] || 0) + e.duration_mins })
   const maxCatMins = Math.max(...Object.values(catMap), 1)
+
+  // Latest end time across all entries (for auto-filling next start time)
+  const latestEndTime = entries.reduce<string>((best, e) => {
+    if (!e.end_time) return best
+    if (!best) return e.end_time
+    return timeToMins(e.end_time) > timeToMins(best) ? e.end_time : best
+  }, '')
 
   // Subtask grouping
   const parentEntries = entries.filter(e => !e.parent_entry_id)
@@ -1341,10 +1349,6 @@ ${Array.from(byDate.entries()).map(([d, dayEntries]) => {
                 Today's Log
                 <span className="dt-count-badge">{entries.length}</span>
               </h3>
-              <button className="dt-btn dt-btn-ghost dt-btn-sm" onClick={clearDoneEntries}>
-                <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
-                Clear Done
-              </button>
             </div>
 
             {loading ? (
