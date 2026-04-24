@@ -8,9 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
@@ -1696,6 +1697,51 @@ type SprintBoardColumn struct {
 	Total  int                `json:"total"` // total issues in this column (before pagination)
 }
 
+// activitiesToStateLogs converts YouTrack activity items into IssueStateLog entries.
+// Used as a live fallback when the DB state log has no history for an issue.
+func activitiesToStateLogs(issueID string, activities []youtrack.IssueActivityItem) []database.IssueStateLog {
+	var logs []database.IssueStateLog
+	var prevState string
+	var prevTime time.Time
+	for _, act := range activities {
+		if act.Field.Presentation != "State" {
+			continue
+		}
+		toState := ""
+		if len(act.Added) > 0 {
+			toState = act.Added[0].Name
+		}
+		if toState == "" {
+			continue
+		}
+		fromState := prevState
+		ts := time.UnixMilli(act.Timestamp)
+		var durPtr *float64
+		if !prevTime.IsZero() && fromState != "" {
+			dur := ts.Sub(prevTime).Hours()
+			durPtr = &dur
+		}
+		movedBy := ""
+		if act.Author != nil {
+			movedBy = act.Author.FullName
+			if movedBy == "" {
+				movedBy = act.Author.Login
+			}
+		}
+		logs = append(logs, database.IssueStateLog{
+			IssueID:                  issueID,
+			FromState:                fromState,
+			ToState:                  toState,
+			TransitionedAt:           ts,
+			DurationInPrevStateHours: durPtr,
+			MovedBy:                  movedBy,
+		})
+		prevState = toState
+		prevTime = ts
+	}
+	return logs
+}
+
 // GetSprintBoardStatus returns current board status for a sprint, grouped by column.
 // GET /api/reports/sprint-board-status?sprint_id=xxx&sprint_name=xxx&limit=20&offset=0
 func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Request) {
@@ -1801,6 +1847,45 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	stateLogMap, _ := h.reportRepo.GetStateLogsForIssues(r.Context(), issueIDs)
+
+	// For issues with sparse DB history (≤2 entries = likely only recent webhooks, not full history),
+	// fetch live activity from YouTrack in parallel to get accurate cycle time / verification data.
+	var missingIDs []string
+	for _, id := range issueIDs {
+		if len(stateLogMap[id]) <= 2 {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+	if len(missingIDs) > 0 {
+		type fetchResult struct {
+			issueID string
+			logs    []database.IssueStateLog
+		}
+		resultCh := make(chan fetchResult, len(missingIDs))
+		sem := make(chan struct{}, 10) // max 10 concurrent YouTrack calls
+		var wg sync.WaitGroup
+		for _, id := range missingIDs {
+			wg.Add(1)
+			go func(issueID string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				acts, err := ytClient.GetIssueActivities(r.Context(), issueID)
+				if err != nil || len(acts) == 0 {
+					resultCh <- fetchResult{issueID: issueID}
+					return
+				}
+				resultCh <- fetchResult{issueID: issueID, logs: activitiesToStateLogs(issueID, acts)}
+			}(id)
+		}
+		// Close result channel once all goroutines finish
+		go func() { wg.Wait(); close(resultCh) }()
+		for res := range resultCh {
+			if len(res.logs) > 0 {
+				stateLogMap[res.issueID] = res.logs
+			}
+		}
+	}
 
 	// Group issues by current state, computing time-in-state from DB state log
 	now := time.Now()
@@ -2188,61 +2273,25 @@ func (h *ReportHandler) GetIssueTransitions(w http.ResponseWriter, r *http.Reque
 		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "issue_id is required"})
 		return
 	}
-	logsMap, err := h.reportRepo.GetStateLogsForIssues(r.Context(), []string{issueID})
-	if err != nil {
-		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: err.Error()})
-		return
-	}
-	logs := logsMap[issueID]
-
-	// If no DB logs, fall back to fetching live activity from YouTrack
-	if len(logs) == 0 {
-		ytClient, ytErr := h.getYouTrackClient(r.Context())
-		if ytErr == nil {
-			activities, actErr := ytClient.GetIssueActivities(r.Context(), issueID)
-			if actErr == nil {
-				// Convert YouTrack activities to IssueStateLog format
-				var prevState string
-				var prevTime time.Time
-				for _, act := range activities {
-					if act.Field.Presentation != "State" {
-						continue
-					}
-					fromState := prevState
-					toState := ""
-					if len(act.Added) > 0 {
-						toState = act.Added[0].Name
-					}
-					if toState == "" {
-						continue
-					}
-					ts := time.UnixMilli(act.Timestamp)
-					var durPtr *float64
-					if !prevTime.IsZero() && fromState != "" {
-						dur := ts.Sub(prevTime).Hours()
-						durPtr = &dur
-					}
-					movedBy := ""
-					if act.Author != nil {
-						movedBy = act.Author.FullName
-						if movedBy == "" {
-							movedBy = act.Author.Login
-						}
-					}
-					entry := database.IssueStateLog{
-						IssueID:                  issueID,
-						FromState:                fromState,
-						ToState:                  toState,
-						TransitionedAt:           ts,
-						DurationInPrevStateHours: durPtr,
-						MovedBy:                  movedBy,
-					}
-					logs = append(logs, entry)
-					prevState = toState
-					prevTime = ts
-				}
-			}
+	// Always try YouTrack live first — DB history may be partial (only recent webhooks).
+	// DB logs are used as fallback if YouTrack is unreachable or returns nothing.
+	var logs []database.IssueStateLog
+	ytClient, ytErr := h.getYouTrackClient(r.Context())
+	if ytErr == nil {
+		activities, actErr := ytClient.GetIssueActivities(r.Context(), issueID)
+		if actErr == nil && len(activities) > 0 {
+			logs = activitiesToStateLogs(issueID, activities)
 		}
+	}
+
+	// Fall back to DB if live fetch failed or returned nothing
+	if len(logs) == 0 {
+		logsMap, err := h.reportRepo.GetStateLogsForIssues(r.Context(), []string{issueID})
+		if err != nil {
+			sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: err.Error()})
+			return
+		}
+		logs = logsMap[issueID]
 	}
 
 	if logs == nil {
@@ -2322,11 +2371,46 @@ func (h *ReportHandler) GetSprintQASummary(w http.ResponseWriter, r *http.Reques
 	}
 	stateLogMap, _ := h.reportRepo.GetStateLogsForIssues(r.Context(), issueIDs)
 
-	now := time.Now()
+	// Live fallback for issues with no DB history (same pattern as GetSprintBoardStatus)
+	var qaMissingIDs []string
+	for _, id := range issueIDs {
+		if len(stateLogMap[id]) == 0 {
+			qaMissingIDs = append(qaMissingIDs, id)
+		}
+	}
+	if len(qaMissingIDs) > 0 {
+		type qaFetchResult struct {
+			issueID string
+			logs    []database.IssueStateLog
+		}
+		qaCh := make(chan qaFetchResult, len(qaMissingIDs))
+		qaSem := make(chan struct{}, 10)
+		var qaWg sync.WaitGroup
+		for _, id := range qaMissingIDs {
+			qaWg.Add(1)
+			go func(issueID string) {
+				defer qaWg.Done()
+				qaSem <- struct{}{}
+				defer func() { <-qaSem }()
+				acts, actErr := ytClient.GetIssueActivities(r.Context(), issueID)
+				if actErr != nil || len(acts) == 0 {
+					qaCh <- qaFetchResult{issueID: issueID}
+					return
+				}
+				qaCh <- qaFetchResult{issueID: issueID, logs: activitiesToStateLogs(issueID, acts)}
+			}(id)
+		}
+		go func() { qaWg.Wait(); close(qaCh) }()
+		for res := range qaCh {
+			if len(res.logs) > 0 {
+				stateLogMap[res.issueID] = res.logs
+			}
+		}
+	}
+
 	_ = sprintFinishMs
 	_ = slaMap
 	_ = proxyBase
-	_ = now
 
 	// Build per-person QA map
 	qaMap := map[string]*QAUserSummary{}

@@ -1147,8 +1147,8 @@ type IssueActivityItem struct {
 	Field     struct {
 		Presentation string `json:"presentation"` // "State", "Assignee", etc.
 	} `json:"field"`
-	Added   []ActivityValue `json:"added"`
-	Removed []ActivityValue `json:"removed"`
+	Added   ActivityValues `json:"added"`
+	Removed ActivityValues `json:"removed"`
 	Target  struct {
 		ID         string `json:"id"`         // internal issue id, e.g. "3-884"
 		IDReadable string `json:"idReadable"` // human-readable id, e.g. "ARD-801"
@@ -1156,9 +1156,46 @@ type IssueActivityItem struct {
 	} `json:"target"`
 }
 
-// ActivityValue is the value inside added/removed arrays of an activity item
+// ActivityValue is the value inside added/removed arrays of an activity item.
+// YouTrack can return either an object {id,name} or a bare number/string for
+// numeric custom fields. The custom unmarshaler silently ignores non-object entries
+// so the caller never gets a parse error.
 type ActivityValue struct {
 	Name string `json:"name"`
+}
+
+// ActivityValues is a slice of ActivityValue with a resilient JSON unmarshaler.
+// YouTrack returns arrays of objects for enum fields but bare numbers/strings for
+// numeric fields. We parse what we can and skip the rest — no parse errors.
+type ActivityValues []ActivityValue
+
+func (av *ActivityValues) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*av = nil
+		return nil
+	}
+	// Not an array (bare number, string, bool) — silently skip.
+	if data[0] != '[' {
+		*av = nil
+		return nil
+	}
+	// Array: iterate raw elements, extract only JSON objects with a "name" field.
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		*av = nil
+		return nil
+	}
+	*av = (*av)[:0] // reset without reallocating
+	for _, elem := range raw {
+		if len(elem) > 0 && elem[0] == '{' {
+			var v ActivityValue
+			if err := json.Unmarshal(elem, &v); err == nil && v.Name != "" {
+				*av = append(*av, v)
+			}
+		}
+		// Skip numbers, strings, booleans inside the array.
+	}
+	return nil
 }
 
 // GetIssueActivities fetches the full state-change history for an issue using
