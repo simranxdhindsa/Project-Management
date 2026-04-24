@@ -2348,6 +2348,18 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
 
       {/* ── Swimlane view (Design 02) ── */}
       {!loading && viewMode === 'swimlane' && (
+        <>
+        {/* Color legend */}
+        <div className="pm-tracking-swimlane-legend">
+          <span className="pm-tracking-swimlane-legend-item pm-tracking-swimlane-chip--overdue">Overdue</span>
+          <span className="pm-tracking-swimlane-legend-item pm-tracking-swimlane-chip--atrisk">At Risk</span>
+          <span className="pm-tracking-swimlane-legend-item pm-tracking-swimlane-chip--blocked">Blocked</span>
+          <span className="pm-tracking-swimlane-legend-item pm-tracking-swimlane-chip--bounced">↩ Bounced 3+</span>
+          <span className="pm-tracking-swimlane-legend-item pm-tracking-swimlane-chip--dev">In Dev / Verified</span>
+          <span className="pm-tracking-swimlane-legend-item pm-tracking-swimlane-chip--normal">Normal</span>
+          <span className="pm-tracking-swimlane-legend-sep">·</span>
+          <span className="pm-tracking-swimlane-legend-hint">↩N = bounces &nbsp;·&nbsp; Nd = active time &nbsp;·&nbsp; ✓DEV/STG/PRD = QA verified</span>
+        </div>
         <div className="pm-tracking-swimlane-board">
           {byPersonList.map(person => {
             const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
@@ -2359,8 +2371,19 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               if (i.overdue_level === 'deadline') return 'pm-tracking-swimlane-chip--overdue'
               if (i.overdue_level === 'sprint' || i.is_delayed) return 'pm-tracking-swimlane-chip--atrisk'
               if (i.current_state?.toLowerCase().includes('block')) return 'pm-tracking-swimlane-chip--blocked'
+              if (i.bounce_count >= 3) return 'pm-tracking-swimlane-chip--bounced'
               if (i.current_state?.toLowerCase().includes('dev') || i.verified_on_dev) return 'pm-tracking-swimlane-chip--dev'
               return 'pm-tracking-swimlane-chip--normal'
+            }
+            const isActive = (i: SprintBoardIssue) => {
+              const s = i.current_state?.toLowerCase() || ''
+              return s.includes('progress') || s === 'in progress'
+            }
+            const qaLabel = (i: SprintBoardIssue) => {
+              if (i.verified_on_prod) return '✓PRD'
+              if (i.verified_on_stage) return '✓STG'
+              if (i.verified_on_dev) return '✓DEV'
+              return null
             }
             return (
               <div key={person.name} className="pm-tracking-swimlane-row">
@@ -2375,16 +2398,27 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                   <span className="pm-tracking-swimlane-count">{total} ticket{total !== 1 ? 's' : ''}</span>
                 </div>
                 <div className="pm-tracking-swimlane-chips">
-                  {person.issues.map(i => (
-                    <span
-                      key={i.idReadable}
-                      className={`pm-tracking-swimlane-chip ${getChipClass(i)}`}
-                      title={i.summary}
-                      onClick={() => setExpandedIssue(expandedIssue === i.idReadable ? null : i.idReadable)}
-                    >
-                      {i.idReadable}
-                    </span>
-                  ))}
+                  {person.issues.map(i => {
+                    const tooltipParts = [i.summary]
+                    if (i.bounce_count > 0) tooltipParts.push(`↩${i.bounce_count} bounce${i.bounce_count !== 1 ? 's' : ''}`)
+                    if (i.total_active_hours > 0) tooltipParts.push(`${fmtHoursCompact(i.total_active_hours)} active`)
+                    if (i.verified_on_dev) tooltipParts.push(`DEV✓ ${i.verified_on_dev}`)
+                    if (i.verified_on_stage) tooltipParts.push(`STG✓ ${i.verified_on_stage}`)
+                    if (i.verified_on_prod) tooltipParts.push(`PRD✓ ${i.verified_on_prod}`)
+                    return (
+                      <span
+                        key={i.idReadable}
+                        className={`pm-tracking-swimlane-chip ${getChipClass(i)}`}
+                        title={tooltipParts.join(' · ')}
+                        onClick={() => setExpandedIssue(expandedIssue === i.idReadable ? null : i.idReadable)}
+                      >
+                        {i.idReadable}
+                        {i.bounce_count > 0 && <span className="pm-tracking-chip-bounce">↩{i.bounce_count}</span>}
+                        {i.total_active_hours > 0 && isActive(i) && <span className="pm-tracking-chip-time">{fmtHoursCompact(i.total_active_hours)}</span>}
+                        {qaLabel(i) && <span className="pm-tracking-chip-qa">{qaLabel(i)}</span>}
+                      </span>
+                    )
+                  })}
                 </div>
                 <div className="pm-tracking-swimlane-loadbar-wrap">
                   <div className="pm-tracking-swimlane-loadbar">
@@ -2402,6 +2436,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
             )
           })}
         </div>
+        </>
       )}
 
       {/* ── Sidebar view (Design 03) ── */}
@@ -2595,6 +2630,13 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       <span className="pm-tracking-delay-title-text" title={issue.summary}>{issue.summary}</span>
                       {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
                       {issue.is_hotfix && <span className="pm-tracking-hotfix-chip">HF</span>}
+                      {(issue.verified_on_dev || issue.verified_on_stage || issue.verified_on_prod) && (
+                        <span className="pm-tracking-verif-badges">
+                          {issue.verified_on_dev && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--dev" title={`DEV verified by ${issue.verified_on_dev}`}>DEV✓</span>}
+                          {issue.verified_on_stage && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--stage" title={`Stage verified by ${issue.verified_on_stage}`}>STG✓</span>}
+                          {issue.verified_on_prod && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--prod" title={`Prod verified by ${issue.verified_on_prod}`}>PRD✓</span>}
+                        </span>
+                      )}
                     </div>
                     <div className="pm-tracking-timebar-wrap">
                       <div className="pm-tracking-timebar-track">
@@ -2659,8 +2701,18 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                         : <div className="pm-tracking-swimlane-avatar">{getInitialsFromName(issue.assignee)}</div>
                       }
                       <div className="pm-tracking-alert-blocked-info">
-                        <div className="pm-tracking-alert-blocked-id">{issue.idReadable}</div>
+                        <div className="pm-tracking-alert-blocked-id">
+                          {issue.idReadable}
+                          {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge" style={{ marginLeft: 4 }}>↩{issue.bounce_count}</span>}
+                        </div>
                         <div className="pm-tracking-alert-blocked-title" title={issue.summary}>{issue.summary}</div>
+                        {(issue.verified_on_dev || issue.verified_on_stage || issue.verified_on_prod) && (
+                          <div className="pm-tracking-verif-badges" style={{ marginTop: 3 }}>
+                            {issue.verified_on_dev && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--dev" title={`DEV verified by ${issue.verified_on_dev}`}>DEV✓</span>}
+                            {issue.verified_on_stage && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--stage" title={`Stage verified by ${issue.verified_on_stage}`}>STG✓</span>}
+                            {issue.verified_on_prod && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--prod" title={`Prod verified by ${issue.verified_on_prod}`}>PRD✓</span>}
+                          </div>
+                        )}
                       </div>
                       <div className="pm-tracking-alert-blocked-time">{fmtHoursCompact(issue.hours_in_state)}</div>
                     </div>
@@ -2703,7 +2755,17 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                             <span className="pm-tracking-alert-card-stat">Cycle <span>{fmtHoursCompact(issue.cycle_time_hours)}</span></span>
                           )}
                           <span className="pm-tracking-alert-card-stat">In state <span>{fmtHoursCompact(issue.hours_in_state)}</span></span>
+                          {issue.total_active_hours > 0 && (
+                            <span className="pm-tracking-alert-card-stat">Active <span>{fmtHoursCompact(issue.total_active_hours)}</span></span>
+                          )}
                         </div>
+                        {(issue.verified_on_dev || issue.verified_on_stage || issue.verified_on_prod) && (
+                          <div className="pm-tracking-verif-badges" style={{ marginTop: 4 }}>
+                            {issue.verified_on_dev && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--dev" title={`DEV verified by ${issue.verified_on_dev}`}>DEV✓</span>}
+                            {issue.verified_on_stage && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--stage" title={`Stage verified by ${issue.verified_on_stage}`}>STG✓</span>}
+                            {issue.verified_on_prod && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--prod" title={`Prod verified by ${issue.verified_on_prod}`}>PRD✓</span>}
+                          </div>
+                        )}
                         <div className="pm-tracking-focus-assignee">
                           {avatarSrc
                             ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={issue.assignee} style={{ width: 18, height: 18 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
