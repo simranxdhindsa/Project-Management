@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Sprint Tracking — Redesign</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root {
+  --bg:       #07080F;
+  --surface:  #0F1117;
+  --s2:       #161B27;
+  --s3:       #1C2333;
+  --border:   #252D3D;
+  --border2:  #2E3A50;
+  --text:     #E8EDF5;
+  --muted:    #6B7A99;
+  --dim:      #3D4D6A;
+  --primary:  #6366F1;
+  --primary-g:#818CF8;
+  --green:    #10B981;
+  --red:      #F43F5E;
+  --amber:    #F59E0B;
+  --blue:     #3B82F6;
+  --purple:   #A855F7;
+  --orange:   #F97316;
+  --cyan:     #06B6D4;
+}
+[data-theme="light"] {
+  --bg:#F0F2F8; --surface:#FFFFFF; --s2:#F7F9FC; --s3:#EEF2F8;
+  --border:#DDE3EE; --border2:#C8D0E0; --text:#0F172A; --muted:#64748B; --dim:#94A3B8;
+}
+
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
+
+/* ── HEADER ── */
+.hdr{
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  padding:0 28px;height:54px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:100;
+}
+.hdr-logo{font-weight:700;font-size:15px;letter-spacing:-.3px}
+.hdr-tabs{display:flex;gap:2px}
+.htab{padding:5px 14px;border-radius:6px;font-size:13px;font-weight:500;color:var(--muted);
+  cursor:pointer;border:none;background:none;transition:all 150ms}
+.htab:hover{color:var(--text);background:var(--s2)}
+.htab.on{color:var(--text);background:var(--s2);position:relative}
+.htab.on::after{content:'';position:absolute;bottom:-1px;left:14px;right:14px;height:2px;background:var(--primary);border-radius:2px}
+.hdr-right{display:flex;align-items:center;gap:10px}
+.sprint-pill{
+  display:flex;align-items:center;gap:7px;
+  background:var(--s2);border:1px solid var(--border);border-radius:8px;
+  padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;
+  color:var(--text);
+}
+.sprint-dates{font-weight:400;color:var(--muted)}
+.theme-btn{background:var(--s2);border:1px solid var(--border);border-radius:8px;
+  padding:5px 10px;font-size:12px;cursor:pointer;color:var(--muted)}
+
+/* ── PAGE ── */
+.page{padding:24px 28px;max-width:1440px;margin:0 auto}
+
+/* ── TOOLBAR ROW ── */
+.toolbar-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.page-label{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;color:var(--text)}
+.tools{display:flex;align-items:center;gap:8px}
+.vtoggle{display:flex;background:var(--s2);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.vtbtn{padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;border:none;background:none;
+  color:var(--muted);display:flex;align-items:center;gap:5px;transition:all 150ms}
+.vtbtn.on{background:var(--s3);color:var(--text)}
+.tbtn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:8px;
+  font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);
+  background:var(--s2);color:var(--muted);transition:all 150ms}
+.tbtn:hover{color:var(--text);border-color:var(--border2)}
+
+/* ── KPI BAR ── */
+.kpi-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.kpi{
+  background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  padding:18px 20px;position:relative;overflow:hidden;
+}
+.kpi::after{content:'';position:absolute;inset:0;border-radius:14px;pointer-events:none;
+  background:radial-gradient(ellipse at top left, var(--kc,transparent) 0%, transparent 60%);
+  opacity:.08}
+.kpi-lbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.kpi-val{font-size:32px;font-weight:800;line-height:1;letter-spacing:-.5px}
+.kpi-note{font-size:11px;color:var(--muted);margin-top:6px}
+.kpi-prog{height:3px;background:var(--s3);border-radius:2px;margin-top:12px;overflow:hidden}
+.kpi-prog-f{height:100%;border-radius:2px;transition:width .6s ease}
+.kpi--green{--kc:var(--green)} .kpi--green .kpi-val{color:var(--green)}
+.kpi--red{--kc:var(--red)}     .kpi--red .kpi-val{color:var(--red)}
+.kpi--amber{--kc:var(--amber)} .kpi--amber .kpi-val{color:var(--amber)}
+
+/* ── SECTION SHELL ── */
+.sec{margin-bottom:20px}
+.sec-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;margin-bottom:12px;cursor:pointer;user-select:none;
+}
+.sec-title{display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px;letter-spacing:.02em}
+.sec-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.sec-count{
+  background:var(--s3);border:1px solid var(--border);
+  border-radius:20px;padding:1px 8px;font-size:11px;font-weight:600;color:var(--muted)
+}
+.sec-meta{display:flex;align-items:center;gap:10px;font-size:12px}
+.warn-lbl{color:var(--amber);font-weight:600;display:flex;align-items:center;gap:4px}
+.crit-lbl{color:var(--red);font-weight:600;display:flex;align-items:center;gap:4px}
+.chevron{transition:transform 200ms;color:var(--dim)}
+.sec.cls .chevron{transform:rotate(-90deg)}
+.sec.cls .sec-body{display:none}
+
+/* ═══════════════════════════════════════
+   IN PROGRESS — CARD GRID
+═══════════════════════════════════════ */
+.ip-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px}
+.ip-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  padding:16px;position:relative;overflow:hidden;
+  cursor:pointer;transition:border-color 200ms, transform 200ms;
+}
+.ip-card:hover{border-color:var(--border2);transform:translateY(-1px)}
+.ip-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.ip-card--crit::before{background:linear-gradient(90deg,var(--red),var(--orange))}
+.ip-card--warn::before{background:linear-gradient(90deg,var(--amber),var(--orange))}
+.ip-card--ok::before{background:linear-gradient(90deg,var(--primary),var(--cyan))}
+
+.ip-card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.ip-card-id{font-family:'Fira Code',monospace;font-size:11px;font-weight:500;color:var(--primary)}
+.ip-card-badges{display:flex;gap:5px}
+.ip-card-title{font-size:14px;font-weight:600;line-height:1.4;margin-bottom:10px;color:var(--text)}
+
+.ip-card-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px}
+.tag{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700}
+.tag-bounce{background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.25)}
+.tag-hf    {background:rgba(244,63,94,.15); color:var(--red);   border:1px solid rgba(244,63,94,.25)}
+.tag-reg   {background:rgba(168,85,247,.15);color:var(--purple);border:1px solid rgba(168,85,247,.25)}
+.tag-p0{background:rgba(244,63,94,.15);color:var(--red);border:1px solid rgba(244,63,94,.25)}
+.tag-p1{background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.25)}
+.tag-p2{background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.25)}
+.tag-p3{background:rgba(107,122,153,.15);color:var(--muted);border:1px solid rgba(107,122,153,.25)}
+.tag-a1{background:rgba(168,85,247,.15);color:var(--purple);border:1px solid rgba(168,85,247,.25)}
+
+.ip-card-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding-top:12px;border-top:1px solid var(--border)}
+.stat-cell{display:flex;flex-direction:column;gap:2px}
+.stat-lbl{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.stat-val{font-family:'Fira Code',monospace;font-size:13px;font-weight:600}
+.stat-val--crit{color:var(--red)}
+.stat-val--warn{color:var(--amber)}
+.stat-val--ok  {color:var(--text)}
+.stat-val--dim {color:var(--dim)}
+
+.ip-card-footer{display:flex;align-items:center;justify-content:space-between;margin-top:12px}
+.assignee-row{display:flex;align-items:center;gap:7px}
+.av{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0}
+.av-name{font-size:12px;font-weight:500;color:var(--text)}
+.verif-chips{display:flex;gap:4px}
+.vchip{padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700}
+.vchip-dev  {background:rgba(16,185,129,.15);color:var(--green); border:1px solid rgba(16,185,129,.3)}
+.vchip-stg  {background:rgba(59,130,246,.15); color:var(--blue);  border:1px solid rgba(59,130,246,.3)}
+.vchip-prod {background:rgba(168,85,247,.15); color:var(--purple);border:1px solid rgba(168,85,247,.3)}
+
+/* ── Expand panel on card click ── */
+.ip-card-expand{display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.ip-card.expanded .ip-card-expand{display:block}
+.tl-line{display:flex;align-items:center;gap:8px;font-size:11px;padding:4px 0;color:var(--muted)}
+.tl-line.bounce-line{color:var(--orange)}
+.tl-line.bounce-line .tl-tag{background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.25);padding:1px 5px;border-radius:4px;font-size:10px;font-weight:700}
+.tl-dot{width:6px;height:6px;border-radius:50%;background:var(--border2);flex-shrink:0}
+.tl-dot.active{background:var(--primary)}
+.tl-dot.bounce{background:var(--orange)}
+.tl-time{margin-left:auto;font-family:'Fira Code',monospace;font-size:10px;color:var(--dim)}
+
+/* ═══════════════════════════════════════
+   BLOCKED — ALERT STRIP
+═══════════════════════════════════════ */
+.blocked-strip{
+  background:linear-gradient(135deg,rgba(244,63,94,.06) 0%,rgba(244,63,94,.02) 100%);
+  border:1px solid rgba(244,63,94,.25);
+  border-radius:14px;overflow:hidden;
+}
+.blocked-strip-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 18px;
+  background:rgba(244,63,94,.08);
+  border-bottom:1px solid rgba(244,63,94,.15);
+  cursor:pointer;
+}
+.blocked-sec-title{display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px}
+.blocked-row{
+  display:flex;align-items:center;gap:0;
+  padding:11px 18px;border-bottom:1px solid rgba(244,63,94,.1);
+  transition:background 150ms;cursor:pointer;
+}
+.blocked-row:last-child{border-bottom:none}
+.blocked-row:hover{background:rgba(244,63,94,.05)}
+.blocked-row--crit{border-left:3px solid var(--red)}
+.blocked-row--warn{border-left:3px solid var(--amber)}
+.blocked-row--crit td:first-child,.blocked-row--warn td:first-child{padding-left:9px}
+.bl-id{font-family:'Fira Code',monospace;font-size:11px;color:var(--primary);width:90px;flex-shrink:0}
+.bl-pri{width:48px;flex-shrink:0}
+.bl-title{flex:1;font-size:13px;font-weight:500;color:var(--text)}
+.bl-time{font-family:'Fira Code',monospace;font-size:12px;font-weight:600;width:80px;text-align:right;flex-shrink:0}
+.bl-time--crit{color:var(--red)}
+.bl-time--warn{color:var(--amber)}
+.bl-assignee{display:flex;align-items:center;gap:6px;width:110px;flex-shrink:0;justify-content:flex-end}
+
+/* ═══════════════════════════════════════
+   COMPACT TABLE (DEV, TODO)
+═══════════════════════════════════════ */
+.compact-table{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.ct-row{
+  display:grid;grid-template-columns:90px 50px 1fr 90px 90px 130px 120px;
+  align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);
+  cursor:pointer;transition:background 150ms;gap:8px;
+}
+.ct-row:last-child{border-bottom:none}
+.ct-row:hover{background:var(--s2)}
+.ct-row.header{background:var(--s2);cursor:default;border-bottom:1px solid var(--border)}
+.ct-row.header:hover{background:var(--s2)}
+.ct-lbl{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ct-row--overdue{border-left:3px solid var(--red)}
+.ct-row--warn{border-left:3px solid var(--amber)}
+
+/* ═══════════════════════════════════════
+   BY ASSIGNEE VIEW
+═══════════════════════════════════════ */
+.a-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:14px;overflow:hidden}
+.a-card-hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;cursor:pointer}
+.a-card-hdr:hover{background:var(--s2)}
+.a-left{display:flex;align-items:center;gap:14px}
+.av-lg{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:#fff;flex-shrink:0}
+.a-name{font-size:15px;font-weight:700}
+.a-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.a-right{display:flex;align-items:center;gap:12px}
+.load-meter{display:flex;gap:3px;align-items:flex-end;height:20px}
+.lm-bar{width:5px;border-radius:2px;background:var(--border)}
+.lm-bar.active{background:var(--primary)}
+.lm-bar.blocked{background:var(--red)}
+.load-tag{padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700}
+.load-high{background:rgba(244,63,94,.15);color:var(--red);border:1px solid rgba(244,63,94,.3)}
+.load-ok  {background:rgba(16,185,129,.15);color:var(--green);border:1px solid rgba(16,185,129,.3)}
+.load-med {background:rgba(245,158,11,.15);color:var(--amber);border:1px solid rgba(245,158,11,.3)}
+
+.a-body{padding:0}
+.a-tickets{padding:0 0 0 0}
+.a-qa{padding:14px 20px;background:var(--s2);border-top:1px solid var(--border)}
+.a-qa-lbl{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.a-qa-row{display:flex;gap:20px;font-size:12px;flex-wrap:wrap}
+.a-qa-item{display:flex;align-items:center;gap:5px}
+
+/* ── Common ── */
+.tid{font-family:'Fira Code',monospace;font-size:11px;font-weight:500;color:var(--primary)}
+.title-t{font-size:13px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.time-crit{color:var(--red);font-family:'Fira Code',monospace;font-size:12px;font-weight:600;display:flex;align-items:center;gap:3px}
+.time-warn{color:var(--amber);font-family:'Fira Code',monospace;font-size:12px}
+.time-ok  {color:var(--muted);font-family:'Fira Code',monospace;font-size:12px}
+.time-dim {color:var(--dim);font-family:'Fira Code',monospace;font-size:12px}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div style="display:flex;align-items:center;gap:28px">
+    <span class="hdr-logo">Trackflow</span>
+    <nav class="hdr-tabs">
+      <button class="htab on">Tracking</button>
+      <button class="htab">Reports</button>
+      <button class="htab">Assignee Stats</button>
+      <button class="htab">Daily Ops</button>
+    </nav>
+  </div>
+  <div class="hdr-right">
+    <div class="sprint-pill">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Sprint 2 <span class="sprint-dates">13 Apr – 25 Apr</span>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--muted)"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <button class="theme-btn" onclick="toggleTheme()">Light / Dark</button>
+  </div>
+</header>
+
+<div class="page">
+
+  <!-- Toolbar -->
+  <div class="toolbar-row">
+    <div class="page-label">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Sprint Tracking
+    </div>
+    <div class="tools">
+      <div class="vtoggle">
+        <button class="vtbtn on" onclick="setView('column',this)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18"/><rect x="14" y="3" width="7" height="18"/></svg>
+          By Column
+        </button>
+        <button class="vtbtn" onclick="setView('assignee',this)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          By Assignee
+        </button>
+      </div>
+      <button class="tbtn">All Assignees</button>
+      <button class="tbtn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <!-- KPI -->
+  <div class="kpi-bar">
+    <div class="kpi kpi--green">
+      <div class="kpi-lbl">Completion</div>
+      <div class="kpi-val">87<span style="font-size:18px;font-weight:500;color:var(--muted)">%</span></div>
+      <div class="kpi-prog"><div class="kpi-prog-f" style="width:87%;background:var(--green)"></div></div>
+      <div class="kpi-note">156 / 179 tickets &nbsp;·&nbsp; 23 remaining</div>
+    </div>
+    <div class="kpi kpi--red">
+      <div class="kpi-lbl">Blocked</div>
+      <div class="kpi-val">12</div>
+      <div class="kpi-note">5 in progress &nbsp;·&nbsp; <span style="color:var(--red)">1 P0</span></div>
+    </div>
+    <div class="kpi kpi--amber">
+      <div class="kpi-lbl">Bounced</div>
+      <div class="kpi-val">2</div>
+      <div class="kpi-note">1 hotfix &nbsp;·&nbsp; 1 regression</div>
+    </div>
+    <div class="kpi kpi--red">
+      <div class="kpi-lbl">Sprint Ends</div>
+      <div class="kpi-val">1d <span style="font-size:20px">6h</span></div>
+      <div class="kpi-note" style="color:var(--red)">129 overdue &nbsp;·&nbsp; Apr 25</div>
+    </div>
+  </div>
+
+  <!-- ═══ BY COLUMN VIEW ═══ -->
+  <div id="view-column">
+
+    <!-- IN PROGRESS — CARDS -->
+    <div class="sec" id="s-ip">
+      <div class="sec-hdr" onclick="toggleSec('s-ip')">
+        <div class="sec-title">
+          <span class="sec-dot" style="background:var(--primary);box-shadow:0 0 6px var(--primary)"></span>
+          IN PROGRESS
+          <span class="sec-count">5</span>
+        </div>
+        <div class="sec-meta">
+          <span class="warn-lbl">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+            2 overdue
+          </span>
+          <svg class="chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="sec-body">
+        <div class="ip-grid">
+
+          <!-- Card: overdue + bounced -->
+          <div class="ip-card ip-card--crit" onclick="toggleCard(this)">
+            <div class="ip-card-top">
+              <span class="ip-card-id">ARD-1469</span>
+              <div class="ip-card-badges">
+                <span class="tag tag-p2">P2</span>
+                <span class="tag tag-reg">Regression</span>
+              </div>
+            </div>
+            <div class="ip-card-title">Do Not Delete This Card [TRIGGERED]</div>
+            <div class="ip-card-tags">
+              <span class="tag tag-bounce">↩ Bounced ×2</span>
+            </div>
+            <div class="ip-card-stats">
+              <div class="stat-cell">
+                <span class="stat-lbl">Cycle Time</span>
+                <span class="stat-val stat-val--crit">10d 10h</span>
+              </div>
+              <div class="stat-cell">
+                <span class="stat-lbl">In State</span>
+                <span class="stat-val stat-val--crit">10d 10h</span>
+              </div>
+              <div class="stat-cell">
+                <span class="stat-lbl">Verified</span>
+                <span class="stat-val stat-val--dim">—</span>
+              </div>
+            </div>
+            <div class="ip-card-footer">
+              <div class="assignee-row">
+                <div class="av" style="background:#6366F1">SD</div>
+                <span class="av-name">Simran Dhindsa</span>
+              </div>
+              <div class="verif-chips"></div>
+            </div>
+            <div class="ip-card-expand">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Transition History</div>
+              <div class="tl-line"><div class="tl-dot active"></div>To Do → In Progress<span class="tl-time">Apr 10, 09:00</span></div>
+              <div class="tl-line bounce-line"><div class="tl-dot bounce"></div>In Progress → Dev &nbsp;<span class="tl-tag">stint 1: 2h 30m</span><span class="tl-time">Apr 10, 11:30</span></div>
+              <div class="tl-line bounce-line"><div class="tl-dot bounce"></div>Dev → In Progress &nbsp;<span class="tl-tag">↩ Bounce</span><span class="tl-time">Apr 13, 22:47</span></div>
+              <div class="tl-line"><div class="tl-dot active"></div>In Progress → Stage<span class="tl-time">Apr 23, 22:48</span></div>
+            </div>
+          </div>
+
+          <!-- Card: at-risk -->
+          <div class="ip-card ip-card--warn" onclick="toggleCard(this)">
+            <div class="ip-card-top">
+              <span class="ip-card-id">ARD-1541</span>
+              <div class="ip-card-badges"><span class="tag tag-p2">P2</span></div>
+            </div>
+            <div class="ip-card-title">Sending Audio file as message (Different API), recorded as MP3 or WAV</div>
+            <div class="ip-card-tags"><span style="font-size:11px;color:var(--muted)">No flags</span></div>
+            <div class="ip-card-stats">
+              <div class="stat-cell"><span class="stat-lbl">Cycle Time</span><span class="stat-val stat-val--warn">2d 9h</span></div>
+              <div class="stat-cell"><span class="stat-lbl">In State</span><span class="stat-val stat-val--warn">2d 9h</span></div>
+              <div class="stat-cell"><span class="stat-lbl">Verified</span><span class="stat-val stat-val--dim">—</span></div>
+            </div>
+            <div class="ip-card-footer">
+              <div class="assignee-row"><div class="av" style="background:#8B5CF6">VP</div><span class="av-name">Vishal Pal</span></div>
+            </div>
+            <div class="ip-card-expand">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Transition History</div>
+              <div class="tl-line"><div class="tl-dot active"></div>To Do → In Progress<span class="tl-time">Apr 21, 10:00</span></div>
+            </div>
+          </div>
+
+          <!-- Card: ok -->
+          <div class="ip-card ip-card--ok" onclick="toggleCard(this)">
+            <div class="ip-card-top">
+              <span class="ip-card-id">ARD-1425</span>
+              <div class="ip-card-badges"><span class="tag tag-p2">P2</span></div>
+            </div>
+            <div class="ip-card-title">Mobile: Implement Auto Retry on Network Reconnection</div>
+            <div class="ip-card-tags"><span style="font-size:11px;color:var(--muted)">No flags</span></div>
+            <div class="ip-card-stats">
+              <div class="stat-cell"><span class="stat-lbl">Cycle Time</span><span class="stat-val stat-val--dim">—</span></div>
+              <div class="stat-cell"><span class="stat-lbl">In State</span><span class="stat-val stat-val--ok">10h</span></div>
+              <div class="stat-cell"><span class="stat-lbl">Verified</span><span class="stat-val stat-val--dim">—</span></div>
+            </div>
+            <div class="ip-card-footer">
+              <div class="assignee-row"><div class="av" style="background:#0EA5E9">PA</div><span class="av-name">Parv</span></div>
+            </div>
+            <div class="ip-card-expand">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Transition History</div>
+              <div class="tl-line"><div class="tl-dot active"></div>To Do → In Progress<span class="tl-time">Apr 23, 08:00</span></div>
+            </div>
+          </div>
+
+          <!-- Card: hotfix, verified -->
+          <div class="ip-card ip-card--ok" onclick="toggleCard(this)">
+            <div class="ip-card-top">
+              <span class="ip-card-id">ARD-1074</span>
+              <div class="ip-card-badges"><span class="tag tag-a1">A1</span><span class="tag tag-hf">HF</span></div>
+            </div>
+            <div class="ip-card-title">Unable to Open Chat Panel — Hotfix</div>
+            <div class="ip-card-tags"><span class="tag tag-hf">Hotfix — In Progress → Stage</span></div>
+            <div class="ip-card-stats">
+              <div class="stat-cell"><span class="stat-lbl">Cycle Time</span><span class="stat-val stat-val--ok">1d 2h</span></div>
+              <div class="stat-cell"><span class="stat-lbl">In State</span><span class="stat-val stat-val--ok">7h</span></div>
+              <div class="stat-cell">
+                <span class="stat-lbl">Verified</span>
+                <div class="verif-chips" style="margin-top:2px"><span class="vchip vchip-dev">DEV</span><span class="vchip vchip-stg">STG</span></div>
+              </div>
+            </div>
+            <div class="ip-card-footer">
+              <div class="assignee-row"><div class="av" style="background:#10B981">CH</div><span class="av-name">Charlie</span></div>
+            </div>
+            <div class="ip-card-expand">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Transition History</div>
+              <div class="tl-line"><div class="tl-dot active"></div>To Do → In Progress<span class="tl-time">Apr 22, 14:00</span></div>
+              <div class="tl-line"><div class="tl-dot active"></div>In Progress → Stage (Hotfix)<span class="tl-time">Apr 23, 16:00</span></div>
+            </div>
+          </div>
+
+        </div><!-- /ip-grid -->
+      </div>
+    </div>
+
+    <!-- BLOCKED — alert strip -->
+    <div class="sec" id="s-bl">
+      <div class="sec-hdr" onclick="toggleSec('s-bl')">
+        <div class="sec-title">
+          <span class="sec-dot" style="background:var(--red);box-shadow:0 0 6px var(--red)"></span>
+          BLOCKED
+          <span class="sec-count">12</span>
+        </div>
+        <div class="sec-meta">
+          <span class="crit-lbl">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            3 shown · critical first
+          </span>
+          <svg class="chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="sec-body">
+        <div class="blocked-strip">
+          <div class="blocked-row blocked-row--crit">
+            <span class="bl-id">ARD-759</span>
+            <span class="bl-pri"><span class="tag tag-p2">P2</span></span>
+            <span class="bl-title">Create API Documentation in Voiden for Ardoise APIs &nbsp;<span class="tag tag-hf">HF</span></span>
+            <span class="bl-time bl-time--crit">14d 6h</span>
+            <div class="bl-assignee"><div class="av" style="background:#F43F5E">SO</div><span style="font-size:12px;color:var(--muted)">Sonal</span></div>
+          </div>
+          <div class="blocked-row blocked-row--crit">
+            <span class="bl-id">ARD-1443</span>
+            <span class="bl-pri"><span class="tag tag-p2">P2</span></span>
+            <span class="bl-title">P2 BE Studio: Uploading files API stuck in pending state or timed out</span>
+            <span class="bl-time bl-time--crit">14d 6h</span>
+            <div class="bl-assignee"><div class="av" style="background:#F43F5E">SO</div><span style="font-size:12px;color:var(--muted)">Sonal</span></div>
+          </div>
+          <div class="blocked-row blocked-row--warn">
+            <span class="bl-id">ARD-1486</span>
+            <span class="bl-pri"><span class="tag tag-p2">P2</span></span>
+            <span class="bl-title">FE MC: Redesign Mission Control UI to Back-Office Style</span>
+            <span class="bl-time bl-time--warn">2d 4h</span>
+            <div class="bl-assignee"><div class="av" style="background:#F97316">HA</div><span style="font-size:12px;color:var(--muted)">Harpinder</span></div>
+          </div>
+          <div class="blocked-row blocked-row--warn">
+            <span class="bl-id">ARD-1488</span>
+            <span class="bl-pri"><span class="tag tag-p2">P2</span></span>
+            <span class="bl-title">BE Studio: Confirm Criteria Displays Unformatted Output</span>
+            <span class="bl-time bl-time--warn">8d 11h</span>
+            <div class="bl-assignee"><div class="av" style="background:#10B981">DE</div><span style="font-size:12px;color:var(--muted)">Deepak</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEV — compact table -->
+    <div class="sec" id="s-dev">
+      <div class="sec-hdr" onclick="toggleSec('s-dev')">
+        <div class="sec-title">
+          <span class="sec-dot" style="background:var(--blue)"></span>
+          DEV
+          <span class="sec-count">3</span>
+        </div>
+        <div class="sec-meta">
+          <span class="warn-lbl"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>2 delayed</span>
+          <svg class="chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="sec-body">
+        <div class="compact-table">
+          <div class="ct-row header">
+            <span class="ct-lbl">Ticket</span><span class="ct-lbl">Pri</span>
+            <span class="ct-lbl">Title</span>
+            <span class="ct-lbl">Cycle</span><span class="ct-lbl">In State</span>
+            <span class="ct-lbl">Verified</span><span class="ct-lbl">Assignee</span>
+          </div>
+          <div class="ct-row ct-row--overdue">
+            <span class="tid">ARD-1554</span>
+            <span class="tag tag-p2">P2</span>
+            <span class="title-t">FE UI: Apply Uploaded or Selected Font to Domain UI v2</span>
+            <span class="time-crit">6d 6h</span>
+            <span class="time-crit">6d 6h</span>
+            <span class="time-dim">—</span>
+            <div style="display:flex;align-items:center;gap:6px"><div class="av" style="background:#8B5CF6">VP</div><span style="font-size:12px;color:var(--muted)">Vishal</span></div>
+          </div>
+          <div class="ct-row ct-row--warn">
+            <span class="tid">ARD-1583</span>
+            <span class="tag tag-p2">P2</span>
+            <span class="title-t">BE UI: Speech To Text Implementation</span>
+            <span class="time-warn">2d 3h</span>
+            <span class="time-warn">2d 3h</span>
+            <span class="time-dim">—</span>
+            <div style="display:flex;align-items:center;gap:6px"><div class="av" style="background:#0EA5E9">SY</div><span style="font-size:12px;color:var(--muted)">Suryansh</span></div>
+          </div>
+          <div class="ct-row">
+            <span class="tid">ARD-1160</span>
+            <span class="tag tag-p2">P2</span>
+            <span class="title-t">Make Onboarding Interactive with Guided Tour</span>
+            <span class="time-ok">3d 2h</span>
+            <span class="time-ok">1d 4h</span>
+            <div style="display:flex;gap:3px"><span class="vchip vchip-dev">DEV</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div class="av" style="background:#6366F1">AL</div><span style="font-size:12px;color:var(--muted)">Alice</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TO DO — collapsed by default -->
+    <div class="sec cls" id="s-todo">
+      <div class="sec-hdr" onclick="toggleSec('s-todo')">
+        <div class="sec-title">
+          <span class="sec-dot" style="background:var(--dim)"></span>
+          TO DO
+          <span class="sec-count">6</span>
+        </div>
+        <div class="sec-meta">
+          <span style="font-size:12px;color:var(--dim)">Not started — click to expand</span>
+          <svg class="chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="sec-body">
+        <div class="compact-table">
+          <div class="ct-row header" style="grid-template-columns:90px 50px 1fr 120px">
+            <span class="ct-lbl">Ticket</span><span class="ct-lbl">Pri</span><span class="ct-lbl">Title</span><span class="ct-lbl">Assignee</span>
+          </div>
+          <div class="ct-row" style="grid-template-columns:90px 50px 1fr 120px">
+            <span class="tid">ARD-1042</span><span class="tag tag-p2">P2</span>
+            <span class="title-t">P2 Studio: Assistant Displays Internal Tool or Function Call Output</span>
+            <div style="display:flex;align-items:center;gap:6px"><div class="av" style="background:#6366F1">SD</div><span style="font-size:12px;color:var(--muted)">Simran</span></div>
+          </div>
+          <div class="ct-row" style="grid-template-columns:90px 50px 1fr 120px">
+            <span class="tid">ARD-1139</span><span class="tag tag-p2">P2</span>
+            <span class="title-t">P2 Studio: AI Response Displays Raw JSON or Code Tags During Course Creation</span>
+            <div style="display:flex;align-items:center;gap:6px"><div class="av" style="background:#0EA5E9">PA</div><span style="font-size:12px;color:var(--muted)">Parv</span></div>
+          </div>
+          <div class="ct-row" style="grid-template-columns:90px 50px 1fr 120px">
+            <span class="tid">ARD-1592</span><span class="tag tag-p2">P2</span>
+            <span class="title-t">Stage Deployment PRE/POST requisites</span>
+            <div style="display:flex;align-items:center;gap:6px"><div class="av" style="background:#F59E0B">AD</div><span style="font-size:12px;color:var(--muted)">Arpit</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /view-column -->
+
+  <!-- ═══ BY ASSIGNEE VIEW ═══ -->
+  <div id="view-assignee" style="display:none">
+
+    <div class="a-card" id="a-deepak">
+      <div class="a-card-hdr" onclick="toggleSec('a-deepak')">
+        <div class="a-left">
+          <div class="av-lg" style="background:#10B981">DE</div>
+          <div>
+            <div class="a-name">Deepak</div>
+            <div class="a-sub">20 tickets &nbsp;·&nbsp; 3 in progress &nbsp;·&nbsp; 2 blocked &nbsp;·&nbsp; <span style="color:var(--red)">17 overdue</span></div>
+          </div>
+        </div>
+        <div class="a-right">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="load-meter">
+              <div class="lm-bar active" style="height:14px"></div>
+              <div class="lm-bar active" style="height:14px"></div>
+              <div class="lm-bar active" style="height:14px"></div>
+              <div class="lm-bar blocked" style="height:10px"></div>
+              <div class="lm-bar blocked" style="height:10px"></div>
+              <div class="lm-bar" style="height:6px"></div>
+              <div class="lm-bar" style="height:6px"></div>
+            </div>
+            <span style="font-size:11px;color:var(--muted)">3 active · 2 blocked</span>
+          </div>
+          <span class="load-tag load-high">High Load</span>
+          <svg class="chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="sec-body a-body">
+        <div class="a-tickets">
+          <div class="compact-table" style="border:none;border-radius:0;border-top:1px solid var(--border)">
+            <div class="ct-row header"><span class="ct-lbl">Ticket</span><span class="ct-lbl">Pri</span><span class="ct-lbl">Title</span><span class="ct-lbl">Cycle</span><span class="ct-lbl">In State</span><span class="ct-lbl">Verified</span><span class="ct-lbl">Status</span></div>
+            <div class="ct-row ct-row--overdue">
+              <span class="tid">ARD-1488</span><span class="tag tag-p2">P2</span>
+              <span class="title-t">BE Studio: Confirm Criteria Displays Unformatted Output</span>
+              <span class="time-crit">8d 11h</span><span class="time-crit">8d 11h</span>
+              <span class="time-dim">—</span>
+              <span class="tag" style="background:rgba(244,63,94,.15);color:var(--red);border:1px solid rgba(244,63,94,.3)">BLOCKED</span>
+            </div>
+            <div class="ct-row ct-row--warn">
+              <span class="tid">ARD-1453</span><span class="tag tag-p3">P3</span>
+              <span class="title-t">Incorrect Language Response (English Output While French Selected)</span>
+              <span class="time-dim">—</span><span class="time-ok">8h</span>
+              <span class="time-dim">—</span>
+              <span class="tag" style="background:rgba(59,130,246,.15);color:var(--blue);border:1px solid rgba(59,130,246,.3)">IN PROGRESS</span>
+            </div>
+            <div class="ct-row">
+              <span class="tid">ARD-1518</span><span class="tag tag-p2">P2</span>
+              <span class="title-t">Topic's Descriptions Not Copied to Course Outline Assets</span>
+              <span class="time-warn">3d 4h</span><span class="time-warn">3d 4h</span>
+              <span class="time-dim">—</span>
+              <span class="tag" style="background:rgba(59,130,246,.15);color:var(--blue);border:1px solid rgba(59,130,246,.3)">IN PROGRESS</span>
+            </div>
+          </div>
+        </div>
+        <div class="a-qa">
+          <div class="a-qa-lbl">QA Activity</div>
+          <div class="a-qa-row">
+            <div class="a-qa-item"><span class="vchip vchip-dev">DEV</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--green)">ARD-1200, ARD-1201</span></div>
+            <div class="a-qa-item"><span class="vchip vchip-stg">STG</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--blue)">ARD-1100</span></div>
+            <div class="a-qa-item"><span class="vchip vchip-prod">PROD</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--dim)">—</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="a-card" id="a-vishal">
+      <div class="a-card-hdr" onclick="toggleSec('a-vishal')">
+        <div class="a-left">
+          <div class="av-lg" style="background:#8B5CF6">VP</div>
+          <div>
+            <div class="a-name">Vishal Pal</div>
+            <div class="a-sub">5 tickets &nbsp;·&nbsp; 2 in progress &nbsp;·&nbsp; <span style="color:var(--amber)">3 overdue</span></div>
+          </div>
+        </div>
+        <div class="a-right">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="load-meter">
+              <div class="lm-bar active" style="height:14px"></div>
+              <div class="lm-bar active" style="height:14px"></div>
+              <div class="lm-bar" style="height:6px"></div>
+              <div class="lm-bar" style="height:6px"></div>
+            </div>
+            <span style="font-size:11px;color:var(--muted)">2 active</span>
+          </div>
+          <span class="load-tag load-med">Med Load</span>
+          <svg class="chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="sec-body a-body">
+        <div class="compact-table" style="border:none;border-radius:0;border-top:1px solid var(--border)">
+          <div class="ct-row header"><span class="ct-lbl">Ticket</span><span class="ct-lbl">Pri</span><span class="ct-lbl">Title</span><span class="ct-lbl">Cycle</span><span class="ct-lbl">In State</span><span class="ct-lbl">Verified</span><span class="ct-lbl">Status</span></div>
+          <div class="ct-row ct-row--overdue"><span class="tid">ARD-1554</span><span class="tag tag-p2">P2</span><span class="title-t">FE UI: Apply Uploaded Font to Domain UI v2</span><span class="time-crit">6d 6h</span><span class="time-crit">6d 6h</span><span class="time-dim">—</span><span class="tag" style="background:rgba(59,130,246,.15);color:var(--blue);border:1px solid rgba(59,130,246,.3)">DEV</span></div>
+          <div class="ct-row ct-row--warn"><span class="tid">ARD-1541</span><span class="tag tag-p2">P2</span><span class="title-t">Sending Audio file as message (Different API)</span><span class="time-warn">2d 9h</span><span class="time-warn">2d 9h</span><span class="time-dim">—</span><span class="tag" style="background:rgba(59,130,246,.15);color:var(--blue);border:1px solid rgba(59,130,246,.3)">IN PROGRESS</span></div>
+        </div>
+        <div class="a-qa">
+          <div class="a-qa-lbl">QA Activity</div>
+          <div class="a-qa-row">
+            <div class="a-qa-item"><span class="vchip vchip-dev">DEV</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--green)">ARD-1300</span></div>
+            <div class="a-qa-item"><span class="vchip vchip-stg">STG</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--dim)">—</span></div>
+            <div class="a-qa-item"><span class="vchip vchip-prod">PROD</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--dim)">—</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="a-card" id="a-simran">
+      <div class="a-card-hdr" onclick="toggleSec('a-simran')">
+        <div class="a-left">
+          <div class="av-lg" style="background:#6366F1">SD</div>
+          <div>
+            <div class="a-name">Simran Dhindsa</div>
+            <div class="a-sub">3 tickets &nbsp;·&nbsp; 1 in progress &nbsp;·&nbsp; <span style="color:var(--orange)">1 bounced</span> &nbsp;·&nbsp; <span style="color:var(--red)">1 overdue</span></div>
+          </div>
+        </div>
+        <div class="a-right">
+          <div style="display:flex;align-items:center;gap:6px">
+            <div class="load-meter">
+              <div class="lm-bar active" style="height:14px"></div>
+              <div class="lm-bar" style="height:6px"></div>
+              <div class="lm-bar" style="height:6px"></div>
+            </div>
+            <span style="font-size:11px;color:var(--muted)">1 active</span>
+          </div>
+          <span class="load-tag load-ok">Low Load</span>
+          <svg class="chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+      </div>
+      <div class="sec-body a-body">
+        <div class="compact-table" style="border:none;border-radius:0;border-top:1px solid var(--border)">
+          <div class="ct-row header"><span class="ct-lbl">Ticket</span><span class="ct-lbl">Pri</span><span class="ct-lbl">Title</span><span class="ct-lbl">Cycle</span><span class="ct-lbl">In State</span><span class="ct-lbl">Verified</span><span class="ct-lbl">Status</span></div>
+          <div class="ct-row ct-row--overdue"><span class="tid">ARD-1469</span><span class="tag tag-p2">P2</span><span class="title-t">Do Not Delete This Card [TRIGGERED] — ↩ Bounced ×2</span><span class="time-crit">10d 10h</span><span class="time-crit">10d 10h</span><span class="time-dim">—</span><span class="tag" style="background:rgba(59,130,246,.15);color:var(--blue);border:1px solid rgba(59,130,246,.3)">IN PROGRESS</span></div>
+        </div>
+        <div class="a-qa">
+          <div class="a-qa-lbl">QA Activity</div>
+          <div class="a-qa-row">
+            <div class="a-qa-item"><span class="vchip vchip-dev">DEV</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--green)">ARD-1469, ARD-1400</span></div>
+            <div class="a-qa-item"><span class="vchip vchip-stg">STG</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--blue)">ARD-1350</span></div>
+            <div class="a-qa-item"><span class="vchip vchip-prod">PROD</span><span style="color:var(--muted);font-size:12px">Verified:</span><span style="font-size:12px;color:var(--purple)">ARD-1200</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /view-assignee -->
+</div><!-- /page -->
+
+<script>
+function toggleSec(id){
+  const el=document.getElementById(id)
+  el.classList.toggle('cls')
+}
+function toggleCard(el){
+  el.classList.toggle('expanded')
+}
+function setView(v,btn){
+  document.querySelectorAll('.vtbtn').forEach(b=>b.classList.remove('on'))
+  btn.classList.add('on')
+  document.getElementById('view-column').style.display=v==='column'?'block':'none'
+  document.getElementById('view-assignee').style.display=v==='assignee'?'block':'none'
+}
+function toggleTheme(){
+  const h=document.documentElement
+  h.setAttribute('data-theme',h.getAttribute('data-theme')==='dark'?'light':'dark')
+}
+</script>
+</body>
+</html>

@@ -1625,6 +1625,14 @@ function IssueDetailModal({
 
 type SortField = 'default' | 'priority' | 'time_in_state' | 'cycle_time' | 'bounces' | 'assignee'
 
+function getColumnType(col: SprintBoardColumn): 'inprogress' | 'blocked' | 'compact' | 'todo' {
+  const n = col.name?.toLowerCase() || ''
+  if (n.includes('progress') || n === 'inprogress') return 'inprogress'
+  if (n.includes('block')) return 'blocked'
+  if (n === 'to do' || n === 'todo' || n.includes('backlog') || n.includes('uvr') || n === 'open' || n === 'new') return 'todo'
+  return 'compact'
+}
+
 function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIssueIds?: Set<string>; sprintId?: string; sprintFinishMs?: number }) {
   const [boardColumns, setBoardColumns] = useState<SprintBoardColumn[]>([])
   const [summary, setSummary] = useState<import('../services/api').SprintSummary | null>(null)
@@ -1638,13 +1646,17 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
   const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-  const [viewMode, setViewMode] = useState<'column' | 'assignee'>('column')
+  const [viewMode, setViewMode] = useState<'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus'>('column')
+  const [viewModeOpen, setViewModeOpen] = useState(false)
+  const [sidebarPerson, setSidebarPerson] = useState<string>('')
+  const [showAllFocus, setShowAllFocus] = useState(false)
   const [expandedIssue, setExpandedIssue] = useState<string | null>(null)
   const [detailIssue, setDetailIssue] = useState<{ issue: SprintBoardIssue; logs: IssueStateLogEntry[] } | null>(null)
   const [ytDetailIssue, setYtDetailIssue] = useState<import('../services/api').YouTrackIssue | null>(null)
   const [ytDetailLoading, setYtDetailLoading] = useState(false)
   const assigneeRef = useRef<HTMLDivElement>(null)
   const sortRef = useRef<HTMLDivElement>(null)
+  const viewModeRef = useRef<HTMLDivElement>(null)
 
   // ── Data fetching ─────────────────────────────────────────────────────────
   const fetchBoardStatus = useCallback(async () => {
@@ -1673,6 +1685,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
         setAssigneeOpen(false)
       if (sortRef.current && !sortRef.current.contains(e.target as Node))
         setSortOpen(false)
+      if (viewModeRef.current && !viewModeRef.current.contains(e.target as Node))
+        setViewModeOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -1854,6 +1868,56 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     return map
   }, [boardColumns])
 
+  // ── SLA map from workflow config ─────────────────────────────────────────
+  const slaMap = useMemo(() => {
+    const m: Record<string, number> = {}
+    wfConfig?.priority_tags?.forEach((pt: any) => {
+      if (pt.sla_hours) {
+        m[pt.label.toLowerCase()] = pt.sla_hours
+        pt.yt_mappings?.forEach((yt: string) => { m[yt.toLowerCase()] = pt.sla_hours })
+      }
+    })
+    return m
+  }, [wfConfig])
+
+  // ── All issues sorted by delay severity (delay-bars + focus) ─────────────
+  const allIssuesByDelay = useMemo(() => {
+    const score = (i: SprintBoardIssue) =>
+      i.overdue_level === 'deadline' ? 4 : i.overdue_level === 'sprint' ? 3 : i.is_delayed ? 2 : i.bounce_count > 0 ? 1 : 0
+    return filteredColumns.flatMap(c => c.issues).sort((a, b) => {
+      const d = score(b) - score(a)
+      return d !== 0 ? d : (b.bounce_count || 0) - (a.bounce_count || 0)
+    })
+  }, [filteredColumns])
+
+  // ── Per-person list (swimlane, sidebar, split-pane) ──────────────────────
+  const byPersonList = useMemo(() => {
+    const map = new Map<string, { name: string; login: string; avatarUrl: string; issues: SprintBoardIssue[] }>()
+    filteredColumns.flatMap(c => c.issues).forEach(issue => {
+      const key = issue.assignee || 'Unassigned'
+      if (!map.has(key)) map.set(key, { name: key, login: issue.assigneeLogin || '', avatarUrl: issue.avatarUrl || '', issues: [] })
+      map.get(key)!.issues.push(issue)
+    })
+    return Array.from(map.values()).sort((a, b) => {
+      const aHasCrit = a.issues.some(i => i.overdue_level === 'deadline')
+      const bHasCrit = b.issues.some(i => i.overdue_level === 'deadline')
+      if (aHasCrit !== bHasCrit) return bHasCrit ? 1 : -1
+      return b.issues.length - a.issues.length
+    })
+  }, [filteredColumns])
+
+  // ── Blocked / in-progress issues (alert-first) ───────────────────────────
+  const allBlockedIssues = useMemo(() =>
+    filteredColumns.filter(c => c.name?.toLowerCase().includes('block')).flatMap(c => c.issues),
+  [filteredColumns])
+
+  const allInProgressIssues = useMemo(() =>
+    filteredColumns.filter(c => {
+      const n = c.name?.toLowerCase() || ''
+      return n.includes('progress') || n === 'inprogress'
+    }).flatMap(c => c.issues),
+  [filteredColumns])
+
   // ── Issue row renderer (shared by column + assignee views) ────────────────
   const renderIssueRow = (issue: SprintBoardIssue) => {
     const avatarUrl = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
@@ -1962,32 +2026,170 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     )
   }
 
+  // ── IN PROGRESS card renderer ────────────────────────────────────────────
+  const renderIssueCard = (issue: SprintBoardIssue) => {
+    const isExpanded = expandedIssue === issue.idReadable
+    const avatarUrl = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
+    const priColors = priorityColorMap[issue.priority?.toLowerCase()] || null
+    const urgencyClass = issue.overdue_level === 'deadline' ? ' pm-tracking-ip-card--crit'
+      : (issue.overdue_level === 'sprint' || issue.is_delayed) ? ' pm-tracking-ip-card--warn'
+      : ' pm-tracking-ip-card--ok'
+    const cycleLabel = issue.cycle_time_hours > 0 ? fmtHoursCompact(issue.cycle_time_hours) : null
+    const statClass = issue.overdue_level === 'deadline' ? ' pm-tracking-ip-stat-value--crit'
+      : (issue.overdue_level === 'sprint' || issue.is_delayed) ? ' pm-tracking-ip-stat-value--warn' : ''
+    return (
+      <React.Fragment key={issue.id || issue.idReadable}>
+        <div className={`pm-tracking-ip-card${urgencyClass}`} onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}>
+          <div className="pm-tracking-ip-card-top">
+            <span className="pm-tracking-ip-card-id" onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}>
+              {issue.idReadable}
+            </span>
+            <div className="pm-tracking-ip-card-badges">
+              {issue.priority && (
+                <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
+                  {issue.priority}
+                </span>
+              )}
+              {issue.is_hotfix && <span className="pm-tracking-hotfix-chip"><Zap size={8} /> HF</span>}
+            </div>
+          </div>
+          <div className="pm-tracking-ip-card-title">{issue.summary}</div>
+          <div className="pm-tracking-ip-card-tags">
+            {issue.bounce_count > 0 && <span className="pm-tracking-ip-card-tag pm-tracking-ip-card-tag--bounce">↩ Bounced ×{issue.bounce_count}</span>}
+            {issue.move_type === 'qa_rejected' && <span className="pm-tracking-ip-card-tag pm-tracking-ip-card-tag--qa">QA Rejected</span>}
+            {issue.move_type === 'dev_stalled' && <span className="pm-tracking-ip-card-tag pm-tracking-ip-card-tag--stall">Dev Stalled</span>}
+            {issue.overdue_level === 'deadline' && <span className="pm-tracking-ip-card-tag pm-tracking-ip-card-tag--overdue">Overdue</span>}
+            {!issue.bounce_count && !issue.move_type && issue.overdue_level !== 'deadline' && (
+              <span className="pm-tracking-ip-card-tag pm-tracking-ip-card-tag--noflag">No flags</span>
+            )}
+          </div>
+          <div className="pm-tracking-ip-card-stats">
+            <div className="pm-tracking-ip-stat-cell">
+              <span className="pm-tracking-ip-stat-label">Cycle Time</span>
+              <span className={`pm-tracking-ip-stat-value${statClass}`}>{cycleLabel ?? '—'}</span>
+            </div>
+            <div className="pm-tracking-ip-stat-cell">
+              <span className="pm-tracking-ip-stat-label">In State</span>
+              <span className={`pm-tracking-ip-stat-value${statClass}`}>{fmtHoursCompact(issue.hours_in_state)}</span>
+            </div>
+            <div className="pm-tracking-ip-stat-cell">
+              <span className="pm-tracking-ip-stat-label">Verified</span>
+              <div className="pm-tracking-verif-badges" style={{ marginTop: 2 }}>
+                {issue.verified_on_dev && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--dev" title={issue.verified_on_dev}>DEV</span>}
+                {issue.verified_on_stage && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--stage" title={issue.verified_on_stage}>STG</span>}
+                {issue.verified_on_prod && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--prod" title={issue.verified_on_prod}>PRD</span>}
+                {!issue.verified_on_dev && !issue.verified_on_stage && !issue.verified_on_prod && (
+                  <span className="pm-tracking-ip-stat-value pm-tracking-ip-stat-value--dim">—</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="pm-tracking-ip-card-footer">
+            <div className="pm-tracking-ip-card-assignee-row">
+              {avatarUrl
+                ? <img className="pm-tracking-avatar" src={avatarUrl} alt={issue.assignee} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.removeAttribute('style') }} />
+                : null}
+              <div className="pm-tracking-avatar pm-tracking-avatar--initials" style={avatarUrl ? { display: 'none' } : undefined}>{getInitialsFromName(issue.assignee)}</div>
+              <span className="pm-tracking-ip-card-assignee">{issue.assignee || 'Unassigned'}</span>
+            </div>
+          </div>
+          {isExpanded && (
+            <div className="pm-tracking-ip-card-expand">
+              <IssueTransitionInline
+                issueId={issue.idReadable || issue.id}
+                columnHierarchy={columnHierarchy}
+                onViewDetails={(logs) => setDetailIssue({ issue, logs })}
+              />
+            </div>
+          )}
+        </div>
+      </React.Fragment>
+    )
+  }
+
+  // ── BLOCKED row renderer ─────────────────────────────────────────────────
+  const renderBlockedRow = (issue: SprintBoardIssue) => {
+    const priColors = priorityColorMap[issue.priority?.toLowerCase()] || null
+    const avatarUrl = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
+    const timeClass = issue.overdue_level === 'deadline' ? ' pm-tracking-blocked-time--crit'
+      : (issue.overdue_level === 'sprint' || issue.is_delayed) ? ' pm-tracking-blocked-time--warn' : ''
+    const rowClass = issue.overdue_level === 'deadline' ? ' pm-tracking-blocked-row--crit'
+      : (issue.overdue_level === 'sprint' || issue.is_delayed) ? ' pm-tracking-blocked-row--warn' : ''
+    return (
+      <div key={issue.idReadable} className={`pm-tracking-blocked-row${rowClass}`}
+        onClick={() => setExpandedIssue(expandedIssue === issue.idReadable ? null : issue.idReadable)}>
+        <span className="pm-tracking-blocked-id">{issue.idReadable}</span>
+        <span className="pm-tracking-blocked-pri">
+          {issue.priority && (
+            <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
+              {issue.priority}
+            </span>
+          )}
+        </span>
+        <div className="pm-tracking-blocked-title">
+          <span className="pm-tracking-blocked-title-text" title={issue.summary}>{issue.summary}</span>
+          {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
+          {issue.is_hotfix && <span className="pm-tracking-hotfix-chip"><Zap size={8} /></span>}
+        </div>
+        <span className={`pm-tracking-blocked-time${timeClass}`}>{fmtHoursCompact(issue.hours_in_state)}</span>
+        <div className="pm-tracking-blocked-assignee">
+          {avatarUrl
+            ? <img className="pm-tracking-avatar" src={avatarUrl} alt={issue.assignee} style={{ width: 20, height: 20 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            : <div className="pm-tracking-avatar pm-tracking-avatar--initials" style={{ width: 20, height: 20, fontSize: 8 }}>{getInitialsFromName(issue.assignee)}</div>
+          }
+          <span className="pm-tracking-blocked-assignee-name">{issue.assignee}</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="pm-tab-content pm-tracking-tab">
-      {/* ── Header ── */}
-      <div className="pm-tracking-header">
-        <h3 className="pm-section-title"><Activity size={16} /> Tracking</h3>
-        <div className="pm-tracking-controls">
-          {/* View toggle */}
-          <div className="pm-tracking-view-toggle">
-            <button
-              className={`pm-tracking-view-toggle-btn${viewMode === 'column' ? ' active' : ''}`}
-              onClick={() => setViewMode('column')}
-            >
-              <Layers size={12} /> By Column
-            </button>
-            <button
-              className={`pm-tracking-view-toggle-btn${viewMode === 'assignee' ? ' active' : ''}`}
-              onClick={() => setViewMode('assignee')}
-            >
-              <Users size={12} /> By Assignee
-            </button>
-          </div>
-          {/* Sort dropdown */}
+      {/* ── Toolbar row ── */}
+      <div className="pm-tracking-toolbar">
+        <div className="pm-tracking-toolbar-left">
+          <Activity size={15} className="pm-tracking-toolbar-icon" />
+          <span className="pm-tracking-toolbar-title">Sprint Tracking</span>
+        </div>
+        <div className="pm-tracking-toolbar-right">
+          {/* View mode dropdown */}
+          {(() => {
+            const VIEW_MODES = [
+              { id: 'column',      label: 'By Column',   icon: <Layers size={11} /> },
+              { id: 'assignee',    label: 'By Assignee', icon: <Users size={11} /> },
+              { id: 'swimlane',    label: 'Swimlane',    icon: <Layers size={11} /> },
+              { id: 'sidebar',     label: 'Sidebar',     icon: <Users size={11} /> },
+              { id: 'heatmap',     label: 'Heat Map',    icon: <BarChart2 size={11} /> },
+              { id: 'delay-bars',  label: 'Delay Bars',  icon: <Timer size={11} /> },
+              { id: 'alert-first', label: 'Alert First', icon: <AlertTriangle size={11} /> },
+              { id: 'split-pane',  label: 'Split Pane',  icon: <Gauge size={11} /> },
+              { id: 'focus',       label: 'Focus Mode',  icon: <ScanSearch size={11} /> },
+            ] as const
+            const current = VIEW_MODES.find(m => m.id === viewMode) || VIEW_MODES[0]
+            return (
+              <div className="pm-custom-dropdown pm-tracking-viewmode-dropdown" ref={viewModeRef}>
+                <button className={`pm-custom-dropdown-trigger${viewModeOpen ? ' open' : ''}`} onClick={() => setViewModeOpen(o => !o)}>
+                  {current.icon}<span>{current.label}</span>
+                  <ChevronDown size={11} className={`dropdown-chevron${viewModeOpen ? ' open' : ''}`} />
+                </button>
+                {viewModeOpen && (
+                  <div className="pm-custom-dropdown-menu">
+                    {VIEW_MODES.map(m => (
+                      <button key={m.id} className={`pm-dropdown-item${viewMode === m.id ? ' active' : ''}`}
+                        onClick={() => { setViewMode(m.id as typeof viewMode); setViewModeOpen(false) }}>
+                        {m.icon} {m.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+          {/* Sort */}
           <div className="pm-custom-dropdown" ref={sortRef}>
-            <button className="pm-custom-dropdown-trigger" onClick={() => setSortOpen(o => !o)} title="Sort issues">
+            <button className="pm-custom-dropdown-trigger" onClick={() => setSortOpen(o => !o)}>
               <ArrowDownUp size={11} />
-              <span>{sortField === 'default' ? 'Sort' : { priority: 'Priority', time_in_state: 'Time in State', cycle_time: 'Cycle Time', bounces: 'Bounces', assignee: 'Assignee' }[sortField]}</span>
+              <span>{sortField === 'default' ? 'Sort' : { priority: 'Priority', time_in_state: 'In State', cycle_time: 'Cycle', bounces: 'Bounces', assignee: 'Assignee' }[sortField]}</span>
               <ChevronDown size={11} className={`dropdown-chevron ${sortOpen ? 'open' : ''}`} />
             </button>
             {sortOpen && (
@@ -2001,9 +2203,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               </div>
             )}
           </div>
+          {/* Assignee filter */}
           {allAssignees.length > 0 && (
             <div className="pm-custom-dropdown" ref={assigneeRef}>
               <button className="pm-custom-dropdown-trigger" onClick={() => setAssigneeOpen(o => !o)}>
+                <Users size={11} />
                 <span>{filterAssignee || 'All Assignees'}</span>
                 <ChevronDown size={11} className={`dropdown-chevron ${assigneeOpen ? 'open' : ''}`} />
               </button>
@@ -2019,37 +2223,48 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               )}
             </div>
           )}
-          <button className="btn-secondary btn-sm" onClick={toggleAllCollapse} title={allCollapsed ? 'Expand all' : 'Collapse all'}>
+          <button className="pm-tracking-toolbar-btn" onClick={toggleAllCollapse} title={allCollapsed ? 'Expand all' : 'Collapse all'}>
             {allCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
           </button>
-          <button className="btn-secondary btn-sm" onClick={fetchBoardStatus} disabled={loading} title="Refresh">
+          <button className="pm-tracking-toolbar-btn" onClick={fetchBoardStatus} disabled={loading} title="Refresh">
             {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
           </button>
         </div>
       </div>
 
-      {/* ── KPI bar ── */}
+      {/* ── KPI cards ── */}
       {summary && (
-        <div className="pm-tracking-kpi-bar">
-          <div className="pm-tracking-kpi-card">
-            <span className="pm-tracking-kpi-label">Completion</span>
-            <span className="pm-tracking-kpi-value">{summary.done_issues} / {summary.total_issues}</span>
-            <span className="pm-tracking-kpi-sub">{Math.round(summary.completion_pct)}%</span>
+        <div className="pm-tracking-kpi-row">
+          {/* Completion */}
+          <div className="pm-tracking-kpi pm-tracking-kpi--green">
+            <div className="pm-tracking-kpi-lbl">Completion</div>
+            <div className="pm-tracking-kpi-val">
+              {Math.round(summary.completion_pct)}<span className="pm-tracking-kpi-unit">%</span>
+            </div>
+            <div className="pm-tracking-kpi-prog">
+              <div className="pm-tracking-kpi-prog-f" style={{ width: `${Math.round(summary.completion_pct)}%` }} />
+            </div>
+            <div className="pm-tracking-kpi-note">{summary.done_issues} / {summary.total_issues} tickets</div>
           </div>
-          <div className="pm-tracking-kpi-card">
-            <span className="pm-tracking-kpi-label">Blocked</span>
-            <span className="pm-tracking-kpi-value">{summary.blocked_count}</span>
-            <span className="pm-tracking-kpi-sub">{summary.in_progress_count} in progress</span>
+          {/* Blocked */}
+          <div className="pm-tracking-kpi pm-tracking-kpi--red">
+            <div className="pm-tracking-kpi-lbl">Blocked</div>
+            <div className="pm-tracking-kpi-val">{summary.blocked_count}</div>
+            <div className="pm-tracking-kpi-note">{summary.in_progress_count} in progress · {summary.overdue_count} overdue</div>
           </div>
-          <div className="pm-tracking-kpi-card">
-            <span className="pm-tracking-kpi-label">Bounced</span>
-            <span className="pm-tracking-kpi-value">{summary.bounced_count}</span>
-            <span className="pm-tracking-kpi-sub">{summary.hotfix_count} hotfixes</span>
+          {/* Bounced */}
+          <div className="pm-tracking-kpi pm-tracking-kpi--amber">
+            <div className="pm-tracking-kpi-lbl">Bounced</div>
+            <div className="pm-tracking-kpi-val">{summary.bounced_count}</div>
+            <div className="pm-tracking-kpi-note">{summary.hotfix_count} hotfix{summary.hotfix_count !== 1 ? 'es' : ''} · backward moves</div>
           </div>
-          <div className={`pm-tracking-kpi-card${sprintDeadlineLabel === 'OVERDUE' ? ' pm-tracking-kpi-card--warning' : ''}`}>
-            <span className="pm-tracking-kpi-label">Sprint Ends</span>
-            <span className="pm-tracking-kpi-value">{sprintDeadlineLabel ?? '—'}</span>
-            <span className="pm-tracking-kpi-sub">{summary.overdue_count} overdue</span>
+          {/* Sprint Ends */}
+          <div className={`pm-tracking-kpi${sprintDeadlineLabel === 'OVERDUE' ? ' pm-tracking-kpi--red' : ' pm-tracking-kpi--amber'}`}>
+            <div className="pm-tracking-kpi-lbl">Sprint Ends</div>
+            <div className={`pm-tracking-kpi-val${sprintDeadlineLabel === 'OVERDUE' ? ' pm-tracking-kpi-val--danger' : ''}`}>
+              {sprintDeadlineLabel ?? '—'}
+            </div>
+            <div className="pm-tracking-kpi-note">{summary.overdue_count} ticket{summary.overdue_count !== 1 ? 's' : ''} overdue</div>
           </div>
         </div>
       )}
@@ -2058,66 +2273,682 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
       {statusMsg && <div className="pm-report-status">{statusMsg}</div>}
 
       {!sprintId && (
-        <div className="pm-empty-state">
-          <Activity size={36} />
-          <p>Select a sprint to view board status</p>
-        </div>
+        <div className="pm-empty-state"><Activity size={36} /><p>Select a sprint to view board status</p></div>
       )}
 
       {sprintId && loading && trackingSkeleton}
 
       {sprintId && !loading && filteredColumns.length === 0 && !error && (
-        <div className="pm-empty-state">
-          <Activity size={36} />
-          <p>No issues found for this sprint.</p>
-        </div>
+        <div className="pm-empty-state"><Activity size={36} /><p>No issues found for this sprint.</p></div>
       )}
 
       {/* ── Column view ── */}
       {!loading && viewMode === 'column' && (
         <div className="pm-tracking-board">
           {filteredColumns.map(col => {
+            const colType = getColumnType(col)
             const isCollapsed = collapsedCols.has(col.name)
-            const hotfixCount = col.issues.filter(i => i.is_hotfix).length
+            const delayedCount = col.issues.filter(i => i.is_delayed).length
+            const bouncedCount = col.issues.filter(i => i.bounce_count > 0).length
+            const dotColor = colType === 'inprogress'
+              ? 'var(--accent-primary, #6366f1)'
+              : colType === 'blocked' ? '#ef4444'
+              : colType === 'todo' ? '#4b5563' : '#3b82f6'
             return (
-              <div key={col.name} className="pm-tracking-column-section">
-                <div className="pm-tracking-col-header pm-tracking-col-header--clickable" onClick={() => toggleColCollapse(col.name)}>
-                  <ChevronDown size={13} className={`dropdown-chevron pm-tracking-col-chevron${isCollapsed ? '' : ' open'}`} />
-                  <span className="pm-tracking-col-name">{col.name}</span>
-                  <span className="pm-tracking-col-count">{col.issues.length}</span>
-                  {col.issues.filter(i => i.is_delayed).length > 0 && (
-                    <span className="pm-tracking-col-delayed">
-                      <AlertTriangle size={11} /> {col.issues.filter(i => i.is_delayed).length} delayed
-                    </span>
-                  )}
-                  {col.issues.filter(i => i.bounce_count > 0).length > 0 && (
-                    <span className="pm-tracking-col-bounced">
-                      ↩ {col.issues.filter(i => i.bounce_count > 0).length} bounced
-                    </span>
-                  )}
-                  {hotfixCount > 0 && (
-                    <span className="pm-tracking-col-hotfix"><Zap size={10} /> {hotfixCount} HF</span>
-                  )}
+              <div key={col.name} className="pm-tracking-sec">
+                <div className="pm-tracking-sec-hdr" onClick={() => toggleColCollapse(col.name)}>
+                  <div className="pm-tracking-sec-title">
+                    <span className="pm-tracking-sec-dot" style={{ background: dotColor, boxShadow: colType === 'inprogress' ? `0 0 6px ${dotColor}` : colType === 'blocked' ? '0 0 6px #ef4444' : 'none' }} />
+                    {col.name.toUpperCase()}
+                    <span className="pm-tracking-sec-count">{col.issues.length}</span>
+                  </div>
+                  <div className="pm-tracking-sec-meta">
+                    {delayedCount > 0 && (
+                      <span className="pm-tracking-sec-warn"><AlertTriangle size={11} /> {delayedCount} overdue</span>
+                    )}
+                    {bouncedCount > 0 && (
+                      <span className="pm-tracking-sec-bounce">↩ {bouncedCount} bounced</span>
+                    )}
+                    <ChevronDown size={13} className={`dropdown-chevron${isCollapsed ? '' : ' open'}`} />
+                  </div>
                 </div>
                 {!isCollapsed && (
-                  <>
-                    <div className="pm-tracking-issue-row pm-tracking-col-header-row">
-                      <span className="pm-tracking-issue-id pm-tracking-col-heading">Ticket</span>
-                      <span className="pm-tracking-col-heading">Pri</span>
-                      <span className="pm-tracking-issue-summary pm-tracking-col-heading">Title</span>
-                      <span className="pm-tracking-cycle-time pm-tracking-col-heading" title="Cycle time (calendar) · (dev time)">Cycle</span>
-                      <span className="pm-tracking-time pm-tracking-col-heading">In State</span>
-                      <span className="pm-tracking-verif-badges pm-tracking-col-heading">Verified</span>
-                      <span className="pm-tracking-assignee-cell pm-tracking-col-heading">Assignee</span>
-                    </div>
-                    {col.issues.map(issue => renderIssueRow(issue))}
-                  </>
+                  <div className="pm-tracking-sec-body">
+                    {colType === 'inprogress' && (
+                      <div className="pm-tracking-ip-grid">
+                        {col.issues.map(issue => renderIssueCard(issue))}
+                      </div>
+                    )}
+                    {colType === 'blocked' && (
+                      <div className="pm-tracking-blocked-strip">
+                        {col.issues.map(issue => renderBlockedRow(issue))}
+                      </div>
+                    )}
+                    {(colType === 'compact' || colType === 'todo') && (
+                      <>
+                        <div className="pm-tracking-issue-row pm-tracking-col-header-row">
+                          <span className="pm-tracking-issue-id pm-tracking-col-heading">Ticket</span>
+                          <span className="pm-tracking-col-heading">Pri</span>
+                          <span className="pm-tracking-issue-summary pm-tracking-col-heading">Title</span>
+                          <span className="pm-tracking-cycle-time pm-tracking-col-heading">Cycle</span>
+                          <span className="pm-tracking-time pm-tracking-col-heading">In State</span>
+                          <span className="pm-tracking-verif-badges pm-tracking-col-heading">Verified</span>
+                          <span className="pm-tracking-assignee-cell pm-tracking-col-heading">Assignee</span>
+                        </div>
+                        {col.issues.map(issue => renderIssueRow(issue))}
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             )
           })}
         </div>
       )}
+
+      {/* ── Swimlane view (Design 02) ── */}
+      {!loading && viewMode === 'swimlane' && (
+        <div className="pm-tracking-swimlane-board">
+          {byPersonList.map(person => {
+            const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
+            const total = person.issues.length
+            const activeCount = person.issues.filter(i => { const n = i.current_state?.toLowerCase() || ''; return n.includes('progress') }).length
+            const blockedCount = person.issues.filter(i => i.current_state?.toLowerCase().includes('block')).length
+            const otherCount = total - activeCount - blockedCount
+            const getChipClass = (i: SprintBoardIssue) => {
+              if (i.overdue_level === 'deadline') return 'pm-tracking-swimlane-chip--overdue'
+              if (i.overdue_level === 'sprint' || i.is_delayed) return 'pm-tracking-swimlane-chip--atrisk'
+              if (i.current_state?.toLowerCase().includes('block')) return 'pm-tracking-swimlane-chip--blocked'
+              if (i.current_state?.toLowerCase().includes('dev') || i.verified_on_dev) return 'pm-tracking-swimlane-chip--dev'
+              return 'pm-tracking-swimlane-chip--normal'
+            }
+            return (
+              <div key={person.name} className="pm-tracking-swimlane-row">
+                <div className="pm-tracking-swimlane-person">
+                  <div className="pm-tracking-swimlane-person-header">
+                    {avatarSrc
+                      ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={person.name} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                      : <div className="pm-tracking-swimlane-avatar">{getInitialsFromName(person.name)}</div>
+                    }
+                    <span className="pm-tracking-swimlane-name">{person.name}</span>
+                  </div>
+                  <span className="pm-tracking-swimlane-count">{total} ticket{total !== 1 ? 's' : ''}</span>
+                </div>
+                <div className="pm-tracking-swimlane-chips">
+                  {person.issues.map(i => (
+                    <span
+                      key={i.idReadable}
+                      className={`pm-tracking-swimlane-chip ${getChipClass(i)}`}
+                      title={i.summary}
+                      onClick={() => setExpandedIssue(expandedIssue === i.idReadable ? null : i.idReadable)}
+                    >
+                      {i.idReadable}
+                    </span>
+                  ))}
+                </div>
+                <div className="pm-tracking-swimlane-loadbar-wrap">
+                  <div className="pm-tracking-swimlane-loadbar">
+                    {total > 0 && <div className="pm-tracking-swimlane-seg pm-tracking-swimlane-seg--active" style={{ width: `${(activeCount / total) * 100}%` }} />}
+                    {total > 0 && <div className="pm-tracking-swimlane-seg pm-tracking-swimlane-seg--blocked" style={{ width: `${(blockedCount / total) * 100}%` }} />}
+                    {total > 0 && <div className="pm-tracking-swimlane-seg pm-tracking-swimlane-seg--other" style={{ width: `${(otherCount / total) * 100}%` }} />}
+                  </div>
+                  <div className="pm-tracking-swimlane-loadbar-labels">
+                    <span>{activeCount} active</span>
+                    {blockedCount > 0 && <span>{blockedCount} blocked</span>}
+                    <span>{total} total</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Sidebar view (Design 03) ── */}
+      {!loading && viewMode === 'sidebar' && (() => {
+        const activePerson = sidebarPerson || byPersonList[0]?.name || ''
+        const selectedPersonData = byPersonList.find(p => p.name === activePerson)
+        return (
+          <div className="pm-tracking-sidebar-layout">
+            <div className="pm-tracking-sidebar-panel">
+              {byPersonList.map(person => {
+                const total = person.issues.length
+                const activeCount = person.issues.filter(i => i.current_state?.toLowerCase().includes('progress')).length
+                const blockedCount = person.issues.filter(i => i.current_state?.toLowerCase().includes('block')).length
+                const devCount = person.issues.filter(i => i.verified_on_dev).length
+                const idleCount = total - activeCount - blockedCount - devCount
+                const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
+                return (
+                  <div
+                    key={person.name}
+                    className={`pm-tracking-sidebar-person${activePerson === person.name ? ' active' : ''}`}
+                    onClick={() => setSidebarPerson(person.name)}
+                  >
+                    {avatarSrc
+                      ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={person.name} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                      : <div className="pm-tracking-swimlane-avatar">{getInitialsFromName(person.name)}</div>
+                    }
+                    <div className="pm-tracking-sidebar-person-info">
+                      <div className="pm-tracking-sidebar-person-name">{person.name}</div>
+                      <div className="pm-tracking-sidebar-person-count">{total} ticket{total !== 1 ? 's' : ''}</div>
+                      <div className="pm-tracking-sidebar-loadbar">
+                        {total > 0 && <div className="pm-tracking-sidebar-seg pm-tracking-sidebar-seg--active" style={{ width: `${(activeCount / total) * 100}%` }} />}
+                        {total > 0 && <div className="pm-tracking-sidebar-seg pm-tracking-sidebar-seg--blocked" style={{ width: `${(blockedCount / total) * 100}%` }} />}
+                        {total > 0 && <div className="pm-tracking-sidebar-seg pm-tracking-sidebar-seg--dev" style={{ width: `${(devCount / total) * 100}%` }} />}
+                        {total > 0 && <div className="pm-tracking-sidebar-seg pm-tracking-sidebar-seg--idle" style={{ width: `${(idleCount / total) * 100}%` }} />}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="pm-tracking-sidebar-main">
+              {selectedPersonData ? (
+                <>
+                  <div className="pm-tracking-issue-row pm-tracking-col-header-row">
+                    <span className="pm-tracking-issue-id pm-tracking-col-heading">Ticket</span>
+                    <span className="pm-tracking-col-heading">Pri</span>
+                    <span className="pm-tracking-issue-summary pm-tracking-col-heading">Title</span>
+                    <span className="pm-tracking-cycle-time pm-tracking-col-heading">Cycle</span>
+                    <span className="pm-tracking-time pm-tracking-col-heading">In State</span>
+                    <span className="pm-tracking-verif-badges pm-tracking-col-heading">Verified</span>
+                    <span className="pm-tracking-assignee-cell pm-tracking-col-heading">Column</span>
+                  </div>
+                  {selectedPersonData.issues.map(issue => renderIssueRow(issue))}
+                </>
+              ) : (
+                <div className="pm-tracking-sidebar-empty">Select a person to view their tickets</div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Heatmap view (Design 04) ── */}
+      {!loading && viewMode === 'heatmap' && (() => {
+        const colNames = filteredColumns.map(c => c.name)
+        return (
+          <div className="pm-tracking-heatmap-wrap">
+            <div className="pm-tracking-heatmap-grid-wrap">
+              <div
+                className="pm-tracking-heatmap-grid"
+                style={{ gridTemplateColumns: `180px repeat(${colNames.length}, minmax(52px, 1fr))` }}
+              >
+                {/* Header row */}
+                <div className="pm-tracking-heatmap-header-cell">Person</div>
+                {colNames.map(n => (
+                  <div key={n} className="pm-tracking-heatmap-header-cell" title={n}>
+                    {n.length > 10 ? n.slice(0, 9) + '…' : n}
+                  </div>
+                ))}
+                {/* Data rows */}
+                {byPersonList.map(person => {
+                  const hasDeadline = person.issues.some(i => i.overdue_level === 'deadline')
+                  const hasSprint = person.issues.some(i => i.overdue_level === 'sprint' || i.is_delayed)
+                  const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
+                  return (
+                    <React.Fragment key={person.name}>
+                      <div className="pm-tracking-heatmap-row-label">
+                        {avatarSrc
+                          ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={person.name} style={{ width: 20, height: 20 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          : <div className="pm-tracking-swimlane-avatar" style={{ width: 20, height: 20, fontSize: 8 }}>{getInitialsFromName(person.name)}</div>
+                        }
+                        {person.name}
+                      </div>
+                      {filteredColumns.map(col => {
+                        const count = col.issues.filter(i => (i.assignee || 'Unassigned') === person.name).length
+                        const issues = col.issues.filter(i => (i.assignee || 'Unassigned') === person.name)
+                        const hasOver = issues.some(i => i.overdue_level === 'deadline')
+                        const hasRisk = issues.some(i => i.overdue_level === 'sprint' || i.is_delayed)
+                        const cellClass = count === 0 ? 'pm-tracking-heatmap-cell--empty'
+                          : hasOver ? 'pm-tracking-heatmap-cell--overdue'
+                          : hasRisk ? 'pm-tracking-heatmap-cell--atrisk'
+                          : 'pm-tracking-heatmap-cell--ok'
+                        return (
+                          <div key={col.name} className={`pm-tracking-heatmap-cell ${cellClass}`}>
+                            {count > 0 ? count : '·'}
+                          </div>
+                        )
+                      })}
+                    </React.Fragment>
+                  )
+                })}
+              </div>
+            </div>
+            {/* Full ticket list below heatmap */}
+            <div className="pm-tracking-board">
+              {filteredColumns.map(col => (
+                <div key={col.name} className="pm-tracking-column-section">
+                  <div className="pm-tracking-col-header">
+                    <span className="pm-tracking-col-name">{col.name}</span>
+                    <span className="pm-tracking-col-count">{col.issues.length}</span>
+                  </div>
+                  {col.issues.map(issue => renderIssueRow(issue))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Delay Bars view (Design 05) ── */}
+      {!loading && viewMode === 'delay-bars' && (() => {
+        const SCALE_DAYS = 10
+        return (
+          <div className="pm-tracking-delay-board">
+            <div className="pm-tracking-delay-legend">
+              <span className="pm-tracking-delay-legend-item">
+                <span className="pm-tracking-delay-legend-dot pm-tracking-delay-legend-dot--work" /> Working
+              </span>
+              <span className="pm-tracking-delay-legend-item">
+                <span className="pm-tracking-delay-legend-dot pm-tracking-delay-legend-dot--bounce" /> Bounce
+              </span>
+              <span className="pm-tracking-delay-legend-item">
+                <span className="pm-tracking-delay-legend-dot pm-tracking-delay-legend-dot--review" /> Review/Idle
+              </span>
+              <span className="pm-tracking-delay-legend-item">
+                <span className="pm-tracking-delay-legend-sla" /> SLA limit
+              </span>
+            </div>
+            <div className="pm-tracking-delay-headers">
+              <span />
+              <span>Ticket</span>
+              <span>Pri</span>
+              <span>Title</span>
+              <span>Time Bar (10d scale)</span>
+              <span>Delay</span>
+            </div>
+            {allIssuesByDelay.map(issue => {
+              const slaHours = slaMap[issue.priority?.toLowerCase()] || 0
+              const workDays = (issue.total_active_hours || 0) / 24
+              const bounceDays = (issue.bounce_count || 0) * 0.4
+              const reviewDays = Math.max(0, ((issue.cycle_time_hours || 0) - (issue.total_active_hours || 0)) / 24 - bounceDays)
+              const totalDays = workDays + bounceDays + reviewDays
+              const slaDays = slaHours / 24
+              const overSla = slaDays > 0 && totalDays > slaDays
+              const overDays = totalDays - slaDays
+              const workPct = Math.min((workDays / SCALE_DAYS) * 100, 100)
+              const bouncePct = Math.min((bounceDays / SCALE_DAYS) * 100, 100 - workPct)
+              const reviewPct = Math.min((reviewDays / SCALE_DAYS) * 100, 100 - workPct - bouncePct)
+              const slaPct = slaDays > 0 ? Math.min((slaDays / SCALE_DAYS) * 100, 100) : null
+              const overPct = slaPct ? Math.max(0, 100 - slaPct) : 0
+              const rowClass = issue.overdue_level === 'deadline' ? ' pm-tracking-delay-row--over'
+                : (issue.overdue_level === 'sprint' || issue.is_delayed) ? ' pm-tracking-delay-row--risk' : ''
+              const isExpanded = expandedIssue === issue.idReadable
+              const priColors = priorityColorMap[issue.priority?.toLowerCase()] || null
+              return (
+                <React.Fragment key={issue.idReadable}>
+                  <div
+                    className={`pm-tracking-delay-row${rowClass}`}
+                    onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
+                  >
+                    <span>{isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
+                    <span className="pm-tracking-issue-id">{issue.idReadable}</span>
+                    <span>
+                      {issue.priority && (
+                        <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
+                          {issue.priority}
+                        </span>
+                      )}
+                    </span>
+                    <div className="pm-tracking-delay-title-cell">
+                      <span className="pm-tracking-delay-title-text" title={issue.summary}>{issue.summary}</span>
+                      {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
+                      {issue.is_hotfix && <span className="pm-tracking-hotfix-chip">HF</span>}
+                    </div>
+                    <div className="pm-tracking-timebar-wrap">
+                      <div className="pm-tracking-timebar-track">
+                        {workPct > 0 && <div className="pm-tracking-timebar-seg pm-tracking-timebar-seg--work" style={{ left: 0, width: `${workPct}%` }} />}
+                        {bouncePct > 0 && <div className="pm-tracking-timebar-seg pm-tracking-timebar-seg--bounce" style={{ left: `${workPct}%`, width: `${bouncePct}%` }} />}
+                        {reviewPct > 0 && <div className="pm-tracking-timebar-seg pm-tracking-timebar-seg--review" style={{ left: `${workPct + bouncePct}%`, width: `${reviewPct}%` }} />}
+                        {slaPct && <div className="pm-tracking-timebar-sla" style={{ left: `${slaPct}%` }} />}
+                        {overSla && overPct > 0 && <div className="pm-tracking-timebar-overzone" style={{ left: `${slaPct}%`, width: `${overPct}%` }} />}
+                      </div>
+                      <div className="pm-tracking-timebar-scale">
+                        <span>0d</span>
+                        {slaPct && <span style={{ position: 'absolute', left: `${slaPct}%`, transform: 'translateX(-50%)', whiteSpace: 'nowrap' }}>SLA</span>}
+                        <span>10d</span>
+                      </div>
+                    </div>
+                    <div className="pm-tracking-delay-badge">
+                      {slaDays > 0 ? (
+                        <>
+                          <span className={`pm-tracking-delay-badge-num ${overSla ? 'pm-tracking-delay-badge-num--over' : 'pm-tracking-delay-badge-num--ok'}`}>
+                            {overSla ? `+${overDays.toFixed(1)}d` : `${(slaDays - totalDays).toFixed(1)}d`}
+                          </span>
+                          <span className="pm-tracking-delay-badge-label">{overSla ? 'over SLA' : 'left'}</span>
+                        </>
+                      ) : (
+                        <span className="pm-tracking-delay-badge-label">{totalDays.toFixed(1)}d elapsed</span>
+                      )}
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="pm-tracking-delay-row-expand">
+                      <IssueTransitionInline
+                        issueId={issue.idReadable}
+                        columnHierarchy={columnHierarchy}
+                        onViewDetails={(logs) => setDetailIssue({ issue, logs })}
+                      />
+                    </div>
+                  )}
+                </React.Fragment>
+              )
+            })}
+          </div>
+        )
+      })()}
+
+      {/* ── Alert-first view (Design 07) ── */}
+      {!loading && viewMode === 'alert-first' && (
+        <div className="pm-tracking-alert-layout">
+          <div className="pm-tracking-alert-banner">
+            <div className="pm-tracking-alert-banner-header">
+              <span className="pm-tracking-alert-count">{allBlockedIssues.length}</span>
+              <span className="pm-tracking-alert-count-label">ticket{allBlockedIssues.length !== 1 ? 's' : ''} blocked</span>
+            </div>
+            {allBlockedIssues.length > 0 && (
+              <div className="pm-tracking-alert-grid">
+                {allBlockedIssues.map(issue => {
+                  const rowUrgency = issue.overdue_level === 'deadline' ? '--critical' : '--atrisk'
+                  const avatarSrc = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
+                  return (
+                    <div key={issue.idReadable} className={`pm-tracking-alert-blocked-row pm-tracking-alert-blocked-row${rowUrgency}`}>
+                      {avatarSrc
+                        ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={issue.assignee} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                        : <div className="pm-tracking-swimlane-avatar">{getInitialsFromName(issue.assignee)}</div>
+                      }
+                      <div className="pm-tracking-alert-blocked-info">
+                        <div className="pm-tracking-alert-blocked-id">{issue.idReadable}</div>
+                        <div className="pm-tracking-alert-blocked-title" title={issue.summary}>{issue.summary}</div>
+                      </div>
+                      <div className="pm-tracking-alert-blocked-time">{fmtHoursCompact(issue.hours_in_state)}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          <div className="pm-tracking-alert-inprogress">
+            <div className="pm-tracking-alert-section-header">
+              <Activity size={13} /> In Progress <span className="pm-tracking-col-count">{allInProgressIssues.length}</span>
+            </div>
+            {allInProgressIssues.length > 0 ? (
+              <div className="pm-tracking-alert-cards">
+                {allInProgressIssues.map(issue => {
+                  const urgency = issue.overdue_level === 'deadline' ? '--overdue'
+                    : (issue.overdue_level === 'sprint' || issue.is_delayed) ? '--atrisk' : '--normal'
+                  const priColors = priorityColorMap[issue.priority?.toLowerCase()] || null
+                  const isExpanded = expandedIssue === issue.idReadable
+                  const avatarSrc = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
+                  return (
+                    <div
+                      key={issue.idReadable}
+                      className={`pm-tracking-alert-card pm-tracking-alert-card${urgency}`}
+                      onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
+                    >
+                      <div className="pm-tracking-alert-card-header">
+                        <span className="pm-tracking-alert-card-id">{issue.idReadable}</span>
+                        {issue.priority && (
+                          <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
+                            {issue.priority}
+                          </span>
+                        )}
+                        {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
+                      </div>
+                      <div className="pm-tracking-alert-card-title">{issue.summary}</div>
+                      <div className="pm-tracking-alert-card-footer">
+                        <div className="pm-tracking-alert-card-stats">
+                          {issue.cycle_time_hours > 0 && (
+                            <span className="pm-tracking-alert-card-stat">Cycle <span>{fmtHoursCompact(issue.cycle_time_hours)}</span></span>
+                          )}
+                          <span className="pm-tracking-alert-card-stat">In state <span>{fmtHoursCompact(issue.hours_in_state)}</span></span>
+                        </div>
+                        <div className="pm-tracking-focus-assignee">
+                          {avatarSrc
+                            ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={issue.assignee} style={{ width: 18, height: 18 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                            : null
+                          }
+                          <span>{issue.assignee}</span>
+                        </div>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ marginTop: 10 }}>
+                          <IssueTransitionInline
+                            issueId={issue.idReadable}
+                            columnHierarchy={columnHierarchy}
+                            onViewDetails={(logs) => setDetailIssue({ issue, logs })}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="pm-tracking-sidebar-empty">No in-progress tickets</div>
+            )}
+            {/* Remaining columns collapsed */}
+            {filteredColumns
+              .filter(c => !c.name?.toLowerCase().includes('block') && !c.name?.toLowerCase().includes('progress'))
+              .map(col => (
+                <div key={col.name} className="pm-tracking-column-section" style={{ marginTop: 10 }}>
+                  <div
+                    className="pm-tracking-col-header pm-tracking-col-header--clickable"
+                    onClick={() => toggleColCollapse(col.name)}
+                  >
+                    <ChevronDown size={13} className={`dropdown-chevron pm-tracking-col-chevron${collapsedCols.has(col.name) ? '' : ' open'}`} />
+                    <span className="pm-tracking-col-name">{col.name}</span>
+                    <span className="pm-tracking-col-count">{col.issues.length}</span>
+                  </div>
+                  {!collapsedCols.has(col.name) && col.issues.map(issue => renderIssueRow(issue))}
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      )}
+
+      {/* ── Split Pane view (Design 09) ── */}
+      {!loading && viewMode === 'split-pane' && (() => {
+        const totalIssues = filteredColumns.flatMap(c => c.issues).length
+        const doneIssues = summary?.done_issues || 0
+        const pct = totalIssues > 0 ? Math.round((doneIssues / (summary?.total_issues || totalIssues)) * 100) : 0
+        const r = 38, stroke = 12, circ = 2 * Math.PI * r
+        const arc = circ - (pct / 100) * circ
+        const sectionOrder = filteredColumns
+        return (
+          <div className="pm-tracking-split-layout">
+            <div className="pm-tracking-split-left">
+              <div>
+                <div className="pm-tracking-split-sprint-name">{summary ? `${summary.done_issues} / ${summary.total_issues} done` : 'Sprint'}</div>
+                {sprintDeadlineLabel && <div className="pm-tracking-split-sprint-range">{sprintDeadlineLabel}</div>}
+              </div>
+              <div className="pm-tracking-split-donut-wrap">
+                <svg width="100" height="100" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={stroke} />
+                  <circle
+                    cx="50" cy="50" r={r} fill="none"
+                    stroke="#6366f1" strokeWidth={stroke}
+                    strokeDasharray={circ}
+                    strokeDashoffset={arc}
+                    strokeLinecap="round"
+                    transform="rotate(-90 50 50)"
+                  />
+                </svg>
+                <div className="pm-tracking-split-donut-center">
+                  <div className="pm-tracking-split-donut-pct">{pct}%</div>
+                  <div className="pm-tracking-split-donut-label">done</div>
+                </div>
+              </div>
+              <div className="pm-tracking-split-kpi-row">
+                {summary && (
+                  <>
+                    <div className="pm-tracking-split-kpi-line">
+                      <span className="pm-tracking-split-kpi-key">Done</span>
+                      <span className="pm-tracking-split-kpi-val">{summary.done_issues} / {summary.total_issues}</span>
+                    </div>
+                    <div className="pm-tracking-split-kpi-line">
+                      <span className="pm-tracking-split-kpi-key">Blocked</span>
+                      <span className={`pm-tracking-split-kpi-val${summary.blocked_count > 0 ? ' pm-tracking-split-kpi-val--danger' : ''}`}>{summary.blocked_count}</span>
+                    </div>
+                    <div className="pm-tracking-split-kpi-line">
+                      <span className="pm-tracking-split-kpi-key">Bounced</span>
+                      <span className={`pm-tracking-split-kpi-val${summary.bounced_count > 0 ? ' pm-tracking-split-kpi-val--warn' : ''}`}>{summary.bounced_count}</span>
+                    </div>
+                    <div className="pm-tracking-split-kpi-line">
+                      <span className="pm-tracking-split-kpi-key">Ends</span>
+                      <span className={`pm-tracking-split-kpi-val${sprintDeadlineLabel === 'OVERDUE' ? ' pm-tracking-split-kpi-val--danger' : ''}`}>{sprintDeadlineLabel ?? '—'}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+              <hr className="pm-tracking-split-divider" />
+              <div>
+                <div className="pm-tracking-split-section-title">Load per person</div>
+                {byPersonList.map(person => {
+                  const total = person.issues.length
+                  const activeCount = person.issues.filter(i => i.current_state?.toLowerCase().includes('progress')).length
+                  const blockedCount = person.issues.filter(i => i.current_state?.toLowerCase().includes('block')).length
+                  const otherCount = total - activeCount - blockedCount
+                  const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
+                  return (
+                    <div key={person.name} className="pm-tracking-split-person-row">
+                      {avatarSrc
+                        ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={person.name} style={{ width: 22, height: 22 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                        : <div className="pm-tracking-swimlane-avatar" style={{ width: 22, height: 22, fontSize: 9 }}>{getInitialsFromName(person.name)}</div>
+                      }
+                      <div className="pm-tracking-split-person-info">
+                        <div className="pm-tracking-split-person-name">{person.name}</div>
+                      </div>
+                      <div className="pm-tracking-split-bar" style={{ width: 80 }}>
+                        {total > 0 && <div className="pm-tracking-split-bar-seg pm-tracking-split-bar-seg--active" style={{ width: `${(activeCount / total) * 100}%` }} />}
+                        {total > 0 && <div className="pm-tracking-split-bar-seg pm-tracking-split-bar-seg--blocked" style={{ width: `${(blockedCount / total) * 100}%` }} />}
+                        {total > 0 && <div className="pm-tracking-split-bar-seg pm-tracking-split-bar-seg--other" style={{ width: `${(otherCount / total) * 100}%` }} />}
+                      </div>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 16, textAlign: 'right' }}>{total}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="pm-tracking-split-right">
+              {sectionOrder.map(col => (
+                <div key={col.name} className="pm-tracking-column-section">
+                  <div className="pm-tracking-col-header">
+                    <span className="pm-tracking-col-name">{col.name}</span>
+                    <span className="pm-tracking-col-count">{col.issues.length}</span>
+                  </div>
+                  {col.issues.map(issue => renderIssueRow(issue))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Focus Mode view (Design 10) ── */}
+      {!loading && viewMode === 'focus' && (() => {
+        const critical = allIssuesByDelay.filter(i => i.overdue_level === 'deadline' || i.overdue_level === 'sprint' || i.is_delayed)
+        const topIssues = allIssuesByDelay.slice(0, 3)
+        const restIssues = allIssuesByDelay.slice(3)
+        const getUrgencyClass = (i: SprintBoardIssue) =>
+          i.overdue_level === 'deadline' ? '--overdue' : (i.overdue_level === 'sprint' || i.is_delayed) ? '--atrisk' : '--normal'
+        return (
+          <div className="pm-tracking-focus-board">
+            <div className="pm-tracking-focus-header">
+              <div>
+                <div className="pm-tracking-focus-header-title">Sprint Focus — {critical.length} critical</div>
+                {sprintDeadlineLabel && <div className="pm-tracking-focus-header-meta">Sprint ends {sprintDeadlineLabel}</div>}
+              </div>
+            </div>
+            {topIssues.map(issue => {
+              const urgency = getUrgencyClass(issue)
+              const priColors = priorityColorMap[issue.priority?.toLowerCase()] || null
+              const isExpanded = expandedIssue === issue.idReadable
+              const avatarSrc = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
+              return (
+                <div key={issue.idReadable} className={`pm-tracking-focus-card pm-tracking-focus-card${urgency}`}>
+                  <div className="pm-tracking-focus-card-top">
+                    <span className="pm-tracking-focus-id">{issue.idReadable}</span>
+                    {issue.overdue_level === 'deadline' && <span className="pm-tracking-overdue-badge">Overdue</span>}
+                    {(issue.overdue_level === 'sprint' || issue.is_delayed) && issue.overdue_level !== 'deadline' && (
+                      <span className="pm-tracking-atrisk-badge">At Risk</span>
+                    )}
+                    {issue.priority && (
+                      <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
+                        {issue.priority}
+                      </span>
+                    )}
+                    {issue.is_hotfix && <span className="pm-tracking-hotfix-chip">HF</span>}
+                    {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
+                  </div>
+                  <div className="pm-tracking-focus-title">{issue.summary}</div>
+                  <div className="pm-tracking-focus-stats">
+                    {issue.cycle_time_hours > 0 && (
+                      <div className="pm-tracking-focus-stat">
+                        <span className="pm-tracking-focus-stat-label">Cycle</span>
+                        <span className="pm-tracking-focus-stat-value">{fmtHoursCompact(issue.cycle_time_hours)}</span>
+                      </div>
+                    )}
+                    <div className="pm-tracking-focus-stat">
+                      <span className="pm-tracking-focus-stat-label">In State</span>
+                      <span className="pm-tracking-focus-stat-value">{fmtHoursCompact(issue.hours_in_state)}</span>
+                    </div>
+                    {issue.bounce_count > 0 && (
+                      <div className="pm-tracking-focus-stat">
+                        <span className="pm-tracking-focus-stat-label">Bounces</span>
+                        <span className="pm-tracking-focus-stat-value">{issue.bounce_count}</span>
+                      </div>
+                    )}
+                    {(issue.verified_on_dev || issue.verified_on_stage || issue.verified_on_prod) && (
+                      <div className="pm-tracking-focus-stat">
+                        <span className="pm-tracking-focus-stat-label">Verified</span>
+                        <div className="pm-tracking-verif-badges">
+                          {issue.verified_on_dev && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--dev" title={issue.verified_on_dev}>DEV</span>}
+                          {issue.verified_on_stage && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--stage" title={issue.verified_on_stage}>STG</span>}
+                          {issue.verified_on_prod && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--prod" title={issue.verified_on_prod}>PRD</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="pm-tracking-focus-footer">
+                    <div className="pm-tracking-focus-assignee">
+                      {avatarSrc
+                        ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={issue.assignee} style={{ width: 20, height: 20 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                        : null
+                      }
+                      <span>{issue.assignee}</span>
+                    </div>
+                    <button className="pm-tracking-focus-expand-btn" onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}>
+                      {isExpanded ? 'Collapse' : 'View Timeline'}
+                    </button>
+                  </div>
+                  {isExpanded && (
+                    <div style={{ marginTop: 12 }}>
+                      <IssueTransitionInline
+                        issueId={issue.idReadable}
+                        columnHierarchy={columnHierarchy}
+                        onViewDetails={(logs) => setDetailIssue({ issue, logs })}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {!showAllFocus && restIssues.length > 0 && (
+              <button className="pm-tracking-focus-show-more" onClick={() => setShowAllFocus(true)}>
+                Show {restIssues.length} more ticket{restIssues.length !== 1 ? 's' : ''}
+              </button>
+            )}
+            {showAllFocus && restIssues.length > 0 && (
+              <div className="pm-tracking-focus-rest">
+                {restIssues.map(issue => renderIssueRow(issue))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── Assignee view ── */}
       {!loading && viewMode === 'assignee' && (

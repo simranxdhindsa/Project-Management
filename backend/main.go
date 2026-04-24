@@ -363,6 +363,7 @@ func main() {
 	reportRoutes.HandleFunc("/reconcile", reportHandler.ReconcileStateLog).Methods("POST")
 	reportRoutes.HandleFunc("/reset-state-log", reportHandler.ResetStateLog).Methods("DELETE")
 	reportRoutes.HandleFunc("/sprint-board-status", reportHandler.GetSprintBoardStatus).Methods("GET")
+	reportRoutes.HandleFunc("/sprint-qa-summary", reportHandler.GetSprintQASummary).Methods("GET")
 	reportRoutes.HandleFunc("/issue-transitions", reportHandler.GetIssueTransitions).Methods("GET")
 
 	// DayTrack routes (protected)

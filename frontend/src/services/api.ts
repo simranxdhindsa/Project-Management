@@ -1095,6 +1095,14 @@ class ApiService {
     return this.request<SprintBoardStatusResponse>(`/reports/sprint-board-status?${qs.toString()}`)
   }
 
+  async getSprintQaSummary(params: { sprint_id?: string; sprint_name?: string; sprint_finish_ms?: number }) {
+    const qs = new URLSearchParams()
+    if (params.sprint_id) qs.set('sprint_id', params.sprint_id)
+    if (params.sprint_name) qs.set('sprint_name', encodeURIComponent(params.sprint_name))
+    if (params.sprint_finish_ms) qs.set('sprint_finish_ms', String(params.sprint_finish_ms))
+    return this.request<QAUserSummary[]>(`/reports/sprint-qa-summary?${qs.toString()}`)
+  }
+
   async getIssueTransitions(issueId: string) {
     return this.request<IssueStateLogEntry[]>(`/reports/issue-transitions?issue_id=${encodeURIComponent(issueId)}`)
   }
@@ -1995,6 +2003,13 @@ export interface TimeTrackingRow {
   pinned: boolean
 }
 
+export interface StintInfo {
+  started_at: string         // RFC3339
+  ended_at: string           // RFC3339; empty = ongoing
+  duration_hours: number
+  end_state: string          // where ticket went after this stint; empty = ongoing
+}
+
 export interface SprintBoardIssue {
   id: string
   idReadable: string
@@ -2003,6 +2018,7 @@ export interface SprintBoardIssue {
   assignee: string
   assigneeLogin: string
   avatarUrl: string
+  created_by: string         // issue reporter / creator
   issue_type: string
   current_state: string
   from_state: string
@@ -2010,16 +2026,27 @@ export interface SprintBoardIssue {
   hours_in_state: number
   is_delayed: boolean
   threshold_hours: number
-  move_type: string  // "qa_rejected" | "dev_stalled" | ""
+  move_type: string          // "qa_rejected" | "dev_stalled" | ""
   bounce_count: number
-  total_active_hours: number
+  total_active_hours: number // includes ongoing active time
   cycle_time_hours: number
   verified_on_dev: string
   verified_on_stage: string
   verified_on_prod: string
   is_hotfix: boolean
   stint_count: number
-  overdue_level: string  // "deadline" | "sprint" | "sla" | ""
+  stints: StintInfo[]        // per-stint time breakdown
+  overdue_level: string      // "deadline" | "sprint" | "sla" | ""
+}
+
+export interface QAUserSummary {
+  name: string
+  avatar_url: string
+  tickets_created: string[]
+  verified_on_dev: string[]
+  verified_on_stage: string[]
+  verified_on_prod: string[]
+  total_verifications: number
 }
 
 export interface SprintSummary {

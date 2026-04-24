@@ -1638,6 +1638,14 @@ func (h *ReportHandler) ListWeeklyReports(w http.ResponseWriter, r *http.Request
 	sendJSON(w, http.StatusOK, Response{Success: true, Data: reports})
 }
 
+// StintInfo represents one continuous "In Progress" session for a ticket
+type StintInfo struct {
+	StartedAt     string  `json:"started_at"`              // RFC3339 when the stint began
+	EndedAt       string  `json:"ended_at,omitempty"`      // RFC3339 when it ended; empty = ongoing
+	DurationHours float64 `json:"duration_hours"`          // hours spent in this stint
+	EndState      string  `json:"end_state,omitempty"`     // column ticket moved to after this stint
+}
+
 // SprintBoardIssue is one issue in the sprint-board-status response
 type SprintBoardIssue struct {
 	ID              string  `json:"id"`
@@ -1647,23 +1655,25 @@ type SprintBoardIssue struct {
 	Assignee        string  `json:"assignee"`
 	AssigneeLogin   string  `json:"assigneeLogin"`
 	AvatarURL       string  `json:"avatarUrl"`
+	CreatedBy       string  `json:"created_by"`            // issue reporter / creator
 	IssueType       string  `json:"issue_type"`
 	CurrentState    string  `json:"current_state"`
-	FromState       string  `json:"from_state"`        // state before the most recent transition
-	SinceDate       string  `json:"since_date"`        // ISO date when issue entered current state
+	FromState       string  `json:"from_state"`            // state before the most recent transition
+	SinceDate       string  `json:"since_date"`            // ISO date when issue entered current state
 	HoursInState    float64 `json:"hours_in_state"`
 	IsDelayed       bool    `json:"is_delayed"`
 	ThresholdHours  float64 `json:"threshold_hours"`
-	MoveType            string  `json:"move_type"`             // "qa_rejected" | "dev_stalled" | ""
-	BounceCount         int     `json:"bounce_count"`          // number of backward moves across full history
-	TotalActiveHours    float64 `json:"total_active_hours"`    // sum of time spent in active states
-	CycleTimeHours      float64 `json:"cycle_time_hours"`      // first active → first done transition
-	VerifiedOnDev       string  `json:"verified_on_dev"`       // who moved to first verified-role state
-	VerifiedOnStage     string  `json:"verified_on_stage"`     // who moved to second verified-role state
-	VerifiedOnProd      string  `json:"verified_on_prod"`      // who moved to closed-role state
-	IsHotfix            bool    `json:"is_hotfix"`             // jumped from active → deployed/verified directly
-	StintCount          int     `json:"stint_count"`           // how many separate In Progress sessions
-	OverdueLevel        string  `json:"overdue_level"`         // "deadline" | "sprint" | "sla" | ""
+	MoveType        string  `json:"move_type"`             // "qa_rejected" | "dev_stalled" | ""
+	BounceCount     int     `json:"bounce_count"`          // number of backward moves across full history
+	TotalActiveHours float64 `json:"total_active_hours"`   // sum of time spent in active states (including ongoing)
+	CycleTimeHours  float64 `json:"cycle_time_hours"`      // first active → first done transition
+	VerifiedOnDev   string  `json:"verified_on_dev"`       // who moved to lowest-rank verified-role state
+	VerifiedOnStage string  `json:"verified_on_stage"`     // who moved to second-lowest verified-role state
+	VerifiedOnProd  string  `json:"verified_on_prod"`      // who moved to closed-role state
+	IsHotfix        bool    `json:"is_hotfix"`             // jumped from active → deployed/verified directly
+	StintCount      int     `json:"stint_count"`           // how many separate In Progress sessions
+	Stints          []StintInfo `json:"stints"`            // per-stint time breakdown
+	OverdueLevel    string  `json:"overdue_level"`         // "deadline" | "sprint" | "sla" | ""
 }
 
 // SprintSummary aggregates sprint-level metrics
@@ -1830,6 +1840,16 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			issueType = youtrack.GetCustomFieldValue(issue, wfCfg.HotfixRules.TypeFieldName)
 		}
 
+		// Extract reporter / created_by
+		createdBy := ""
+		if issue.Reporter != nil {
+			if issue.Reporter.FullName != "" {
+				createdBy = issue.Reporter.FullName
+			} else {
+				createdBy = issue.Reporter.Login
+			}
+		}
+
 		// Determine when this issue entered its current state from batch-loaded logs
 		sinceDate := ""
 		var hoursInState float64
@@ -1923,69 +1943,71 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			overdueLevel = "sla"
 		}
 
+		var stints []StintInfo
 		if logs, ok := stateLogMap[issue.IDReadable]; ok && wfCfg != nil {
-			// Scan full log for cycle time, stints, QA verification, hotfix
+			// --- Single-pass scan: cycle time, stints, QA verification, hotfix ---
 			var firstActiveAt *time.Time
 			var firstDoneAt *time.Time
-			verifiedRanksSeen := []int{} // ranks of verified-role states hit, in order
+			var stintStart *time.Time // start of current/last "In Progress" session
+
+			// QA verification: rank → last mover for that rank
+			verifiedByRank := map[int]string{}
+			closedMover := ""
 
 			for _, entry := range logs {
 				toRole := getStateRole(entry.ToState, wfCfg.ColumnHierarchy)
 				fromRole := getStateRole(entry.FromState, wfCfg.ColumnHierarchy)
 
-				// Stint count: each entry to "active" role
+				// ── Stints: track each "In Progress" session ─────────────────────
 				if toRole == "active" {
 					stintCount++
 					t := entry.TransitionedAt
+					stintStart = &t
 					if firstActiveAt == nil {
 						firstActiveAt = &t
 					}
 				}
+				if fromRole == "active" && stintStart != nil {
+					dur := entry.TransitionedAt.Sub(*stintStart).Hours()
+					totalActiveHours += dur
+					stints = append(stints, StintInfo{
+						StartedAt:     stintStart.Format(time.RFC3339),
+						EndedAt:       entry.TransitionedAt.Format(time.RFC3339),
+						DurationHours: dur,
+						EndState:      entry.ToState,
+					})
+					stintStart = nil
+				}
 
-				// First done transition for cycle time
+				// ── Cycle time: first active → first done ─────────────────────────
 				if firstDoneAt == nil && (toRole == "dev_done" || toRole == "verified" || toRole == "deployed" || toRole == "closed") {
 					t := entry.TransitionedAt
 					firstDoneAt = &t
 				}
 
-				// QA verification: who moved to each verified-role state
-				if toRole == "verified" {
-					toRank := getStateIndexFromConfig(entry.ToState, wfCfg.ColumnHierarchy)
-					// Assign to dev/stage/prod slot based on order seen
-					slot := len(verifiedRanksSeen)
-					verifiedRanksSeen = append(verifiedRanksSeen, toRank)
-					mover := entry.MovedBy
-					if mover == "" {
-						mover = entry.Assignee
-					}
-					switch slot {
-					case 0:
-						verifiedOnDev = mover
-					case 1:
-						verifiedOnStage = mover
-					default:
-						verifiedOnProd = mover
-					}
+				// ── QA verification: rank-based slot assignment ───────────────────
+				// Use the rank of the destination state so that re-verifications
+				// (e.g. bouncing back from Ready for Stage and re-moving there)
+				// always update the correct slot instead of bumping the next slot.
+				mover := entry.MovedBy
+				if mover == "" {
+					mover = entry.Assignee
 				}
-				// Also track "closed" role as prod verification
-				if toRole == "closed" && verifiedOnProd == "" {
-					mover := entry.MovedBy
-					if mover == "" {
-						mover = entry.Assignee
-					}
-					verifiedOnProd = mover
+				if toRole == "verified" {
+					rank := getStateIndexFromConfig(entry.ToState, wfCfg.ColumnHierarchy)
+					verifiedByRank[rank] = mover
+				}
+				if toRole == "closed" {
+					closedMover = mover
 				}
 
-				// Hotfix: active → deployed/verified directly (skipping dev_done)
+				// ── Hotfix: active → deployed/verified directly (no dev_done before) ──
 				if fromRole == "active" && (toRole == "deployed" || toRole == "verified") {
-					// Check that no dev_done role was hit before this
 					devDoneHit := false
 					for _, prev := range logs {
-						if prev.TransitionedAt.Before(entry.TransitionedAt) {
-							if getStateRole(prev.ToState, wfCfg.ColumnHierarchy) == "dev_done" {
-								devDoneHit = true
-								break
-							}
+						if prev.TransitionedAt.Before(entry.TransitionedAt) && getStateRole(prev.ToState, wfCfg.ColumnHierarchy) == "dev_done" {
+							devDoneHit = true
+							break
 						}
 					}
 					if !devDoneHit {
@@ -1993,6 +2015,28 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 					}
 				}
 			}
+
+			// Ongoing stint: if ticket is currently in active state, account for time since stintStart
+			if stintStart != nil {
+				dur := now.Sub(*stintStart).Hours()
+				totalActiveHours += dur
+				stints = append(stints, StintInfo{
+					StartedAt:     stintStart.Format(time.RFC3339),
+					DurationHours: dur,
+					// EndedAt / EndState empty = ongoing
+				})
+			}
+
+			// Sort verified ranks → assign to dev / stage / prod slots
+			var verRanks []int
+			for r := range verifiedByRank {
+				verRanks = append(verRanks, r)
+			}
+			sort.Ints(verRanks)
+			if len(verRanks) >= 1 { verifiedOnDev = verifiedByRank[verRanks[0]] }
+			if len(verRanks) >= 2 { verifiedOnStage = verifiedByRank[verRanks[1]] }
+			if len(verRanks) >= 3 { verifiedOnProd = verifiedByRank[verRanks[2]] }
+			if verifiedOnProd == "" { verifiedOnProd = closedMover }
 
 			// Also check issue_type field for hotfix
 			if wfCfg.HotfixRules.TypeFieldName != "" {
@@ -2003,7 +2047,7 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 				}
 			}
 
-			// Compute cycle time
+			// Cycle time: first active → first done (or now if still in progress)
 			if firstActiveAt != nil {
 				end := now
 				if firstDoneAt != nil {
@@ -2016,6 +2060,11 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			}
 		}
 
+		// If no log history but currently active, use hoursInState as active time
+		if totalActiveHours == 0 && isActiveNow {
+			totalActiveHours = hoursInState
+		}
+
 		bi := SprintBoardIssue{
 			ID:               issue.ID,
 			IDReadable:       issue.IDReadable,
@@ -2024,6 +2073,7 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			Assignee:         assigneeName,
 			AssigneeLogin:    assigneeLogin,
 			AvatarURL:        avatarURL,
+			CreatedBy:        createdBy,
 			IssueType:        issueType,
 			CurrentState:     currentState,
 			FromState:        fromState,
@@ -2040,6 +2090,7 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			VerifiedOnProd:   verifiedOnProd,
 			IsHotfix:         isHotfix,
 			StintCount:       stintCount,
+			Stints:           stints,
 			OverdueLevel:     overdueLevel,
 		}
 
@@ -2198,6 +2249,175 @@ func (h *ReportHandler) GetIssueTransitions(w http.ResponseWriter, r *http.Reque
 		logs = []database.IssueStateLog{}
 	}
 	sendJSON(w, http.StatusOK, Response{Success: true, Data: logs})
+}
+
+// QAUserSummary aggregates verification and creation activity for one person in a sprint.
+type QAUserSummary struct {
+	Name               string   `json:"name"`
+	AvatarURL          string   `json:"avatar_url"`
+	TicketsCreated     []string `json:"tickets_created"`    // IDReadable of tickets this person created
+	VerifiedOnDev      []string `json:"verified_on_dev"`    // IDReadables
+	VerifiedOnStage    []string `json:"verified_on_stage"`
+	VerifiedOnProd     []string `json:"verified_on_prod"`
+	TotalVerifications int      `json:"total_verifications"`
+}
+
+// GetSprintQASummary returns per-user QA activity (verifications + creations) for a sprint.
+// GET /api/reports/sprint-qa-summary?sprint_id=xxx&sprint_finish_ms=xxx
+func (h *ReportHandler) GetSprintQASummary(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	// Re-use GetSprintBoardStatus logic: fetch board data then aggregate QA stats.
+	// Build a synthetic request to the same handler and grab the result data.
+	sprintID := r.URL.Query().Get("sprint_id")
+	sprintName, _ := url.QueryUnescape(r.URL.Query().Get("sprint_name"))
+	sprintFinishMs, _ := strconv.ParseInt(r.URL.Query().Get("sprint_finish_ms"), 10, 64)
+
+	wfCfg := h.loadWorkflowConfig(r.Context(), user.ID, "youtrack")
+	slaMap := map[string]float64{}
+	if wfCfg != nil {
+		for _, pt := range wfCfg.PriorityTags {
+			slaMap[strings.ToLower(pt.Label)] = pt.SLAHours
+			for _, yt := range pt.YTMappings {
+				slaMap[strings.ToLower(yt)] = pt.SLAHours
+			}
+		}
+	}
+
+	scheme := "https"
+	if r.TLS == nil && r.Header.Get("X-Forwarded-Proto") == "" {
+		scheme = "http"
+	}
+	proxyBase := scheme + "://" + r.Host + "/api/youtrack/proxy?url="
+
+	ytClient, err := h.getYouTrackClient(r.Context())
+	if err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "YouTrack not configured: " + err.Error()})
+		return
+	}
+
+	var sprintIssues []youtrack.Issue
+	if sprintID != "" {
+		sprintIssues, err = ytClient.GetAllSprintIssues(r.Context(), sprintID)
+		if err != nil && sprintName != "" {
+			sprintIssues, err = ytClient.GetIssuesByStateForSprint(r.Context(), sprintName, nil)
+		}
+	} else if sprintName != "" {
+		sprintIssues, err = ytClient.GetIssuesByStateForSprint(r.Context(), sprintName, nil)
+	}
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to fetch sprint issues: " + err.Error()})
+		return
+	}
+
+	issueIDs := make([]string, 0, len(sprintIssues))
+	for _, issue := range sprintIssues {
+		if issue.IDReadable != "" {
+			issueIDs = append(issueIDs, issue.IDReadable)
+		}
+	}
+	stateLogMap, _ := h.reportRepo.GetStateLogsForIssues(r.Context(), issueIDs)
+
+	now := time.Now()
+	_ = sprintFinishMs
+	_ = slaMap
+	_ = proxyBase
+	_ = now
+
+	// Build per-person QA map
+	qaMap := map[string]*QAUserSummary{}
+	ensure := func(name, avatarURL string) *QAUserSummary {
+		if name == "" {
+			return nil
+		}
+		if _, ok := qaMap[name]; !ok {
+			qaMap[name] = &QAUserSummary{Name: name, AvatarURL: avatarURL}
+		}
+		return qaMap[name]
+	}
+
+	for _, issue := range sprintIssues {
+		id := issue.IDReadable
+
+		// Tickets created by
+		if issue.Reporter != nil {
+			name := issue.Reporter.FullName
+			if name == "" {
+				name = issue.Reporter.Login
+			}
+			avatar := issue.Reporter.AvatarUrl
+			if avatar != "" && strings.HasPrefix(avatar, "/") {
+				avatar = ytClient.GetBaseURL() + avatar
+			}
+			if avatar != "" {
+				avatar = proxyBase + url.QueryEscape(base64.StdEncoding.EncodeToString([]byte(avatar)))
+			}
+			if u := ensure(name, avatar); u != nil {
+				u.TicketsCreated = append(u.TicketsCreated, id)
+			}
+		}
+
+		// Verification slots from state log
+		if logs, ok := stateLogMap[id]; ok && wfCfg != nil {
+			verifiedByRank := map[int]string{}
+			closedMover := ""
+			for _, entry := range logs {
+				toRole := getStateRole(entry.ToState, wfCfg.ColumnHierarchy)
+				mover := entry.MovedBy
+				if mover == "" {
+					mover = entry.Assignee
+				}
+				if toRole == "verified" {
+					rank := getStateIndexFromConfig(entry.ToState, wfCfg.ColumnHierarchy)
+					verifiedByRank[rank] = mover
+				}
+				if toRole == "closed" {
+					closedMover = mover
+				}
+			}
+			var verRanks []int
+			for rankKey := range verifiedByRank {
+				verRanks = append(verRanks, rankKey)
+			}
+			sort.Ints(verRanks)
+
+			if len(verRanks) >= 1 {
+				if u := ensure(verifiedByRank[verRanks[0]], ""); u != nil {
+					u.VerifiedOnDev = append(u.VerifiedOnDev, id)
+				}
+			}
+			if len(verRanks) >= 2 {
+				if u := ensure(verifiedByRank[verRanks[1]], ""); u != nil {
+					u.VerifiedOnStage = append(u.VerifiedOnStage, id)
+				}
+			}
+			if len(verRanks) >= 3 {
+				if u := ensure(verifiedByRank[verRanks[2]], ""); u != nil {
+					u.VerifiedOnProd = append(u.VerifiedOnProd, id)
+				}
+			} else if closedMover != "" {
+				if u := ensure(closedMover, ""); u != nil {
+					u.VerifiedOnProd = append(u.VerifiedOnProd, id)
+				}
+			}
+		}
+	}
+
+	// Compute totals and sort by total verifications desc
+	result := make([]*QAUserSummary, 0, len(qaMap))
+	for _, u := range qaMap {
+		u.TotalVerifications = len(u.VerifiedOnDev) + len(u.VerifiedOnStage) + len(u.VerifiedOnProd)
+		result = append(result, u)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].TotalVerifications > result[j].TotalVerifications
+	})
+
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: result})
 }
 
 // ResetStateLog deletes all rows from issue_state_log so tracking starts fresh.

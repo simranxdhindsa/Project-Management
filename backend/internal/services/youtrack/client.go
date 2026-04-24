@@ -128,6 +128,7 @@ type Issue struct {
 	Description  string        `json:"description"`  // Issue description
 	Created      int64         `json:"created"`      // Unix timestamp ms
 	Updated      int64         `json:"updated"`      // Unix timestamp ms
+	Reporter     *User         `json:"reporter,omitempty"` // who created the issue
 	CustomFields []CustomField `json:"customFields"` // State, Subsystem, Priority, etc.
 	Attachments  []Attachment  `json:"attachments,omitempty"`
 	Project      *Project      `json:"project,omitempty"`
@@ -609,7 +610,7 @@ func (c *Client) GetAllSprintIssues(ctx context.Context, sprintID string) ([]Iss
 	if err != nil {
 		return nil, err
 	}
-	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	fields := "id,idReadable,summary,description,created,updated,reporter(id,fullName,login,avatarUrl),customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
 	var all []Issue
 	skip := 0
 	pageSize := 500
@@ -635,7 +636,7 @@ func (c *Client) GetAllSprintIssues(ctx context.Context, sprintID string) ([]Iss
 
 // GetIssue returns a single issue by ID
 func (c *Client) GetIssue(ctx context.Context, issueID string) (*Issue, error) {
-	fields := "id,idReadable,summary,description,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
+	fields := "id,idReadable,summary,description,created,updated,reporter(id,fullName,login,avatarUrl),customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),attachments(id,name,size,mimeType,url,extension),project(shortName)"
 	path := fmt.Sprintf("/api/issues/%s?fields=%s", url.PathEscape(issueID), fields)
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
@@ -1015,7 +1016,7 @@ func (c *Client) GetIssuesByStateForSprint(ctx context.Context, sprintName strin
 	} else {
 		query = fmt.Sprintf("project: %s sprint: {%s}", c.projectID, sprintName)
 	}
-	fields := "id,idReadable,summary,created,updated,customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),project(shortName)"
+	fields := "id,idReadable,summary,created,updated,reporter(id,fullName,login,avatarUrl),customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),project(shortName)"
 	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=500", fields, url.QueryEscape(query))
 
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)

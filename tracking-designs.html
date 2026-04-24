@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Sprint Tracking — 10 Designs</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#080A10;color:#E2E8F0;min-height:100vh}
+
+/* ── DESIGN PICKER ── */
+.picker{
+  position:fixed;top:0;left:0;right:0;z-index:200;
+  background:rgba(5,7,12,.95);backdrop-filter:blur(12px);
+  border-bottom:1px solid rgba(255,255,255,.07);
+  padding:0 20px;height:52px;
+  display:flex;align-items:center;gap:8px;overflow-x:auto;
+}
+.picker::-webkit-scrollbar{display:none}
+.pick-label{font-size:11px;font-weight:700;color:#4A5568;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;margin-right:4px}
+.pbtn{
+  padding:5px 14px;border-radius:7px;font-size:12px;font-weight:600;
+  cursor:pointer;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);
+  color:#94A3B8;transition:all 150ms;white-space:nowrap;flex-shrink:0;
+}
+.pbtn:hover{color:#E2E8F0;border-color:rgba(255,255,255,.15)}
+.pbtn.on{color:#fff;border-color:var(--accent,#6366F1);background:rgba(99,102,241,.15)}
+
+/* ── DESIGN SECTIONS ── */
+.design{display:none;padding-top:52px;min-height:100vh}
+.design.on{display:block}
+
+/* ════════════════════════════════════════════════════
+   SHARED COMPONENTS (overridden per theme)
+════════════════════════════════════════════════════ */
+.d-wrap{padding:20px 24px;max-width:1300px;margin:0 auto}
+.d-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.d-title{font-size:15px;font-weight:700;display:flex;align-items:center;gap:7px}
+.d-tools{display:flex;gap:8px}
+.d-btn{padding:5px 13px;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:5px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.kpi{border-radius:12px;padding:16px 18px}
+.kpi-l{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+.kpi-v{font-size:26px;font-weight:800;line-height:1;letter-spacing:-.5px}
+.kpi-n{font-size:11px;margin-top:5px}
+.kpi-bar{height:3px;border-radius:2px;margin-top:10px}
+.kpi-bar-f{height:100%;border-radius:2px;width:87%}
+.sec-wrap{margin-bottom:14px;border-radius:12px;overflow:hidden}
+.sec-h{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600}
+.sec-dot{width:8px;height:8px;border-radius:50%;margin-right:8px}
+.sec-cnt{padding:1px 8px;border-radius:20px;font-size:11px;font-weight:600;margin-left:6px}
+/* cards grid */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;padding:14px}
+.card{border-radius:10px;padding:14px;cursor:pointer;position:relative;overflow:hidden;transition:transform 150ms}
+.card:hover{transform:translateY(-1px)}
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.card-id{font-family:'Fira Code',monospace;font-size:11px;font-weight:500}
+.card-title{font-size:13px;font-weight:600;line-height:1.4;margin-bottom:8px}
+.card-tags{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px}
+.tag{display:inline-flex;align-items:center;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700}
+.card-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding-top:10px}
+.stat-l{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:2px}
+.stat-v{font-family:'Fira Code',monospace;font-size:12px;font-weight:600}
+.card-foot{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+.av{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff}
+.av-n{font-size:12px}
+/* blocked strip */
+.bl-strip{border-radius:10px;overflow:hidden;margin:0 0 14px}
+.bl-row{display:flex;align-items:center;gap:8px;padding:10px 16px;cursor:pointer;transition:background 150ms}
+.bl-id{font-family:'Fira Code',monospace;font-size:11px;width:85px;flex-shrink:0}
+.bl-pri{width:44px;flex-shrink:0}
+.bl-title{flex:1;font-size:13px;font-weight:500}
+.bl-t{font-family:'Fira Code',monospace;font-size:12px;font-weight:600;width:70px;text-align:right;flex-shrink:0}
+.bl-av{display:flex;align-items:center;gap:5px;width:100px;flex-shrink:0;justify-content:flex-end}
+/* compact table */
+.ct{border-radius:10px;overflow:hidden;margin-bottom:14px}
+.ct-row{display:grid;grid-template-columns:85px 48px 1fr 80px 80px 120px;align-items:center;padding:9px 16px;gap:8px;cursor:pointer;transition:background 150ms}
+.ct-hdr{cursor:default!important}
+.ct-lbl{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+/* verif */
+.vc{padding:2px 5px;border-radius:4px;font-size:10px;font-weight:700}
+.vc-d{background:rgba(16,185,129,.15);color:#10B981;border:1px solid rgba(16,185,129,.3)}
+.vc-s{background:rgba(59,130,246,.15);color:#3B82F6;border:1px solid rgba(59,130,246,.3)}
+.vc-p{background:rgba(168,85,247,.15);color:#A855F7;border:1px solid rgba(168,85,247,.3)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 1 — OLED Dark (Indigo)
+════════════════════════════════════════════════════ */
+.d1{--bg:#07080F;--surf:#0F1117;--s2:#161B27;--bdr:#252D3D;--txt:#E8EDF5;--mut:#6B7A99;--acc:#6366F1;--red:#F43F5E;--amb:#F59E0B;--grn:#10B981}
+.d1{background:var(--bg);color:var(--txt)}
+.d1 .d-btn{background:var(--s2);border:1px solid var(--bdr);color:var(--mut)}
+.d1 .kpi{background:var(--surf);border:1px solid var(--bdr)}
+.d1 .kpi-l{color:var(--mut)}
+.d1 .kpi-bar{background:var(--s2)}
+.d1 .kpi-bar-f{background:var(--grn)}
+.d1 .sec-wrap{background:var(--surf);border:1px solid var(--bdr)}
+.d1 .sec-h{background:var(--surf)}
+.d1 .sec-cnt{background:var(--s2);border:1px solid var(--bdr);color:var(--mut)}
+.d1 .card{background:var(--s2);border:1px solid var(--bdr)}
+.d1 .card--crit{border-top:3px solid var(--red)}
+.d1 .card--warn{border-top:3px solid var(--amb)}
+.d1 .card--ok{border-top:3px solid var(--acc)}
+.d1 .card-id{color:var(--acc)}
+.d1 .card-title{color:var(--txt)}
+.d1 .stat-l{color:var(--mut)}
+.d1 .stat-crit{color:var(--red)}
+.d1 .stat-warn{color:var(--amb)}
+.d1 .stat-ok{color:var(--txt)}
+.d1 .stat-dim{color:var(--bdr)}
+.d1 .av-n{color:var(--mut)}
+.d1 .tag-bounce{background:rgba(249,115,22,.15);color:#F97316;border:1px solid rgba(249,115,22,.25)}
+.d1 .tag-hf{background:rgba(244,63,94,.15);color:var(--red);border:1px solid rgba(244,63,94,.25)}
+.d1 .tag-p2{background:rgba(245,158,11,.15);color:var(--amb);border:1px solid rgba(245,158,11,.25)}
+.d1 .tag-p3{background:rgba(107,122,153,.15);color:var(--mut);border:1px solid rgba(107,122,153,.25)}
+.d1 .bl-strip{background:rgba(244,63,94,.06);border:1px solid rgba(244,63,94,.2)}
+.d1 .bl-row{border-bottom:1px solid rgba(244,63,94,.1)}
+.d1 .bl-row:hover{background:rgba(244,63,94,.06)}
+.d1 .bl-row--crit{border-left:3px solid var(--red)}
+.d1 .bl-row--amb{border-left:3px solid var(--amb)}
+.d1 .bl-id{color:var(--acc)}
+.d1 .bl-title{color:var(--txt)}
+.d1 .bl-tc{color:var(--red)}
+.d1 .bl-ta{color:var(--amb)}
+.d1 .ct{background:var(--surf);border:1px solid var(--bdr)}
+.d1 .ct-hdr{background:var(--s2)}
+.d1 .ct-row:hover{background:var(--s2)}
+.d1 .ct-lbl{color:var(--mut)}
+.d1 .ct-tid{color:var(--acc)}
+.d1 .ct-title{color:var(--txt)}
+.d1 .ct-crit{color:var(--red)}
+.d1 .ct-warn{color:var(--amb)}
+.d1 .ct-dim{color:var(--mut)}
+.d1 .ct-row--ov{border-left:3px solid var(--red)}
+.d1 .ct-row--wn{border-left:3px solid var(--amb)}
+.d1 .kpi-grn .kpi-v{color:#10B981}
+.d1 .kpi-red .kpi-v{color:var(--red)}
+.d1 .kpi-amb .kpi-v{color:var(--amb)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 2 — Linear-style (Navy Minimal)
+════════════════════════════════════════════════════ */
+.d2{--bg:#0A0B14;--surf:#111320;--s2:#181A2E;--bdr:#1E2240;--txt:#D4D8F0;--mut:#5A6080;--acc:#818CF8;--red:#FC5C7D;--amb:#FFA940;--grn:#4ADE80;font-family:'Space Grotesk',sans-serif}
+.d2{background:var(--bg);color:var(--txt)}
+.d2 .d-btn{background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:6px}
+.d2 .kpi{background:var(--surf);border:1px solid var(--bdr);border-radius:8px}
+.d2 .kpi-l{color:var(--mut)}
+.d2 .kpi-bar{background:var(--s2)}
+.d2 .kpi-bar-f{background:var(--grn)}
+.d2 .sec-wrap{background:var(--surf);border:1px solid var(--bdr);border-radius:8px}
+.d2 .sec-h{background:transparent}
+.d2 .sec-cnt{background:var(--s2);border:1px solid var(--bdr);color:var(--mut)}
+.d2 .card{background:var(--s2);border:1px solid var(--bdr);border-radius:8px}
+.d2 .card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.d2 .card--crit::before{background:var(--red)}
+.d2 .card--warn::before{background:var(--amb)}
+.d2 .card--ok::before{background:var(--acc)}
+.d2 .card-id{color:var(--acc);font-size:10px}
+.d2 .card-title{color:var(--txt);font-size:13px}
+.d2 .stat-l{color:var(--mut);font-size:8px}
+.d2 .stat-crit{color:var(--red)}
+.d2 .stat-warn{color:var(--amb)}
+.d2 .stat-ok{color:var(--txt)}
+.d2 .stat-dim{color:var(--mut)}
+.d2 .av-n{color:var(--mut)}
+.d2 .tag-bounce{background:rgba(255,169,64,.12);color:var(--amb);border:1px solid rgba(255,169,64,.2)}
+.d2 .tag-hf{background:rgba(252,92,125,.12);color:var(--red);border:1px solid rgba(252,92,125,.2)}
+.d2 .tag-p2{background:rgba(255,169,64,.12);color:var(--amb);border:1px solid rgba(255,169,64,.2)}
+.d2 .tag-p3{background:rgba(90,96,128,.15);color:var(--mut);border:1px solid rgba(90,96,128,.2)}
+.d2 .bl-strip{background:rgba(252,92,125,.05);border:1px solid rgba(252,92,125,.15);border-radius:8px}
+.d2 .bl-row{border-bottom:1px solid rgba(252,92,125,.08)}
+.d2 .bl-row:hover{background:rgba(252,92,125,.05)}
+.d2 .bl-row--crit{border-left:2px solid var(--red)}
+.d2 .bl-row--amb{border-left:2px solid var(--amb)}
+.d2 .bl-id{color:var(--acc)}
+.d2 .bl-title{color:var(--txt)}
+.d2 .bl-tc{color:var(--red)}
+.d2 .bl-ta{color:var(--amb)}
+.d2 .ct{background:var(--surf);border:1px solid var(--bdr);border-radius:8px}
+.d2 .ct-hdr{background:var(--s2)}
+.d2 .ct-row:hover{background:var(--s2)}
+.d2 .ct-lbl{color:var(--mut)}
+.d2 .ct-tid{color:var(--acc)}
+.d2 .ct-title{color:var(--txt)}
+.d2 .ct-crit{color:var(--red)}
+.d2 .ct-warn{color:var(--amb)}
+.d2 .ct-dim{color:var(--mut)}
+.d2 .ct-row--ov{border-left:2px solid var(--red)}
+.d2 .ct-row--wn{border-left:2px solid var(--amb)}
+.d2 .kpi-grn .kpi-v{color:var(--grn)}
+.d2 .kpi-red .kpi-v{color:var(--red)}
+.d2 .kpi-amb .kpi-v{color:var(--amb)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 3 — Vercel-style (Ultra Minimal Dark)
+════════════════════════════════════════════════════ */
+.d3{--bg:#000;--surf:#111;--s2:#1A1A1A;--bdr:#2A2A2A;--txt:#EDEDED;--mut:#888;--acc:#fff;--red:#FF4444;--amb:#FF9A3C;--grn:#50E3C2;font-family:'Inter',sans-serif}
+.d3{background:var(--bg);color:var(--txt)}
+.d3 .kpis{gap:1px;background:var(--bdr)}
+.d3 .kpi{background:var(--bg);border-radius:0;border:none;padding:20px 24px}
+.d3 .kpi-l{color:var(--mut);font-size:11px}
+.d3 .kpi-bar{background:var(--s2)}
+.d3 .kpi-bar-f{background:var(--grn)}
+.d3 .sec-wrap{background:var(--bg);border:1px solid var(--bdr);border-radius:0}
+.d3 .sec-h{background:var(--bg);border-bottom:1px solid var(--bdr)}
+.d3 .sec-cnt{background:var(--s2);border:1px solid var(--bdr);color:var(--mut)}
+.d3 .cards{padding:1px;gap:1px;background:var(--bdr)}
+.d3 .card{background:var(--bg);border-radius:0;border:none;padding:20px}
+.d3 .card--crit{border-top:none;box-shadow:inset 0 2px 0 var(--red)}
+.d3 .card--warn{border-top:none;box-shadow:inset 0 2px 0 var(--amb)}
+.d3 .card--ok{border-top:none;box-shadow:inset 0 2px 0 var(--s2)}
+.d3 .card-id{color:var(--mut);font-size:11px}
+.d3 .card-title{color:var(--txt)}
+.d3 .stat-l{color:var(--mut)}
+.d3 .stat-crit{color:var(--red)}
+.d3 .stat-warn{color:var(--amb)}
+.d3 .stat-ok{color:var(--txt)}
+.d3 .stat-dim{color:var(--s2)}
+.d3 .av-n{color:var(--mut)}
+.d3 .tag-bounce{background:rgba(255,154,60,.1);color:var(--amb);border:1px solid rgba(255,154,60,.2)}
+.d3 .tag-hf{background:rgba(255,68,68,.1);color:var(--red);border:1px solid rgba(255,68,68,.2)}
+.d3 .tag-p2{background:rgba(255,154,60,.1);color:var(--amb);border:1px solid rgba(255,154,60,.2)}
+.d3 .tag-p3{background:rgba(136,136,136,.1);color:var(--mut);border:1px solid rgba(136,136,136,.2)}
+.d3 .bl-strip{background:var(--bg);border:1px solid rgba(255,68,68,.3);border-radius:0}
+.d3 .bl-row{border-bottom:1px solid var(--bdr)}
+.d3 .bl-row:hover{background:var(--s2)}
+.d3 .bl-row--crit{border-left:2px solid var(--red)}
+.d3 .bl-row--amb{border-left:2px solid var(--amb)}
+.d3 .bl-id{color:var(--mut)}
+.d3 .bl-title{color:var(--txt)}
+.d3 .bl-tc{color:var(--red)}
+.d3 .bl-ta{color:var(--amb)}
+.d3 .ct{background:var(--bg);border:1px solid var(--bdr);border-radius:0}
+.d3 .ct-hdr{background:var(--s2)}
+.d3 .ct-row:hover{background:var(--s2)}
+.d3 .ct-lbl{color:var(--mut)}
+.d3 .ct-tid{color:var(--mut)}
+.d3 .ct-title{color:var(--txt)}
+.d3 .ct-crit{color:var(--red)}
+.d3 .ct-warn{color:var(--amb)}
+.d3 .ct-dim{color:var(--s2)}
+.d3 .ct-row--ov{border-left:2px solid var(--red)}
+.d3 .ct-row--wn{border-left:2px solid var(--amb)}
+.d3 .kpi-grn .kpi-v{color:var(--grn)}
+.d3 .kpi-red .kpi-v{color:var(--red)}
+.d3 .kpi-amb .kpi-v{color:var(--amb)}
+.d3 .d-btn{background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:0}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 4 — GitHub Dark
+════════════════════════════════════════════════════ */
+.d4{--bg:#0D1117;--surf:#161B22;--s2:#21262D;--bdr:#30363D;--txt:#E6EDF3;--mut:#8B949E;--acc:#58A6FF;--red:#FF7B72;--amb:#E3B341;--grn:#3FB950;font-family:'Inter',sans-serif}
+.d4{background:var(--bg);color:var(--txt)}
+.d4 .d-btn{background:var(--s2);border:1px solid var(--bdr);color:var(--txt);border-radius:6px}
+.d4 .kpi{background:var(--surf);border:1px solid var(--bdr);border-radius:6px}
+.d4 .kpi-l{color:var(--mut)}
+.d4 .kpi-bar{background:var(--s2)}
+.d4 .kpi-bar-f{background:var(--grn)}
+.d4 .sec-wrap{background:var(--surf);border:1px solid var(--bdr);border-radius:6px}
+.d4 .sec-h{background:var(--s2)}
+.d4 .sec-cnt{background:var(--bg);border:1px solid var(--bdr);color:var(--mut)}
+.d4 .card{background:var(--bg);border:1px solid var(--bdr);border-radius:6px}
+.d4 .card--crit{border-left:3px solid var(--red)}
+.d4 .card--warn{border-left:3px solid var(--amb)}
+.d4 .card--ok{border-top:2px solid var(--acc)}
+.d4 .card-id{color:var(--acc)}
+.d4 .card-title{color:var(--txt)}
+.d4 .stat-l{color:var(--mut)}
+.d4 .stat-crit{color:var(--red)}
+.d4 .stat-warn{color:var(--amb)}
+.d4 .stat-ok{color:var(--txt)}
+.d4 .stat-dim{color:var(--bdr)}
+.d4 .av-n{color:var(--mut)}
+.d4 .tag-bounce{background:rgba(227,179,65,.12);color:var(--amb);border:1px solid rgba(227,179,65,.2)}
+.d4 .tag-hf{background:rgba(255,123,114,.12);color:var(--red);border:1px solid rgba(255,123,114,.2)}
+.d4 .tag-p2{background:rgba(227,179,65,.12);color:var(--amb);border:1px solid rgba(227,179,65,.2)}
+.d4 .tag-p3{background:rgba(139,148,158,.12);color:var(--mut);border:1px solid rgba(139,148,158,.2)}
+.d4 .bl-strip{background:rgba(255,123,114,.05);border:1px solid rgba(255,123,114,.2);border-radius:6px}
+.d4 .bl-row{border-bottom:1px solid rgba(255,123,114,.1)}
+.d4 .bl-row:hover{background:rgba(255,123,114,.04)}
+.d4 .bl-row--crit{border-left:3px solid var(--red)}
+.d4 .bl-row--amb{border-left:3px solid var(--amb)}
+.d4 .bl-id{color:var(--acc)}
+.d4 .bl-title{color:var(--txt)}
+.d4 .bl-tc{color:var(--red)}
+.d4 .bl-ta{color:var(--amb)}
+.d4 .ct{background:var(--surf);border:1px solid var(--bdr);border-radius:6px}
+.d4 .ct-hdr{background:var(--s2)}
+.d4 .ct-row:hover{background:var(--s2)}
+.d4 .ct-lbl{color:var(--mut)}
+.d4 .ct-tid{color:var(--acc)}
+.d4 .ct-title{color:var(--txt)}
+.d4 .ct-crit{color:var(--red)}
+.d4 .ct-warn{color:var(--amb)}
+.d4 .ct-dim{color:var(--mut)}
+.d4 .ct-row--ov{border-left:3px solid var(--red)}
+.d4 .ct-row--wn{border-left:3px solid var(--amb)}
+.d4 .kpi-grn .kpi-v{color:var(--grn)}
+.d4 .kpi-red .kpi-v{color:var(--red)}
+.d4 .kpi-amb .kpi-v{color:var(--amb)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 5 — Purple Dark (Notion-ish)
+════════════════════════════════════════════════════ */
+.d5{--bg:#1A1523;--surf:#211D2E;--s2:#2B2540;--bdr:#372F50;--txt:#E0D9F5;--mut:#8B7BB0;--acc:#C084FC;--red:#FB7185;--amb:#FBBF24;--grn:#34D399;font-family:'DM Sans',sans-serif}
+.d5{background:var(--bg);color:var(--txt)}
+.d5 .d-btn{background:var(--s2);border:1px solid var(--bdr);color:var(--mut);border-radius:8px}
+.d5 .kpi{background:var(--surf);border:1px solid var(--bdr);border-radius:12px}
+.d5 .kpi-l{color:var(--mut)}
+.d5 .kpi-bar{background:var(--s2)}
+.d5 .kpi-bar-f{background:var(--grn)}
+.d5 .sec-wrap{background:var(--surf);border:1px solid var(--bdr);border-radius:12px}
+.d5 .sec-h{background:transparent}
+.d5 .sec-cnt{background:var(--s2);border:1px solid var(--bdr);color:var(--mut)}
+.d5 .card{background:linear-gradient(135deg,var(--s2) 0%,var(--surf) 100%);border:1px solid var(--bdr);border-radius:10px}
+.d5 .card--crit::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--red)}
+.d5 .card--warn::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--amb)}
+.d5 .card--ok::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--acc)}
+.d5 .card-id{color:var(--acc)}
+.d5 .card-title{color:var(--txt)}
+.d5 .stat-l{color:var(--mut)}
+.d5 .stat-crit{color:var(--red)}
+.d5 .stat-warn{color:var(--amb)}
+.d5 .stat-ok{color:var(--txt)}
+.d5 .stat-dim{color:var(--bdr)}
+.d5 .av-n{color:var(--mut)}
+.d5 .tag-bounce{background:rgba(251,191,36,.12);color:var(--amb);border:1px solid rgba(251,191,36,.2)}
+.d5 .tag-hf{background:rgba(251,113,133,.12);color:var(--red);border:1px solid rgba(251,113,133,.2)}
+.d5 .tag-p2{background:rgba(192,132,252,.12);color:var(--acc);border:1px solid rgba(192,132,252,.2)}
+.d5 .tag-p3{background:rgba(139,123,176,.12);color:var(--mut);border:1px solid rgba(139,123,176,.2)}
+.d5 .bl-strip{background:rgba(251,113,133,.06);border:1px solid rgba(251,113,133,.2);border-radius:12px}
+.d5 .bl-row{border-bottom:1px solid rgba(251,113,133,.1)}
+.d5 .bl-row:hover{background:rgba(251,113,133,.05)}
+.d5 .bl-row--crit{border-left:3px solid var(--red)}
+.d5 .bl-row--amb{border-left:3px solid var(--amb)}
+.d5 .bl-id{color:var(--acc)}
+.d5 .bl-title{color:var(--txt)}
+.d5 .bl-tc{color:var(--red)}
+.d5 .bl-ta{color:var(--amb)}
+.d5 .ct{background:var(--surf);border:1px solid var(--bdr);border-radius:12px}
+.d5 .ct-hdr{background:var(--s2)}
+.d5 .ct-row:hover{background:var(--s2)}
+.d5 .ct-lbl{color:var(--mut)}
+.d5 .ct-tid{color:var(--acc)}
+.d5 .ct-title{color:var(--txt)}
+.d5 .ct-crit{color:var(--red)}
+.d5 .ct-warn{color:var(--amb)}
+.d5 .ct-dim{color:var(--mut)}
+.d5 .ct-row--ov{border-left:3px solid var(--red)}
+.d5 .ct-row--wn{border-left:3px solid var(--amb)}
+.d5 .kpi-grn .kpi-v{color:var(--grn)}
+.d5 .kpi-red .kpi-v{color:var(--red)}
+.d5 .kpi-amb .kpi-v{color:var(--amb)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 6 — Clean Light (Enterprise)
+════════════════════════════════════════════════════ */
+.d6{--bg:#F8FAFC;--surf:#FFFFFF;--s2:#F1F5F9;--bdr:#E2E8F0;--txt:#0F172A;--mut:#64748B;--acc:#4F46E5;--red:#DC2626;--amb:#D97706;--grn:#059669}
+.d6{background:var(--bg);color:var(--txt)}
+.d6 .d-btn{background:var(--surf);border:1px solid var(--bdr);color:var(--mut);border-radius:8px}
+.d6 .kpi{background:var(--surf);border:1px solid var(--bdr);box-shadow:0 1px 3px rgba(0,0,0,.06);border-radius:12px}
+.d6 .kpi-l{color:var(--mut)}
+.d6 .kpi-bar{background:var(--s2)}
+.d6 .kpi-bar-f{background:var(--grn)}
+.d6 .sec-wrap{background:var(--surf);border:1px solid var(--bdr);box-shadow:0 1px 3px rgba(0,0,0,.04);border-radius:12px}
+.d6 .sec-h{background:var(--s2)}
+.d6 .sec-cnt{background:var(--bdr);color:var(--mut)}
+.d6 .card{background:var(--s2);border:1px solid var(--bdr);border-radius:10px}
+.d6 .card--crit{border-top:3px solid var(--red)}
+.d6 .card--warn{border-top:3px solid var(--amb)}
+.d6 .card--ok{border-top:3px solid var(--acc)}
+.d6 .card-id{color:var(--acc)}
+.d6 .card-title{color:var(--txt)}
+.d6 .stat-l{color:var(--mut)}
+.d6 .stat-crit{color:var(--red)}
+.d6 .stat-warn{color:var(--amb)}
+.d6 .stat-ok{color:var(--txt)}
+.d6 .stat-dim{color:var(--bdr)}
+.d6 .av-n{color:var(--mut)}
+.d6 .tag-bounce{background:#FEF3C7;color:var(--amb);border:1px solid #FDE68A}
+.d6 .tag-hf{background:#FEE2E2;color:var(--red);border:1px solid #FECACA}
+.d6 .tag-p2{background:#FEF3C7;color:var(--amb);border:1px solid #FDE68A}
+.d6 .tag-p3{background:#F1F5F9;color:var(--mut);border:1px solid var(--bdr)}
+.d6 .bl-strip{background:#FFF5F5;border:1px solid #FED7D7;border-radius:12px}
+.d6 .bl-row{border-bottom:1px solid #FED7D7}
+.d6 .bl-row:hover{background:#FFF0F0}
+.d6 .bl-row--crit{border-left:3px solid var(--red)}
+.d6 .bl-row--amb{border-left:3px solid var(--amb)}
+.d6 .bl-id{color:var(--acc)}
+.d6 .bl-title{color:var(--txt)}
+.d6 .bl-tc{color:var(--red)}
+.d6 .bl-ta{color:var(--amb)}
+.d6 .ct{background:var(--surf);border:1px solid var(--bdr);border-radius:12px}
+.d6 .ct-hdr{background:var(--s2)}
+.d6 .ct-row:hover{background:var(--s2)}
+.d6 .ct-lbl{color:var(--mut)}
+.d6 .ct-tid{color:var(--acc)}
+.d6 .ct-title{color:var(--txt)}
+.d6 .ct-crit{color:var(--red)}
+.d6 .ct-warn{color:var(--amb)}
+.d6 .ct-dim{color:var(--mut)}
+.d6 .ct-row--ov{border-left:3px solid var(--red)}
+.d6 .ct-row--wn{border-left:3px solid var(--amb)}
+.d6 .kpi-grn .kpi-v{color:var(--grn)}
+.d6 .kpi-red .kpi-v{color:var(--red)}
+.d6 .kpi-amb .kpi-v{color:var(--amb)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 7 — Neon Terminal (Dev Mode)
+════════════════════════════════════════════════════ */
+.d7{--bg:#080D0B;--surf:#0C1410;--s2:#111A14;--bdr:#1A2B1E;--txt:#B4F5C8;--mut:#4D7A5A;--acc:#00FF88;--red:#FF4060;--amb:#FFD700;--grn:#00FF88;font-family:'Fira Code',monospace}
+.d7{background:var(--bg);color:var(--txt)}
+.d7 .d-btn{background:transparent;border:1px solid var(--acc);color:var(--acc);border-radius:4px;font-family:'Fira Code',monospace;font-size:11px}
+.d7 .kpi{background:var(--surf);border:1px solid var(--bdr);border-radius:4px;border-left:2px solid var(--acc)}
+.d7 .kpi-l{color:var(--mut);font-size:9px}
+.d7 .kpi-bar{background:var(--s2)}
+.d7 .kpi-bar-f{background:var(--grn)}
+.d7 .sec-wrap{background:var(--surf);border:1px solid var(--bdr);border-radius:4px}
+.d7 .sec-h{background:var(--s2);border-bottom:1px solid var(--bdr)}
+.d7 .sec-cnt{background:var(--bg);border:1px solid var(--acc);color:var(--acc);font-size:10px}
+.d7 .card{background:var(--s2);border:1px solid var(--bdr);border-radius:4px}
+.d7 .card--crit{border:1px solid var(--red);box-shadow:0 0 8px rgba(255,64,96,.15)}
+.d7 .card--warn{border:1px solid var(--amb);box-shadow:0 0 8px rgba(255,215,0,.1)}
+.d7 .card--ok{border:1px solid var(--acc);box-shadow:0 0 8px rgba(0,255,136,.08)}
+.d7 .card-id{color:var(--acc);font-size:11px}
+.d7 .card-title{color:var(--txt);font-size:12px}
+.d7 .stat-l{color:var(--mut);font-size:8px}
+.d7 .stat-crit{color:var(--red)}
+.d7 .stat-warn{color:var(--amb)}
+.d7 .stat-ok{color:var(--acc)}
+.d7 .stat-dim{color:var(--bdr)}
+.d7 .av-n{color:var(--mut)}
+.d7 .tag-bounce{background:rgba(255,215,0,.1);color:var(--amb);border:1px solid rgba(255,215,0,.3)}
+.d7 .tag-hf{background:rgba(255,64,96,.1);color:var(--red);border:1px solid rgba(255,64,96,.3)}
+.d7 .tag-p2{background:rgba(0,255,136,.08);color:var(--acc);border:1px solid rgba(0,255,136,.2)}
+.d7 .tag-p3{background:rgba(77,122,90,.1);color:var(--mut);border:1px solid rgba(77,122,90,.2)}
+.d7 .bl-strip{background:rgba(255,64,96,.05);border:1px solid rgba(255,64,96,.3);border-radius:4px;box-shadow:0 0 20px rgba(255,64,96,.05)}
+.d7 .bl-row{border-bottom:1px solid rgba(255,64,96,.1)}
+.d7 .bl-row:hover{background:rgba(255,64,96,.05)}
+.d7 .bl-row--crit{border-left:2px solid var(--red)}
+.d7 .bl-row--amb{border-left:2px solid var(--amb)}
+.d7 .bl-id{color:var(--acc)}
+.d7 .bl-title{color:var(--txt)}
+.d7 .bl-tc{color:var(--red)}
+.d7 .bl-ta{color:var(--amb)}
+.d7 .ct{background:var(--surf);border:1px solid var(--bdr);border-radius:4px}
+.d7 .ct-hdr{background:var(--s2);border-bottom:1px solid var(--bdr)}
+.d7 .ct-row:hover{background:var(--s2)}
+.d7 .ct-lbl{color:var(--mut)}
+.d7 .ct-tid{color:var(--acc)}
+.d7 .ct-title{color:var(--txt)}
+.d7 .ct-crit{color:var(--red)}
+.d7 .ct-warn{color:var(--amb)}
+.d7 .ct-dim{color:var(--mut)}
+.d7 .ct-row--ov{border-left:2px solid var(--red)}
+.d7 .ct-row--wn{border-left:2px solid var(--amb)}
+.d7 .kpi-grn .kpi-v{color:var(--grn);text-shadow:0 0 10px rgba(0,255,136,.3)}
+.d7 .kpi-red .kpi-v{color:var(--red);text-shadow:0 0 10px rgba(255,64,96,.3)}
+.d7 .kpi-amb .kpi-v{color:var(--amb)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 8 — Slate Pro (Neutral professional)
+════════════════════════════════════════════════════ */
+.d8{--bg:#F4F6F8;--surf:#FFFFFF;--s2:#EEF1F5;--bdr:#D8DDE6;--txt:#1C2333;--mut:#6B7590;--acc:#2563EB;--red:#E53E3E;--amb:#DD6B20;--grn:#276749}
+.d8{background:var(--bg);color:var(--txt)}
+.d8 .d-btn{background:var(--surf);border:1px solid var(--bdr);color:var(--txt);border-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.d8 .kpi{background:var(--surf);border:1px solid var(--bdr);border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.d8 .kpi-l{color:var(--mut)}
+.d8 .kpi-bar{background:var(--s2)}
+.d8 .kpi-bar-f{background:var(--grn)}
+.d8 .sec-wrap{background:var(--surf);border:1px solid var(--bdr);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.d8 .sec-h{background:var(--s2)}
+.d8 .sec-cnt{background:var(--bdr);color:var(--mut)}
+.d8 .card{background:var(--surf);border:1px solid var(--bdr);border-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.d8 .card--crit{border-left:3px solid var(--red)}
+.d8 .card--warn{border-left:3px solid var(--amb)}
+.d8 .card--ok{border-left:3px solid var(--acc)}
+.d8 .card-id{color:var(--acc)}
+.d8 .card-title{color:var(--txt)}
+.d8 .stat-l{color:var(--mut)}
+.d8 .stat-crit{color:var(--red)}
+.d8 .stat-warn{color:var(--amb)}
+.d8 .stat-ok{color:var(--txt)}
+.d8 .stat-dim{color:var(--bdr)}
+.d8 .av-n{color:var(--mut)}
+.d8 .tag-bounce{background:#FFFAF0;color:var(--amb);border:1px solid #FBD38D}
+.d8 .tag-hf{background:#FFF5F5;color:var(--red);border:1px solid #FEB2B2}
+.d8 .tag-p2{background:#FFFAF0;color:var(--amb);border:1px solid #FBD38D}
+.d8 .tag-p3{background:var(--s2);color:var(--mut);border:1px solid var(--bdr)}
+.d8 .bl-strip{background:#FFF5F5;border:1px solid #FEB2B2;border-radius:8px}
+.d8 .bl-row{border-bottom:1px solid #FED7D7}
+.d8 .bl-row:hover{background:#FFF0F0}
+.d8 .bl-row--crit{border-left:3px solid var(--red)}
+.d8 .bl-row--amb{border-left:3px solid var(--amb)}
+.d8 .bl-id{color:var(--acc)}
+.d8 .bl-title{color:var(--txt)}
+.d8 .bl-tc{color:var(--red)}
+.d8 .bl-ta{color:var(--amb)}
+.d8 .ct{background:var(--surf);border:1px solid var(--bdr);border-radius:8px}
+.d8 .ct-hdr{background:var(--s2)}
+.d8 .ct-row:hover{background:var(--s2)}
+.d8 .ct-lbl{color:var(--mut)}
+.d8 .ct-tid{color:var(--acc)}
+.d8 .ct-title{color:var(--txt)}
+.d8 .ct-crit{color:var(--red)}
+.d8 .ct-warn{color:var(--amb)}
+.d8 .ct-dim{color:var(--mut)}
+.d8 .ct-row--ov{border-left:3px solid var(--red)}
+.d8 .ct-row--wn{border-left:3px solid var(--amb)}
+.d8 .kpi-grn .kpi-v{color:var(--grn)}
+.d8 .kpi-red .kpi-v{color:var(--red)}
+.d8 .kpi-amb .kpi-v{color:var(--amb)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 9 — Midnight Teal
+════════════════════════════════════════════════════ */
+.d9{--bg:#06111A;--surf:#0B1A24;--s2:#0F2230;--bdr:#163040;--txt:#C8E6F5;--mut:#4A7A96;--acc:#00BCD4;--red:#FF5252;--amb:#FFB300;--grn:#00E5A0;font-family:'DM Sans',sans-serif}
+.d9{background:var(--bg);color:var(--txt)}
+.d9 .d-btn{background:transparent;border:1px solid var(--bdr);color:var(--mut);border-radius:8px}
+.d9 .kpi{background:var(--surf);border:1px solid var(--bdr);border-radius:14px}
+.d9 .kpi-l{color:var(--mut)}
+.d9 .kpi-bar{background:var(--s2)}
+.d9 .kpi-bar-f{background:var(--grn)}
+.d9 .sec-wrap{background:var(--surf);border:1px solid var(--bdr);border-radius:14px}
+.d9 .sec-h{background:transparent}
+.d9 .sec-cnt{background:var(--s2);border:1px solid var(--bdr);color:var(--mut)}
+.d9 .card{background:var(--s2);border:1px solid var(--bdr);border-radius:10px}
+.d9 .card--crit::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--red)}
+.d9 .card--warn::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--amb)}
+.d9 .card--ok::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--acc)}
+.d9 .card-id{color:var(--acc)}
+.d9 .card-title{color:var(--txt)}
+.d9 .stat-l{color:var(--mut)}
+.d9 .stat-crit{color:var(--red)}
+.d9 .stat-warn{color:var(--amb)}
+.d9 .stat-ok{color:var(--txt)}
+.d9 .stat-dim{color:var(--bdr)}
+.d9 .av-n{color:var(--mut)}
+.d9 .tag-bounce{background:rgba(255,179,0,.12);color:var(--amb);border:1px solid rgba(255,179,0,.2)}
+.d9 .tag-hf{background:rgba(255,82,82,.12);color:var(--red);border:1px solid rgba(255,82,82,.2)}
+.d9 .tag-p2{background:rgba(0,188,212,.1);color:var(--acc);border:1px solid rgba(0,188,212,.2)}
+.d9 .tag-p3{background:rgba(74,122,150,.12);color:var(--mut);border:1px solid rgba(74,122,150,.2)}
+.d9 .bl-strip{background:rgba(255,82,82,.05);border:1px solid rgba(255,82,82,.2);border-radius:14px}
+.d9 .bl-row{border-bottom:1px solid rgba(255,82,82,.08)}
+.d9 .bl-row:hover{background:rgba(255,82,82,.04)}
+.d9 .bl-row--crit{border-left:3px solid var(--red)}
+.d9 .bl-row--amb{border-left:3px solid var(--amb)}
+.d9 .bl-id{color:var(--acc)}
+.d9 .bl-title{color:var(--txt)}
+.d9 .bl-tc{color:var(--red)}
+.d9 .bl-ta{color:var(--amb)}
+.d9 .ct{background:var(--surf);border:1px solid var(--bdr);border-radius:14px}
+.d9 .ct-hdr{background:var(--s2)}
+.d9 .ct-row:hover{background:var(--s2)}
+.d9 .ct-lbl{color:var(--mut)}
+.d9 .ct-tid{color:var(--acc)}
+.d9 .ct-title{color:var(--txt)}
+.d9 .ct-crit{color:var(--red)}
+.d9 .ct-warn{color:var(--amb)}
+.d9 .ct-dim{color:var(--mut)}
+.d9 .ct-row--ov{border-left:3px solid var(--red)}
+.d9 .ct-row--wn{border-left:3px solid var(--amb)}
+.d9 .kpi-grn .kpi-v{color:var(--grn)}
+.d9 .kpi-red .kpi-v{color:var(--red)}
+.d9 .kpi-amb .kpi-v{color:var(--amb)}
+
+/* ════════════════════════════════════════════════════
+   DESIGN 10 — Warm Sand (Friendly Light)
+════════════════════════════════════════════════════ */
+.d10{--bg:#FAF7F2;--surf:#FFFFFF;--s2:#F5F0E8;--bdr:#E8DFD0;--txt:#2D2016;--mut:#8C7A6B;--acc:#C2410C;--red:#DC2626;--amb:#B45309;--grn:#065F46;font-family:'DM Sans',sans-serif}
+.d10{background:var(--bg);color:var(--txt)}
+.d10 .d-btn{background:var(--surf);border:1px solid var(--bdr);color:var(--mut);border-radius:8px}
+.d10 .kpi{background:var(--surf);border:1px solid var(--bdr);border-radius:14px;box-shadow:0 2px 6px rgba(44,32,22,.06)}
+.d10 .kpi-l{color:var(--mut)}
+.d10 .kpi-bar{background:var(--s2)}
+.d10 .kpi-bar-f{background:var(--grn)}
+.d10 .sec-wrap{background:var(--surf);border:1px solid var(--bdr);border-radius:14px;box-shadow:0 2px 6px rgba(44,32,22,.05)}
+.d10 .sec-h{background:var(--s2)}
+.d10 .sec-cnt{background:var(--bdr);color:var(--mut)}
+.d10 .card{background:var(--s2);border:1px solid var(--bdr);border-radius:10px}
+.d10 .card--crit{border-top:3px solid var(--red)}
+.d10 .card--warn{border-top:3px solid var(--amb)}
+.d10 .card--ok{border-top:3px solid var(--acc)}
+.d10 .card-id{color:var(--acc)}
+.d10 .card-title{color:var(--txt)}
+.d10 .stat-l{color:var(--mut)}
+.d10 .stat-crit{color:var(--red)}
+.d10 .stat-warn{color:var(--amb)}
+.d10 .stat-ok{color:var(--txt)}
+.d10 .stat-dim{color:var(--bdr)}
+.d10 .av-n{color:var(--mut)}
+.d10 .tag-bounce{background:#FEF3C7;color:var(--amb);border:1px solid #FDE68A}
+.d10 .tag-hf{background:#FEE2E2;color:var(--red);border:1px solid #FECACA}
+.d10 .tag-p2{background:#FEF3C7;color:var(--amb);border:1px solid #FDE68A}
+.d10 .tag-p3{background:var(--s2);color:var(--mut);border:1px solid var(--bdr)}
+.d10 .bl-strip{background:#FFF8F5;border:1px solid #FECACA;border-radius:14px}
+.d10 .bl-row{border-bottom:1px solid #FECACA}
+.d10 .bl-row:hover{background:#FFF0EC}
+.d10 .bl-row--crit{border-left:3px solid var(--red)}
+.d10 .bl-row--amb{border-left:3px solid var(--amb)}
+.d10 .bl-id{color:var(--acc)}
+.d10 .bl-title{color:var(--txt)}
+.d10 .bl-tc{color:var(--red)}
+.d10 .bl-ta{color:var(--amb)}
+.d10 .ct{background:var(--surf);border:1px solid var(--bdr);border-radius:14px}
+.d10 .ct-hdr{background:var(--s2)}
+.d10 .ct-row:hover{background:var(--s2)}
+.d10 .ct-lbl{color:var(--mut)}
+.d10 .ct-tid{color:var(--acc)}
+.d10 .ct-title{color:var(--txt)}
+.d10 .ct-crit{color:var(--red)}
+.d10 .ct-warn{color:var(--amb)}
+.d10 .ct-dim{color:var(--mut)}
+.d10 .ct-row--ov{border-left:3px solid var(--red)}
+.d10 .ct-row--wn{border-left:3px solid var(--amb)}
+.d10 .kpi-grn .kpi-v{color:var(--grn)}
+.d10 .kpi-red .kpi-v{color:var(--red)}
+.d10 .kpi-amb .kpi-v{color:var(--amb)}
+</style>
+</head>
+<body>
+
+<!-- PICKER -->
+<div class="picker">
+  <span class="pick-label">Design</span>
+  <button class="pbtn on" style="--accent:#6366F1" onclick="show(1,this)">1 · OLED Dark</button>
+  <button class="pbtn" style="--accent:#818CF8" onclick="show(2,this)">2 · Linear Navy</button>
+  <button class="pbtn" style="--accent:#fff" onclick="show(3,this)">3 · Vercel Minimal</button>
+  <button class="pbtn" style="--accent:#58A6FF" onclick="show(4,this)">4 · GitHub Dark</button>
+  <button class="pbtn" style="--accent:#C084FC" onclick="show(5,this)">5 · Purple Haze</button>
+  <button class="pbtn" style="--accent:#4F46E5" onclick="show(6,this)">6 · Clean Light</button>
+  <button class="pbtn" style="--accent:#00FF88" onclick="show(7,this)">7 · Neon Terminal</button>
+  <button class="pbtn" style="--accent:#2563EB" onclick="show(8,this)">8 · Slate Pro</button>
+  <button class="pbtn" style="--accent:#00BCD4" onclick="show(9,this)">9 · Midnight Teal</button>
+  <button class="pbtn" style="--accent:#C2410C" onclick="show(10,this)">10 · Warm Sand</button>
+</div>
+
+<!-- DESIGNS 1-10: same content, different class -->
+<div id="d1" class="design d1 on"><div class="d-wrap"><!-- content injected --></div></div>
+<div id="d2" class="design d2"><div class="d-wrap"></div></div>
+<div id="d3" class="design d3"><div class="d-wrap"></div></div>
+<div id="d4" class="design d4"><div class="d-wrap"></div></div>
+<div id="d5" class="design d5"><div class="d-wrap"></div></div>
+<div id="d6" class="design d6"><div class="d-wrap"></div></div>
+<div id="d7" class="design d7"><div class="d-wrap"></div></div>
+<div id="d8" class="design d8"><div class="d-wrap"></div></div>
+<div id="d9" class="design d9"><div class="d-wrap"></div></div>
+<div id="d10" class="design d10"><div class="d-wrap"></div></div>
+
+<script>
+// ── Shared content HTML ──
+const CONTENT = `
+<div class="d-header">
+  <div class="d-title">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    Sprint Tracking
+  </div>
+  <div class="d-tools">
+    <div style="display:flex;border-radius:8px;overflow:hidden;border:1px solid var(--bdr)">
+      <button class="d-btn" style="border-radius:0;border:none;border-right:1px solid var(--bdr)">By Column</button>
+      <button class="d-btn" style="border-radius:0;border:none">By Assignee</button>
+    </div>
+    <button class="d-btn">All Assignees</button>
+    <button class="d-btn">Sprint 2 · 13–25 Apr</button>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi kpi-grn">
+    <div class="kpi-l">Completion</div>
+    <div class="kpi-v">87<span style="font-size:16px;opacity:.6">%</span></div>
+    <div class="kpi-bar"><div class="kpi-bar-f"></div></div>
+    <div class="kpi-n" style="color:var(--mut)">156 / 179 · 23 left</div>
+  </div>
+  <div class="kpi kpi-red">
+    <div class="kpi-l">Blocked</div>
+    <div class="kpi-v">12</div>
+    <div class="kpi-n" style="color:var(--mut)">5 in progress · 1 P0</div>
+  </div>
+  <div class="kpi kpi-amb">
+    <div class="kpi-l">Bounced</div>
+    <div class="kpi-v">2</div>
+    <div class="kpi-n" style="color:var(--mut)">1 hotfix · 1 regression</div>
+  </div>
+  <div class="kpi kpi-red">
+    <div class="kpi-l">Sprint Ends</div>
+    <div class="kpi-v">1d 6h</div>
+    <div class="kpi-n" style="color:var(--red)">129 overdue · Apr 25</div>
+  </div>
+</div>
+
+<!-- IN PROGRESS — CARDS -->
+<div class="sec-wrap">
+  <div class="sec-h">
+    <span style="display:flex;align-items:center">
+      <span class="sec-dot" style="background:var(--acc)"></span>
+      IN PROGRESS <span class="sec-cnt">5</span>
+    </span>
+    <span style="font-size:12px;color:var(--red);font-weight:600">▲ 2 overdue</span>
+  </div>
+  <div class="cards">
+    <div class="card card--crit">
+      <div class="card-top">
+        <span class="card-id">ARD-1469</span>
+        <div style="display:flex;gap:4px">
+          <span class="tag tag-p2">P2</span>
+        </div>
+      </div>
+      <div class="card-title">Do Not Delete This Card [TRIGGERED]</div>
+      <div class="card-tags">
+        <span class="tag tag-bounce">↩ Bounced ×2</span>
+        <span class="tag tag-hf">Regression</span>
+      </div>
+      <div class="card-stats">
+        <div><div class="stat-l">Cycle</div><div class="stat-v stat-crit">10d 10h</div></div>
+        <div><div class="stat-l">In State</div><div class="stat-v stat-crit">10d 10h</div></div>
+        <div><div class="stat-l">Verified</div><div class="stat-v stat-dim">—</div></div>
+      </div>
+      <div class="card-foot">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="av" style="background:#6366F1">SD</div>
+          <span class="av-n">Simran</span>
+        </div>
+      </div>
+    </div>
+    <div class="card card--warn">
+      <div class="card-top">
+        <span class="card-id">ARD-1541</span>
+        <span class="tag tag-p2">P2</span>
+      </div>
+      <div class="card-title">Sending Audio file as message (Different API), MP3 or WAV</div>
+      <div class="card-tags"><span style="font-size:11px;color:var(--mut)">No flags</span></div>
+      <div class="card-stats">
+        <div><div class="stat-l">Cycle</div><div class="stat-v stat-warn">2d 9h</div></div>
+        <div><div class="stat-l">In State</div><div class="stat-v stat-warn">2d 9h</div></div>
+        <div><div class="stat-l">Verified</div><div class="stat-v stat-dim">—</div></div>
+      </div>
+      <div class="card-foot">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="av" style="background:#8B5CF6">VP</div>
+          <span class="av-n">Vishal</span>
+        </div>
+      </div>
+    </div>
+    <div class="card card--ok">
+      <div class="card-top">
+        <span class="card-id">ARD-1074</span>
+        <div style="display:flex;gap:4px"><span class="tag tag-p3">A1</span><span class="tag tag-hf">HF</span></div>
+      </div>
+      <div class="card-title">Unable to Open Chat Panel — Hotfix</div>
+      <div class="card-tags"><span class="tag tag-bounce">Hotfix → Stage</span></div>
+      <div class="card-stats">
+        <div><div class="stat-l">Cycle</div><div class="stat-v stat-ok">1d 2h</div></div>
+        <div><div class="stat-l">In State</div><div class="stat-v stat-ok">7h</div></div>
+        <div><div class="stat-l">Verified</div><div style="display:flex;gap:3px;margin-top:2px"><span class="vc vc-d">DEV</span><span class="vc vc-s">STG</span></div></div>
+      </div>
+      <div class="card-foot">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="av" style="background:#10B981">CH</div>
+          <span class="av-n">Charlie</span>
+        </div>
+      </div>
+    </div>
+    <div class="card card--ok">
+      <div class="card-top">
+        <span class="card-id">ARD-1425</span>
+        <span class="tag tag-p2">P2</span>
+      </div>
+      <div class="card-title">Mobile: Implement Auto Retry on Network Reconnection</div>
+      <div class="card-tags"><span style="font-size:11px;color:var(--mut)">No flags</span></div>
+      <div class="card-stats">
+        <div><div class="stat-l">Cycle</div><div class="stat-v stat-dim">—</div></div>
+        <div><div class="stat-l">In State</div><div class="stat-v stat-ok">10h</div></div>
+        <div><div class="stat-l">Verified</div><div class="stat-v stat-dim">—</div></div>
+      </div>
+      <div class="card-foot">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="av" style="background:#0EA5E9">PA</div>
+          <span class="av-n">Parv</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BLOCKED STRIP -->
+<div class="bl-strip">
+  <div style="padding:10px 16px 8px;display:flex;align-items:center;justify-content:space-between">
+    <span style="font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px">
+      <span class="sec-dot" style="background:var(--red)"></span>
+      BLOCKED <span class="sec-cnt">12</span>
+    </span>
+    <span style="font-size:12px;color:var(--red);font-weight:600">3 critical</span>
+  </div>
+  <div class="bl-row bl-row--crit">
+    <span class="bl-id">ARD-759</span>
+    <span class="bl-pri"><span class="tag tag-p2">P2</span></span>
+    <span class="bl-title">Create API Documentation in Voiden <span class="tag tag-hf" style="margin-left:6px">HF</span></span>
+    <span class="bl-t bl-tc">14d 6h</span>
+    <div class="bl-av"><div class="av" style="background:#F43F5E">SO</div><span style="font-size:12px;color:var(--mut)">Sonal</span></div>
+  </div>
+  <div class="bl-row bl-row--crit">
+    <span class="bl-id">ARD-1443</span>
+    <span class="bl-pri"><span class="tag tag-p2">P2</span></span>
+    <span class="bl-title">BE Studio: Uploading files API stuck in pending state</span>
+    <span class="bl-t bl-tc">14d 6h</span>
+    <div class="bl-av"><div class="av" style="background:#F43F5E">SO</div><span style="font-size:12px;color:var(--mut)">Sonal</span></div>
+  </div>
+  <div class="bl-row bl-row--amb">
+    <span class="bl-id">ARD-1486</span>
+    <span class="bl-pri"><span class="tag tag-p2">P2</span></span>
+    <span class="bl-title">FE MC: Redesign Mission Control UI to Back-Office Style</span>
+    <span class="bl-t bl-ta">2d 4h</span>
+    <div class="bl-av"><div class="av" style="background:#F97316">HA</div><span style="font-size:12px;color:var(--mut)">Harpinder</span></div>
+  </div>
+</div>
+
+<!-- DEV compact -->
+<div class="ct">
+  <div class="ct-row ct-hdr">
+    <span class="ct-lbl">Ticket</span><span class="ct-lbl">Pri</span>
+    <span class="ct-lbl">Title</span>
+    <span class="ct-lbl">Cycle</span><span class="ct-lbl">In State</span>
+    <span class="ct-lbl">Assignee</span>
+  </div>
+  <div style="padding:6px 16px 6px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--mut)">
+    <span class="sec-dot" style="background:var(--acc);width:7px;height:7px"></span>
+    DEV <span class="sec-cnt" style="margin-left:4px">3</span>
+    <span style="margin-left:auto;color:var(--amb);font-weight:600;font-size:11px">▲ 2 delayed</span>
+  </div>
+  <div class="ct-row ct-row--ov">
+    <span class="ct-tid" style="font-family:'Fira Code',monospace;font-size:11px">ARD-1554</span>
+    <span class="tag tag-p2">P2</span>
+    <span class="ct-title" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">FE UI: Apply Uploaded Font to Domain UI v2</span>
+    <span class="ct-crit" style="font-family:'Fira Code',monospace;font-size:12px">6d 6h</span>
+    <span class="ct-crit" style="font-family:'Fira Code',monospace;font-size:12px">6d 6h</span>
+    <div style="display:flex;align-items:center;gap:5px"><div class="av" style="background:#8B5CF6">VP</div><span class="ct-dim" style="font-size:12px">Vishal</span></div>
+  </div>
+  <div class="ct-row">
+    <span class="ct-tid" style="font-family:'Fira Code',monospace;font-size:11px">ARD-1160</span>
+    <span class="tag tag-p2">P2</span>
+    <span class="ct-title" style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Make Onboarding Interactive with Guided Tour</span>
+    <span class="ct-ok" style="font-family:'Fira Code',monospace;font-size:12px;color:var(--mut)">3d 2h</span>
+    <span class="ct-ok" style="font-family:'Fira Code',monospace;font-size:12px;color:var(--mut)">1d 4h</span>
+    <div style="display:flex;align-items:center;gap:5px"><div class="av" style="background:#6366F1">AL</div><span class="ct-dim" style="font-size:12px">Alice</span></div>
+  </div>
+  <div style="padding:6px 16px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--mut)">
+    <span class="sec-dot" style="background:var(--mut);width:7px;height:7px"></span>
+    TO DO <span class="sec-cnt" style="margin-left:4px">6</span>
+    <span style="font-size:11px;color:var(--mut);font-weight:400;margin-left:auto">Collapsed — click to expand</span>
+  </div>
+</div>
+`
+
+// Inject content into all 10 wrappers
+document.querySelectorAll('.d-wrap').forEach(el => el.innerHTML = CONTENT)
+
+function show(n, btn) {
+  document.querySelectorAll('.design').forEach(d => d.classList.remove('on'))
+  document.querySelectorAll('.pbtn').forEach(b => b.classList.remove('on'))
+  document.getElementById('d'+n).classList.add('on')
+  btn.classList.add('on')
+  window.scrollTo(0, 0)
+}
+</script>
+</body>
+</html>
