@@ -95,7 +95,7 @@ function WcSelectDropdown({ value, options, onChange, className = '' }: WcSelect
         <ChevronDown size={11} className={`dropdown-chevron ${open ? 'open' : ''}`} />
       </button>
       {open && rect && createPortal(
-        <div className="pm-custom-dropdown-menu" style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, minWidth: rect.width, zIndex: 9999 }}>
+        <div className="pm-custom-dropdown-menu wc-sel-dropdown" style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, minWidth: rect.width, zIndex: 9999 }}>
           {options.map(opt => (
             <button key={opt} type="button" className={`pm-dropdown-item ${value === opt ? 'active' : ''}`}
               onClick={() => { onChange(opt); setOpen(false); setRect(null) }}>
@@ -164,29 +164,55 @@ function WcObjDropdown({ value, placeholder = '— Select —', options, onChang
   )
 }
 
+const ROLE_COLORS: Record<string, string> = {
+  backlog:  '#6b7280',
+  active:   '#3d6eff',
+  blocked:  '#ef4444',
+  findings: '#f59e0b',
+  dev_done: '#22c55e',
+  verified: '#06b6d4',
+  deployed: '#8b5cf6',
+  closed:   '#94a3b8',
+}
+
 interface SortableColumnRowProps {
   col: ColumnState
   i: number
   updateColumn: (i: number, field: keyof ColumnState, value: string | number | boolean | string[]) => void
+  removeColumn: (i: number) => void
   COLUMN_ROLES: string[]
 }
 
-function SortableColumnRow({ col, i, updateColumn, COLUMN_ROLES }: SortableColumnRowProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: col.state })
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  }
+function SortableColumnRow({ col, i, updateColumn, removeColumn, COLUMN_ROLES }: SortableColumnRowProps) {
+  const id = col.state || `__empty_${i}`
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
+  const roleColor = ROLE_COLORS[col.role] || 'transparent'
   return (
-    <div ref={setNodeRef} style={style} className="wc-col-row">
-      <div className="wc-drag-handle" {...attributes} {...listeners}>
-        <GripVertical size={14} />
-      </div>
-      <input type="text" value={col.state} onChange={e => updateColumn(i, 'state', e.target.value)} className="wc-input" />
-      <WcSelectDropdown value={col.role} options={COLUMN_ROLES} onChange={val => updateColumn(i, 'role', val)} className="wc-sel-col-role" />
-      <input type="text" value={(col.aliases ?? []).join(', ')} onChange={e => updateColumn(i, 'aliases', e.target.value.split(',').map(s => s.trim()).filter(Boolean))} className="wc-input wc-input-grow" placeholder="alias1, alias2" />
-      <input type="checkbox" checked={col.is_lateral} onChange={e => updateColumn(i, 'is_lateral', e.target.checked)} className="wc-checkbox" />
+    <div ref={setNodeRef} style={style} className="wc-col-card">
+      <div className="wc-col-card-stripe" style={{ background: roleColor }} />
+      <div className="wc-drag-handle" {...attributes} {...listeners}><GripVertical size={14} /></div>
+      <span className="wc-col-rank">{i + 1}</span>
+      <input
+        type="text"
+        value={col.state}
+        onChange={e => updateColumn(i, 'state', e.target.value)}
+        className="wc-input wc-col-name-input"
+        placeholder="Column name"
+      />
+      <WcSelectDropdown value={col.role || '—'} options={['—', ...COLUMN_ROLES]} onChange={val => updateColumn(i, 'role', val === '—' ? '' : val)} className="wc-sel-col-role" />
+      <input
+        type="text"
+        value={(col.aliases ?? []).join(', ')}
+        onChange={e => updateColumn(i, 'aliases', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+        className="wc-input wc-input-grow"
+        placeholder="alias1, alias2"
+      />
+      <label className="wc-lateral-toggle" title="Lateral move (doesn't count as bounce)">
+        <input type="checkbox" checked={col.is_lateral} onChange={e => updateColumn(i, 'is_lateral', e.target.checked)} className="wc-checkbox" />
+        <span>Lateral</span>
+      </label>
+      <button className="wc-icon-btn wc-icon-btn-danger" onClick={() => removeColumn(i)} title="Remove row"><Trash2 size={12} /></button>
     </div>
   )
 }
@@ -195,26 +221,28 @@ interface ColumnDndListProps {
   editColumns: ColumnState[]
   setEditColumns: React.Dispatch<React.SetStateAction<ColumnState[]>>
   updateColumn: (i: number, field: keyof ColumnState, value: string | number | boolean | string[]) => void
+  removeColumn: (i: number) => void
   COLUMN_ROLES: string[]
 }
 
-function ColumnDndList({ editColumns, setEditColumns, updateColumn, COLUMN_ROLES }: ColumnDndListProps) {
+function ColumnDndList({ editColumns, setEditColumns, updateColumn, removeColumn, COLUMN_ROLES }: ColumnDndListProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     if (over && active.id !== over.id) {
       setEditColumns(prev => {
-        const oldIndex = prev.findIndex(c => c.state === active.id)
-        const newIndex = prev.findIndex(c => c.state === over.id)
+        const oldIndex = prev.findIndex((c, idx) => (c.state || `__empty_${idx}`) === active.id)
+        const newIndex = prev.findIndex((c, idx) => (c.state || `__empty_${idx}`) === over.id)
         return arrayMove(prev, oldIndex, newIndex)
       })
     }
   }
+  const items = editColumns.map((c, i) => c.state || `__empty_${i}`)
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <SortableContext items={editColumns.map(c => c.state)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={items} strategy={verticalListSortingStrategy}>
         {editColumns.map((col, i) => (
-          <SortableColumnRow key={col.state} col={col} i={i} updateColumn={updateColumn} COLUMN_ROLES={COLUMN_ROLES} />
+          <SortableColumnRow key={col.state || `__empty_${i}`} col={col} i={i} updateColumn={updateColumn} removeColumn={removeColumn} COLUMN_ROLES={COLUMN_ROLES} />
         ))}
       </SortableContext>
     </DndContext>
@@ -799,6 +827,8 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const removeTag = (i: number) => setEditTags(prev => prev.filter((_, idx) => idx !== i))
   const updateColumn = (i: number, field: keyof ColumnState, value: string | number | boolean | string[]) =>
     setEditColumns(prev => prev.map((c, idx) => idx === i ? { ...c, [field]: value } : c))
+  const removeColumn = (i: number) => setEditColumns(prev => prev.filter((_, idx) => idx !== i))
+  const addColumn = () => setEditColumns(prev => [...prev, { state: '', rank: prev.length, aliases: [], role: '', is_lateral: false }])
   const moveColumn = (i: number, dir: -1 | 1) => setEditColumns(prev => {
     const arr = [...prev]; const j = i + dir
     if (j < 0 || j >= arr.length) return arr
@@ -1471,19 +1501,37 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
               {/* Column Hierarchy */}
               {wcSection === 'columns' && (
                 <div className="wc-section">
-                  <p className="int-help-text">Set the order and role of each YouTrack column. Role drives hotfix detection and report logic.</p>
+                  <div className="wc-col-topbar">
+                    <p className="int-help-text" style={{ margin: 0 }}>Each row maps a board column to a role. Roles drive hotfix detection, bounce labels, and overdue logic.</p>
+                    {columnsLoadingFromYT && <span className="wc-col-syncing"><RefreshCw size={12} className="spin" /> Syncing from YouTrack…</span>}
+                  </div>
+                  <div className="wc-col-legend">
+                    {Object.entries(ROLE_COLORS).map(([role, color]) => (
+                      <span key={role} className="wc-col-legend-item">
+                        <span className="wc-col-legend-dot" style={{ background: color }} />
+                        {role}
+                      </span>
+                    ))}
+                  </div>
                   <div className="wc-col-list">
-                    <div className="wc-col-header">
-                      <span></span><span>State</span><span>Role</span><span>Aliases</span><span>Lateral</span>
+                    <div className="wc-col-card-header">
+                      <span style={{ width: 24 }} /><span style={{ width: 24 }} /><span style={{ width: 20 }} />
+                      <span style={{ width: 160 }}>State</span>
+                      <span style={{ width: 132 }}>Role</span>
+                      <span style={{ flex: 1 }}>Aliases</span>
+                      <span style={{ width: 72 }}>Lateral</span>
+                      <span style={{ width: 28 }} />
                     </div>
                     <ColumnDndList
                       editColumns={editColumns}
                       setEditColumns={setEditColumns}
                       updateColumn={updateColumn}
+                      removeColumn={removeColumn}
                       COLUMN_ROLES={COLUMN_ROLES}
                     />
                   </div>
                   <div className="wc-actions">
+                    <button className="int-btn int-btn-ghost int-btn-sm" onClick={addColumn}><Plus size={13} /> Add row</button>
                     <button className="int-btn int-btn-primary int-btn-sm" onClick={handleSaveColumns} disabled={wcSaving}>
                       {wcSaving ? 'Saving…' : <><Save size={13} /> Save</>}
                     </button>

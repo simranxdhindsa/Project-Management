@@ -2017,7 +2017,11 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		isDoneNow := currentStateRole == "dev_done" || currentStateRole == "verified" || currentStateRole == "deployed" || currentStateRole == "closed"
 		_ = isDoneNow
 
-		if dueDate != nil && dueDate.Before(now) && !isDoneNow {
+		if isDoneNow {
+			// Terminal states (dev_done, verified, deployed, closed) are never overdue
+			isDelayed = false
+			overdueLevel = ""
+		} else if dueDate != nil && dueDate.Before(now) {
 			isDelayed = true
 			overdueLevel = "deadline"
 		} else if sprintFinishMs > 0 && time.UnixMilli(sprintFinishMs).Before(now) && isActiveNow {
@@ -2035,8 +2039,21 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			var firstDoneAt *time.Time
 			var stintStart *time.Time // start of current/last "In Progress" session
 
-			// QA verification: rank → last mover for that rank
-			verifiedByRank := map[int]string{}
+			// QA verification: threshold-based slot assignment.
+			// Build sorted list of ranks of all "verified" role states — these are
+			// the checkpoints (Ready for Stage, Ready for Prod, Verified, etc.).
+			// When a ticket skips a checkpoint (e.g. Dev→Stage instead of Dev→Ready for Stage),
+			// the rank of the destination is still ≥ the threshold, so the slot is filled.
+			verifiedThresholds := []int{}
+			seenVT := map[int]bool{}
+			for _, col := range wfCfg.ColumnHierarchy {
+				if col.Role == "verified" && !seenVT[col.Rank] {
+					verifiedThresholds = append(verifiedThresholds, col.Rank)
+					seenVT[col.Rank] = true
+				}
+			}
+			sort.Ints(verifiedThresholds)
+			verifiedSlots := make([]string, len(verifiedThresholds))
 			closedMover := ""
 
 			for _, entry := range logs {
@@ -2070,19 +2087,25 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 					firstDoneAt = &t
 				}
 
-				// ── QA verification: rank-based slot assignment ───────────────────
-				// Use the rank of the destination state so that re-verifications
-				// (e.g. bouncing back from Ready for Stage and re-moving there)
-				// always update the correct slot instead of bumping the next slot.
 				mover := entry.MovedBy
 				if mover == "" {
 					mover = entry.Assignee
 				}
-				if toRole == "verified" {
-					rank := getStateIndexFromConfig(entry.ToState, wfCfg.ColumnHierarchy)
-					verifiedByRank[rank] = mover
+
+				// ── QA verification: threshold-based, forward moves only ──────────
+				// A ticket that skips "Ready for Stage" and goes Dev→Stage still
+				// crosses the Ready-for-Stage rank threshold, so the correct person
+				// gets credited for DEV verification.
+				fromRank := getStateIndexFromConfig(entry.FromState, wfCfg.ColumnHierarchy)
+				toRank := getStateIndexFromConfig(entry.ToState, wfCfg.ColumnHierarchy)
+				if toRank > fromRank && mover != "" {
+					for i, threshold := range verifiedThresholds {
+						if verifiedSlots[i] == "" && toRank >= threshold {
+							verifiedSlots[i] = mover
+						}
+					}
 				}
-				if toRole == "closed" {
+				if toRole == "closed" && closedMover == "" {
 					closedMover = mover
 				}
 
@@ -2112,15 +2135,10 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 				})
 			}
 
-			// Sort verified ranks → assign to dev / stage / prod slots
-			var verRanks []int
-			for r := range verifiedByRank {
-				verRanks = append(verRanks, r)
-			}
-			sort.Ints(verRanks)
-			if len(verRanks) >= 1 { verifiedOnDev = verifiedByRank[verRanks[0]] }
-			if len(verRanks) >= 2 { verifiedOnStage = verifiedByRank[verRanks[1]] }
-			if len(verRanks) >= 3 { verifiedOnProd = verifiedByRank[verRanks[2]] }
+			// Assign verification slots → named fields
+			if len(verifiedSlots) >= 1 { verifiedOnDev = verifiedSlots[0] }
+			if len(verifiedSlots) >= 2 { verifiedOnStage = verifiedSlots[1] }
+			if len(verifiedSlots) >= 3 { verifiedOnProd = verifiedSlots[2] }
 			if verifiedOnProd == "" { verifiedOnProd = closedMover }
 
 			// Also check issue_type field for hotfix
@@ -2445,42 +2463,52 @@ func (h *ReportHandler) GetSprintQASummary(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		// Verification slots from state log
+		// Verification slots from state log — same threshold logic as GetSprintBoardStatus
 		if logs, ok := stateLogMap[id]; ok && wfCfg != nil {
-			verifiedByRank := map[int]string{}
+			verifiedThresholds := []int{}
+			seenVT := map[int]bool{}
+			for _, col := range wfCfg.ColumnHierarchy {
+				if col.Role == "verified" && !seenVT[col.Rank] {
+					verifiedThresholds = append(verifiedThresholds, col.Rank)
+					seenVT[col.Rank] = true
+				}
+			}
+			sort.Ints(verifiedThresholds)
+			verifiedSlots := make([]string, len(verifiedThresholds))
 			closedMover := ""
+
 			for _, entry := range logs {
 				toRole := getStateRole(entry.ToState, wfCfg.ColumnHierarchy)
 				mover := entry.MovedBy
 				if mover == "" {
 					mover = entry.Assignee
 				}
-				if toRole == "verified" {
-					rank := getStateIndexFromConfig(entry.ToState, wfCfg.ColumnHierarchy)
-					verifiedByRank[rank] = mover
+				fromRank := getStateIndexFromConfig(entry.FromState, wfCfg.ColumnHierarchy)
+				toRank := getStateIndexFromConfig(entry.ToState, wfCfg.ColumnHierarchy)
+				if toRank > fromRank && mover != "" {
+					for i, threshold := range verifiedThresholds {
+						if verifiedSlots[i] == "" && toRank >= threshold {
+							verifiedSlots[i] = mover
+						}
+					}
 				}
-				if toRole == "closed" {
+				if toRole == "closed" && closedMover == "" {
 					closedMover = mover
 				}
 			}
-			var verRanks []int
-			for rankKey := range verifiedByRank {
-				verRanks = append(verRanks, rankKey)
-			}
-			sort.Ints(verRanks)
 
-			if len(verRanks) >= 1 {
-				if u := ensure(verifiedByRank[verRanks[0]], ""); u != nil {
+			if len(verifiedSlots) >= 1 {
+				if u := ensure(verifiedSlots[0], ""); u != nil {
 					u.VerifiedOnDev = append(u.VerifiedOnDev, id)
 				}
 			}
-			if len(verRanks) >= 2 {
-				if u := ensure(verifiedByRank[verRanks[1]], ""); u != nil {
+			if len(verifiedSlots) >= 2 {
+				if u := ensure(verifiedSlots[1], ""); u != nil {
 					u.VerifiedOnStage = append(u.VerifiedOnStage, id)
 				}
 			}
-			if len(verRanks) >= 3 {
-				if u := ensure(verifiedByRank[verRanks[2]], ""); u != nil {
+			if len(verifiedSlots) >= 3 {
+				if u := ensure(verifiedSlots[2], ""); u != nil {
 					u.VerifiedOnProd = append(u.VerifiedOnProd, id)
 				}
 			} else if closedMover != "" {
