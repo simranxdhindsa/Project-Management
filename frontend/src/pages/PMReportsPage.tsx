@@ -21,7 +21,7 @@ import {
   Brain, ScanSearch, BarChart2, GitBranch, Layers,
   Cpu, Database, Radar, Gauge, ListChecks,
   Workflow, Telescope, FlaskConical, Network, Compass,
-  Rocket,
+  Rocket, ShieldCheck, Shield,
 } from 'lucide-react'
 import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
 import api from '../services/api'
@@ -1646,7 +1646,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
   const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-  const [viewMode, setViewMode] = useState<'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus'>('column')
+  const [viewMode, setViewMode] = useState<'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline'>('column')
+  const [qaFilterMode, setQaFilterMode] = useState<'all' | 'needs-qa'>('all')
   const [viewModeOpen, setViewModeOpen] = useState(false)
   const [sidebarPerson, setSidebarPerson] = useState<string>('')
   const [showAllFocus, setShowAllFocus] = useState(false)
@@ -1918,6 +1919,35 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     }).flatMap(c => c.issues),
   [filteredColumns])
 
+  // ── QA Pipeline: all issues sorted for the QA view ──────────────────────
+  const qaAllIssues = useMemo(() => {
+    const qaScore = (i: SprintBoardIssue) => {
+      let s = 0
+      if (i.verified_on_dev) s++
+      if (i.verified_on_stage) s++
+      if (i.verified_on_prod) s++
+      return s
+    }
+    const issues = filteredColumns.flatMap(c => c.issues)
+    return [...issues].sort((a, b) => {
+      const sa = qaScore(a), sb = qaScore(b)
+      const aPartial = sa > 0 && sa < 3
+      const bPartial = sb > 0 && sb < 3
+      const aWorked = (a.total_active_hours || 0) > 0 || (a.bounce_count || 0) > 0
+      const bWorked = (b.total_active_hours || 0) > 0 || (b.bounce_count || 0) > 0
+      // Partial first → none-but-worked → fully-verified last
+      if (aPartial && !bPartial) return -1
+      if (!aPartial && bPartial) return 1
+      if (sa === 0 && sb === 0) {
+        if (aWorked && !bWorked) return -1
+        if (!aWorked && bWorked) return 1
+      }
+      if (sa === 3 && sb !== 3) return 1
+      if (sb === 3 && sa !== 3) return -1
+      return 0
+    })
+  }, [filteredColumns])
+
   // ── Issue row renderer (shared by column + assignee views) ────────────────
   const renderIssueRow = (issue: SprintBoardIssue) => {
     const avatarUrl = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
@@ -2164,6 +2194,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               { id: 'alert-first', label: 'Alert First', icon: <AlertTriangle size={11} /> },
               { id: 'split-pane',  label: 'Split Pane',  icon: <Gauge size={11} /> },
               { id: 'focus',       label: 'Focus Mode',  icon: <ScanSearch size={11} /> },
+              { id: 'qa-pipeline', label: 'QA Pipeline', icon: <ShieldCheck size={11} /> },
             ] as const
             const current = VIEW_MODES.find(m => m.id === viewMode) || VIEW_MODES[0]
             return (
@@ -3006,6 +3037,243 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
             {showAllFocus && restIssues.length > 0 && (
               <div className="pm-tracking-focus-rest">
                 {restIssues.map(issue => renderIssueRow(issue))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* ── QA Pipeline view ── */}
+      {!loading && viewMode === 'qa-pipeline' && (() => {
+        const qaPersonEntries = Array.from(qaByPerson.entries()).sort((a, b) => {
+          const ta = a[1].devVerified.length + a[1].stageVerified.length + a[1].prodVerified.length
+          const tb = b[1].devVerified.length + b[1].stageVerified.length + b[1].prodVerified.length
+          return tb - ta
+        })
+        const isPendingDev = (i: SprintBoardIssue) =>
+          !i.verified_on_dev && ((i.total_active_hours || 0) > 0 || (i.bounce_count || 0) > 0)
+        const isPendingStg = (i: SprintBoardIssue) =>
+          !!i.verified_on_dev && !i.verified_on_stage
+        const isPendingPrd = (i: SprintBoardIssue) =>
+          !!i.verified_on_stage && !i.verified_on_prod
+        const qaScore = (i: SprintBoardIssue) =>
+          (i.verified_on_dev ? 1 : 0) + (i.verified_on_stage ? 1 : 0) + (i.verified_on_prod ? 1 : 0)
+        const displayIssues = qaFilterMode === 'needs-qa'
+          ? qaAllIssues.filter(i => isPendingDev(i) || isPendingStg(i) || isPendingPrd(i))
+          : qaAllIssues
+        const totalVerified = qaAllIssues.filter(i => qaScore(i) === 3).length
+        const totalPending = qaAllIssues.filter(i => isPendingDev(i) || isPendingStg(i) || isPendingPrd(i)).length
+        const totalNone = qaAllIssues.filter(i => qaScore(i) === 0 && !isPendingDev(i)).length
+
+        const VerifCell = ({ verified, pending, name }: { verified: string; pending: boolean; name: string }) => {
+          const initials = verified ? verified.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) : ''
+          if (verified) return (
+            <div className="pm-qa-verif-cell pm-qa-verif-cell--yes">
+              <div className="pm-qa-verif-avatar">{initials}</div>
+              <div className="pm-qa-verif-info">
+                <span className="pm-qa-verif-name">{verified}</span>
+                <span className="pm-qa-verif-badge pm-qa-verif-badge--done"><Check size={9} /> verified</span>
+              </div>
+            </div>
+          )
+          if (pending) return (
+            <div className="pm-qa-verif-cell pm-qa-verif-cell--pending">
+              <div className="pm-qa-verif-pending-icon"><Clock size={12} /></div>
+              <div className="pm-qa-verif-info">
+                <span className="pm-qa-verif-name pm-qa-verif-name--pending">Pending</span>
+                <span className="pm-qa-verif-badge pm-qa-verif-badge--wait">awaiting {name}</span>
+              </div>
+            </div>
+          )
+          return (
+            <div className="pm-qa-verif-cell pm-qa-verif-cell--none">
+              <span className="pm-qa-verif-dash">—</span>
+            </div>
+          )
+        }
+
+        return (
+          <div className="pm-qa-pipeline">
+            {/* QA Load section */}
+            {qaPersonEntries.length > 0 && (
+              <div className="pm-qa-load-section">
+                <div className="pm-qa-load-title">
+                  <ShieldCheck size={13} />
+                  <span>QA Load This Sprint</span>
+                </div>
+                <div className="pm-qa-load-cards">
+                  {qaPersonEntries.map(([name, qa]) => {
+                    const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+                    return (
+                      <div key={name} className="pm-qa-load-card">
+                        <div className="pm-qa-load-card-person">
+                          <div className="pm-qa-load-avatar">{initials}</div>
+                          <span className="pm-qa-load-name">{name}</span>
+                        </div>
+                        <div className="pm-qa-load-counts">
+                          {qa.devVerified.length > 0 && (
+                            <span className="pm-qa-load-count pm-qa-load-count--dev">
+                              DEV ×{qa.devVerified.length}
+                            </span>
+                          )}
+                          {qa.stageVerified.length > 0 && (
+                            <span className="pm-qa-load-count pm-qa-load-count--stg">
+                              STG ×{qa.stageVerified.length}
+                            </span>
+                          )}
+                          {qa.prodVerified.length > 0 && (
+                            <span className="pm-qa-load-count pm-qa-load-count--prd">
+                              PRD ×{qa.prodVerified.length}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {/* Summary stats card */}
+                  <div className="pm-qa-load-card pm-qa-load-card--summary">
+                    <div className="pm-qa-load-summary-row">
+                      <span className="pm-qa-summary-dot pm-qa-summary-dot--green" />
+                      <span className="pm-qa-summary-label">Fully verified</span>
+                      <span className="pm-qa-summary-val">{totalVerified}</span>
+                    </div>
+                    <div className="pm-qa-load-summary-row">
+                      <span className="pm-qa-summary-dot pm-qa-summary-dot--amber" />
+                      <span className="pm-qa-summary-label">Needs QA</span>
+                      <span className="pm-qa-summary-val">{totalPending}</span>
+                    </div>
+                    <div className="pm-qa-load-summary-row">
+                      <span className="pm-qa-summary-dot pm-qa-summary-dot--gray" />
+                      <span className="pm-qa-summary-label">Not started</span>
+                      <span className="pm-qa-summary-val">{totalNone}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Filter toggle */}
+            <div className="pm-qa-filter-bar">
+              <button
+                className={`pm-qa-filter-btn${qaFilterMode === 'all' ? ' active' : ''}`}
+                onClick={() => setQaFilterMode('all')}
+              >
+                All tickets <span className="pm-qa-filter-count">{qaAllIssues.length}</span>
+              </button>
+              <button
+                className={`pm-qa-filter-btn${qaFilterMode === 'needs-qa' ? ' active' : ''}`}
+                onClick={() => setQaFilterMode('needs-qa')}
+              >
+                <Shield size={11} /> Needs QA <span className="pm-qa-filter-count pm-qa-filter-count--amber">{totalPending}</span>
+              </button>
+            </div>
+
+            {/* Matrix table */}
+            <div className="pm-qa-matrix">
+              {/* Header */}
+              <div className="pm-qa-matrix-header">
+                <div className="pm-qa-col-ticket">Ticket</div>
+                <div className="pm-qa-col-assignee">Assignee</div>
+                <div className="pm-qa-col-stage pm-qa-col-stage--dev">
+                  <span className="pm-qa-stage-dot pm-qa-stage-dot--dev" /> DEV
+                </div>
+                <div className="pm-qa-col-stage pm-qa-col-stage--stg">
+                  <span className="pm-qa-stage-dot pm-qa-stage-dot--stg" /> STAGE
+                </div>
+                <div className="pm-qa-col-stage pm-qa-col-stage--prd">
+                  <span className="pm-qa-stage-dot pm-qa-stage-dot--prd" /> PROD
+                </div>
+              </div>
+
+              {/* Rows */}
+              {displayIssues.length === 0 && (
+                <div className="pm-qa-empty">
+                  <ShieldCheck size={28} style={{ opacity: 0.2 }} />
+                  <span>No tickets match the current filter</span>
+                </div>
+              )}
+              {displayIssues.map(issue => {
+                const score = qaScore(issue)
+                const edgeClass = score === 3 ? ' pm-qa-row--full'
+                  : (isPendingDev(issue) || isPendingStg(issue) || isPendingPrd(issue)) ? ' pm-qa-row--pending'
+                  : score > 0 ? ' pm-qa-row--partial'
+                  : ''
+                const priColors = priorityColorMap[issue.priority?.toLowerCase()] || null
+                const avatarSrc = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
+                const isExpanded = expandedIssue === issue.idReadable
+                return (
+                  <React.Fragment key={issue.id || issue.idReadable}>
+                    <div className={`pm-qa-row${edgeClass}`} onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}>
+                      {/* Ticket cell */}
+                      <div className="pm-qa-cell pm-qa-cell--ticket">
+                        <div className="pm-qa-ticket-top">
+                          <span
+                            className="pm-qa-ticket-id"
+                            onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}
+                          >
+                            {issue.idReadable}
+                          </span>
+                          {issue.priority && (
+                            <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
+                              {issue.priority}
+                            </span>
+                          )}
+                          {issue.is_hotfix && <span className="pm-tracking-hotfix-chip"><Zap size={9} /> HF</span>}
+                          {issue.bounce_count > 0 && (
+                            <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>
+                          )}
+                        </div>
+                        <div className="pm-qa-ticket-title" title={issue.summary}>{issue.summary}</div>
+                        <div className="pm-qa-ticket-state">{issue.current_state}</div>
+                      </div>
+
+                      {/* Assignee cell */}
+                      <div className="pm-qa-cell pm-qa-cell--assignee">
+                        {avatarSrc
+                          ? <img className="pm-tracking-avatar" src={avatarSrc} alt={issue.assignee} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.removeAttribute('style') }} />
+                          : null}
+                        <div className="pm-tracking-avatar pm-tracking-avatar--initials" style={avatarSrc ? { display: 'none' } : undefined}>
+                          {getInitialsFromName(issue.assignee)}
+                        </div>
+                        <span className="pm-qa-assignee-name">{issue.assignee || 'Unassigned'}</span>
+                      </div>
+
+                      {/* DEV cell */}
+                      <div className="pm-qa-cell pm-qa-cell--stage">
+                        <VerifCell verified={issue.verified_on_dev} pending={isPendingDev(issue)} name="DEV" />
+                      </div>
+
+                      {/* STAGE cell */}
+                      <div className="pm-qa-cell pm-qa-cell--stage">
+                        <VerifCell verified={issue.verified_on_stage} pending={isPendingStg(issue)} name="STAGE" />
+                      </div>
+
+                      {/* PROD cell */}
+                      <div className="pm-qa-cell pm-qa-cell--stage">
+                        <VerifCell verified={issue.verified_on_prod} pending={isPendingPrd(issue)} name="PROD" />
+                      </div>
+                    </div>
+                    {isExpanded && (
+                      <div className="pm-qa-expand-row">
+                        <IssueTransitionInline
+                          issueId={issue.idReadable || issue.id}
+                          columnHierarchy={columnHierarchy}
+                          onViewDetails={(logs) => setDetailIssue({ issue, logs })}
+                        />
+                      </div>
+                    )}
+                  </React.Fragment>
+                )
+              })}
+            </div>
+
+            {qaPersonEntries.length === 0 && qaAllIssues.every(i => !i.verified_on_dev && !i.verified_on_stage && !i.verified_on_prod) && (
+              <div className="pm-qa-no-data">
+                <ShieldCheck size={32} style={{ opacity: 0.15 }} />
+                <div className="pm-qa-no-data-title">No QA verifications recorded yet</div>
+                <div className="pm-qa-no-data-hint">
+                  Verifications are attributed when someone moves a ticket to Ready for Stage, Ready for Prod, or Verified.
+                </div>
               </div>
             )}
           </div>
