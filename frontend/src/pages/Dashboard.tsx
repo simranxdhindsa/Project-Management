@@ -562,18 +562,18 @@ export default function Dashboard() {
               <span>DailyOps</span>
             </button>
             <button
-              className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('activity')}
-            >
-              <Activity size={20} />
-              <span>Activity</span>
-            </button>
-            <button
               className={`sidebar-nav-item ${currentPage === 'daytrack' ? 'active' : ''}`}
               onClick={() => setCurrentPage('daytrack')}
             >
               <Clock size={20} />
               <span>DayTrack</span>
+            </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('activity')}
+            >
+              <Activity size={20} />
+              <span>Activity</span>
             </button>
             <button
               className={`sidebar-nav-item ${currentPage === 'calendar' ? 'active' : ''}`}
