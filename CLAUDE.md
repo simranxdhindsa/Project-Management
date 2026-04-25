@@ -128,6 +128,191 @@ VITE_GOOGLE_CLIENT_ID=    # must match backend GOOGLE_CLIENT_ID
 - The `go.mod` toolchain version must match an **actually released** Go version. `go 1.25.x` does not exist — use `go 1.24.0` or lower.
 - Windows: Windows Defender may corrupt module cache downloads. Add `C:\Users\<user>\go\pkg\mod` to Defender exclusions if you see `unexpected NUL in input` errors.
 
+---
+
+## Frontend Development Rules
+
+### 1 — Always follow the Workflow Config
+
+Every PM feature must derive its column classification, roles, and thresholds from the live workflow config, **never hardcode column or state names**.
+
+- Load with `useWorkflowConfig()` hook (`frontend/src/hooks/useWorkflowConfig.ts`)
+- Column role lookup pattern: build a `Map<string, string>` from `wfConfig.column_hierarchy` (state + all aliases, lowercased) then fall back to keyword heuristics only when the map is empty
+- Role semantics used throughout the app:
+
+| Role string | Meaning |
+|---|---|
+| `active` | In Progress — developer is working on it |
+| `blocked` | Blocked — external dependency, dev can't act |
+| `dev_done` | Done / DEV — moved out of active development |
+| `verified` | Verified / Ready for Stage or Prod |
+| `deployed` | Deployed to Stage or Prod |
+| `closed` | Fully resolved / closed |
+| `backlog` / `''` | To Do / Queued — not yet started |
+
+- Overdue / delay logic must check `isDoneNow` (role in dev_done/verified/deployed/closed) first — done tickets must **never** show overdue regardless of hours_in_state
+- Blocked tickets must **never** count as overdue — the developer can't act on them
+- Only `active` and `backlog/todo` (open) tickets count toward a developer's overdue metric
+
+### 2 — Use the Established Dropdown and Calendar Components
+
+Do not build new dropdown or calendar implementations. Use the two existing patterns:
+
+**`pm-custom-dropdown` pattern** — used everywhere in `PMReportsPage.tsx`, `BoardPage.tsx`, `DayTrackPage.tsx`, etc.
+```tsx
+// Standard inline dropdown (outside-click handled via useRef + mousedown listener)
+<div className="pm-custom-dropdown" ref={myRef}>
+  <button className="pm-custom-dropdown-trigger" onClick={() => setOpen(o => !o)}>
+    {label} <ChevronDown size={12} />
+  </button>
+  {open && (
+    <div className="pm-custom-dropdown-menu">
+      {options.map(opt => (
+        <div key={opt} className="pm-custom-dropdown-item" onClick={() => { setValue(opt); setOpen(false) }}>
+          {opt}
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+```
+
+**`WcSelectDropdown` component** — defined in `IntegrationsPage.tsx` (line 71). Used for role/config selects in the Integrations page. It renders a portal-based dropdown with `wc-sel-dropdown` class on the portal div (critical — ensures the outside-click handler doesn't close it prematurely). Use this pattern for compact select inputs inside settings/config tables.
+
+**`CalendarView` component** — `frontend/src/components/calendar/CalendarView.tsx`. Use this for any date-range or calendar display — do not roll a new one.
+
+Portal bug note: any portal-rendered dropdown menu **must** include `wc-sel-dropdown` in its className, otherwise the global mousedown outside-click handler will close it before the option's `onClick` fires.
+
+### 3 — Light Mode and Dark Mode
+
+Every new component and CSS class must have both dark (default) and light mode styles. The app ships both themes and both must be visually correct.
+
+**Pattern:**
+```css
+/* Dark mode (default — no selector needed) */
+.my-class {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.8);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+/* Light mode override */
+[data-theme="light"] .my-class {
+  background: rgba(241,245,249,0.9);
+  color: #1e293b;
+  border: 1px solid rgba(99,102,241,0.15);
+}
+```
+
+Key light-mode color values to use consistently:
+- Surface bg: `rgba(241,245,249,0.9)` or `#ffffff`
+- Primary text: `#1e293b` / `#0f172a`
+- Secondary text: `#475569` / `#64748b`
+- Muted text: `#94a3b8`
+- Border: `rgba(99,102,241,0.12)` to `rgba(99,102,241,0.2)`
+- Primary accent: `#4f46e5` / `#6366f1`
+- Danger: `#dc2626` / `#ef4444`
+- Warning: `#d97706`
+- Success: `#16a34a`
+
+**No inline `style={{}}`** in components (except truly dynamic values like widths derived from data — e.g. a progress bar `width: ${pct}%`). All colours, spacing, and layout must be in the CSS files.
+
+CSS files per page/feature:
+- `frontend/src/styles/pages/pm-reports.css` — PMReports, Tracking, QA Pipeline
+- `frontend/src/styles/pages/daily-ops.css` — Daily Ops tab
+- `frontend/src/styles/pages/integrations.css` — Integrations page
+- `frontend/src/index.css` — global shared classes
+
+---
+
+## Features Built
+
+### Tracking Tab (`PMReportsPage.tsx` — `TrackingTab`)
+
+9 view modes accessible from the view-mode dropdown:
+
+| Mode | Description |
+|---|---|
+| **By Column** | Default — issues grouped by board column (sprint-scoped) |
+| **By Assignee** | Issues grouped by developer; QA verified subsection per person |
+| **Swimlane** | Each person = full-width row with urgency-coloured ticket chips + load bar |
+| **Sidebar** | Left 240px avatar list; click person → their tickets fill the right panel |
+| **Heatmap** | Assignee × column matrix — cell colour shows overdue/at-risk/ok count |
+| **Delay Bars** | Horizontal time bar per ticket: working (blue) / bounce (orange) / review (purple); SLA marker line |
+| **Alert First** | Giant blocked banner at top + 2-col in-progress cards below |
+| **Split Pane** | Left health panel (donut, load bars, sprint countdown) + right flat ticket list |
+| **Focus Mode** | Top 3 most-delayed tickets shown large; "Show N more" expands the rest |
+| **QA Pipeline** | Verification matrix per ticket: DEV / STAGE / PROD cells with who tested + pending indicators |
+
+**Sprint KPI bar** (top of Tracking tab):
+- Completion % (done / total)
+- Blocked count
+- Bounced tickets count
+- Sprint deadline countdown (amber when <24h)
+
+**Per-ticket row enhancements:**
+- Cycle time (first active → first done)
+- Verification badges: `DEV✓` / `STG✓` / `PRD✓` with tooltip showing tester name
+- Hotfix badge (orange `HF`)
+- Bounce badge (`↩N`) — backward move count
+- Stint count (`×N`) — separate In Progress sessions
+- `overdue_level` colouring: `deadline` (red) / `sprint` (amber) / `sla` (yellow)
+- Inline row expand → full state transition timeline (`IssueTransitionInline`)
+
+**Overdue logic (backend `report.go`):**
+1. If `isDoneNow` (role in dev_done/verified/deployed/closed) → `is_delayed = false`, `overdue_level = ""`
+2. Else if ticket-level YouTrack due date passed → `overdue_level = "deadline"`
+3. Else if sprint finish ms passed and ticket is active → `overdue_level = "sprint"`
+4. Else if `hours_in_state > priority SLA threshold` → `overdue_level = "sla"`
+
+### QA Pipeline View
+
+Dedicated verification matrix showing per-ticket QA coverage across three stages. Key concepts:
+- `verified_on_dev` / `verified_on_stage` / `verified_on_prod` — name of person who moved ticket to each verified-role column
+- `isPendingDev` = no dev verif + ticket has been worked on (`total_active_hours > 0 || bounce_count > 0`)
+- `isPendingStg` = has dev verif but not stage verif
+- `isPendingPrd` = has stage verif but not prod verif
+- QA Load cards at top show per-QA person how many tickets they've verified at each stage
+- Filter toggle: "All" vs "Needs QA" (hides fully-verified tickets)
+
+### Integrations — Column Hierarchy
+
+- Card-based layout with left colour stripe per role (`ROLE_COLORS` constant)
+- Auto-fetches YouTrack board columns on tab open (`useEffect` on `[wcSection, wcSource]`) — no manual button
+- `WcSelectDropdown` portal fix: portal div must have `wc-sel-dropdown` class so outside-click handler doesn't fire on it
+- Aliases column always visible (fixed width `120px` on role dropdown so aliases input isn't squeezed out)
+
+### Daily Ops Tab
+
+Simplified to a single **Developer Load** view (Morning Brief and Report Preview tabs removed).
+
+Data sourced from `api.getSprintBoardStatus(sprintId)` — uses the same sprint board endpoint as the Tracking tab, so counts are always accurate and never depend on YouTrack webhooks.
+
+Per-developer card shows:
+- Real avatar image (from sprint board data) with initials fallback
+- Sprint progress bar (`done / (done + active + blocked)`)
+- Stat chips: done in sprint / active / blocked / bounced / overdue / hours worked
+- Active issue list (first 4, `+N more`)
+- Blocked issue list (separate section)
+
+Overloaded badge rule: `activeIssues.length > 5` — purely a workload metric (in-progress tickets only).
+Overdue count rule: only open tickets (`isActive || isQueued`) where `is_delayed = true`. Blocked and done tickets never count as overdue.
+
+### Backend: Sprint Board Status (`GET /api/reports/sprint-board-status`)
+
+Returns `SprintBoardStatusResponse { summary: SprintSummary, columns: SprintBoardColumn[] }`.
+
+`SprintBoardIssue` fields added over time:
+- `bounce_count`, `total_active_hours` — from state log scan
+- `cycle_time_hours` — first active → first done
+- `verified_on_dev/stage/prod` — who moved to each verified-role column
+- `is_hotfix`, `stint_count`, `stints[]`
+- `overdue_level` (`"deadline"` | `"sprint"` | `"sla"` | `""`)
+- `move_type` (`"qa_rejected"` | `"dev_stalled"` | `""`)
+- `issue_type` — from YouTrack custom field (e.g. Hotfix, Regression)
+
+`SprintSummary` fields: `total_issues`, `done_issues`, `in_progress_count`, `blocked_count`, `bounced_count`, `hotfix_count`, `overdue_count`, `sprint_finish_ms`, `completion_pct`.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
