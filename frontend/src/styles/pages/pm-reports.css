@@ -2445,7 +2445,7 @@
 
 .pm-tracking-issue-row {
   display: grid;
-  grid-template-columns: 80px 44px 1fr 52px 52px 80px 140px auto;
+  grid-template-columns: 80px 44px 1fr 100px 80px 80px 140px auto;
   align-items: center;
   gap: 0.5rem;
   padding: 0.38rem 0.75rem;
@@ -3741,6 +3741,7 @@
 .pm-tracking-toolbar {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 20px; gap: 12px;
+  padding-left: 1.25rem; padding-right: 1.25rem;
 }
 .pm-tracking-toolbar-left {
   display: flex; align-items: center; gap: 10px;
@@ -3784,6 +3785,7 @@
   grid-template-columns: repeat(4, 1fr);
   gap: 14px;
   margin-bottom: 28px;
+  padding-left: 1.25rem; padding-right: 1.25rem;
 }
 .pm-tracking-kpi {
   position: relative; overflow: hidden;
