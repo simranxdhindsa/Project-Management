@@ -313,6 +313,52 @@ Returns `SprintBoardStatusResponse { summary: SprintSummary, columns: SprintBoar
 
 `SprintSummary` fields: `total_issues`, `done_issues`, `in_progress_count`, `blocked_count`, `bounced_count`, `hotfix_count`, `overdue_count`, `sprint_finish_ms`, `completion_pct`.
 
+### PM Assistant RAG (`backend/internal/handlers/pm_query_rag.go`)
+
+The PM assistant uses **zero-cost BM25 sparse retrieval** to keep every prompt under ~3,000 tokens regardless of sprint size.
+
+**Do NOT dump all sprint issues into the prompt.** Always route through `BuildPMQueryContext()`.
+
+#### Intent classification (classify before retrieving)
+
+| Intent | Trigger | Retrieved context |
+|--------|---------|-------------------|
+| `greeting` / `general summary` | "hi", "overview", "sprint status" | Sprint KPI stats only (~150 tokens) |
+| `issue_id` | Regex `[A-Z]{2,10}-\d+` in query | That one issue only |
+| `assignee` | Name matched against live sprint data | That person's issues only |
+| `status_filter` | "blocked", "delayed", "done", "in progress" keywords | Filtered subset |
+| `general` | None of the above | BM25 top-20 issues |
+
+#### Issue context line format (per issue in retrieval)
+
+```
+- {ID} | {Priority} | {Summary} | {Status} | {Assignee} | bounces:{N} [OVERDUE] [HOTFIX] [BLOCKED]
+  → {FromState}→{ToState} ({Xh}, by {Person})   ← last 3 transitions
+  BLOCKER: {reason}                               ← if blocked
+```
+
+#### KPI context (always appended, ~50 tokens)
+
+```
+## Sprint Summary: {name} | Ends: {date}
+Total: N | Done: N | InProgress: N | Blocked: N | Overdue: N | Bounced: N
+```
+
+#### Entry point
+
+```go
+context, intent := BuildPMQueryContext(query, issues, trackingLogs, blockerReasons, kpis)
+```
+
+Called from `PMAssistantQuery` in `youtrack.go`. The handler:
+1. Fetches sprint issues from YouTrack (`ytClient.GetAllSprintIssues`)
+2. Fetches time-tracking logs **sprint-scoped** (`SprintIssueIDs` param — never empty)
+3. Computes KPI counts (Overdue + Bounced) from tracking logs using `pmIsMovedBack` + `pmOverdueThreshold`
+4. Calls `BuildPMQueryContext` → prepends returned context to system prompt
+5. Sends to AI via `ai.QueryWithHistory` (model: `llama-3.1-8b-instant`, 131K TPM free tier)
+
+**When adding new PM assistant features**: extend the intent classifier in `pm_query_rag.go`, not the handler in `youtrack.go`. Keep context output compact — every token costs latency and risks hitting the 131K TPM limit.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 

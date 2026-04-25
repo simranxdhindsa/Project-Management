@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   RefreshCw, CheckCircle, Clock, AlertTriangle, TrendingDown, Users,
+  GitBranch, ChevronDown, Check,
 } from 'lucide-react'
 import { api } from '../services/api'
-import type { SprintBoardColumn, SprintBoardIssue } from '../services/api'
+import type { SprintBoardColumn, SprintBoardIssue, YouTrackSprint } from '../services/api'
 import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
+import { getActiveSource } from '../services/pmDataService'
 
 interface Props {
   onBlockersChange: (ids: Set<string>) => void
@@ -409,6 +412,138 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
         </div>
 
       </div>
+    </div>
+  )
+}
+
+// ── Standalone page wrapper with sprint selector ───────────────────────────
+
+const DO_SPRINT_ID_KEY   = 'pm_active_sprint_id'
+const DO_SPRINT_NAME_KEY = 'pm_active_sprint_name'
+
+function fmtSprintDate(ms: number) {
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+export function DailyOpsPage() {
+  const isYouTrack = getActiveSource() === 'youtrack'
+
+  const [sprints, setSprints]               = useState<YouTrackSprint[]>([])
+  const [activeSprint, setActiveSprint]     = useState<YouTrackSprint | null>(null)
+  const [dropdownOpen, setDropdownOpen]     = useState(false)
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const menuRef    = useRef<HTMLDivElement>(null)
+
+  // Load sprints and auto-select the current active one
+  useEffect(() => {
+    if (!isYouTrack) return
+    api.getYouTrackSprints().then(res => {
+      const list = ((res as any).data as YouTrackSprint[]) ?? []
+      setSprints(list)
+      const now    = Date.now()
+      const active = list
+        .filter(s => !s.isCompleted && s.finish > now)
+        .sort((a, b) => a.finish - b.finish)[0] ?? null
+      setActiveSprint(active)
+      localStorage.setItem(DO_SPRINT_ID_KEY, active?.id ?? '')
+      localStorage.setItem(DO_SPRINT_NAME_KEY, active?.name ?? '')
+    }).catch(() => {})
+  }, [isYouTrack])
+
+  // Outside-click closes the dropdown
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (!triggerRef.current?.contains(t) && !menuRef.current?.contains(t)) {
+        setDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const handleSprintChange = (sprint: YouTrackSprint | null) => {
+    setActiveSprint(sprint)
+    setDropdownOpen(false)
+    localStorage.setItem(DO_SPRINT_ID_KEY, sprint?.id ?? '')
+    localStorage.setItem(DO_SPRINT_NAME_KEY, sprint?.name ?? '')
+  }
+
+  const sortedSprints = [...sprints].sort((a, b) => b.finish - a.finish)
+
+  return (
+    <div className="do-page-wrap">
+      {/* Sprint selector bar */}
+      {isYouTrack && (
+        <div className="do-sprint-bar">
+          <div ref={triggerRef} style={{ position: 'relative' }}>
+            <button
+              className="do-sprint-trigger"
+              onClick={() => setDropdownOpen(o => !o)}
+            >
+              <GitBranch size={13} />
+              {activeSprint ? (
+                <>
+                  {activeSprint.name}
+                  <span className="do-sprint-dates">
+                    {fmtSprintDate(activeSprint.start)}–{fmtSprintDate(activeSprint.finish)}
+                  </span>
+                </>
+              ) : (
+                <span>Select sprint</span>
+              )}
+              <ChevronDown size={12} style={{ opacity: 0.5 }} />
+            </button>
+            {dropdownOpen && createPortal(
+              <div
+                ref={menuRef}
+                className="pm-custom-dropdown-menu"
+                style={{
+                  position: 'fixed',
+                  top:   (triggerRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                  right: window.innerWidth - (triggerRef.current?.getBoundingClientRect().right ?? 0),
+                  minWidth: 240,
+                  zIndex: 9999,
+                }}
+              >
+                <button
+                  className={`pm-dropdown-item${!activeSprint ? ' active' : ''}`}
+                  onClick={() => handleSprintChange(null)}
+                >
+                  <span style={{ width: 13, display: 'inline-flex', alignItems: 'center' }}>
+                    {!activeSprint && <Check size={12} />}
+                  </span>
+                  All sprints
+                </button>
+                {sortedSprints.length === 0 && (
+                  <div style={{ padding: '9px 14px', fontSize: 13, opacity: 0.5 }}>No sprints found</div>
+                )}
+                {sortedSprints.map(s => (
+                  <button
+                    key={s.id}
+                    className={`pm-dropdown-item${activeSprint?.id === s.id ? ' active' : ''}`}
+                    onClick={() => handleSprintChange(s)}
+                    style={{ opacity: s.isCompleted ? 0.6 : 1 }}
+                  >
+                    <span style={{ width: 13, display: 'inline-flex', alignItems: 'center' }}>
+                      {activeSprint?.id === s.id && <Check size={12} />}
+                    </span>
+                    <span style={{ flex: 1 }}>{s.name}</span>
+                    <span style={{ fontSize: 11, opacity: 0.55, marginLeft: 8 }}>
+                      {fmtSprintDate(s.start)}–{fmtSprintDate(s.finish)}
+                    </span>
+                    {s.isCompleted && <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 4 }}>✓</span>}
+                  </button>
+                ))}
+              </div>,
+              document.body
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Content */}
+      <DailyOpsTab onBlockersChange={() => {}} sprintId={activeSprint?.id} />
     </div>
   )
 }

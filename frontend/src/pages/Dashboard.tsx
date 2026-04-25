@@ -21,7 +21,6 @@ import {
   KanbanSquare,
   List,
   Calendar,
-  ClipboardList,
   Bot,
   Bell,
   BarChart3,
@@ -47,12 +46,13 @@ import {
   Maximize2,
   Minimize2,
   Activity,
+  Zap,
 } from 'lucide-react'
 import { PMAssistantTab } from './PMReportsPage'
 import { IntegrationsPage } from './IntegrationsPage'
 import { SettingsPage } from './SettingsPage'
 import { BoardPage } from './BoardPage'
-import { DailyTaskListPage } from './DailyTaskListPage'
+import { DailyOpsPage } from './DailyOpsTab'
 import { DailyAnalysisViewPage } from './DailyAnalysisViewPage'
 import { BotConfigPage } from './BotConfigPage'
 import { AIAnalysisPage } from './AIAnalysisPage'
@@ -65,10 +65,10 @@ import { JellySwitch } from '../components/JellySwitch'
 import { RightPanel } from '../components/notifications/RightPanel'
 import type { LocalNotification } from '../components/notifications/RightPanel'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-tasks' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-ops' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-tasks', 'activity', 'calendar', 'ai-analysis', 'daily-analysis', 'pm-reports', 'daytrack']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'daily-analysis', 'pm-reports', 'daytrack']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -139,7 +139,7 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'dashboard': 'dashboard',
   'board': 'board',
   'list': 'list',
-  'daily-tasks': 'daily-tasks',
+  'daily-ops': 'daily-ops',
   'daily-analysis': 'daily-analysis',
   'calendar': 'calendar',
   'reports': 'reports',
@@ -209,7 +209,7 @@ export default function Dashboard() {
       'dashboard':      'Dashboard',
       'board':          'Board View',
       'list':           'List View',
-      'daily-tasks':    'Daily Tasks',
+      'daily-ops':      'DailyOps',
       'daily-analysis': 'Daily Analysis',
       'calendar':       'Calendar',
       'reports':        'Reports',
@@ -555,11 +555,11 @@ export default function Dashboard() {
               <span>List View</span>
             </button>
             <button
-              className={`sidebar-nav-item ${currentPage === 'daily-tasks' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('daily-tasks')}
+              className={`sidebar-nav-item ${currentPage === 'daily-ops' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('daily-ops')}
             >
-              <ClipboardList size={20} />
-              <span>Daily Tasks</span>
+              <Zap size={20} />
+              <span>DailyOps</span>
             </button>
             <button
               className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
@@ -694,7 +694,7 @@ export default function Dashboard() {
             {currentPage === 'dashboard' && 'Dashboard'}
             {currentPage === 'board' && 'Board View'}
             {currentPage === 'list' && 'List View'}
-            {currentPage === 'daily-tasks' && 'Daily Task List'}
+            {currentPage === 'daily-ops' && 'DailyOps'}
             {currentPage === 'calendar' && 'Calendar'}
             {currentPage === 'ai-analysis' && 'AI Task Analysis'}
             {currentPage === 'daily-analysis' && 'Daily Status'}
@@ -1124,8 +1124,8 @@ export default function Dashboard() {
         {/* Board View */}
         {currentPage === 'board' && <BoardPage />}
 
-        {/* Daily Task List */}
-        {currentPage === 'daily-tasks' && <DailyTaskListPage />}
+        {/* Daily Ops */}
+        {currentPage === 'daily-ops' && <DailyOpsPage />}
 
         {/* Bot Configuration */}
         {currentPage === 'bots' && <BotConfigPage />}
