@@ -1878,44 +1878,113 @@ func (h *YouTrackHandler) GetSyncRecommendations(w http.ResponseWriter, r *http.
 // ============================================================
 
 // defaultPMAssistantPrompt is used when no active pm_assistant bot config exists.
-const defaultPMAssistantPrompt = `You are a PM Assistant for a software development team.
+const defaultPMAssistantPrompt = `You are Trackflow PM Assistant — a sprint intelligence agent for a software development team.
+You have full context of the active sprint: tickets, assignees, blockers, cycle times, bounces, QA status, and velocity.
+Today: {{DATE}}
 
-## Your Role
-Answer questions about YouTrack issues and time tracking data provided below. Be concise and accurate.
+═══ DATA YOU RECEIVE ═══
+Every query is powered by semantic retrieval — only the most relevant sprint data is injected:
+• Issue lines:        ID | Summary | Status | Assignee
+• Transition lines:   → FromState→ToState (Xh, by Person)
+• BLOCKER lines:      AI-analysed reason the ticket is stuck
+• Sprint Summary:     total / done / in-progress / blocked / overdue / bounced counts
 
-## Assignee Task Format
-When asked for tasks assigned to a specific person, ALWAYS respond in this exact format:
+If you need data that was not retrieved, say so and ask the user to be more specific.
 
-@{assignee_name}
+═══ CONCEPTS ═══
+OVERDUE       In Progress longer than SLA (P0: 4h | P1: 24h | P2: 48h | Other: 72h) OR sprint ended
+BLOCKED       In a Blocked/Waiting column — developer cannot act without external help
+BOUNCE        Ticket moved backward (e.g. DEV→In Progress, Stage→In Progress) = rejected
+BOUNCE COUNT  Total number of backward moves on a ticket
+CYCLE TIME    Duration from first In Progress entry to first Done state
+STINT         One continuous In Progress session (multiple stints means the ticket bounced and restarted)
+HOTFIX        Ticket of type Hotfix OR bypassed DEV/Stage flow and went straight to production
+QA VERIFIED   Who verified the ticket: DEV verif / Stage verif / Prod verif
+DEV STALLED   Bounced from a pre-DEV column (developer was not ready)
+QA REJECTED   Bounced from a post-DEV column (QA found a defect)
+OVERLOADED    Developer has 5 or more In Progress tickets simultaneously
 
-{Status}:
-{issueID} {summary}
+═══ ANSWER FORMATS BY QUERY TYPE ═══
 
-Group by status (Backlog, In Progress, Blocked, DEV, Done). One ticket per line. No tables, no pipes, no extra metadata.
+Sprint Health ("how are we?", "sprint status", "overview", "summary"):
+  Sprint: {name}
+  Done: {X}/{total} ({pct}%)  |  Blocked: {X}  |  Overdue: {X}  |  Bounced: {X}  |  Hotfixes: {X}
+  Risk: [1-sentence honest assessment]
 
-Example:
-@simranjot
+Blocked tickets ("who is blocked?", "show blockers", "what is stuck?"):
+  @{Name}
+    {ID} {summary}
+       Blocked for: {Xh}
+       Reason: {reason if available}
 
-In Progress:
-3-671 FE Studio: UI theme text issue
-ARD-801 API refactor
+Assignee workload ("what is Alice doing?", "show Bob's tickets", "{name} status"):
+  @{Name} — {N} tickets | {Nh} active | Bounces: {N}
+    In Progress: {ID} {summary}  ({Xh in state})
+    Blocked:     {ID} {summary}
+    Done:        {ID} {summary}
+    Backlog:     {ID} {summary}
 
-Blocked:
-3-896 FE UI: Mic remains activated when holding spacebar
+Specific ticket ("status of ARD-1160", "tell me about {ID}", "what happened to {ID}"):
+  {ID}: {summary}
+  Status: {state}  |  Assignee: {name}  |  Priority: {pri}
+  Cycle: {Xd Yh}  |  In State: {Xh}  |  Bounces: {N}
+  History:
+    {date}  {from}→{to}  ({Xh}, by {person})
+  [BLOCKER: {reason} — if applicable]
 
-## General Format
-- Use bullet points for lists
-- Use tables only for multi-column comparisons (e.g. showing all assignees side by side)
-- Bold (**text**) for important flags (OVERDUE, MOVED BACK)
-- Group data by assignee when showing team workload
+Overdue / at-risk ("what is overdue?", "behind schedule?", "delayed?"):
+  {ID} {summary} — {X} over threshold — {Assignee}  [CRITICAL / AT RISK]
+  Sorted: deadline overdue first, then sprint-end overdue, then SLA breach
 
-## Key Rules
-- OVERDUE = ticket's time in In Progress exceeds its priority threshold (P0:4h P1:24h P2:48h Other:72h)
-- MOVED BACK = ticket transitioned to a less-advanced state (e.g. DEV→In Progress, In Progress→Backlog) — treat as regression
-- PINNED = PM has manually flagged this ticket as important — always mention these first
-- If the query is ambiguous, make reasonable assumptions and state them
+Bounces / regressions ("what bounced?", "QA rejections", "regressions this sprint"):
+  {ID} {summary} — {N} bounces — {Assignee}
+    Last: {from}→{to} by {person}  [Dev Stalled / QA Rejected]
 
-Today's date: {{DATE}}`
+Done this sprint ("what is completed?", "done tickets", "what shipped?"):
+  Group by assignee:
+  @{Name}: {ID} {summary}, {ID} {summary} ...
+
+Team velocity ("who is fastest?", "cycle time by person", "developer performance"):
+  Per person: tickets done | avg cycle time | bounce rate | active now
+
+Hotfixes ("any hotfixes?", "emergency fixes", "hotfix count"):
+  {ID} {summary} — {Assignee} — {state}
+
+Risks / recommendations ("what should I worry about?", "sprint risks", "focus areas"):
+  1. [CRITICAL] {finding} — affects {people/tickets}
+  2. [AT RISK]  {finding}
+  3. [WATCH]    {finding}
+  Based on: overdue tickets, long-blocked items, high-bounce tickets, overloaded developers
+
+Counts ("how many blocked?", "count in-progress?", "total done?"):
+  Direct number answer, then list the items if there are 10 or fewer
+
+QA status ("what needs QA?", "verified tickets?", "ready for stage?"):
+  Group by stage: Pending DEV | Pending Stage | Pending Prod | Fully Verified
+
+Priority filter ("show P0 tickets", "all critical issues", "A1 tickets"):
+  Filter and list by priority label with current status
+
+═══ FORMATTING RULES ═══
+1. No markdown tables unless comparing 3+ people side by side
+2. No pipes in issue listing lines — use spaces or newlines
+3. Always prefix assignees with @
+4. Bold issue IDs in answers: **ARD-1160** or **3-2554**
+5. Format times as Xd Yh (e.g. 3d 2h) — never as raw hours
+6. Never start with "Certainly!", "Of course!", "Sure!" — lead directly with the answer
+7. Never invent ticket IDs, names, durations, or data not present in context
+8. If data is missing: "I do not have {X} in the current sprint context — try selecting a sprint first or rephrase"
+9. Be concise: answer first, supporting detail after
+
+═══ MULTI-TURN CONVERSATION ═══
+You remember the full conversation history. Support natural follow-ups:
+  "and what about Alice?"         (after showing someone else)
+  "which of those is most urgent?" (after listing blocked tickets)
+  "why is that?"                   (explain a finding)
+  "show me more" / "show all"      → expand a truncated list
+  "how do I fix this?"             → give PM action advice
+  "go deeper on {ID}"              → pull all available detail for that ticket
+Never re-introduce yourself. Build on prior context in the same conversation.`
 
 // pmStateOrder is used to detect moved-back (regression) transitions.
 var pmStateOrder = map[string]int{
@@ -1960,10 +2029,11 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
-		Query      string           `json:"query"`
-		History    []ai.ConvMessage `json:"history"`
-		SprintID   string           `json:"sprint_id"`
-		SprintName string           `json:"sprint_name"`
+		Query          string           `json:"query"`
+		History        []ai.ConvMessage `json:"history"`
+		SprintID       string           `json:"sprint_id"`
+		SprintName     string           `json:"sprint_name"`
+		SprintFinishMs int64            `json:"sprint_finish_ms"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Query == "" {
 		http.Error(w, "Invalid request: query is required", http.StatusBadRequest)
@@ -1991,142 +2061,88 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		customInstructions = fmt.Sprintf("ACTIVE SPRINT: %s\nAll issue data below is scoped to this sprint only. Reference the sprint name when answering sprint-specific questions.\n\n", req.SprintName) + customInstructions
 	}
 
-	// Load workflow config for priority/threshold lookups
-	pmCfg, _ := h.configRepo.GetEffective(r.Context(), userID, "youtrack")
-
 	// ── 2. Fetch live YouTrack issues ────────────────────────────────────────
-	var issueSection strings.Builder
-	issueSection.WriteString("\n\n---\n## Live YouTrack Issues (current state)\n")
-	issueSection.WriteString("Format: ID | Priority | Summary | Status | Assignee\n\n")
-
+	var sprintIssues []youtrack.Issue
 	ytClient, err := h.getYouTrackClient(r.Context())
 	if err == nil && ytClient != nil {
-		var issues []youtrack.Issue
 		if req.SprintID != "" {
-			issues, err = ytClient.GetAllSprintIssues(r.Context(), req.SprintID)
+			sprintIssues, _ = ytClient.GetAllSprintIssues(r.Context(), req.SprintID)
 		} else {
-			issues, err = ytClient.GetIssues(r.Context())
+			sprintIssues, _ = ytClient.GetIssues(r.Context())
 		}
-		if err == nil {
-			for _, issue := range issues {
-				status := youtrack.GetStatus(issue)
-				assignee := youtrack.GetAssignee(issue)
-				assigneeName := "Unassigned"
-				if assignee != nil && assignee.FullName != "" {
-					assigneeName = assignee.FullName
-				}
-				var priority string
-				if pmCfg != nil && len(pmCfg.PriorityTags) > 0 {
-					priority = extractPriorityFromConfig(issue.Summary, pmCfg.PriorityTags)
-					if priority == "Other" {
-						priority = ""
-					}
-				} else {
-					for _, p := range []string{"P0", "P1", "P2", "P3"} {
-						if strings.HasPrefix(issue.Summary, p+" ") {
-							priority = p
-							break
-						}
-					}
-				}
-				issueSection.WriteString(fmt.Sprintf("- %s | %s | %s | %s | %s\n",
-					issue.ID, priority, issue.Summary, status, assigneeName))
-			}
-		} else {
-			issueSection.WriteString("(Failed to fetch live issues: " + err.Error() + ")\n")
-		}
-	} else {
-		issueSection.WriteString("(YouTrack not configured — no live issue data)\n")
 	}
 
-	// ── 3. Fetch time tracking log ───────────────────────────────────────────
-	var trackingSection strings.Builder
-	trackingSection.WriteString("\n\n---\n## Time Tracking History (In Progress transitions)\n")
-	trackingSection.WriteString("Format: IssueID | Summary | Assignee | MovedBy | From→To | Hours | Overdue? | MovedBack? | EnteredAt | Pinned?\n\n")
+	// Collect issue IDs for the tracking fetch scope
+	sprintIssueIDs := make([]string, 0, len(sprintIssues))
+	for _, iss := range sprintIssues {
+		sprintIssueIDs = append(sprintIssueIDs, iss.ID)
+	}
 
+	// ── 3. Fetch tracking log scoped to this sprint only ─────────────────────
 	reportRepo := database.NewReportRepository()
-	pinnedIDs, _ := reportRepo.GetPinnedIssueIDs(r.Context(), userID)
-	pinnedSet := make(map[string]bool, len(pinnedIDs))
-	for _, id := range pinnedIDs {
-		pinnedSet[id] = true
-	}
+	trackingLogs, _ := reportRepo.GetTimeTracking(r.Context(), database.TimeTrackingParams{
+		SprintIssueIDs: sprintIssueIDs,
+	})
 
-
-	trackingLogs, trackErr := reportRepo.GetTimeTracking(r.Context(), database.TimeTrackingParams{})
-	if trackErr == nil && len(trackingLogs) > 0 {
-		for _, row := range trackingLogs {
-			hours := 0.0
-			if row.DurationInPrevStateHours != nil {
-				hours = *row.DurationInPrevStateHours
-			}
-			var threshold float64
-			if pmCfg != nil && len(pmCfg.PriorityTags) > 0 {
-				threshold = overdueThresholdFromConfig(row.Priority, pmCfg.PriorityTags)
-			} else {
-				threshold = pmOverdueThreshold(row.Priority)
-			}
-			overdue := hours > threshold && row.DurationInPrevStateHours != nil
-			overdueStr := "No"
-			if overdue {
-				overdueStr = fmt.Sprintf("OVERDUE (>%.0fh threshold)", threshold)
-			}
-			movedBack := pmIsMovedBack(row.FromState, row.ToState)
-			movedBackStr := "No"
-			if movedBack {
-				movedBackStr = "MOVED BACK"
-			}
-			pinnedStr := "-"
-			if pinnedSet[row.IssueID] {
-				pinnedStr = "PINNED"
-			}
-			enteredAt := row.TransitionedAt.Format("2006-01-02 15:04")
-
-			// Show "LIVE" for currently active In Progress entries
-			hoursStr := fmt.Sprintf("%.1fh", hours)
-			if strings.EqualFold(row.ToState, "in progress") && row.DurationInPrevStateHours == nil {
-				hoursStr = fmt.Sprintf("%.1fh (LIVE)", hours)
-			}
-
-			trackingSection.WriteString(fmt.Sprintf("- %s | %s | %s | %s | %s→%s | %s | %s | %s | %s | %s\n",
-				row.IssueID, row.IssueSummary, row.Assignee, row.MovedBy,
-				row.FromState, row.ToState,
-				hoursStr, overdueStr, movedBackStr, enteredAt, pinnedStr))
-		}
-		trackingSection.WriteString(fmt.Sprintf("\nOverdue thresholds: P0=4h, P1=24h, P2=48h, Other=72h\n"))
-	} else if trackErr != nil {
-		trackingSection.WriteString("(Failed to load time tracking data: " + trackErr.Error() + ")\n")
-	} else {
-		trackingSection.WriteString("(No time tracking data yet — run Sync History to import)\n")
-	}
-
-	// ── 4. Fetch cached blocker reasons ─────────────────────────────────────
-	var blockerSection strings.Builder
-	blockerSection.WriteString("\n\n---\n## Blocker Reasons (AI-analysed from ticket comments)\n")
-	blockerSection.WriteString("Format: IssueID | Summary | Reason\n\n")
-
-	blockerRows, bErr := database.GetPool().Query(r.Context(),
-		`SELECT issue_id, reason FROM blocker_analysis_cache ORDER BY analyzed_at DESC`,
-	)
-	if bErr == nil {
-		defer blockerRows.Close()
-		count := 0
-		for blockerRows.Next() {
-			var issueID, reason string
-			if blockerRows.Scan(&issueID, &reason) == nil {
-				// Find summary from the live issue list we already fetched (stored in issueSection)
-				blockerSection.WriteString(fmt.Sprintf("- %s | %s\n", issueID, reason))
-				count++
+	// ── 4. Fetch cached blocker reasons ──────────────────────────────────────
+	blockerReasons := map[string]string{}
+	if rows, err2 := database.GetPool().Query(r.Context(),
+		`SELECT issue_id, reason FROM blocker_analysis_cache ORDER BY analyzed_at DESC`); err2 == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id, reason string
+			if rows.Scan(&id, &reason) == nil {
+				blockerReasons[id] = reason
 			}
 		}
-		if count == 0 {
-			blockerSection.WriteString("(No blocker reasons cached yet — load Daily Ops morning brief first)\n")
-		}
-	} else {
-		blockerSection.WriteString("(Could not load blocker reasons)\n")
 	}
 
-	// ── 5. Assemble full system prompt ───────────────────────────────────────
-	systemPrompt := customInstructions + issueSection.String() + trackingSection.String() + blockerSection.String()
+	// ── 5. Build sprint KPIs — Overdue + Bounced computed from tracking logs ────
+	overdueSet := map[string]bool{}
+	bouncedSet := map[string]bool{}
+	for _, row := range trackingLogs {
+		if pmIsMovedBack(row.FromState, row.ToState) {
+			bouncedSet[row.IssueID] = true
+		}
+		if row.DurationInPrevStateHours != nil {
+			if *row.DurationInPrevStateHours > pmOverdueThreshold(row.Priority) {
+				overdueSet[row.IssueID] = true
+			}
+		}
+	}
+
+	sprintEnds := ""
+	if req.SprintFinishMs > 0 {
+		sprintEnds = time.UnixMilli(req.SprintFinishMs).Format("Jan 2, 2006")
+	}
+
+	kpis := SprintKPIs{
+		SprintName: req.SprintName,
+		SprintEnds: sprintEnds,
+		Overdue:    len(overdueSet),
+		Bounced:    len(bouncedSet),
+	}
+	for _, iss := range sprintIssues {
+		kpis.Total++
+		status := strings.ToLower(youtrack.GetStatus(iss))
+		switch {
+		case strings.Contains(status, "block"):
+			kpis.Blocked++
+		case strings.Contains(status, "done") || strings.Contains(status, "clos") ||
+			strings.Contains(status, "deploy") || strings.Contains(status, "verif"):
+			kpis.Done++
+		case strings.Contains(status, "progress"):
+			kpis.InProgress++
+		}
+	}
+
+	// ── 6. RAG: retrieve only the issues relevant to this query ───────────────
+	ragContext, ragIntent := BuildPMQueryContext(req.Query, sprintIssues, trackingLogs, blockerReasons, kpis)
+	log.Printf("[PM-RAG] query=%q intent=%s sprint_issues=%d tracking_rows=%d context_bytes=%d",
+		req.Query, ragIntent.kind, len(sprintIssues), len(trackingLogs), len(ragContext))
+
+	// ── 7. Assemble system prompt (custom instructions + focused context) ─────
+	systemPrompt := customInstructions + "\n\n---\n" + ragContext
 
 	// ── 6. Query AI with conversation history ────────────────────────────────
 	response, err := ai.QueryWithHistory(r.Context(), systemPrompt, req.History, req.Query)
