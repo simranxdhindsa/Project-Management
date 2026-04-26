@@ -138,14 +138,16 @@ const TABS = [
 type TabId = typeof TABS[number]['id']
 
 const SUGGESTED_QUERIES = [
-  'Which tickets are currently overdue?',
-  'Show tickets that were moved back',
-  'How long has each In Progress ticket been active?',
-  'Show workload by assignee',
-  'Which tickets are pinned?',
-  'Give me a summary of blocked and In Progress tickets',
-  'P1-P3 issues by status',
-  'Tickets in DEV',
+  'Which tickets have been bounced back this sprint?',
+  'Show me all blocked tickets and why they\'re stuck',
+  'Who has the most overdue tickets right now?',
+  'Which tickets are past their SLA deadline?',
+  'Show cycle time per developer this sprint',
+  'Which hotfixes are still in progress?',
+  'Show QA verification status — what\'s pending DEV, STAGE, PROD?',
+  'Which tickets have the highest bounce count?',
+  'Developer workload — active vs blocked vs done per person',
+  'Show me all at-risk tickets sorted by delay severity',
 ]
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
