@@ -2061,8 +2061,9 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		customInstructions = fmt.Sprintf("ACTIVE SPRINT: %s\nAll issue data below is scoped to this sprint only. Reference the sprint name when answering sprint-specific questions.\n\n", req.SprintName) + customInstructions
 	}
 
-	// ── 2. Fetch live YouTrack issues ────────────────────────────────────────
+	// ── 2. Fetch live YouTrack issues + available sprints ────────────────────
 	var sprintIssues []youtrack.Issue
+	var availableSprints []youtrack.Sprint
 	ytClient, err := h.getYouTrackClient(r.Context())
 	if err == nil && ytClient != nil {
 		if req.SprintID != "" {
@@ -2070,6 +2071,7 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		} else {
 			sprintIssues, _ = ytClient.GetIssues(r.Context())
 		}
+		availableSprints, _ = ytClient.GetSprints(r.Context())
 	}
 
 	// Collect issue IDs for the tracking fetch scope
@@ -2141,21 +2143,56 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	log.Printf("[PM-RAG] query=%q intent=%s sprint_issues=%d tracking_rows=%d context_bytes=%d",
 		req.Query, ragIntent.kind, len(sprintIssues), len(trackingLogs), len(ragContext))
 
-	// ── 7. Assemble system prompt (custom instructions + focused context) ─────
+	// ── 7. Inject available sprints + sprint-action instructions ─────────────
+	if len(availableSprints) > 0 {
+		var sprintListSB strings.Builder
+		sprintListSB.WriteString("AVAILABLE SPRINTS:\n")
+		for i, s := range availableSprints {
+			sprintListSB.WriteString(fmt.Sprintf("  %d. %s (id: %s)\n", i+1, s.Name, s.ID))
+		}
+		sprintListSB.WriteString("\nIf the user asks to select, switch to, or use a specific sprint, respond ONLY with valid JSON (no markdown, no extra text):\n")
+		sprintListSB.WriteString(`{"answer":"<confirmation message>","action":"select_sprint","payload":{"sprint_id":"<id>","sprint_name":"<name>"}}`)
+		sprintListSB.WriteString("\nFor all other queries, respond normally in plain text or markdown.\n\n")
+		customInstructions = sprintListSB.String() + customInstructions
+	}
+
+	// ── 8. Assemble system prompt (custom instructions + focused context) ─────
 	systemPrompt := customInstructions + "\n\n---\n" + ragContext
 
-	// ── 6. Query AI with conversation history ────────────────────────────────
+	// ── 9. Query AI with conversation history ────────────────────────────────
 	response, err := ai.QueryWithHistory(r.Context(), systemPrompt, req.History, req.Query)
 	if err != nil {
 		http.Error(w, "AI query failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// ── 10. Parse structured action response if AI returned JSON ─────────────
+	type actionPayload struct {
+		SprintID   string `json:"sprint_id"`
+		SprintName string `json:"sprint_name"`
+	}
+	type actionResponse struct {
+		Answer  string        `json:"answer"`
+		Action  string        `json:"action"`
+		Payload actionPayload `json:"payload"`
+	}
+	displayResponse := response
+	respAction := ""
+	var respPayload interface{}
+	var ar actionResponse
+	if parseErr := json.Unmarshal([]byte(strings.TrimSpace(response)), &ar); parseErr == nil && ar.Action != "" {
+		displayResponse = ar.Answer
+		respAction = ar.Action
+		respPayload = ar.Payload
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data": map[string]interface{}{
-			"response": response,
+			"response": displayResponse,
+			"action":   respAction,
+			"payload":  respPayload,
 		},
 	})
 }

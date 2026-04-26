@@ -425,6 +425,44 @@
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
+.pm-assistant-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+.pm-assistant-sprint-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  padding: 0.22rem 0.6rem;
+  border-radius: 99px;
+  border: 1px solid rgba(99,102,241,0.3);
+  background: rgba(99,102,241,0.1);
+  color: rgba(199,210,254,0.9);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pm-assistant-sprint-trigger:hover {
+  background: rgba(99,102,241,0.18);
+  border-color: rgba(99,102,241,0.5);
+}
+.pm-assistant-action-notif {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 1rem;
+  font-size: 0.72rem;
+  color: #4ade80;
+  background: rgba(74,222,128,0.08);
+  border-bottom: 1px solid rgba(74,222,128,0.15);
+  flex-shrink: 0;
+  animation: pm-notif-in 0.18s ease;
+}
+@keyframes pm-notif-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ── cfg-chip (report config chips) ─────────────────────── */
 .cfg-chip {
@@ -2397,6 +2435,9 @@
 [data-theme="light"] .pm-chat-panel .pm-chat-input:focus { border-color: rgba(99,102,241,0.45); background: #ffffff; }
 [data-theme="light"] .pm-chat-panel .pm-chat-input::placeholder { color: #94a3b8; }
 [data-theme="light"] .pm-float-bubble { box-shadow: 0 4px 24px rgba(99,102,241,0.5), 0 2px 8px rgba(0,0,0,0.2); }
+[data-theme="light"] .pm-assistant-sprint-trigger { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.25); color: #4f46e5; }
+[data-theme="light"] .pm-assistant-sprint-trigger:hover { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); }
+[data-theme="light"] .pm-assistant-action-notif { color: #16a34a; background: rgba(22,163,74,0.07); border-bottom-color: rgba(22,163,74,0.15); }
 
 /* ── Tracking tab: sprint column-section view ───────────────────────────── */
 .pm-tracking-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; gap: 0.5rem; }

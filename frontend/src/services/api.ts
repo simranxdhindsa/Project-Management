@@ -450,10 +450,10 @@ class ApiService {
   }
 
   // PM Assistant
-  async pmAssistantQuery(query: string, history: { role: string; content: string }[] = [], sprintId?: string, sprintName?: string) {
-    return this.request<{ response: string }>('/youtrack/pm-query', {
+  async pmAssistantQuery(query: string, history: { role: string; content: string }[] = [], sprintId?: string, sprintName?: string, sprintFinishMs?: number) {
+    return this.request<{ response: string; action?: string; payload?: { sprint_id?: string; sprint_name?: string } }>('/youtrack/pm-query', {
       method: 'POST',
-      body: JSON.stringify({ query, history, sprint_id: sprintId, sprint_name: sprintName }),
+      body: JSON.stringify({ query, history, sprint_id: sprintId, sprint_name: sprintName, sprint_finish_ms: sprintFinishMs }),
     })
   }
 

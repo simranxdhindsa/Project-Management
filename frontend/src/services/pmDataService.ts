@@ -171,10 +171,10 @@ export function getPMIssuesGroupedByAssignee() {
 
 // ── AI / analysis ─────────────────────────────────────────────────────────────
 
-export function pmAssistantQuery(query: string, history: { role: string; content: string }[] = [], sprintId?: string, sprintName?: string) {
+export function pmAssistantQuery(query: string, history: { role: string; content: string }[] = [], sprintId?: string, sprintName?: string, sprintFinishMs?: number) {
   return getActiveSource() === 'asana'
     ? api.asanaPMAssistantQuery(query, history)
-    : api.pmAssistantQuery(query, history, sprintId, sprintName)
+    : api.pmAssistantQuery(query, history, sprintId, sprintName, sprintFinishMs)
 }
 
 export function matchAnalysis(personBreakdown: any[], analysis: any[]) {

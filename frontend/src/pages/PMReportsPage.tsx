@@ -299,6 +299,44 @@ export function PMAssistantTab() {
   const inputRef = useRef<HTMLInputElement>(null)
   const thinkingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Sprint selector state
+  const [sprints, setSprints] = useState<YouTrackSprint[]>([])
+  const [assistantSprint, setAssistantSprint] = useState<YouTrackSprint | null>(null)
+  const [sprintDropOpen, setSprintDropOpen] = useState(false)
+  const [actionNotif, setActionNotif] = useState<string | null>(null)
+  const sprintDropRef = useRef<HTMLDivElement>(null)
+
+  // Load sprints + restore last selected sprint
+  useEffect(() => {
+    api.getYouTrackSprints().then(res => {
+      const list = ((res as any).data as YouTrackSprint[]) ?? []
+      setSprints(list)
+      const savedId = localStorage.getItem('pm_active_sprint_id')
+      if (savedId) {
+        const found = list.find(s => s.id === savedId)
+        if (found) setAssistantSprint(found)
+      }
+    }).catch(() => {})
+  }, [])
+
+  // Outside-click to close sprint dropdown
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (sprintDropRef.current && !sprintDropRef.current.contains(e.target as Node)) {
+        setSprintDropOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // Auto-dismiss action notification
+  useEffect(() => {
+    if (!actionNotif) return
+    const t = setTimeout(() => setActionNotif(null), 3500)
+    return () => clearTimeout(t)
+  }, [actionNotif])
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
@@ -317,6 +355,18 @@ export function PMAssistantTab() {
     return () => { if (thinkingTimerRef.current) clearTimeout(thinkingTimerRef.current) }
   }, [loading])
 
+  const handleSprintSelect = (sprint: YouTrackSprint | null) => {
+    setAssistantSprint(sprint)
+    setSprintDropOpen(false)
+    if (sprint) {
+      localStorage.setItem('pm_active_sprint_id', sprint.id)
+      localStorage.setItem('pm_active_sprint_name', sprint.name)
+    } else {
+      localStorage.removeItem('pm_active_sprint_id')
+      localStorage.removeItem('pm_active_sprint_name')
+    }
+  }
+
   const handleSend = async (query?: string) => {
     const text = query || input.trim()
     if (!text || loading) return
@@ -330,14 +380,14 @@ export function PMAssistantTab() {
     const history = updatedMessages.map(m => ({ role: m.role, content: m.content }))
     const historyWithoutLast = history.slice(0, -1)
 
-    const activeSprintId = localStorage.getItem('pm_active_sprint_id') || undefined
-    const activeSprintName = localStorage.getItem('pm_active_sprint_name') || undefined
-    const doQuery = () => pmAssistantQuery(text, historyWithoutLast, activeSprintId, activeSprintName)
+    const sprintId = assistantSprint?.id
+    const sprintName = assistantSprint?.name
+    const sprintFinishMs = assistantSprint?.finish ?? undefined
+    const doQuery = () => pmAssistantQuery(text, historyWithoutLast, sprintId, sprintName, sprintFinishMs)
 
     const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)]
 
     const friendlyError = (msg: string): string => {
-      // Per-day token limit — retry window is minutes (e.g. "20m48s")
       const tpdMatch = msg.match(/try again in (\d+)m(\d+(?:\.\d+)?)?s?/i)
       if (tpdMatch) {
         const mins = parseInt(tpdMatch[1])
@@ -345,16 +395,11 @@ export function PMAssistantTab() {
         const timeStr = secs > 0 ? `${mins}m ${secs}s` : `${mins} minute${mins !== 1 ? 's' : ''}`
         return pick(DAILY_LIMIT_MSGS).replace(/{time}/g, timeStr)
       }
-
-      // Per-minute short limit (already auto-retried — this is fallback)
       const perMinMatch = msg.match(/try again in (\d+(?:\.\d+)?)(ms|s)\b/i)
       if (perMinMatch) return pick(GENERIC_LIMIT_MSGS)
-
-      // Generic rate/token error
       if (msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('token')) {
         return pick(GENERIC_LIMIT_MSGS)
       }
-
       return "Something went wrong on my end. Please try again."
     }
 
@@ -364,7 +409,6 @@ export function PMAssistantTab() {
         response = await doQuery()
       } catch (firstErr) {
         const errMsg = firstErr instanceof Error ? firstErr.message : ''
-        // Per-minute limit with short delay — auto retry silently
         const retryMatch = errMsg.match(/try again in (\d+(?:\.\d+)?)(ms|s)\b/i)
         if (retryMatch) {
           const value = parseFloat(retryMatch[1])
@@ -380,10 +424,20 @@ export function PMAssistantTab() {
           throw firstErr
         }
       }
+
+      // Handle structured action responses from AI
+      const data = response.data
+      if (data?.action === 'select_sprint' && data.payload?.sprint_id) {
+        const targetSprint = sprints.find(s => s.id === data.payload!.sprint_id)
+          ?? { id: data.payload.sprint_id!, name: data.payload.sprint_name ?? data.payload.sprint_id!, start: 0, finish: 0, isCompleted: false }
+        handleSprintSelect(targetSprint)
+        setActionNotif(`Switched to ${targetSprint.name}`)
+      }
+
       const assistantMsg: ChatMessage = {
         id: `msg-${Date.now()}-assistant`,
         role: 'assistant',
-        content: response.data?.response || 'No response received.',
+        content: data?.response || 'No response received.',
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, assistantMsg])
@@ -404,13 +458,63 @@ export function PMAssistantTab() {
 
   const clearChat = () => setMessages([])
 
+  const fmtSprintDate = (ms: number) => ms ? new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
+
   return (
     <div className="pm-tab-content pm-assistant-tab">
-      {/* Context badge + clear button */}
+      {/* Header: sprint selector + context badge + clear */}
       <div className="pm-assistant-header">
-        <div className="pm-assistant-context-badge">
-          <Bot size={12} />
-          <span>Context: Live YouTrack issues + Time tracking data + Conversation memory</span>
+        <div className="pm-assistant-header-left">
+          {/* Sprint selector dropdown */}
+          <div className="pm-custom-dropdown pm-assistant-sprint-drop" ref={sprintDropRef}>
+            <button
+              className="pm-custom-dropdown-trigger pm-assistant-sprint-trigger"
+              onClick={() => setSprintDropOpen(o => !o)}
+            >
+              <GitBranch size={11} />
+              <span>{assistantSprint ? assistantSprint.name : 'All sprints'}</span>
+              <ChevronDown size={10} />
+            </button>
+            {sprintDropOpen && createPortal(
+              <div
+                className="pm-custom-dropdown-menu"
+                style={{
+                  position: 'fixed',
+                  top: (sprintDropRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
+                  left: sprintDropRef.current?.getBoundingClientRect().left ?? 0,
+                  minWidth: 220,
+                  zIndex: 9999,
+                }}
+              >
+                <div
+                  className={`pm-dropdown-item${!assistantSprint ? ' active' : ''}`}
+                  onClick={() => handleSprintSelect(null)}
+                >
+                  All sprints
+                </div>
+                {sprints.map(s => (
+                  <div
+                    key={s.id}
+                    className={`pm-dropdown-item${assistantSprint?.id === s.id ? ' active' : ''}`}
+                    onClick={() => handleSprintSelect(s)}
+                    style={{ opacity: s.isCompleted ? 0.6 : 1 }}
+                  >
+                    <span style={{ flex: 1 }}>{s.name}</span>
+                    {s.start && s.finish && (
+                      <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 8 }}>
+                        {fmtSprintDate(s.start)}–{fmtSprintDate(s.finish)}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>,
+              document.body
+            )}
+          </div>
+          <div className="pm-assistant-context-badge">
+            <Bot size={12} />
+            <span>Live context{assistantSprint ? ` · ${assistantSprint.name}` : ''}</span>
+          </div>
         </div>
         {messages.length > 0 && (
           <button className="btn-sm btn-secondary" onClick={clearChat} title="Start a new conversation">
@@ -418,6 +522,14 @@ export function PMAssistantTab() {
           </button>
         )}
       </div>
+
+      {/* Action notification banner */}
+      {actionNotif && (
+        <div className="pm-assistant-action-notif">
+          <Check size={12} />
+          <span>{actionNotif}</span>
+        </div>
+      )}
 
       <div className="pm-chat-messages">
         {messages.length === 0 && (
@@ -485,7 +597,7 @@ export function PMAssistantTab() {
             ref={inputRef}
             type="text"
             className="pm-chat-input"
-            placeholder="Ask about overdue tickets, workload, regressions…"
+            placeholder={assistantSprint ? `Ask about ${assistantSprint.name}…` : 'Ask about overdue tickets, workload, regressions…'}
             value={input}
             onChange={e => setInput(e.target.value.slice(0, 500))}
             maxLength={500}
