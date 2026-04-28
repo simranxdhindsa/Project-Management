@@ -1,3 +1,6 @@
+# Design files
+.designs/
+
 # Dependencies
 node_modules/
 

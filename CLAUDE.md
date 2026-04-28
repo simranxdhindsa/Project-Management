@@ -359,6 +359,71 @@ Called from `PMAssistantQuery` in `youtrack.go`. The handler:
 
 **When adding new PM assistant features**: extend the intent classifier in `pm_query_rag.go`, not the handler in `youtrack.go`. Keep context output compact — every token costs latency and risks hitting the 131K TPM limit.
 
+### PM Assistant Action Pattern (keyword: **"AI action"**)
+
+This pattern lets the PM assistant **execute app actions** (not just answer questions) based on natural language input. Sprint switching is the reference implementation. Use the same pattern for all future assistant-driven actions.
+
+**How it works end-to-end:**
+
+1. **Backend injects available options** into the system prompt (e.g. sprint list, project list, assignee list — whatever options the action needs).
+2. **Backend instructs the AI** to return pure JSON when an action is detected (no markdown, no extra text):
+   ```json
+   { "answer": "<confirmation message>", "action": "<action_id>", "payload": { ...params } }
+   ```
+3. **Backend parses the AI response** (`json.Unmarshal`). If `action != ""`, it extracts `answer`, `action`, `payload` and returns them as top-level fields in `data` alongside `response`.
+4. **Frontend reads `response.data.action`**. If it matches a known action, it executes the corresponding function (e.g. `handleSprintSelect`) and shows a green `.pm-assistant-action-notif` banner.
+5. The AI's `answer` text is displayed in the chat bubble normally.
+
+**Implemented actions:**
+
+| Action ID | Trigger phrases | What it does |
+|-----------|----------------|--------------|
+| `select_sprint` | "select sprint X", "switch to sprint X", "use sprint X" | Sets the assistant sprint selector to the matching sprint |
+
+**Adding a new AI action — checklist:**
+
+- [ ] **`youtrack.go` `PMAssistantQuery`**: Fetch available options, append to `customInstructions` with the JSON instruction block listing them.
+- [ ] **`api.ts`**: Add new payload fields to `pmAssistantQuery` response type.
+- [ ] **`PMReportsPage.tsx` `PMAssistantTab`**: Add `else if (data.action === 'new_id')` → call the corresponding frontend function.
+- [ ] **CSS**: Reuse `.pm-assistant-action-notif` — already styled.
+
+**Planned future actions (not yet implemented):**
+
+| Action ID | Trigger | What it will do |
+|-----------|---------|----------------|
+| `create_ticket` | "create a ticket for X", "add issue: Y" | AI fills all ticket fields from description; shows confirmation card before creating |
+| `assign_ticket` | "assign ARD-123 to Alice" | Updates assignee via YouTrack API |
+| `move_ticket` | "move ARD-123 to In Progress" | Changes ticket state via YouTrack API |
+| `set_priority` | "set ARD-123 to P1" | Updates priority field |
+
+**`create_ticket` design (implement when user says "add AI ticket creation"):**
+- User describes the issue in chat. AI returns `{ action: "create_ticket", payload: { summary, priority, assignee, type, description } }`.
+- Frontend shows a **confirmation card** with all filled fields — user reviews and clicks "Create" or edits fields.
+- On confirm: call `api.createYouTrackIssue(payload)`. **Never auto-create without user review.**
+
+---
+
+### RAG in PM Assistant (`pm_query_rag.go`)
+
+The PM assistant uses **zero-cost BM25 sparse retrieval** to keep every prompt under ~3,000 tokens regardless of sprint size. The RAG layer sits between the handler and the AI call.
+
+**When to extend RAG vs the handler:**
+- New **query intents** (e.g. "who hasn't committed today", "show me by priority") → add to `classifyPMQueryIntent()` and `retrieveRelevantIssues()` in `pm_query_rag.go`.
+- New **context data** to inject (e.g. sprint velocity, PR status) → add to `BuildPMQueryContext()` in `pm_query_rag.go`.
+- New **AI actions** (option lists, JSON instructions) → add to `PMAssistantQuery` in `youtrack.go` **before** `BuildPMQueryContext` is called, so they go into `customInstructions` not `ragContext`.
+
+**Intent → retrieval mapping:**
+
+| Intent | Trigger | Issues retrieved |
+|--------|---------|-----------------|
+| `greeting` / summary | "hi", "overview", "sprint status" | None — KPI stats only |
+| `issue_id` | Regex `[A-Z]{2,10}-\d+` in query | That one issue |
+| `assignee` | Name matched against sprint data | That person's issues only |
+| `status_filter` | "blocked", "delayed", "done", "in progress" | Filtered subset |
+| `general` | Everything else | BM25 top-20 issues |
+
+**Token budget rule:** Every new context block added to `BuildPMQueryContext` must be justified against the 131K TPM free-tier limit. Keep total context under 3,000 tokens per query. Use counts/summaries, not full field dumps.
+
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
