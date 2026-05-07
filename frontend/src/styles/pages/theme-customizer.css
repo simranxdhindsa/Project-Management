@@ -1,0 +1,322 @@
+/* ============================================================
+   Theme Customizer — palette panel in sidebar footer
+   ============================================================ */
+
+/* ── Wrapper & trigger ── */
+.theme-cust-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.theme-cust-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.theme-cust-btn:hover {
+  background: rgba(99, 102, 241, 0.18);
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+/* ── Panel ── */
+.theme-cust-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 280px;
+  z-index: var(--z-dropdown, 1000);
+  border-radius: var(--radius-xl, 14px);
+  padding: 16px;
+  background: rgba(15, 12, 35, 0.96);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(99, 102, 241, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Header ── */
+.theme-cust-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.theme-cust-header span {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  letter-spacing: 0.01em;
+}
+
+.theme-cust-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.theme-cust-close:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Mode tabs ── */
+.theme-cust-tabs {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.theme-cust-tab {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.theme-cust-tab.active {
+  background: rgba(99, 102, 241, 0.3);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.theme-cust-tab:not(.active):hover {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Controls ── */
+.theme-cust-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.theme-cust-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.theme-cust-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.theme-cust-picker-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.theme-cust-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.theme-cust-color-input {
+  opacity: 0;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  padding: 0;
+  border: none;
+}
+
+.theme-cust-hex {
+  font-family: 'Fira Mono', 'Courier New', monospace;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.02em;
+}
+
+.theme-cust-hint {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  line-height: 1.3;
+}
+
+/* ── Preview strip ── */
+.theme-cust-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid;
+  margin-top: 2px;
+}
+
+.theme-cust-preview span {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.theme-cust-preview-btn {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+
+/* ── Actions ── */
+.theme-cust-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.theme-cust-reset {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.theme-cust-reset:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.theme-cust-save {
+  background: var(--color-primary, #6366f1);
+  border: none;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.theme-cust-save:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.theme-cust-save:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ============================================================
+   Light mode overrides
+   ============================================================ */
+
+[data-theme="light"] .theme-cust-btn {
+  background: rgba(241, 245, 249, 0.9);
+  border-color: rgba(99, 102, 241, 0.15);
+  color: #475569;
+}
+
+[data-theme="light"] .theme-cust-btn:hover {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+[data-theme="light"] .theme-cust-panel {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(99, 102, 241, 0.18);
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(99, 102, 241, 0.08);
+}
+
+[data-theme="light"] .theme-cust-header span {
+  color: #1e293b;
+}
+
+[data-theme="light"] .theme-cust-close {
+  color: #94a3b8;
+}
+
+[data-theme="light"] .theme-cust-close:hover {
+  color: #475569;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+[data-theme="light"] .theme-cust-tabs {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+[data-theme="light"] .theme-cust-tab {
+  color: #64748b;
+}
+
+[data-theme="light"] .theme-cust-tab.active {
+  background: rgba(99, 102, 241, 0.15);
+  color: #4f46e5;
+}
+
+[data-theme="light"] .theme-cust-tab:not(.active):hover {
+  color: #475569;
+  background: rgba(15, 23, 42, 0.05);
+}
+
+[data-theme="light"] .theme-cust-label {
+  color: #94a3b8;
+}
+
+[data-theme="light"] .theme-cust-hex {
+  color: #475569;
+}
+
+[data-theme="light"] .theme-cust-hint {
+  color: #94a3b8;
+}
+
+[data-theme="light"] .theme-cust-swatch {
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="light"] .theme-cust-reset {
+  border-color: rgba(15, 23, 42, 0.15);
+  color: #64748b;
+}
+
+[data-theme="light"] .theme-cust-reset:hover {
+  border-color: rgba(15, 23, 42, 0.3);
+  color: #1e293b;
+}

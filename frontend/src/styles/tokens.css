@@ -1,0 +1,145 @@
+/* ============================================================
+   VELOCITY DESIGN TOKENS   Single source of truth for all CSS custom properties.
+   ============================================================ */
+
+:root {
+  /* ── Brand Colors ─────────────────────────────────────── */
+  --color-primary:         #6366f1;
+  --color-primary-hover:   #4f46e5;
+  --color-primary-light:   #818cf8;
+  --color-primary-deep:    #3730a3;
+  --color-primary-rgb:     99, 102, 241;
+  --color-secondary:       #8b5cf6;
+  --color-secondary-light: #a78bfa;
+  --color-accent:          #06b6d4;
+  --color-accent-light:    #22d3ee;
+  --color-success:         #10b981;
+  --color-success-light:   #34d399;
+  --color-success-muted:   rgba(16, 185, 129, 0.12);
+  --color-warning:         #f59e0b;
+  --color-warning-light:   #fbbf24;
+  --color-warning-muted:   rgba(245, 158, 11, 0.12);
+  --color-danger:          #ef4444;
+  --color-danger-light:    #f87171;
+  --color-danger-muted:    rgba(239, 68, 68, 0.12);
+  --color-info:            #38bdf8;
+
+  /* ── Gradients ──────────────────────────────────────────── */
+  --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  --gradient-accent:  linear-gradient(135deg, #06b6d4 0%, #6366f1 100%);
+  --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --gradient-danger:  linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  /* Legacy alias used by base.css */
+  --gradient-bg:
+    radial-gradient(ellipse 80% 50% at 20% 0%, rgba(99,102,241,0.13) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(139,92,246,0.10) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 60% at 50% 50%, rgba(6,182,212,0.04) 0%, transparent 70%),
+    linear-gradient(160deg, #0d0b1f 0%, #1a1533 30%, #0f1f3d 65%, #020617 100%);
+
+  /* ── Background ─────────────────────────────────────────── */
+  --bg-gradient: linear-gradient(160deg, #0d0b1f 0%, #1a1533 30%, #0f1f3d 65%, #020617 100%);
+  --bg-base:     #020617;
+  --bg-surface:  #0f172a;
+  --bg-elevated: #1e293b;
+  --bg-card:     rgba(255, 255, 255, 0.04);
+  --bg-hover:    rgba(255, 255, 255, 0.07);
+  --bg-active:   rgba(255, 255, 255, 0.10);
+
+  /* ── Glassmorphism ──────────────────────────────────────── */
+  --glass-bg:           rgba(255, 255, 255, 0.04);
+  --glass-bg-hover:     rgba(255, 255, 255, 0.08);
+  --glass-bg-active:    rgba(255, 255, 255, 0.12);
+  --glass-border:       rgba(255, 255, 255, 0.08);
+  --glass-border-hover: rgba(255, 255, 255, 0.16);
+  --glass-border-glow:  rgba(99, 102, 241, 0.35);
+  --glass-shadow:       0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+  --glass-blur:         blur(16px) saturate(180%);
+  --glass-blur-sm:      blur(8px) saturate(160%);
+  --glass-blur-lg:      blur(24px) saturate(200%);
+
+  /* ── Text ───────────────────────────────────────────────── */
+  --text-primary:   #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted:     #64748b;
+  --text-faint:     #334155;
+  --text-disabled:  rgba(255, 255, 255, 0.22);
+
+  /* ── Surfaces / Borders ─────────────────────────────────── */
+  --surface-bg:      rgba(15, 23, 42, 0.85);
+  --surface-raised:  rgba(30, 41, 59, 0.8);
+  --surface-overlay: rgba(2, 6, 23, 0.92);
+  --border-color:    rgba(255, 255, 255, 0.07);
+  --border-subtle:   rgba(255, 255, 255, 0.04);
+
+  /* ── Shadow System (6 levels + glow variants) ───────────── */
+  --shadow-xs:  0 1px 2px rgba(0,0,0,0.4);
+  --shadow-sm:  0 2px 4px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md:  0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+  --shadow-lg:  0 8px 24px rgba(0,0,0,0.45), 0 4px 8px rgba(0,0,0,0.3);
+  --shadow-xl:  0 16px 48px rgba(0,0,0,0.5), 0 8px 16px rgba(0,0,0,0.35);
+  --shadow-2xl: 0 24px 64px rgba(0,0,0,0.6), 0 12px 24px rgba(0,0,0,0.4);
+  --shadow-glass:        0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+  --shadow-glow:         0 0 24px rgba(99,102,241,0.4);
+  --shadow-glow-sm:      0 0 12px rgba(99,102,241,0.3);
+  --shadow-glow-strong:  0 0 40px rgba(99,102,241,0.6);
+  --shadow-glow-success: 0 0 20px rgba(16,185,129,0.4);
+  --shadow-glow-danger:  0 0 20px rgba(239,68,68,0.4);
+  --shadow-glow-warning: 0 0 20px rgba(245,158,11,0.35);
+
+  /* ── Border Radius ──────────────────────────────────────── */
+  --radius-xs:   0.25rem;
+  --radius-sm:   0.375rem;
+  --radius-md:   0.625rem;
+  --radius-lg:   0.875rem;
+  --radius-xl:   1.125rem;
+  --radius-2xl:  1.5rem;
+  --radius-full: 9999px;
+
+  /* ── Transitions ────────────────────────────────────────── */
+  --transition-instant: 50ms ease;
+  --transition-fast:    120ms cubic-bezier(0.4,0,0.2,1);
+  --transition-normal:  200ms cubic-bezier(0.4,0,0.2,1);
+  --transition-slow:    300ms cubic-bezier(0.4,0,0.2,1);
+  --transition-spring:  400ms cubic-bezier(0.34,1.56,0.64,1);
+  --transition-base:    all 200ms cubic-bezier(0.4,0,0.2,1);
+  --transition-bounce:  all 300ms cubic-bezier(0.34,1.56,0.64,1);
+  --duration-fast:   120ms;
+  --duration-normal: 200ms;
+  --duration-slow:   300ms;
+  --ease-out:        cubic-bezier(0.4,0,0.2,1);
+
+  /* ── Typography ─────────────────────────────────────────── */
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --text-xs:   0.7rem;
+  --text-sm:   0.8375rem;
+  --text-base: 0.9rem;
+  --text-md:   1rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.25rem;
+  --text-2xl:  1.5rem;
+
+  /* ── Layout ─────────────────────────────────────────────── */
+  --sidebar-width:     268px;
+  --sidebar-collapsed: 60px;
+  --header-height:     64px;
+  --input-bg:          rgba(255,255,255,0.04);
+
+  /* ── Spacing ────────────────────────────────────────────── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* ── Z-index ────────────────────────────────────────────── */
+  --z-base:     1;
+  --z-dropdown: 100;
+  --z-sticky:   200;
+  --z-modal:    500;
+  --z-toast:    800;
+  --z-overlay:  1000;
+}

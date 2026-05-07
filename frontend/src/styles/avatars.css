@@ -1,0 +1,35 @@
+/* ============================================================
+   AVATARS
+   ============================================================ */
+.avatar {
+  border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  background: var(--gradient-primary);
+  color: white; font-weight: 700; font-size: 0.75rem;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid rgba(99,102,241,0.3);
+  box-shadow: 0 0 10px rgba(99,102,241,0.2);
+  width: 36px; height: 36px;
+}
+.avatar-sm  { width: 26px; height: 26px; font-size: 0.65rem; }
+.avatar-md  { width: 36px; height: 36px; font-size: 0.75rem; }
+.avatar-lg  { width: 44px; height: 44px; font-size: 0.9rem; }
+.avatar-xl  { width: 56px; height: 56px; font-size: 1.125rem; }
+.avatar-image    { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid rgba(99,102,241,0.3); }
+.avatar-image-sm { width: 28px; height: 28px; }
+
+.avatar-img {
+  width: 100%; height: 100%;
+  border-radius: 50%; object-fit: cover;
+}
+
+/* Avatar group (stacked) */
+.avatar-group { display: flex; align-items: center; }
+.avatar-group .avatar,
+.avatar-group .avatar-sm {
+  border: 2px solid var(--bg-base);
+  margin-left: -8px;
+}
+.avatar-group .avatar:first-child,
+.avatar-group .avatar-sm:first-child {
+  margin-left: 0;
+}

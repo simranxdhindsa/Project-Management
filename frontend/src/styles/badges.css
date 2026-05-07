@@ -1,0 +1,82 @@
+/* ============================================================
+   BADGES — Status, priority, role
+   ============================================================ */
+
+.badge {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: var(--radius-full);
+  font-size: 0.7rem; font-weight: 600; letter-spacing: 0.025em;
+}
+.badge-todo     { background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.25); }
+.badge-progress { background: rgba(245,158,11,0.15);  color: #fbbf24; border: 1px solid rgba(245,158,11,0.25); }
+.badge-review   { background: rgba(139,92,246,0.15);  color: #a78bfa; border: 1px solid rgba(139,92,246,0.25); }
+.badge-done     { background: rgba(16,185,129,0.15);  color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
+.badge-blocked  { background: rgba(239,68,68,0.15);   color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+.badge-cancelled{ background: rgba(100,116,139,0.12); color: #64748b; border: 1px solid rgba(100,116,139,0.2); }
+
+/* ── Status badge ───────────────────────────────────────── */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.2rem 0.55rem; border-radius: var(--radius-full);
+  font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+}
+.status-badge.todo     { background: rgba(255,255,255,0.08); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.1); }
+.status-badge.in-progress { background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); }
+.status-badge.done     { background: rgba(34,197,94,0.13); color: #86efac; border: 1px solid rgba(34,197,94,0.25); }
+.status-badge.blocked  { background: rgba(239,68,68,0.13); color: #fca5a5; border: 1px solid rgba(239,68,68,0.25); }
+
+/* Task priority badges */
+.task-priority-badge {
+  display: inline-flex; align-items: center;
+  padding: 0.175rem 0.55rem;
+  border-radius: var(--radius-full);
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.03em;
+}
+.task-priority-badge.priority-high   { background: rgba(239,68,68,0.15);   color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+.task-priority-badge.priority-medium { background: rgba(245,158,11,0.15);  color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+.task-priority-badge.priority-low    { background: rgba(16,185,129,0.15);  color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+
+/* PM priority badges */
+.priority-badge {
+  display: inline-flex; align-items: center;
+  padding: 0.175rem 0.55rem;
+  border-radius: var(--radius-full);
+  font-size: 0.68rem; font-weight: 700;
+}
+.priority-badge.p0, .priority-badge.critical, .priority-badge.showstopper { background: rgba(239,68,68,0.18); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+.priority-badge.p1, .priority-badge.high      { background: rgba(245,158,11,0.18); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+.priority-badge.p2, .priority-badge.medium, .priority-badge.major { background: rgba(99,102,241,0.18);  color: #818cf8; border: 1px solid rgba(99,102,241,0.3); }
+.priority-badge.p3, .priority-badge.low, .priority-badge.minor, .priority-badge.normal { background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.25); }
+
+/* Priority colour helpers */
+.priority-p0 { background: rgba(239,68,68,0.2); color: #f87171; }
+.priority-p1 { background: rgba(249,115,22,0.2); color: #fb923c; }
+.priority-p2 { background: rgba(234,179,8,0.15); color: #fde047; }
+.priority-p3 { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.45); }
+.priority-default { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.45); }
+
+/* Role badges */
+.role-badge {
+  display: inline-flex; align-items: center;
+  padding: 0.2rem 0.6rem; border-radius: var(--radius-full);
+  font-size: 0.72rem; font-weight: 600;
+}
+.role-badge.admin  { background: rgba(139,92,246,0.15); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+.role-badge.member { background: rgba(99,102,241,0.12); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.25); }
+.role-badge.viewer { background: rgba(255,255,255,0.07); color: var(--text-secondary); border: 1px solid rgba(255,255,255,0.1); }
+
+.role-admin  { background: rgba(239,68,68,0.15);   color: #f87171; border: 1px solid rgba(239,68,68,0.25);   border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: 0.7rem; font-weight: 600; display: inline-flex; align-items: center; }
+.role-pm     { background: rgba(99,102,241,0.15);  color: #818cf8; border: 1px solid rgba(99,102,241,0.25);  border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: 0.7rem; font-weight: 600; display: inline-flex; align-items: center; }
+.role-member { background: rgba(16,185,129,0.15);  color: #34d399; border: 1px solid rgba(16,185,129,0.25); border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: 0.7rem; font-weight: 600; display: inline-flex; align-items: center; }
+.role-viewer { background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.2);  border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: 0.7rem; font-weight: 600; display: inline-flex; align-items: center; }
+
+/* Notification badge */
+.notification-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 18px; height: 18px;
+  background: var(--color-danger); color: white;
+  border-radius: var(--radius-full); font-size: 0.6rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 8px rgba(239,68,68,0.6); border: 2px solid var(--bg-base);
+}

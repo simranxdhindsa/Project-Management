@@ -1,0 +1,50 @@
+/* ============================================================
+   Velocity — Main Stylesheet Entry Point   All rules live in styles/. This file only imports them.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap');
+
+@import "tailwindcss";
+
+/* ── Design tokens & reset ── */
+@import "./styles/tokens.css";
+@import "./styles/base.css";
+
+/* ── Component primitives ── */
+@import "./styles/glass.css";
+@import "./styles/animations.css";
+@import "./styles/buttons.css";
+@import "./styles/badges.css";
+@import "./styles/forms.css";
+@import "./styles/layout.css";
+@import "./styles/cards.css";
+@import "./styles/modals.css";
+@import "./styles/notifications.css";
+@import "./styles/avatars.css";
+@import "./styles/tables.css";
+@import "./styles/utilities.css";
+@import "./styles/tabs.css";
+
+/* ── Page-specific styles ── */
+@import "./styles/pages/login.css";
+@import "./styles/pages/board.css";
+@import "./styles/pages/list-view.css";
+@import "./styles/pages/pm-reports.css";
+@import "./styles/pages/ai-analysis.css";
+@import "./styles/pages/integrations.css";
+@import "./styles/pages/slack.css";
+@import "./styles/pages/daily-ops.css";
+@import "./styles/pages/activity.css";
+@import "./styles/pages/reminders.css";
+@import "./styles/pages/settings.css";
+@import "./styles/pages/admin.css";
+@import "./styles/pages/reports.css";
+@import "./styles/pages/bot-config.css";
+@import "./styles/pages/daytrack.css";
+@import "./styles/pages/calendar.css";
+
+@import "./styles/pages/theme-customizer.css";
+@import "./styles/pages/theme-settings.css";
+
+/* ── Light mode theme overrides (must be last) ── */
+@import "./styles/theme-light.css";

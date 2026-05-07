@@ -1,0 +1,644 @@
+import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
+import { Download, Loader2, ChevronDown, Shield, Briefcase, User as UserIcon, Eye } from 'lucide-react'
+import api from '../services/api'
+import type { AllowedEmail, AllowedDomain, AccessSettings, YouTrackUser } from '../services/api'
+import { ConfirmModal } from '../components/ConfirmModal'
+
+type UserRole = 'admin' | 'project_manager' | 'member' | 'viewer'
+
+const ROLES: { value: UserRole; label: string }[] = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'project_manager', label: 'Project Manager' },
+  { value: 'member', label: 'Member' },
+  { value: 'viewer', label: 'Viewer' },
+]
+
+export function SettingsPage() {
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [settings, setSettings] = useState<AccessSettings | null>(null)
+
+  // Form state
+  const [newEmail, setNewEmail] = useState('')
+  const [newEmailRole, setNewEmailRole] = useState<UserRole>('member')
+  const [newDomain, setNewDomain] = useState('')
+  const [newDomainRole, setNewDomainRole] = useState<UserRole>('member')
+  const [addingEmail, setAddingEmail] = useState(false)
+  const [addingDomain, setAddingDomain] = useState(false)
+  const [emailRoleOpen, setEmailRoleOpen] = useState(false)
+  const [emailRoleRect, setEmailRoleRect] = useState<DOMRect | null>(null)
+  const [domainRoleOpen, setDomainRoleOpen] = useState(false)
+  const [domainRoleRect, setDomainRoleRect] = useState<DOMRect | null>(null)
+
+  // Confirm modal state
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string
+    message: string
+    onConfirm: () => void
+  } | null>(null)
+
+  // Import from YouTrack state
+  const [showYtImport, setShowYtImport] = useState(false)
+  const [ytUsers, setYtUsers] = useState<YouTrackUser[]>([])
+  const [ytLoadingUsers, setYtLoadingUsers] = useState(false)
+  const [ytSelectedEmails, setYtSelectedEmails] = useState<Set<string>>(new Set())
+  const [ytImporting, setYtImporting] = useState(false)
+
+  useEffect(() => {
+    fetchSettings()
+  }, [])
+
+  const fetchSettings = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await api.getAccessSettings()
+      if (response.success && response.data) {
+        setSettings(response.data)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load settings')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleAddEmail = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newEmail.trim()) return
+
+    try {
+      setAddingEmail(true)
+      setError(null)
+      const response = await api.addAllowedEmail(newEmail.trim(), newEmailRole)
+      if (response.success) {
+        setSuccess('Email added successfully')
+        setNewEmail('')
+        setNewEmailRole('member')
+        fetchSettings()
+        setTimeout(() => setSuccess(null), 3000)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add email')
+    } finally {
+      setAddingEmail(false)
+    }
+  }
+
+  const handleRemoveEmail = async (email: string) => {
+    setConfirmAction({
+      title: 'Remove Email',
+      message: `Remove ${email} from the allowed list?`,
+      onConfirm: async () => {
+        setConfirmAction(null)
+        try {
+          setError(null)
+          await api.removeAllowedEmail(email)
+          setSuccess('Email removed successfully')
+          fetchSettings()
+          setTimeout(() => setSuccess(null), 3000)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to remove email')
+        }
+      },
+    })
+  }
+
+  const handleAddDomain = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newDomain.trim()) return
+
+    try {
+      setAddingDomain(true)
+      setError(null)
+      const domain = newDomain.trim().replace(/^@/, '')
+      const response = await api.addAllowedDomain(domain, newDomainRole)
+      if (response.success) {
+        setSuccess('Domain added successfully')
+        setNewDomain('')
+        setNewDomainRole('member')
+        fetchSettings()
+        setTimeout(() => setSuccess(null), 3000)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add domain')
+    } finally {
+      setAddingDomain(false)
+    }
+  }
+
+  const handleRemoveDomain = async (domain: string) => {
+    setConfirmAction({
+      title: 'Remove Domain',
+      message: `Remove @${domain} from the allowed list?`,
+      onConfirm: async () => {
+        setConfirmAction(null)
+        try {
+          setError(null)
+          await api.removeAllowedDomain(domain)
+          setSuccess('Domain removed successfully')
+          fetchSettings()
+          setTimeout(() => setSuccess(null), 3000)
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to remove domain')
+        }
+      },
+    })
+  }
+
+  // Import from YouTrack
+  const handleOpenYtImport = async () => {
+    setShowYtImport(true)
+    setYtLoadingUsers(true)
+    setYtSelectedEmails(new Set())
+    try {
+      const response = await api.getYouTrackUsers()
+      if (response.success && response.data) {
+        setYtUsers(response.data as YouTrackUser[])
+      }
+    } catch {
+      setError('Failed to fetch YouTrack users')
+      setShowYtImport(false)
+    } finally {
+      setYtLoadingUsers(false)
+    }
+  }
+
+  const isEmailAlreadyAllowed = (email: string) => {
+    if (!settings?.allowed_emails) return false
+    return settings.allowed_emails.some(
+      (e: AllowedEmail) => e.email.toLowerCase() === email.toLowerCase()
+    )
+  }
+
+  const handleYtToggle = (email: string) => {
+    setYtSelectedEmails(prev => {
+      const next = new Set(prev)
+      if (next.has(email)) next.delete(email)
+      else next.add(email)
+      return next
+    })
+  }
+
+  const handleYtImport = async () => {
+    if (ytSelectedEmails.size === 0) return
+    setYtImporting(true)
+    try {
+      let added = 0
+      for (const email of ytSelectedEmails) {
+        const response = await api.addAllowedEmail(email, 'member')
+        if (response.success) added++
+      }
+      setSuccess(`Imported ${added} user${added !== 1 ? 's' : ''} from YouTrack`)
+      setTimeout(() => setSuccess(null), 3000)
+      setShowYtImport(false)
+      fetchSettings()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import users')
+    } finally {
+      setYtImporting(false)
+    }
+  }
+
+  const getRoleBadgeClass = (role: UserRole) => {
+    switch (role) {
+      case 'admin':
+        return 'role-admin'
+      case 'project_manager':
+        return 'role-pm'
+      case 'member':
+        return 'role-member'
+      case 'viewer':
+        return 'role-viewer'
+      default:
+        return ''
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="settings-page">
+        <div className="loading-state">
+          <div className="loading-spinner" />
+          <p>Loading settings...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="settings-page">
+      <div className="page-header">
+        <h1 className="page-title">Access Control Settings</h1>
+        <p className="page-subtitle">
+          Manage who can access the application using Google OAuth
+        </p>
+      </div>
+
+      {error && (
+        <div className="alert alert-error">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          {error}
+          <button className="alert-close" onClick={() => setError(null)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {success && (
+        <div className="alert alert-success">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          {success}
+        </div>
+      )}
+
+      {/* Default Admin Notice */}
+      <div className="info-card glass-card">
+        <div className="info-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+        </div>
+        <div className="info-content">
+          <h3>Default Administrator</h3>
+          <p>
+            <strong>{settings?.default_admin_email}</strong> always has admin access
+            and cannot be removed from the system.
+          </p>
+        </div>
+      </div>
+
+      {/* Allowed Emails Section */}
+      <div className="settings-section glass-card">
+        <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h2>Allowed Email Addresses</h2>
+            <p>Specific email addresses that can access the application</p>
+          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleOpenYtImport}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap' }}
+          >
+            <Download size={16} />
+            Import from YouTrack
+          </button>
+        </div>
+
+        <form className="add-form" onSubmit={handleAddEmail}>
+          <div className="form-row">
+            <div className="form-group flex-1">
+              <input
+                type="email"
+                placeholder="user@example.com"
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                required
+              />
+            </div>
+            <div className="form-group">
+              <div className="pm-custom-dropdown settings-role-dropdown">
+                <button
+                  type="button"
+                  className="pm-custom-dropdown-trigger settings-role-trigger"
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                    setEmailRoleRect(r => r ? null : rect)
+                    setEmailRoleOpen(o => !o)
+                  }}
+                >
+                  {newEmailRole === 'admin'           && <Shield size={13} />}
+                  {newEmailRole === 'project_manager' && <Briefcase size={13} />}
+                  {newEmailRole === 'member'          && <UserIcon size={13} />}
+                  {newEmailRole === 'viewer'          && <Eye size={13} />}
+                  <span>{ROLES.find(r => r.value === newEmailRole)?.label}</span>
+                  <ChevronDown size={11} className={`dropdown-chevron ${emailRoleOpen ? 'open' : ''}`} />
+                </button>
+                {emailRoleOpen && emailRoleRect && createPortal(
+                  <div
+                    className="pm-custom-dropdown-menu"
+                    style={{ position: 'fixed', top: emailRoleRect.bottom + 4, left: emailRoleRect.left, minWidth: emailRoleRect.width, zIndex: 9999 }}
+                  >
+                    {ROLES.map(role => (
+                      <button
+                        key={role.value}
+                        type="button"
+                        className={`pm-dropdown-item ${newEmailRole === role.value ? 'active' : ''}`}
+                        onClick={() => { setNewEmailRole(role.value); setEmailRoleOpen(false); setEmailRoleRect(null) }}
+                      >
+                        {role.value === 'admin'           && <Shield size={13} />}
+                        {role.value === 'project_manager' && <Briefcase size={13} />}
+                        {role.value === 'member'          && <UserIcon size={13} />}
+                        {role.value === 'viewer'          && <Eye size={13} />}
+                        <span>{role.label}</span>
+                      </button>
+                    ))}
+                  </div>,
+                  document.body
+                )}
+              </div>
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={addingEmail || !newEmail.trim()}
+            >
+              {addingEmail ? 'Adding...' : 'Add Email'}
+            </button>
+          </div>
+        </form>
+
+        <div className="items-list">
+          {settings?.allowed_emails && settings.allowed_emails.length > 0 ? (
+            settings.allowed_emails.map((item) => (
+              <div key={item.email} className="list-item">
+                <div className="item-info">
+                  <span className="item-name">{item.email}</span>
+                  <span className={`role-badge ${getRoleBadgeClass(item.role)}`}>
+                    {item.role.replace('_', ' ')}
+                  </span>
+                  {item.is_default && (
+                    <span className="default-badge">Default Admin</span>
+                  )}
+                </div>
+                <div className="item-actions">
+                  {!item.is_default && (
+                    <button
+                      className="btn btn-ghost btn-sm btn-danger"
+                      onClick={() => handleRemoveEmail(item.email)}
+                      title="Remove email"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="empty-list">
+              <p>No additional emails configured. Only the default admin has access.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Allowed Domains Section */}
+      <div className="settings-section glass-card">
+        <div className="section-header">
+          <div>
+            <h2>Allowed Email Domains</h2>
+            <p>Allow all users from specific email domains (e.g., @company.com)</p>
+          </div>
+        </div>
+
+        <form className="add-form" onSubmit={handleAddDomain}>
+          <div className="form-row">
+            <div className="form-group flex-1">
+              <div className="input-with-prefix">
+                <span className="input-prefix">@</span>
+                <input
+                  type="text"
+                  placeholder="company.com"
+                  value={newDomain}
+                  onChange={(e) => setNewDomain(e.target.value.replace(/^@/, ''))}
+                  required
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <div className="pm-custom-dropdown settings-role-dropdown">
+                <button
+                  type="button"
+                  className="pm-custom-dropdown-trigger settings-role-trigger"
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                    setDomainRoleRect(r => r ? null : rect)
+                    setDomainRoleOpen(o => !o)
+                  }}
+                >
+                  {newDomainRole === 'admin'           && <Shield size={13} />}
+                  {newDomainRole === 'project_manager' && <Briefcase size={13} />}
+                  {newDomainRole === 'member'          && <UserIcon size={13} />}
+                  {newDomainRole === 'viewer'          && <Eye size={13} />}
+                  <span>{ROLES.find(r => r.value === newDomainRole)?.label}</span>
+                  <ChevronDown size={11} className={`dropdown-chevron ${domainRoleOpen ? 'open' : ''}`} />
+                </button>
+                {domainRoleOpen && domainRoleRect && createPortal(
+                  <div
+                    className="pm-custom-dropdown-menu"
+                    style={{ position: 'fixed', top: domainRoleRect.bottom + 4, left: domainRoleRect.left, minWidth: domainRoleRect.width, zIndex: 9999 }}
+                  >
+                    {ROLES.map(role => (
+                      <button
+                        key={role.value}
+                        type="button"
+                        className={`pm-dropdown-item ${newDomainRole === role.value ? 'active' : ''}`}
+                        onClick={() => { setNewDomainRole(role.value); setDomainRoleOpen(false); setDomainRoleRect(null) }}
+                      >
+                        {role.value === 'admin'           && <Shield size={13} />}
+                        {role.value === 'project_manager' && <Briefcase size={13} />}
+                        {role.value === 'member'          && <UserIcon size={13} />}
+                        {role.value === 'viewer'          && <Eye size={13} />}
+                        <span>{role.label}</span>
+                      </button>
+                    ))}
+                  </div>,
+                  document.body
+                )}
+              </div>
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={addingDomain || !newDomain.trim()}
+            >
+              {addingDomain ? 'Adding...' : 'Add Domain'}
+            </button>
+          </div>
+        </form>
+
+        <div className="items-list">
+          {settings?.allowed_domains && settings.allowed_domains.length > 0 ? (
+            settings.allowed_domains.map((item) => (
+              <div key={item.domain} className="list-item">
+                <div className="item-info">
+                  <span className="item-name">@{item.domain}</span>
+                  <span className={`role-badge ${getRoleBadgeClass(item.role)}`}>
+                    {item.role.replace('_', ' ')}
+                  </span>
+                </div>
+                <div className="item-actions">
+                  <button
+                    className="btn btn-ghost btn-sm btn-danger"
+                    onClick={() => handleRemoveDomain(item.domain)}
+                    title="Remove domain"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="empty-list">
+              <p>No domains configured. Add a domain to allow all users from that organization.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Google OAuth Setup Instructions */}
+      <div className="settings-section glass-card">
+        <div className="section-header">
+          <h2>Google OAuth Setup</h2>
+          <p>Instructions for setting up Google OAuth for your application</p>
+        </div>
+
+        <div className="instructions">
+          <ol>
+            <li>
+              Go to the{' '}
+              <a
+                href="https://console.cloud.google.com/apis/credentials"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Google Cloud Console
+              </a>
+            </li>
+            <li>Create a new project or select an existing one</li>
+            <li>Navigate to "APIs & Services" &gt; "Credentials"</li>
+            <li>Click "Create Credentials" &gt; "OAuth client ID"</li>
+            <li>Select "Web application" as the application type</li>
+            <li>
+              Add authorized JavaScript origins:
+              <ul>
+                <li>
+                  <code>http://localhost:5173</code> (development)
+                </li>
+                <li>
+                  <code>https://yourdomain.com</code> (production)
+                </li>
+              </ul>
+            </li>
+            <li>
+              Add authorized redirect URIs:
+              <ul>
+                <li>
+                  <code>http://localhost:5173/auth/callback</code> (development)
+                </li>
+                <li>
+                  <code>https://yourdomain.com/auth/callback</code> (production)
+                </li>
+              </ul>
+            </li>
+            <li>Copy the Client ID and Client Secret</li>
+            <li>
+              Set environment variables in your backend:
+              <ul>
+                <li>
+                  <code>GOOGLE_CLIENT_ID</code>
+                </li>
+                <li>
+                  <code>GOOGLE_CLIENT_SECRET</code>
+                </li>
+                <li>
+                  <code>GOOGLE_REDIRECT_URI</code>
+                </li>
+              </ul>
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        open={!!confirmAction}
+        title={confirmAction?.title || ''}
+        message={confirmAction?.message || ''}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => confirmAction?.onConfirm()}
+        onCancel={() => setConfirmAction(null)}
+      />
+
+      {/* Import from YouTrack Modal */}
+      {showYtImport && (
+        <div className="modal-overlay" onClick={() => setShowYtImport(false)}>
+          <div className="glass-card yt-import-modal" onClick={e => e.stopPropagation()}>
+            <div className="yt-import-header">
+              <h3>Import Users from YouTrack</h3>
+              <p className="yt-import-subtitle">Select users to add as members</p>
+            </div>
+
+            {ytLoadingUsers ? (
+              <div className="yt-import-loading">
+                <Loader2 size={24} className="animate-spin" />
+                <span>Loading YouTrack users...</span>
+              </div>
+            ) : (
+              <>
+                <div className="yt-import-list">
+                  {ytUsers.filter(u => u.email).map(user => {
+                    const alreadyAllowed = isEmailAlreadyAllowed(user.email!)
+                    return (
+                      <label
+                        key={user.id}
+                        className={`yt-import-item ${alreadyAllowed ? 'yt-import-disabled' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={alreadyAllowed || ytSelectedEmails.has(user.email!)}
+                          disabled={alreadyAllowed}
+                          onChange={() => handleYtToggle(user.email!)}
+                        />
+                        <div className="yt-import-user-info">
+                          <span className="yt-import-name">{user.fullName || user.login}</span>
+                          <span className="yt-import-email">{user.email}</span>
+                        </div>
+                        {alreadyAllowed && <span className="yt-import-badge">Already added</span>}
+                      </label>
+                    )
+                  })}
+                  {ytUsers.filter(u => u.email).length === 0 && (
+                    <div className="yt-import-empty">No users with email addresses found in YouTrack</div>
+                  )}
+                </div>
+
+                <div className="yt-import-actions">
+                  <button className="btn btn-ghost" onClick={() => setShowYtImport(false)}>Cancel</button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleYtImport}
+                    disabled={ytImporting || ytSelectedEmails.size === 0}
+                  >
+                    {ytImporting ? 'Importing...' : `Add Selected (${ytSelectedEmails.size})`}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

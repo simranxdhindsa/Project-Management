@@ -1,0 +1,461 @@
+/* Page: Admin (admin-*, users-table, permission-card) */
+
+/* ========================================
+   ADMIN PAGE STYLES
+   ======================================== */
+
+.admin-page {
+  padding: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.admin-page .page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+}
+
+.admin-page .header-left .page-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.admin-page .header-left .page-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.admin-page .header-right .btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Alert */
+.admin-page .alert {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius-lg);
+  margin-bottom: 1.5rem;
+}
+
+.admin-page .alert-error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.admin-page .alert-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.25rem;
+}
+
+/* Admin Content */
+.admin-content {
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.admin-toolbar .search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.75rem;
+  width: 280px;
+}
+
+.admin-toolbar .search-box svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.admin-toolbar .search-box input {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  width: 100%;
+  outline: none;
+  font-size: 0.875rem;
+}
+
+.admin-toolbar .search-box input::placeholder {
+  color: var(--text-muted);
+}
+
+.admin-toolbar .user-count {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+/* Users Table */
+.users-table {
+  overflow-x: auto;
+}
+
+.users-table .table-header {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 100px;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-md);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.users-table .table-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 100px;
+  gap: 1rem;
+  padding: 1rem;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.users-table .table-row:last-child {
+  border-bottom: none;
+}
+
+.users-table .table-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.col-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.user-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.user-email {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.col-role select {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+/* Role Badges */
+.role-badge {
+  display: inline-block;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: capitalize;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.role-badge:hover {
+  opacity: 0.8;
+}
+
+.role-badge.role-admin {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--color-danger);
+}
+
+.role-badge.role-pm {
+  background: rgba(139, 92, 246, 0.2);
+  color: var(--color-secondary);
+}
+
+.role-badge.role-member {
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--color-primary);
+}
+
+.role-badge.role-viewer {
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--text-secondary);
+}
+
+.col-joined {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.col-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.col-actions .btn-danger:hover {
+  color: var(--color-danger);
+}
+
+/* Role Permissions */
+.role-permissions {
+  padding: 1.5rem;
+}
+
+.role-permissions h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.permission-card {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.permission-card .role-badge {
+  margin-bottom: 0.5rem;
+  cursor: default;
+}
+
+.permission-card .role-badge:hover {
+  opacity: 1;
+}
+
+.permission-card p {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Empty State */
+.admin-page .empty-state,
+.admin-page .loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  text-align: center;
+}
+
+.admin-page .empty-state svg,
+.admin-page .loading-state .loading-spinner {
+  margin-bottom: 1rem;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.admin-page .empty-state h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.admin-page .empty-state p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+/* Form Elements (admin modal) */
+.form-group {
+  margin-bottom: 1.25rem;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  transition: border-color var(--transition-fast);
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.form-group input::placeholder {
+  color: var(--text-muted);
+}
+
+.form-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}
+
+/* ── Role custom dropdown (invite modal) ─────────────────── */
+.admin-role-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.admin-role-trigger {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0.6rem 0.875rem !important;
+  font-size: 0.875rem !important;
+  border-radius: var(--radius-md) !important;
+  border: 1px solid rgba(255,255,255,0.09) !important;
+  background: rgba(255,255,255,0.05) !important;
+  color: var(--text-primary) !important;
+}
+
+.admin-role-trigger .dropdown-chevron {
+  margin-left: auto;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.admin-role-trigger .dropdown-chevron.open {
+  transform: rotate(180deg);
+}
+
+.admin-role-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  min-width: 100% !important;
+}
+
+.admin-role-menu .pm-dropdown-item {
+  font-size: 0.875rem !important;
+  padding: 0.5rem 0.75rem !important;
+}
+
+/* ── Inline role edit trigger (table row) ─────────────────── */
+.admin-edit-role-trigger {
+  padding: 0.3rem 0.6rem !important;
+  font-size: 0.8rem !important;
+  border-radius: var(--radius-sm) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  background: rgba(255,255,255,0.06) !important;
+  color: var(--text-primary) !important;
+  gap: 0.35rem !important;
+}
+
+[data-theme="light"] .admin-edit-role-trigger {
+  background: rgba(255,255,255,0.9) !important;
+  border-color: rgba(99,102,241,0.2) !important;
+  color: #0f172a !important;
+}
+
+/* Light mode overrides for role dropdown */
+[data-theme="light"] .admin-role-trigger {
+  background: rgba(255,255,255,0.9) !important;
+  border-color: rgba(99,102,241,0.15) !important;
+  color: #0f172a !important;
+}
+
+[data-theme="light"] .admin-role-trigger:hover {
+  background: rgba(255,255,255,1) !important;
+  border-color: rgba(99,102,241,0.3) !important;
+}
+
+/* Responsive Admin */
+@media (max-width: 768px) {
+  .admin-page .page-header {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .admin-page .header-right {
+    width: 100%;
+  }
+
+  .admin-page .header-right .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .admin-toolbar {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .admin-toolbar .search-box {
+    width: 100%;
+  }
+
+  .users-table .table-header,
+  .users-table .table-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .col-role,
+  .col-joined {
+    display: none;
+  }
+}

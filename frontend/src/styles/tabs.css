@@ -1,0 +1,134 @@
+/* ============================================================
+   TABS
+   ============================================================ */
+
+/* Generic tab container */
+.tabs {
+  display: flex; gap: 0.25rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  padding: 0.25rem; border-radius: var(--radius-xl);
+}
+.tab {
+  flex: 1; padding: 0.5rem 1rem; text-align: center;
+  font-weight: 500; font-size: 0.8375rem;
+  color: var(--text-muted); border-radius: var(--radius-lg);
+  cursor: pointer; transition: all var(--transition-fast);
+  border: none; background: transparent; font-family: inherit;
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem;
+}
+.tab:hover { color: var(--text-secondary); background: rgba(255,255,255,0.06); }
+.tab.active { background: var(--gradient-primary); color: white; box-shadow: var(--shadow-glow-sm); font-weight: 600; }
+
+/* PM Reports tabs */
+.pm-tab-bar {
+  display: flex; gap: 0.375rem; padding: 0.375rem;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius-xl); margin-bottom: 1.5rem;
+}
+.pm-tab-btn {
+  flex: 1; padding: 0.5rem 1rem; font-size: 0.8125rem; font-weight: 500;
+  color: var(--text-muted); cursor: pointer; border: none; background: transparent;
+  border-radius: var(--radius-lg); transition: all var(--transition-fast); font-family: inherit;
+}
+.pm-tab-btn:hover { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+.pm-tab-btn.active { background: var(--gradient-primary); color: white; box-shadow: var(--shadow-glow-sm); font-weight: 600; }
+
+/* PM Mode/Scope toggle buttons */
+.pm-report-mode-toggle {
+  display: flex; align-items: center;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: 6px; padding: 2px; gap: 2px; flex-shrink: 0;
+}
+.pm-mode-btn {
+  background: transparent; border: none; border-radius: 4px;
+  padding: 0.28rem 0.7rem; font-size: 0.78rem; font-weight: 500;
+  color: var(--text-secondary); cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.pm-mode-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+.pm-mode-btn.active { background: rgba(99,102,241,0.2); color: #a78bfa; }
+
+.pm-report-scope-toggle {
+  display: flex; align-items: center;
+  background: var(--glass-bg); border: 1px solid var(--glass-border);
+  border-radius: 6px; padding: 2px; gap: 2px; flex-shrink: 0;
+}
+.pm-scope-btn {
+  background: transparent; border: none; border-radius: 4px;
+  padding: 0.28rem 0.7rem; font-size: 0.78rem; font-weight: 500;
+  color: var(--text-secondary); cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.pm-scope-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+.pm-scope-btn.active { background: rgba(99,102,241,0.2); color: #a78bfa; }
+
+/* Slack Intelligence tabs */
+.si-tabs {
+  display: flex; gap: 0.25rem; padding: 0.25rem;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius-xl); margin-bottom: 1.25rem;
+}
+.si-tab {
+  padding: 0.475rem 1rem; font-size: 0.8rem; font-weight: 500;
+  color: var(--text-muted); cursor: pointer; border: none; background: transparent;
+  border-radius: var(--radius-lg); transition: all var(--transition-fast); font-family: inherit;
+}
+.si-tab.active { background: var(--gradient-primary); color: white; box-shadow: var(--shadow-glow-sm); font-weight: 600; }
+.si-tab:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+.si-tab-badge { background: rgba(99,102,241,0.2); color: var(--color-primary-light); border-radius: var(--radius-full); padding: 0.1rem 0.4rem; font-size: 0.65rem; font-weight: 700; margin-left: 0.375rem; }
+.si-tab-badge-warn { background: rgba(245,158,11,0.2); color: var(--color-warning-light); }
+
+/* Report tabs */
+.report-tabs {
+  display: flex; gap: 0.25rem; padding: 0.25rem;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--radius-xl); margin-bottom: 1.5rem;
+  overflow-x: auto;
+}
+.report-tabs .tab {
+  flex: 1; padding: 0.5rem 1rem; font-size: 0.8125rem; font-weight: 500;
+  color: var(--text-muted); cursor: pointer; border: none; background: transparent;
+  border-radius: var(--radius-lg); transition: all var(--transition-fast); white-space: nowrap;
+}
+.report-tabs .tab.active { background: var(--gradient-primary); color: white; font-weight: 600; box-shadow: var(--shadow-glow-sm); }
+
+/* Integrations tabs */
+.int-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid rgba(255,255,255,0.07); margin-bottom: 1.5rem; }
+.int-tab {
+  padding: 0.625rem 1.25rem; font-size: 0.875rem; font-weight: 500;
+  color: var(--text-muted); cursor: pointer; border: none; background: transparent;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: all var(--transition-fast); font-family: inherit;
+}
+.int-tab:hover { color: var(--text-secondary); }
+.int-tab.int-tab-active { color: var(--color-primary-light); border-bottom-color: var(--color-primary); font-weight: 600; }
+
+/* Workflow Config tabs */
+.wc-tabs {
+  display: flex; gap: 0.25rem;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  margin-bottom: 1.5rem;
+}
+.wc-tab {
+  padding: 0.4rem 0.875rem; font-size: 0.8rem; font-weight: 500;
+  color: var(--text-muted); cursor: pointer; border: none; background: transparent;
+  border-radius: var(--radius-md); transition: all var(--transition-fast); font-family: inherit;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.wc-tab:hover { color: var(--text-primary); }
+.wc-tab.wc-tab-active { background: var(--gradient-primary); color: white; box-shadow: var(--shadow-glow-sm); }
+
+/* Right panel tabs */
+.right-panel-tabs { display: flex; gap: 0.25rem; }
+.rp-tabs { display: flex; border-bottom: 1px solid rgba(255,255,255,0.07); flex-shrink: 0; padding: 0 1.25rem; }
+
+[data-theme="light"] .pm-mode-btn.active { background: rgba(99,102,241,0.12); color: #6366f1; }
+[data-theme="light"] .pm-scope-btn.active { background: rgba(99,102,241,0.12); color: #6366f1; }
+[data-theme="light"] .wc-tabs { border-bottom-color: rgba(0,0,0,0.1); }
+[data-theme="light"] .wc-tab { color: var(--text-secondary); }
+[data-theme="light"] .wc-tab.wc-tab-active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+
+@media (max-width: 768px) {
+  .report-tabs { flex-wrap: nowrap; justify-content: flex-start; }
+}
