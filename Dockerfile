@@ -48,8 +48,8 @@ RUN apk add --no-cache ca-certificates tzdata curl
 
 WORKDIR /app
 
-COPY --from=go-builder /app/server /app/server
-COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
+COPY --from=go-builder /app/server .
+COPY --from=frontend-builder /app/frontend/dist ./public
 
 ENV PORT=8080 \
     ENVIRONMENT=production
