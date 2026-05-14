@@ -549,6 +549,8 @@ export function DayTrackPage() {
   const [exportBreaks, setExportBreaks] = useState(true)
   const [exportSummarise, setExportSummarise] = useState(false)
   const [exportCopyLoading, setExportCopyLoading] = useState(false)
+  const [exportAISummary, setExportAISummary] = useState<string | null>(null)
+  const [exportAILoading, setExportAILoading] = useState(false)
 
   // Category manager
   const [newCat, setNewCat] = useState('')
@@ -1110,44 +1112,71 @@ export function DayTrackPage() {
     navigator.clipboard.writeText(text).then(() => toast('DayTrack report copied!'))
   }
 
-  async function runExport(format: 'pdf' | 'doc') {
-    setExportLoading(true)
-    try {
-      let start: string, end: string
-      if (exportMode === 'today') {
-        start = date; end = date
-      } else if (exportMode === 'month') {
-        start = `${exportMonth}-01`
-        const [y, m] = exportMonth.split('-').map(Number)
-        const last = new Date(y, m, 0).getDate()
-        end = `${exportMonth}-${String(last).padStart(2, '0')}`
-      } else {
-        start = exportStart; end = exportEnd
-      }
+  // Shared helper — fetches entries for the selected range, runs AI once and caches it
+  async function prepareExportData() {
+    let start: string, end: string, rangeLabel: string
+    if (exportMode === 'today') {
+      start = date; end = date
+      rangeLabel = fmtDate(new Date(date + 'T00:00:00'))
+    } else if (exportMode === 'month') {
+      start = `${exportMonth}-01`
+      const [y, m] = exportMonth.split('-').map(Number)
+      const last = new Date(y, m, 0).getDate()
+      end = `${exportMonth}-${String(last).padStart(2, '0')}`
+      rangeLabel = new Date(start + 'T00:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' })
+    } else {
+      start = exportStart; end = exportEnd
+      rangeLabel = `${start} to ${end}`
+    }
 
+    let allEntries: DayTrackEntry[]
+    if (exportMode === 'today') {
+      allEntries = [...entries]
+    } else {
       const token = localStorage.getItem('token')
       const res = await fetch(`${import.meta.env.VITE_API_URL}/daytrack/entries/range?start=${start}&end=${end}`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       if (!res.ok) throw new Error('Failed to fetch range')
-      let allEntries: DayTrackEntry[] = await res.json()
+      allEntries = await res.json()
+    }
+    if (!exportBreaks) allEntries = allEntries.filter(e => e.category !== 'Breaks')
 
-      // Apply breaks filter
-      if (!exportBreaks) {
-        allEntries = allEntries.filter(e => e.category !== 'Breaks')
+    // Generate AI summary once and cache — reuse on subsequent button clicks
+    let aiSummary = exportAISummary
+    if (exportSummarise && !aiSummary) {
+      setExportAILoading(true)
+      const lines = allEntries
+        .filter(e => !e.parent_entry_id)
+        .map(e => ({
+          category: e.category,
+          name: e.name,
+          duration: e.duration_mins != null ? minsLabel(e.duration_mins) : '',
+          notes: e.notes || ''
+        }))
+      if (lines.length > 0) {
+        try {
+          const res2 = await dayTrackApi.summarize({ date_label: rangeLabel, lines })
+          if (res2.summary) { aiSummary = res2.summary; setExportAISummary(aiSummary) }
+        } catch { /* proceed without AI */ }
       }
+      setExportAILoading(false)
+    }
 
-      // Group by date, then by parent/subtask
+    return { allEntries, rangeLabel, start, end, aiSummary }
+  }
+
+  async function runExport(format: 'pdf' | 'doc') {
+    setExportLoading(true)
+    try {
+      const { allEntries, rangeLabel, start, end, aiSummary } = await prepareExportData()
+
       const byDate = new Map<string, DayTrackEntry[]>()
       allEntries.forEach(e => {
         if (!byDate.has(e.entry_date)) byDate.set(e.entry_date, [])
         byDate.get(e.entry_date)!.push(e)
       })
-
-      const fmtDateStr = (d: string) => {
-        const obj = new Date(d + 'T00:00:00')
-        return fmtDate(obj)
-      }
+      const fmtDateStr = (d: string) => fmtDate(new Date(d + 'T00:00:00'))
       const renderExportRows = (dayEntries: DayTrackEntry[]) => {
         const dayParents = dayEntries.filter(e => !e.parent_entry_id)
         const daySubs = new Map<string, DayTrackEntry[]>()
@@ -1174,49 +1203,19 @@ export function DayTrackPage() {
           return rows
         }).join('')
       }
-      const parentAllEntries = allEntries.filter(e => !e.parent_entry_id)
-      const subMapExport = new Map<string, DayTrackEntry[]>()
-      allEntries.filter(e => e.parent_entry_id).forEach(e => {
-        const list = subMapExport.get(e.parent_entry_id!) ?? []; list.push(e)
-        subMapExport.set(e.parent_entry_id!, list)
-      })
 
+      const parentAllEntries = allEntries.filter(e => !e.parent_entry_id)
       const totalAll = parentAllEntries.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
       const doneAll = parentAllEntries.filter(e => e.status === 'done').length
       const focusAll = parentAllEntries.filter(e => !['Meetings','Breaks'].includes(e.category)).reduce((a, e) => a + (e.duration_mins ?? 0), 0)
-
       const catTotals: Record<string, number> = {}
       parentAllEntries.forEach(e => { if (e.duration_mins) catTotals[e.category] = (catTotals[e.category] || 0) + e.duration_mins })
 
-      const rangeLabel = exportMode === 'today'
-        ? fmtDate(new Date(date + 'T00:00:00'))
-        : exportMode === 'month'
-          ? new Date(start + 'T00:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' })
-          : `${start} to ${end}`
-
-      // AI summarise: only non-ticket parent entries
-      let aiSummaryBlock = ''
-      if (exportSummarise) {
-        const lines = parentAllEntries
-          .filter(e => e.entry_source !== 'youtrack' && e.category !== 'Tickets')
-          .map(e => ({
-            category: e.category,
-            name: e.name,
-            duration: e.duration_mins != null ? minsLabel(e.duration_mins) : '',
-            notes: e.notes || ''
-          }))
-        if (lines.length > 0) {
-          try {
-            const res2 = await dayTrackApi.summarize({ date_label: rangeLabel, lines })
-            if (res2.summary) {
-              aiSummaryBlock = `<div class="summary-box" style="margin-top:20px">
-  <h3 style="color:#7c3aed">AI Summary</h3>
-  <div style="white-space:pre-wrap;font-size:13px;line-height:1.6">${res2.summary.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')}</div>
-</div>`
-            }
-          } catch { /* AI unavailable — proceed without summary */ }
-        }
-      }
+      const aiSummaryBlock = aiSummary
+        ? `<div class="summary-box" style="margin-top:20px">
+  <h3 style="color:#7c3aed">✨ AI Summary</h3>
+  <div style="white-space:pre-wrap;font-size:13px;line-height:1.6">${aiSummary.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')}</div>
+</div>` : ''
 
       const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8">
@@ -1281,11 +1280,12 @@ ${aiSummaryBlock}
         const blob = new Blob([html], { type: 'application/msword' })
         const a = document.createElement('a')
         a.href = URL.createObjectURL(blob)
-        a.download = `daytrack-${exportMode === 'month' ? exportMonth : `${exportStart}-to-${exportEnd}`}.doc`
+        a.download = `daytrack-${exportMode === 'month' ? exportMonth : `${start}-to-${end}`}.doc`
         a.click()
       }
       setExportOpen(false)
-      toast(`Export ready`, 'success')
+      setExportAISummary(null)
+      toast('Export ready', 'success')
     } catch { toast('Export failed', 'warn') }
     finally { setExportLoading(false) }
   }
@@ -1293,40 +1293,26 @@ ${aiSummaryBlock}
   async function copyExportSummary() {
     setExportCopyLoading(true)
     try {
-      let allEntries: DayTrackEntry[]
-      if (exportMode === 'today') {
-        allEntries = entries
+      const { allEntries, aiSummary } = await prepareExportData()
+      let text: string
+      if (aiSummary) {
+        // Strip **bold** markdown — Slack renders it as literal asterisks
+        text = aiSummary.replace(/\*\*(.+?)\*\*/g, '$1')
       } else {
-        let start: string, end: string
-        if (exportMode === 'month') {
-          start = `${exportMonth}-01`
-          const [y, m] = exportMonth.split('-').map(Number)
-          const last = new Date(y, m, 0).getDate()
-          end = `${exportMonth}-${String(last).padStart(2, '0')}`
-        } else {
-          start = exportStart; end = exportEnd
-        }
-        const token = localStorage.getItem('token')
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/daytrack/entries/range?start=${start}&end=${end}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        if (!res.ok) throw new Error('Failed to fetch')
-        allEntries = await res.json()
+        const parents = allEntries.filter(e => !e.parent_entry_id)
+        const isDoneInReport = (e: DayTrackEntry) =>
+          e.status === 'done' || (e.status === 'active' && !e.start_time && !e.end_time)
+        const doneList = parents.filter(isDoneInReport)
+          .map(e => `- ${e.name} (${e.category})${e.duration_mins != null ? ` – ${minsLabel(e.duration_mins)}` : ''}`)
+          .join('\n')
+        const activeList = parents.filter(e => e.status === 'active' && (e.start_time || e.end_time))
+          .map(e => `- ${e.name} (${e.category})`).join('\n')
+        const totalMinsAll = parents.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
+        text = `📋 DayTrack Report\n⏱ Total: ${minsLabel(totalMinsAll)}\n\n`
+        text += `✅ Done:\n${doneList || '- (none)'}\n\n`
+        if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
+        text += `🚧 Blockers:\n- None`
       }
-      if (!exportBreaks) allEntries = allEntries.filter(e => e.category !== 'Breaks')
-      const parents = allEntries.filter(e => !e.parent_entry_id)
-      const isDoneInReport = (e: DayTrackEntry) =>
-        e.status === 'done' || (e.status === 'active' && !e.start_time && !e.end_time)
-      const doneList = parents.filter(e => isDoneInReport(e))
-        .map(e => `- ${e.name} (${e.category})${e.duration_mins != null ? ` – ${minsLabel(e.duration_mins)}` : ''}`)
-        .join('\n')
-      const activeList = parents.filter(e => e.status === 'active' && (e.start_time || e.end_time))
-        .map(e => `- ${e.name} (${e.category})`).join('\n')
-      const totalMinsAll = parents.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
-      let text = `📋 DayTrack Report\n⏱ Total: ${minsLabel(totalMinsAll)}\n\n`
-      text += `✅ Done:\n${doneList || '- (none)'}\n\n`
-      if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
-      text += `🚧 Blockers:\n- None`
       await navigator.clipboard.writeText(text)
       toast('Summary copied!', 'success')
     } catch { toast('Copy failed', 'warn') }
@@ -2290,9 +2276,9 @@ ${aiSummaryBlock}
 
             {/* Date range tabs */}
             <div className="dt-tabs" style={{ marginBottom: 16 }}>
-              <button className={`dt-tab ${exportMode === 'today' ? 'active' : ''}`} onClick={() => setExportMode('today')}>Today</button>
-              <button className={`dt-tab ${exportMode === 'month' ? 'active' : ''}`} onClick={() => setExportMode('month')}>By Month</button>
-              <button className={`dt-tab ${exportMode === 'custom' ? 'active' : ''}`} onClick={() => setExportMode('custom')}>Custom Range</button>
+              <button className={`dt-tab ${exportMode === 'today' ? 'active' : ''}`} onClick={() => { setExportMode('today'); setExportAISummary(null) }}>Today</button>
+              <button className={`dt-tab ${exportMode === 'month' ? 'active' : ''}`} onClick={() => { setExportMode('month'); setExportAISummary(null) }}>By Month</button>
+              <button className={`dt-tab ${exportMode === 'custom' ? 'active' : ''}`} onClick={() => { setExportMode('custom'); setExportAISummary(null) }}>Custom Range</button>
             </div>
 
             {exportMode === 'today' && (
@@ -2311,14 +2297,25 @@ ${aiSummaryBlock}
             {/* Export options */}
             <div className="dt-export-options">
               <label className="dt-export-toggle">
-                <input type="checkbox" checked={exportBreaks} onChange={e => setExportBreaks(e.target.checked)} />
+                <input type="checkbox" checked={exportBreaks} onChange={e => { setExportBreaks(e.target.checked); setExportAISummary(null) }} />
                 <span>Include Breaks</span>
               </label>
               <label className="dt-export-toggle">
-                <input type="checkbox" checked={exportSummarise} onChange={e => setExportSummarise(e.target.checked)} />
+                <input type="checkbox" checked={exportSummarise} onChange={e => { setExportSummarise(e.target.checked); setExportAISummary(null) }} />
                 <span>Summarise with AI <span className="dt-export-toggle-hint">(Groq · skips tickets)</span></span>
               </label>
             </div>
+
+            {/* AI summary preview — shown after first generation, reused by all buttons */}
+            {exportSummarise && exportAILoading && (
+              <div className="dt-export-ai-status">⏳ Generating AI summary…</div>
+            )}
+            {exportSummarise && exportAISummary && !exportAILoading && (
+              <div className="dt-export-ai-preview">
+                <div className="dt-export-ai-preview-label">✨ AI Summary Preview</div>
+                <pre className="dt-export-ai-preview-text">{exportAISummary}</pre>
+              </div>
+            )}
 
             <div className="dt-modal-footer" style={{ marginTop: 20 }}>
               <button className="dt-btn dt-btn-ghost" onClick={() => setExportOpen(false)}>Cancel</button>
