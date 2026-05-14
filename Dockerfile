@@ -44,22 +44,14 @@ RUN npm run build
 # ─────────────────────────────────────────────────────────────
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates tzdata nginx curl
+RUN apk add --no-cache ca-certificates tzdata curl
 
 WORKDIR /app
 
-# Go backend binary
 COPY --from=go-builder /app/server /app/server
+COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
-# Vite static build
-COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
-
-# nginx config and entrypoint
-COPY nginx.conf    /etc/nginx/nginx.conf
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-ENV PORT=8081 \
+ENV PORT=8080 \
     ENVIRONMENT=production
 
 EXPOSE 8080
@@ -67,4 +59,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -sf http://localhost:8080/api/health || exit 1
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["/app/server"]

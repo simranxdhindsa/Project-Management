@@ -761,5 +761,3 @@ func SeedDefaultColumns(ctx context.Context, projectID string) error {
 
 	return nil
 }
- nil
-}
