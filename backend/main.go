@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
@@ -458,14 +459,12 @@ func main() {
 	}
 	fs := http.FileServer(http.Dir(publicDir))
 	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// If the file exists on disk, serve it directly (JS/CSS/images/etc.)
-		path := publicDir + req.URL.Path
-		if _, err := os.Stat(path); err == nil {
+		fullPath := filepath.Join(publicDir, filepath.Clean("/"+req.URL.Path))
+		if _, err := os.Stat(fullPath); err == nil && fullPath != publicDir {
 			fs.ServeHTTP(w, req)
 			return
 		}
-		// Otherwise fall back to index.html for SPA routing.
-		http.ServeFile(w, req, publicDir+"/index.html")
+		http.ServeFile(w, req, filepath.Join(publicDir, "index.html"))
 	})
 
 	// CORS configuration
