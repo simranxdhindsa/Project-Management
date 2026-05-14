@@ -449,6 +449,25 @@ func main() {
 	userThemeRoutes.HandleFunc("", settingsHandler.GetUserTheme).Methods("GET")
 	userThemeRoutes.HandleFunc("", settingsHandler.SaveUserTheme).Methods("PUT")
 
+	// Serve Vite SPA static files from ./public (production: built into the container image).
+	// Any path not matched by /api routes falls through to here.
+	// For client-side routes (non-asset paths), serve index.html so the React router takes over.
+	publicDir := os.Getenv("PUBLIC_DIR")
+	if publicDir == "" {
+		publicDir = "./public"
+	}
+	fs := http.FileServer(http.Dir(publicDir))
+	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// If the file exists on disk, serve it directly (JS/CSS/images/etc.)
+		path := publicDir + req.URL.Path
+		if _, err := os.Stat(path); err == nil {
+			fs.ServeHTTP(w, req)
+			return
+		}
+		// Otherwise fall back to index.html for SPA routing.
+		http.ServeFile(w, req, publicDir+"/index.html")
+	})
+
 	// CORS configuration
 	frontendURL := os.Getenv("FRONTEND_URL")
 	allowedOrigins := []string{"http://localhost:5173", "http://localhost:3000"}
