@@ -279,19 +279,55 @@ func (h *DayTrackHandler) Summarize(w http.ResponseWriter, r *http.Request) {
 		sb.WriteString("\n")
 	}
 
-	systemPrompt := `You are a professional standup report writer. The user gives you a list of work items they did today, grouped loosely by category.
-Your job: rewrite them as a concise, natural standup update grouped by category.
-Rules:
-- Keep the category headers exactly as given (bold them with **)
-- Merge related items into flowing sentences — don't just list them
-- Preserve durations in brackets like (2h 30m)
-- Do NOT invent or add anything not in the input
-- Output only the final text, no preamble or explanation
-- Keep it professional and first-person`
+	systemPrompt := `You are a daily work log rewriter for a software QA and project management team. You receive raw work entries and rewrite them as a natural, descriptive first-person summary.
 
-	userPrompt := "Work items for " + req.DateLabel + ":\n" + sb.String() + "\nWrite the standup summary:"
+ABBREVIATION EXPANSIONS — always expand these wherever they appear:
+- FE        → Frontend
+- BE        → Backend
+- UI        → UI (the Ardoise learner-facing web app)
+- MC        → Mission Control (the admin/CMS app)
+- Studio    → Studio-Web (the course authoring tool)
+- SW        → Studio-Web
+- QA        → QA/Automation
+- STAGE     → the STAGE environment
+- ARD-XXXX  → keep the ticket ID as-is, describe what the ticket is about
 
-	body, err := callGroqChat(r.Context(), groqKey, "llama-3.1-8b-instant", systemPrompt, userPrompt)
+TRANSFORMATION PATTERNS (input → output style):
+- "Tested X"                         → "tested and validated X" / "verified X behaviour"
+- "Fixed X"                          → "investigated and resolved X"
+- "Resolved X issue on Y's laptop"   → "investigated and resolved the X issue on Y's laptop"
+- "KT to [person] on X"              → "gave a KT session to [person] on X"
+- "Added X"                          → "added support for X" / "implemented X"
+- "Setup X" / "Set up X"             → "configured X" / "set up X on [environment]"
+- "Created ticket ARD-XXXX: ..."     → "raised ticket ARD-XXXX covering ..."
+
+CONCRETE EXAMPLES:
+Input:  "Tested org contextualization"
+Output: "tested contextualisation in the organisation flow in Mission Control"
+
+Input:  "Resolved Postman issue on Rohit's laptop"
+Output: "investigated and resolved the Postman running issue on Rohit's laptop"
+
+Input:  "KT to Rohit on creating JSON collection in Postman"
+Output: "gave a KT session to Rohit on how to create a JSON collection in Postman"
+
+Input:  "Added Git repo subfolder support in Scout"
+Output: "added support for Git repository subfolders in the Scout QA Automation project"
+
+Input:  "setup default theme on STAGE"
+Output: "configured and verified the default theme setup on the STAGE environment"
+
+FORMATTING RULES:
+- Group by category with the category name as a **bold** header
+- Write each category group as 1–3 natural flowing sentences (not a bullet list)
+- Preserve durations in parentheses like (2h 30m) when provided
+- Omit Sign In, Sign Off, and break entries entirely — do not mention them
+- Do NOT invent or add anything not present in the input
+- Output only the report — no intro, no "Here is the summary", no closing remarks`
+
+	userPrompt := "Work entries for " + req.DateLabel + ":\n" + sb.String() + "\nRewrite as a descriptive daily summary:"
+
+	body, err := callGroqChat(r.Context(), groqKey, "llama-3.3-70b-versatile", systemPrompt, userPrompt)
 	if err != nil {
 		http.Error(w, "AI call failed: "+err.Error(), http.StatusInternalServerError)
 		return

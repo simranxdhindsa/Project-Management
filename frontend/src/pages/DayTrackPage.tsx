@@ -548,6 +548,7 @@ export function DayTrackPage() {
   const [exportLoading, setExportLoading] = useState(false)
   const [exportBreaks, setExportBreaks] = useState(true)
   const [exportSummarise, setExportSummarise] = useState(false)
+  const [exportCopyLoading, setExportCopyLoading] = useState(false)
 
   // Category manager
   const [newCat, setNewCat] = useState('')
@@ -1106,7 +1107,7 @@ export function DayTrackPage() {
         } catch { /* proceed without AI */ }
       }
     }
-    navigator.clipboard.writeText(text).then(() => toast('Standup copied!'))
+    navigator.clipboard.writeText(text).then(() => toast('DayTrack report copied!'))
   }
 
   async function runExport(format: 'pdf' | 'doc') {
@@ -1276,7 +1277,6 @@ ${aiSummaryBlock}
         w.document.write(html)
         w.document.close()
         w.focus()
-        setTimeout(() => { w.print(); }, 400)
       } else {
         const blob = new Blob([html], { type: 'application/msword' })
         const a = document.createElement('a')
@@ -1288,6 +1288,49 @@ ${aiSummaryBlock}
       toast(`Export ready`, 'success')
     } catch { toast('Export failed', 'warn') }
     finally { setExportLoading(false) }
+  }
+
+  async function copyExportSummary() {
+    setExportCopyLoading(true)
+    try {
+      let allEntries: DayTrackEntry[]
+      if (exportMode === 'today') {
+        allEntries = entries
+      } else {
+        let start: string, end: string
+        if (exportMode === 'month') {
+          start = `${exportMonth}-01`
+          const [y, m] = exportMonth.split('-').map(Number)
+          const last = new Date(y, m, 0).getDate()
+          end = `${exportMonth}-${String(last).padStart(2, '0')}`
+        } else {
+          start = exportStart; end = exportEnd
+        }
+        const token = localStorage.getItem('token')
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/daytrack/entries/range?start=${start}&end=${end}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (!res.ok) throw new Error('Failed to fetch')
+        allEntries = await res.json()
+      }
+      if (!exportBreaks) allEntries = allEntries.filter(e => e.category !== 'Breaks')
+      const parents = allEntries.filter(e => !e.parent_entry_id)
+      const isDoneInReport = (e: DayTrackEntry) =>
+        e.status === 'done' || (e.status === 'active' && !e.start_time && !e.end_time)
+      const doneList = parents.filter(e => isDoneInReport(e))
+        .map(e => `- ${e.name} (${e.category})${e.duration_mins != null ? ` – ${minsLabel(e.duration_mins)}` : ''}`)
+        .join('\n')
+      const activeList = parents.filter(e => e.status === 'active' && (e.start_time || e.end_time))
+        .map(e => `- ${e.name} (${e.category})`).join('\n')
+      const totalMinsAll = parents.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
+      let text = `📋 DayTrack Report\n⏱ Total: ${minsLabel(totalMinsAll)}\n\n`
+      text += `✅ Done:\n${doneList || '- (none)'}\n\n`
+      if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
+      text += `🚧 Blockers:\n- None`
+      await navigator.clipboard.writeText(text)
+      toast('Summary copied!', 'success')
+    } catch { toast('Copy failed', 'warn') }
+    finally { setExportCopyLoading(false) }
   }
 
   function exportCSV() {
@@ -1335,18 +1378,26 @@ ${aiSummaryBlock}
   function buildStandup(): string {
     const today = fmtDate(new Date(date))
     const visibleEntries = exportBreaks ? entries : entries.filter(e => e.category !== 'Breaks')
-    const doneList = visibleEntries.filter(e => e.status === 'done')
-      .map(e => `  ✅ ${e.name} (${e.category}) – ${minsLabel(e.duration_mins)}`).join('\n')
-    const activeList = visibleEntries.filter(e => e.status === 'active')
-      .map(e => `  🔄 ${e.name} (${e.category})`).join('\n')
+    // entries with no time info at all → treat as done in the report regardless of status
+    const isDoneInReport = (e: DayTrackEntry) =>
+      e.status === 'done' || (e.status === 'active' && !e.start_time && !e.end_time)
+    const doneList = visibleEntries
+      .filter(e => isDoneInReport(e))
+      .map(e => `- ${e.name} (${e.category})${e.duration_mins != null ? ` – ${minsLabel(e.duration_mins)}` : ''}`)
+      .join('\n')
+    const activeList = visibleEntries
+      .filter(e => e.status === 'active' && (e.start_time || e.end_time))
+      .map(e => `- ${e.name} (${e.category})`)
+      .join('\n')
     const planList = planned.filter(p => p.when_type === 'today')
-      .map(p => `  📌 ${p.name} (${p.category})`).join('\n')
-    let text = `📋 Daily Standup – ${today}\n`
+      .map(p => `- ${p.name} (${p.category})`)
+      .join('\n')
+    let text = `📋 DayTrack Report – ${today}\n`
     text += `⏱ Total: ${totalMins ? minsLabel(totalMins) : '—'} | Focus Rate: ${focusRate != null ? focusRate + '%' : '—'}\n\n`
-    text += `✅ Done Today:\n${doneList || '  (none)'}\n\n`
+    text += `✅ Done Today:\n${doneList || '- (none)'}\n\n`
     if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
-    text += `📌 Planned / Upcoming:\n${planList || '  (none)'}\n\n`
-    text += `🚧 Blockers:\n  None`
+    text += `📌 Planned / Upcoming:\n${planList || '- (none)'}\n\n`
+    text += `🚧 Blockers:\n- None`
     return text
   }
 
@@ -1960,7 +2011,7 @@ ${aiSummaryBlock}
             <div className="dt-divider" />
 
             <div className="dt-standup-box">
-              <h4>Standup Summary – Copy to Clipboard</h4>
+              <h4>DayTrack Summary</h4>
               <pre>{buildStandup()}</pre>
             </div>
 
@@ -1973,7 +2024,7 @@ ${aiSummaryBlock}
                 <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                 </svg>
-                Copy Standup
+                Copy DayTrack
               </button>
               <button className="dt-btn dt-btn-ghost dt-btn-sm" onClick={exportCSV}>
                 <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -2271,11 +2322,15 @@ ${aiSummaryBlock}
 
             <div className="dt-modal-footer" style={{ marginTop: 20 }}>
               <button className="dt-btn dt-btn-ghost" onClick={() => setExportOpen(false)}>Cancel</button>
-              <button className="dt-btn dt-btn-ghost dt-btn-sm" onClick={() => runExport('doc')} disabled={exportLoading}>
+              <button className="dt-btn dt-btn-ghost dt-btn-sm" onClick={copyExportSummary} disabled={exportCopyLoading || exportLoading}>
+                <svg viewBox="0 0 24 24" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                {exportCopyLoading ? 'Copying…' : 'Copy Summary'}
+              </button>
+              <button className="dt-btn dt-btn-ghost dt-btn-sm" onClick={() => runExport('doc')} disabled={exportLoading || exportCopyLoading}>
                 <svg viewBox="0 0 24 24" width="14" height="14"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 {exportLoading ? 'Generating…' : 'Export DOC'}
               </button>
-              <button className="dt-btn dt-btn-primary" onClick={() => runExport('pdf')} disabled={exportLoading}>
+              <button className="dt-btn dt-btn-primary" onClick={() => runExport('pdf')} disabled={exportLoading || exportCopyLoading}>
                 <svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
                 {exportLoading ? 'Generating…' : 'Export PDF'}
               </button>
