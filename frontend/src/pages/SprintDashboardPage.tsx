@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ChevronDown, Check, RefreshCw, GitBranch,
@@ -7,8 +7,9 @@ import {
 import api from '@/services/api'
 import type {
   YouTrackSprint, SprintBoardIssue, SprintBoardColumn,
-  SprintSummary, SprintBoardStatusResponse,
+  SprintSummary, SprintBoardStatusResponse, YouTrackIssue,
 } from '@/services/api'
+import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 import '../styles/pages/dashboard.css'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -395,7 +396,15 @@ interface DevStat {
   bounceCount: number; totalActiveHours: number
 }
 
-function Design1({ summary, columns }: { summary: SprintSummary; columns: SprintBoardColumn[] }) {
+interface DesignProps {
+  summary: SprintSummary
+  columns: SprintBoardColumn[]
+  onTitleClick: (id: string, e?: React.MouseEvent) => void
+  onIdClick: (id: string, e: React.MouseEvent) => void
+  ytDetailLoading?: boolean
+}
+
+function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }: DesignProps) {
   const [expandedDev, setExpandedDev] = useState<string | null>(null)
 
   const developers = useMemo<DevStat[]>(() => {
@@ -476,8 +485,16 @@ function Design1({ summary, columns }: { summary: SprintSummary; columns: Sprint
                   {[...dev.active, ...dev.blocked].map(iss => (
                     <div key={iss.idReadable} className={`db-mc-ticket-row ${urgencyClass(iss)}`}>
                       <PriPill priority={iss.priority} />
-                      <span className="db-ticket-id">{iss.idReadable}</span>
-                      <span className="db-mc-ticket-title">{iss.summary}</span>
+                      <span
+                        className="db-ticket-id db-ticket-id--link"
+                        onClick={(e) => onIdClick(iss.idReadable, e)}
+                        title={`Open ${iss.idReadable} in YouTrack`}
+                      >{iss.idReadable}</span>
+                      <span
+                        className="db-mc-ticket-title db-ticket-title--link"
+                        onClick={(e) => onTitleClick(iss.idReadable, e)}
+                        title={iss.summary}
+                      >{iss.summary}</span>
                       <span className="db-mc-ticket-time">{fmtHours(iss.hours_in_state)}</span>
                     </div>
                   ))}
@@ -499,12 +516,19 @@ function Design1({ summary, columns }: { summary: SprintSummary; columns: Sprint
             <div key={iss.idReadable} className={`db-mc-focus-card ${urgencyClass(iss)}`}>
               <div className="db-mc-focus-top">
                 <PriPill priority={iss.priority} />
-                <span className="db-ticket-id">{iss.idReadable}</span>
+                <span
+                  className="db-ticket-id db-ticket-id--link"
+                  onClick={(e) => onIdClick(iss.idReadable, e)}
+                  title={`Open ${iss.idReadable} in YouTrack`}
+                >{iss.idReadable}</span>
                 {iss.is_hotfix && <span className="db-hotfix-chip">HF</span>}
                 {iss.bounce_count > 0 && <span className="db-bounce-chip">↩{iss.bounce_count}</span>}
                 <span className="db-ticket-state" style={{ marginLeft: 'auto' }}>{iss.current_state}</span>
               </div>
-              <div className="db-mc-focus-title">{iss.summary}</div>
+              <div
+                className="db-mc-focus-title db-ticket-title--link"
+                onClick={(e) => onTitleClick(iss.idReadable, e)}
+              >{iss.summary}</div>
               <div className="db-mc-focus-footer">
                 <DBAvatar name={iss.assignee || '?'} url={iss.avatarUrl} size={16} />
                 <span className="db-mc-focus-assignee">{iss.assignee?.split(' ')[0] || 'Unassigned'}</span>
@@ -539,7 +563,11 @@ function Design1({ summary, columns }: { summary: SprintSummary; columns: Sprint
                 <div key={iss.idReadable} className="db-mc-delay-row">
                   <div className="db-mc-delay-id">
                     <PriPill priority={iss.priority} />
-                    <span className="db-ticket-id">{iss.idReadable}</span>
+                    <span
+                      className="db-ticket-id db-ticket-id--link"
+                      onClick={(e) => onIdClick(iss.idReadable, e)}
+                      title={`Open ${iss.idReadable} in YouTrack`}
+                    >{iss.idReadable}</span>
                   </div>
                   <div className="db-mc-delay-bar-wrap">
                     <div className="db-mc-timebar" style={{ width: barW }}>
@@ -612,7 +640,7 @@ function SprintDonut({ pct, size = 110 }: { pct: number; size?: number }) {
   )
 }
 
-function Design2({ summary, columns }: { summary: SprintSummary; columns: SprintBoardColumn[] }) {
+function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
   const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
   const pct = toPct(summary.completion_pct)
 
@@ -704,12 +732,19 @@ function Design2({ summary, columns }: { summary: SprintSummary; columns: Sprint
               <div key={iss.idReadable} className={`db-bg-critical-row ${urgencyClass(iss)}`}>
                 <div className="db-bg-cr-top">
                   <PriPill priority={iss.priority} />
-                  <span className="db-ticket-id">{iss.idReadable}</span>
+                  <span
+                    className="db-ticket-id db-ticket-id--link"
+                    onClick={(e) => onIdClick(iss.idReadable, e)}
+                    title={`Open ${iss.idReadable} in YouTrack`}
+                  >{iss.idReadable}</span>
                   {iss.is_hotfix && <span className="db-hotfix-chip">HF</span>}
                   {iss.bounce_count > 0 && <span className="db-bounce-chip">↩{iss.bounce_count}</span>}
                   <span className="db-ticket-state" style={{ marginLeft: 'auto' }}>{iss.current_state}</span>
                 </div>
-                <div className="db-bg-cr-title">{iss.summary}</div>
+                <div
+                  className="db-bg-cr-title db-ticket-title--link"
+                  onClick={(e) => onTitleClick(iss.idReadable, e)}
+                >{iss.summary}</div>
                 <div className="db-bg-cr-footer">
                   <DBAvatar name={iss.assignee || '?'} url={iss.avatarUrl} size={16} />
                   <span className="db-bg-cr-assignee">{iss.assignee?.split(' ')[0] || 'Unassigned'}</span>
@@ -771,9 +806,17 @@ function Design2({ summary, columns }: { summary: SprintSummary; columns: Sprint
             .slice(0, 12)
             .map(iss => (
               <div key={iss.idReadable} className={`db-bg-table-row ${urgencyClass(iss)}`}>
-                <span className="db-ticket-id">{iss.idReadable}</span>
+                <span
+                  className="db-ticket-id db-ticket-id--link"
+                  onClick={(e) => onIdClick(iss.idReadable, e)}
+                  title={`Open ${iss.idReadable} in YouTrack`}
+                >{iss.idReadable}</span>
                 <span><PriPill priority={iss.priority} /></span>
-                <span className="db-bg-table-title" title={iss.summary}>{iss.summary}</span>
+                <span
+                  className="db-bg-table-title db-ticket-title--link"
+                  title={iss.summary}
+                  onClick={(e) => onTitleClick(iss.idReadable, e)}
+                >{iss.summary}</span>
                 <span className="db-bg-table-assignee">{iss.current_state}</span>
                 <span className="db-bg-table-assignee">{iss.assignee?.split(' ')[0] || '—'}</span>
                 <span className="db-bg-table-num">{fmtHours(iss.cycle_time_hours)}</span>
@@ -803,11 +846,13 @@ function FeedDivider({ label, color }: { label: string; color?: string }) {
 }
 
 function Design3({
-  summary, columns, activeSprint,
+  summary, columns, activeSprint, onTitleClick, onIdClick,
 }: {
   summary: SprintSummary
   columns: SprintBoardColumn[]
   activeSprint: YouTrackSprint | null
+  onTitleClick: (id: string, e?: React.MouseEvent) => void
+  onIdClick: (id: string, e: React.MouseEvent) => void
 }) {
   const pct = toPct(summary.completion_pct)
   const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
@@ -861,7 +906,11 @@ function Design3({
         <div className="db-oc-feed-content">
           <div className="db-oc-feed-top">
             <PriPill priority={iss.priority} />
-            <span className="db-ticket-id">{iss.idReadable}</span>
+            <span
+              className="db-ticket-id db-ticket-id--link"
+              onClick={(e) => onIdClick(iss.idReadable, e)}
+              title={`Open ${iss.idReadable} in YouTrack`}
+            >{iss.idReadable}</span>
             {iss.is_hotfix  && <span className="db-hotfix-chip">HF</span>}
             {iss.bounce_count > 0 && <span className="db-bounce-chip">↩{iss.bounce_count}</span>}
             <span className="db-ticket-state">{iss.current_state}</span>
@@ -869,7 +918,11 @@ function Design3({
               {fmtHours(iss.hours_in_state)}
             </span>
           </div>
-          <div className="db-oc-feed-title" title={iss.summary}>{iss.summary}</div>
+          <div
+            className="db-oc-feed-title db-ticket-title--link"
+            title={iss.summary}
+            onClick={(e) => onTitleClick(iss.idReadable, e)}
+          >{iss.summary}</div>
           <div className="db-oc-feed-bottom">
             <DBAvatar name={iss.assignee || '?'} url={iss.avatarUrl} size={15} />
             <span className="db-oc-feed-assignee">{iss.assignee?.split(' ')[0] || '—'}</span>
@@ -987,11 +1040,40 @@ export function SprintDashboardPage() {
   const [sprintOpen, setSprintOpen] = useState(false)
   const [boardData, setBoardData]   = useState<SprintBoardStatusResponse | null>(null)
   const [loading, setLoading]       = useState(false)
+  const [ytDetailIssue, setYtDetailIssue] = useState<YouTrackIssue | null>(null)
+  const [ytDetailLoading, setYtDetailLoading] = useState(false)
+  const [ytBaseUrl, setYtBaseUrl]   = useState('')
 
   const designRef     = useRef<HTMLDivElement>(null)
   const sprintRef     = useRef<HTMLDivElement>(null)
   const designMenuRef = useRef<HTMLDivElement>(null)
   const sprintMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    api.getYouTrackIntegration().then(res => {
+      const d = (res as any)
+      setYtBaseUrl((d?.base_url || d?.data?.base_url || '').replace(/\/$/, ''))
+    }).catch(() => {})
+  }, [])
+
+  const openIssueDetail = useCallback(async (idReadable: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    if (ytDetailLoading) return
+    setYtDetailLoading(true)
+    try {
+      const res = await api.getYouTrackIssue(idReadable)
+      const issue = (res as any).data as YouTrackIssue
+      if (issue) setYtDetailIssue(issue)
+    } catch {}
+    finally { setYtDetailLoading(false) }
+  }, [ytDetailLoading])
+
+  const openInYt = useCallback((idReadable: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!idReadable) return
+    const url = ytBaseUrl ? `${ytBaseUrl}/issue/${idReadable}` : null
+    if (url) window.open(url, '_blank', 'noopener,noreferrer')
+  }, [ytBaseUrl])
 
   useEffect(() => {
     api.getYouTrackSprints().then(res => {
@@ -1164,19 +1246,41 @@ export function SprintDashboardPage() {
       {!loading && boardData && (
         <div className="db-content">
           {designMode === 'velocity' && (
-            <Design1 summary={boardData.summary} columns={boardData.columns} />
+            <Design1
+              summary={boardData.summary}
+              columns={boardData.columns}
+              onTitleClick={openIssueDetail}
+              onIdClick={openInYt}
+              ytDetailLoading={ytDetailLoading}
+            />
           )}
           {designMode === 'bento' && (
-            <Design2 summary={boardData.summary} columns={boardData.columns} />
+            <Design2
+              summary={boardData.summary}
+              columns={boardData.columns}
+              onTitleClick={openIssueDetail}
+              onIdClick={openInYt}
+            />
           )}
           {designMode === 'ops' && (
             <Design3
               summary={boardData.summary}
               columns={boardData.columns}
               activeSprint={activeSprint}
+              onTitleClick={openIssueDetail}
+              onIdClick={openInYt}
             />
           )}
         </div>
+      )}
+
+      {/* Ticket detail panel */}
+      {ytDetailIssue && (
+        <IssueDetailPanel
+          issue={ytDetailIssue}
+          onClose={() => setYtDetailIssue(null)}
+          ytBaseUrl={ytBaseUrl}
+        />
       )}
     </div>
   )

@@ -273,6 +273,23 @@
   color: var(--text-muted);
   flex-shrink: 0;
 }
+.db-ticket-id--link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  transition: color 150ms;
+}
+.db-ticket-id--link:hover { color: #818cf8; }
+
+.db-ticket-title--link {
+  cursor: pointer;
+  transition: color 150ms;
+}
+.db-ticket-title--link:hover { color: #818cf8; text-decoration: underline; text-underline-offset: 2px; }
+
+[data-theme="light"] .db-ticket-id--link:hover { color: #4f46e5; }
+[data-theme="light"] .db-ticket-title--link:hover { color: #4f46e5; }
 .db-ticket-state {
   font-size: 0.6rem;
   color: var(--text-muted);

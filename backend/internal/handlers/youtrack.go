@@ -643,6 +643,7 @@ func (h *YouTrackHandler) GetIssue(w http.ResponseWriter, r *http.Request) {
 			"status":      youtrack.GetStatus(*issue),
 			"subsystem":   youtrack.GetSubsystem(*issue),
 			"priority":    youtrack.GetPriority(*issue),
+			"type":        youtrack.GetCustomFieldValue(*issue, "Type"),
 			"assignee":    assignee,
 			"created":     issue.Created,
 			"updated":     issue.Updated,
