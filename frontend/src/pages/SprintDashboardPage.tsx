@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ChevronDown, Check, RefreshCw, GitBranch,
-  BarChart2, Zap, Target, Activity,
+  BarChart2, Zap, Target, Activity, X,
 } from 'lucide-react'
 import api from '@/services/api'
 import type {
@@ -160,58 +160,72 @@ function Countdown({ finishMs }: { finishMs: number }) {
 
 // ─── KPI Summary Bar (shared across all views) ────────────────────────────────
 
-function KpiBar({ summary }: { summary: SprintSummary }) {
+type DbKpiDrawer = 'completion' | 'blocked' | 'bounced' | 'overdue' | 'in-progress' | 'hotfix' | 'sprint' | null
+
+function KpiBar({ summary, activeDrawer, onKpiClick }: {
+  summary: SprintSummary
+  activeDrawer: DbKpiDrawer
+  onKpiClick: (type: DbKpiDrawer) => void
+}) {
   const pct = toPct(summary.completion_pct)
   const isOverdue = summary.sprint_finish_ms > 0 && Date.now() > summary.sprint_finish_ms
   const isUrgent  = !isOverdue && summary.sprint_finish_ms > 0 &&
                     summary.sprint_finish_ms - Date.now() < 86400000 * 2
+  const tog = (type: DbKpiDrawer) => onKpiClick(activeDrawer === type ? null : type)
   return (
     <div className="db-kpi-bar">
-      <div className="db-kpi-bar-item db-kpi-bar-item--primary">
+      <button className={`db-kpi-bar-item db-kpi-bar-item--primary db-kpi-bar-item--btn${activeDrawer === 'completion' ? ' db-kpi-bar-item--active' : ''}`}
+        onClick={() => tog('completion')}>
         <span className="db-kpi-bar-val">{summary.done_issues}/{summary.total_issues}</span>
         <span className="db-kpi-bar-label">Done</span>
         <div className="db-kpi-bar-track">
           <div className="db-kpi-bar-fill" style={{ width: `${pct}%` }} />
         </div>
         <span className="db-kpi-bar-pct">{pct}%</span>
-      </div>
+      </button>
 
       <div className="db-kpi-bar-sep" />
 
-      <div className={`db-kpi-bar-item${summary.blocked_count > 0 ? ' db-kpi-bar-item--danger' : ''}`}>
+      <button className={`db-kpi-bar-item db-kpi-bar-item--btn${summary.blocked_count > 0 ? ' db-kpi-bar-item--danger' : ''}${activeDrawer === 'blocked' ? ' db-kpi-bar-item--active' : ''}`}
+        onClick={() => tog('blocked')}>
         <span className="db-kpi-bar-val">{summary.blocked_count}</span>
         <span className="db-kpi-bar-label">Blocked</span>
-      </div>
+      </button>
 
-      <div className={`db-kpi-bar-item${summary.bounced_count > 0 ? ' db-kpi-bar-item--warn' : ''}`}>
+      <button className={`db-kpi-bar-item db-kpi-bar-item--btn${summary.bounced_count > 0 ? ' db-kpi-bar-item--warn' : ''}${activeDrawer === 'bounced' ? ' db-kpi-bar-item--active' : ''}`}
+        onClick={() => tog('bounced')}>
         <span className="db-kpi-bar-val">{summary.bounced_count}</span>
         <span className="db-kpi-bar-label">Bounced</span>
-      </div>
+      </button>
 
-      <div className={`db-kpi-bar-item${summary.overdue_count > 0 ? ' db-kpi-bar-item--danger' : ''}`}>
+      <button className={`db-kpi-bar-item db-kpi-bar-item--btn${summary.overdue_count > 0 ? ' db-kpi-bar-item--danger' : ''}${activeDrawer === 'overdue' ? ' db-kpi-bar-item--active' : ''}`}
+        onClick={() => tog('overdue')}>
         <span className="db-kpi-bar-val">{summary.overdue_count}</span>
         <span className="db-kpi-bar-label">Overdue</span>
-      </div>
+      </button>
 
-      <div className="db-kpi-bar-item db-kpi-bar-item--info">
+      <button className={`db-kpi-bar-item db-kpi-bar-item--info db-kpi-bar-item--btn${activeDrawer === 'in-progress' ? ' db-kpi-bar-item--active' : ''}`}
+        onClick={() => tog('in-progress')}>
         <span className="db-kpi-bar-val">{summary.in_progress_count}</span>
         <span className="db-kpi-bar-label">In Progress</span>
-      </div>
+      </button>
 
       {summary.hotfix_count > 0 && (
-        <div className="db-kpi-bar-item db-kpi-bar-item--hotfix">
+        <button className={`db-kpi-bar-item db-kpi-bar-item--hotfix db-kpi-bar-item--btn${activeDrawer === 'hotfix' ? ' db-kpi-bar-item--active' : ''}`}
+          onClick={() => tog('hotfix')}>
           <span className="db-kpi-bar-val">{summary.hotfix_count}</span>
           <span className="db-kpi-bar-label">Hotfixes</span>
-        </div>
+        </button>
       )}
 
       {summary.sprint_finish_ms > 0 && (
         <>
           <div className="db-kpi-bar-sep" />
-          <div className={`db-kpi-bar-item${isOverdue ? ' db-kpi-bar-item--danger' : isUrgent ? ' db-kpi-bar-item--warn' : ''}`}>
+          <button className={`db-kpi-bar-item db-kpi-bar-item--btn${activeDrawer === 'sprint' ? ' db-kpi-bar-item--active' : ''}${isOverdue ? ' db-kpi-bar-item--danger' : isUrgent ? ' db-kpi-bar-item--warn' : ''}`}
+            onClick={() => tog('sprint')}>
             <span className="db-kpi-bar-val">{fmtCountdown(summary.sprint_finish_ms)}</span>
             <span className="db-kpi-bar-label">Sprint ends</span>
-          </div>
+          </button>
         </>
       )}
     </div>
@@ -1040,6 +1054,7 @@ export function SprintDashboardPage() {
   const [sprintOpen, setSprintOpen] = useState(false)
   const [boardData, setBoardData]   = useState<SprintBoardStatusResponse | null>(null)
   const [loading, setLoading]       = useState(false)
+  const [kpiDrawer, setKpiDrawer]   = useState<DbKpiDrawer>(null)
   const [ytDetailIssue, setYtDetailIssue] = useState<YouTrackIssue | null>(null)
   const [ytDetailLoading, setYtDetailLoading] = useState(false)
   const [ytBaseUrl, setYtBaseUrl]   = useState('')
@@ -1215,7 +1230,184 @@ export function SprintDashboardPage() {
 
       {/* KPI bar — shown when data is loaded or loading */}
       {loading && <SkeletonKpiBar />}
-      {!loading && boardData && <KpiBar summary={boardData.summary} />}
+      {!loading && boardData && (
+        <KpiBar summary={boardData.summary} activeDrawer={kpiDrawer} onKpiClick={setKpiDrawer} />
+      )}
+
+      {/* KPI Drawer */}
+      {!loading && boardData && kpiDrawer && (() => {
+        const allIssues = boardData.columns.flatMap(c => c.issues)
+        const blockedIssues   = boardData.columns.filter(c => isBlockedCol(c.name)).flatMap(c => c.issues)
+        const bouncedIssues   = allIssues.filter(i => i.bounce_count > 0).sort((a, b) => b.bounce_count - a.bounce_count)
+        const overdueIssues   = allIssues.filter(i => i.is_delayed)
+        const inProgIssues    = boardData.columns.filter(c => (c.name || '').toLowerCase().includes('progress')).flatMap(c => c.issues)
+        const hotfixIssues    = allIssues.filter(i => i.is_hotfix)
+        const doneIssues      = allIssues.filter(i => {
+          const s = (i.current_state || '').toLowerCase()
+          return s.includes('done') || s.includes('verified') || s.includes('deployed') || s.includes('closed')
+        })
+        const summary = boardData.summary
+        const notStarted = Math.max(0, summary.total_issues - summary.done_issues - summary.in_progress_count - summary.blocked_count)
+
+        const issueList = kpiDrawer === 'blocked'     ? blockedIssues
+                        : kpiDrawer === 'bounced'     ? bouncedIssues
+                        : kpiDrawer === 'overdue'     ? overdueIssues
+                        : kpiDrawer === 'in-progress' ? inProgIssues
+                        : kpiDrawer === 'hotfix'      ? hotfixIssues
+                        : []
+
+        const drawerTitles: Record<string, string> = {
+          blocked:      `Blocked Tickets (${blockedIssues.length})`,
+          bounced:      `Bounced Tickets (${bouncedIssues.length})`,
+          overdue:      `Overdue Tickets (${overdueIssues.length})`,
+          'in-progress': `In Progress (${inProgIssues.length})`,
+          hotfix:       `Hotfix Tickets (${hotfixIssues.length})`,
+          completion:   'Sprint Progress',
+          sprint:       'Sprint Timeline',
+        }
+
+        return (
+          <div className="db-kpi-drawer">
+            <div className="db-kpi-drawer-header">
+              <span className="db-kpi-drawer-title">{drawerTitles[kpiDrawer] ?? ''}</span>
+              <button className="db-kpi-drawer-close" onClick={() => setKpiDrawer(null)}><X size={13} /></button>
+            </div>
+            <div className="db-kpi-drawer-body">
+
+              {/* ── Issue list views ── */}
+              {['blocked','bounced','overdue','in-progress','hotfix'].includes(kpiDrawer) && (
+                issueList.length === 0
+                  ? <div className="db-kpi-drawer-empty">No tickets in this category.</div>
+                  : issueList.map(issue => (
+                    <div key={issue.id} className="db-kpi-drawer-row">
+                      <span className="db-kpi-drawer-id db-ticket-id--link"
+                        onClick={(e) => openInYt(issue.idReadable || issue.id, e)}>
+                        {issue.idReadable || issue.id}
+                      </span>
+                      <span className="db-kpi-drawer-summary db-ticket-title--link"
+                        onClick={(e) => openIssueDetail(issue.idReadable || issue.id, e)}>
+                        {issue.summary}
+                      </span>
+                      {issue.assignee && <span className="db-kpi-drawer-assignee">{issue.assignee}</span>}
+                      {kpiDrawer === 'bounced' && issue.bounce_count > 0 && (
+                        <span className="db-kpi-drawer-chip db-kpi-drawer-chip--warn">↩ {issue.bounce_count}</span>
+                      )}
+                      {kpiDrawer === 'overdue' && issue.overdue_level && (
+                        <span className={`db-kpi-drawer-chip db-kpi-drawer-chip--${issue.overdue_level === 'deadline' ? 'danger' : 'warn'}`}>
+                          {issue.overdue_level}
+                        </span>
+                      )}
+                      {kpiDrawer === 'blocked' && (issue.total_active_hours || 0) > 0 && (
+                        <span className="db-kpi-drawer-chip db-kpi-drawer-chip--danger">
+                          {Math.round(issue.total_active_hours || 0)}h
+                        </span>
+                      )}
+                    </div>
+                  ))
+              )}
+
+              {/* ── Completion ── */}
+              {kpiDrawer === 'completion' && (() => {
+                const pct = Math.round(summary.completion_pct)
+                const doneIds = new Set(
+                  boardData.columns.filter(c => !isBlockedCol(c.name) && !((c.name||'').toLowerCase().includes('progress')) && !['to do','todo','backlog','open','new'].some(k => (c.name||'').toLowerCase().includes(k))).flatMap(c => c.issues.map(i => i.id))
+                )
+                const activeIds = new Set(
+                  boardData.columns.filter(c => (c.name||'').toLowerCase().includes('progress')).flatMap(c => c.issues.map(i => i.id))
+                )
+                const byPerson = new Map<string, { done: number; active: number; total: number }>()
+                allIssues.forEach(i => {
+                  const name = i.assignee || 'Unassigned'
+                  const isDone   = doneIds.has(i.id)
+                  const isActive = activeIds.has(i.id)
+                  const entry = byPerson.get(name) ?? { done: 0, active: 0, total: 0 }
+                  byPerson.set(name, { done: entry.done + (isDone ? 1 : 0), active: entry.active + (isActive ? 1 : 0), total: entry.total + 1 })
+                })
+                return (
+                  <>
+                    <div className="db-kpi-drawer-prog-row">
+                      <span>{summary.done_issues} / {summary.total_issues} done</span>
+                      <span className="db-kpi-drawer-prog-pct">{pct}%</span>
+                    </div>
+                    <div className="db-kpi-drawer-prog-track">
+                      <div className="db-kpi-drawer-prog-fill db-kpi-drawer-prog-fill--green" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="db-kpi-drawer-person-list">
+                      {[...byPerson.entries()].sort((a, b) => b[1].done - a[1].done).map(([name, stat]) => {
+                        const pp = stat.total > 0 ? Math.round((stat.done / stat.total) * 100) : 0
+                        return (
+                          <div key={name} className="db-kpi-drawer-person-row">
+                            <div className="db-kpi-drawer-avatar"><span>{(name || '?')[0]}</span></div>
+                            <span className="db-kpi-drawer-person-name">{name}</span>
+                            <div className="db-kpi-drawer-mini-track">
+                              <div className="db-kpi-drawer-mini-fill" style={{ width: `${pp}%` }} />
+                            </div>
+                            <span className="db-kpi-drawer-person-stats">{stat.done} done · {stat.active} active</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
+                )
+              })()}
+
+              {/* ── Sprint ── */}
+              {kpiDrawer === 'sprint' && (() => {
+                const isOvd = summary.sprint_finish_ms > 0 && Date.now() > summary.sprint_finish_ms
+                const segs = [
+                  { label: 'Done', count: summary.done_issues, cls: 'green' },
+                  { label: 'In Progress', count: summary.in_progress_count, cls: 'blue' },
+                  { label: 'Blocked', count: summary.blocked_count, cls: 'red' },
+                  { label: 'Not Started', count: notStarted, cls: 'muted' },
+                ]
+                return (
+                  <>
+                    <div className={`db-kpi-drawer-sprint-countdown${isOvd ? ' db-kpi-drawer-sprint-countdown--danger' : ''}`}>
+                      {isOvd ? '⚠ Sprint Overdue' : `⏱ ${fmtCountdown(summary.sprint_finish_ms)}`}
+                    </div>
+                    <div className="db-kpi-drawer-sprint-segs">
+                      {segs.map(seg => (
+                        <div key={seg.label} className="db-kpi-drawer-sprint-seg">
+                          <span className={`db-kpi-drawer-sprint-seg-count db-kpi-drawer-sprint-seg-count--${seg.cls}`}>{seg.count}</span>
+                          <div className="db-kpi-drawer-sprint-bar">
+                            <div className={`db-kpi-drawer-sprint-bar-fill db-kpi-drawer-sprint-bar-fill--${seg.cls}`}
+                              style={{ width: `${summary.total_issues > 0 ? Math.round((seg.count / summary.total_issues) * 100) : 0}%` }} />
+                          </div>
+                          <span className="db-kpi-drawer-sprint-seg-label">{seg.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {overdueIssues.length > 0 && (
+                      <>
+                        <div className="db-kpi-drawer-at-risk-header">At Risk ({overdueIssues.length})</div>
+                        {overdueIssues.slice(0, 5).map(issue => (
+                          <div key={issue.id} className="db-kpi-drawer-row">
+                            <span className="db-kpi-drawer-id db-ticket-id--link"
+                              onClick={(e) => openInYt(issue.idReadable || issue.id, e)}>
+                              {issue.idReadable || issue.id}
+                            </span>
+                            <span className="db-kpi-drawer-summary db-ticket-title--link"
+                              onClick={(e) => openIssueDetail(issue.idReadable || issue.id, e)}>
+                              {issue.summary}
+                            </span>
+                            {issue.assignee && <span className="db-kpi-drawer-assignee">{issue.assignee}</span>}
+                            {issue.overdue_level && (
+                              <span className={`db-kpi-drawer-chip db-kpi-drawer-chip--${issue.overdue_level === 'deadline' ? 'danger' : 'warn'}`}>
+                                {issue.overdue_level}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </>
+                )
+              })()}
+
+            </div>
+          </div>
+        )
+      })()}
 
       {/* No sprint selected */}
       {!loading && !activeSprint && (

@@ -1779,6 +1779,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
   const [ytDetailIssue, setYtDetailIssue] = useState<import('../services/api').YouTrackIssue | null>(null)
   const [ytDetailLoading, setYtDetailLoading] = useState(false)
   const [ytBaseUrl, setYtBaseUrl] = useState('')
+  const [kpiDrawer, setKpiDrawer] = useState<'blocked' | 'bounced' | 'sprint' | 'completion' | 'in-progress' | null>(null)
   const assigneeRef = useRef<HTMLDivElement>(null)
   const sortRef = useRef<HTMLDivElement>(null)
   const viewModeRef = useRef<HTMLDivElement>(null)
@@ -2048,6 +2049,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
   // ── Blocked / in-progress issues (alert-first) ───────────────────────────
   const allBlockedIssues = useMemo(() =>
     filteredColumns.filter(c => c.name?.toLowerCase().includes('block')).flatMap(c => c.issues),
+  [filteredColumns])
+
+  const allBouncedIssues = useMemo(() =>
+    filteredColumns.flatMap(c => c.issues).filter(i => i.bounce_count > 0)
+      .sort((a, b) => b.bounce_count - a.bounce_count),
   [filteredColumns])
 
   const allInProgressIssues = useMemo(() =>
@@ -2424,7 +2430,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
       {summary && (
         <div className="pm-tracking-kpi-row">
           {/* Completion */}
-          <div className="pm-tracking-kpi pm-tracking-kpi--green">
+          <button className={`pm-tracking-kpi pm-tracking-kpi--green pm-tracking-kpi--clickable${kpiDrawer === 'completion' ? ' pm-tracking-kpi--active' : ''}`}
+            onClick={() => setKpiDrawer(kpiDrawer === 'completion' ? null : 'completion')}>
             <div className="pm-tracking-kpi-lbl">Completion</div>
             <div className="pm-tracking-kpi-val">
               {Math.round(summary.completion_pct)}<span className="pm-tracking-kpi-unit">%</span>
@@ -2433,26 +2440,224 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               <div className="pm-tracking-kpi-prog-f" style={{ width: `${Math.round(summary.completion_pct)}%` }} />
             </div>
             <div className="pm-tracking-kpi-note">{summary.done_issues} / {summary.total_issues} tickets</div>
-          </div>
+          </button>
+          {/* In Progress */}
+          <button className={`pm-tracking-kpi pm-tracking-kpi--blue pm-tracking-kpi--clickable${kpiDrawer === 'in-progress' ? ' pm-tracking-kpi--active' : ''}`}
+            onClick={() => setKpiDrawer(kpiDrawer === 'in-progress' ? null : 'in-progress')}>
+            <div className="pm-tracking-kpi-lbl">In Progress</div>
+            <div className="pm-tracking-kpi-val">{summary.in_progress_count}</div>
+            <div className="pm-tracking-kpi-note">{summary.overdue_count} overdue · {summary.blocked_count} blocked</div>
+          </button>
           {/* Blocked */}
-          <div className="pm-tracking-kpi pm-tracking-kpi--red">
+          <button className={`pm-tracking-kpi pm-tracking-kpi--red pm-tracking-kpi--clickable${kpiDrawer === 'blocked' ? ' pm-tracking-kpi--active' : ''}`}
+            onClick={() => setKpiDrawer(kpiDrawer === 'blocked' ? null : 'blocked')}>
             <div className="pm-tracking-kpi-lbl">Blocked</div>
             <div className="pm-tracking-kpi-val">{summary.blocked_count}</div>
             <div className="pm-tracking-kpi-note">{summary.in_progress_count} in progress · {summary.overdue_count} overdue</div>
-          </div>
+          </button>
           {/* Bounced */}
-          <div className="pm-tracking-kpi pm-tracking-kpi--amber">
+          <button className={`pm-tracking-kpi pm-tracking-kpi--amber pm-tracking-kpi--clickable${kpiDrawer === 'bounced' ? ' pm-tracking-kpi--active' : ''}`}
+            onClick={() => setKpiDrawer(kpiDrawer === 'bounced' ? null : 'bounced')}>
             <div className="pm-tracking-kpi-lbl">Bounced</div>
             <div className="pm-tracking-kpi-val">{summary.bounced_count}</div>
             <div className="pm-tracking-kpi-note">{summary.hotfix_count} hotfix{summary.hotfix_count !== 1 ? 'es' : ''} · backward moves</div>
-          </div>
+          </button>
           {/* Sprint Ends */}
-          <div className={`pm-tracking-kpi${sprintDeadlineLabel === 'OVERDUE' ? ' pm-tracking-kpi--red' : ' pm-tracking-kpi--amber'}`}>
+          <button className={`pm-tracking-kpi pm-tracking-kpi--clickable${kpiDrawer === 'sprint' ? ' pm-tracking-kpi--active' : ''}${sprintDeadlineLabel === 'OVERDUE' ? ' pm-tracking-kpi--red' : ' pm-tracking-kpi--amber'}`}
+            onClick={() => setKpiDrawer(kpiDrawer === 'sprint' ? null : 'sprint')}>
             <div className="pm-tracking-kpi-lbl">Sprint Ends</div>
             <div className={`pm-tracking-kpi-val${sprintDeadlineLabel === 'OVERDUE' ? ' pm-tracking-kpi-val--danger' : ''}`}>
               {sprintDeadlineLabel ?? '—'}
             </div>
             <div className="pm-tracking-kpi-note">{summary.overdue_count} ticket{summary.overdue_count !== 1 ? 's' : ''} overdue</div>
+          </button>
+        </div>
+      )}
+
+      {/* ── KPI Drawer ── */}
+      {kpiDrawer && summary && (
+        <div className="pm-kpi-drawer">
+          <div className="pm-kpi-drawer-header">
+            <span className="pm-kpi-drawer-title">
+              {kpiDrawer === 'in-progress' && `In Progress (${allInProgressIssues.length})`}
+              {kpiDrawer === 'blocked' && `Blocked Tickets (${allBlockedIssues.length})`}
+              {kpiDrawer === 'bounced' && `Bounced Tickets (${allBouncedIssues.length})`}
+              {kpiDrawer === 'completion' && 'Sprint Progress'}
+              {kpiDrawer === 'sprint' && 'Sprint Timeline'}
+            </span>
+            <button className="pm-kpi-drawer-close" onClick={() => setKpiDrawer(null)}><X size={13} /></button>
+          </div>
+          <div className="pm-kpi-drawer-body">
+
+            {/* ── In Progress ── */}
+            {kpiDrawer === 'in-progress' && (
+              allInProgressIssues.length === 0
+                ? <div className="pm-kpi-drawer-empty">No tickets in progress.</div>
+                : allInProgressIssues.map(issue => (
+                  <div key={issue.id} className="pm-kpi-drawer-row">
+                    <span className="pm-kpi-drawer-id pm-tracking-issue-id--link"
+                      onClick={(e) => openInYouTrack(issue.idReadable || issue.id, e)}>
+                      {issue.idReadable || issue.id}
+                    </span>
+                    <span className="pm-kpi-drawer-summary pm-tracking-issue-summary--clickable"
+                      onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}>
+                      {issue.summary}
+                    </span>
+                    {issue.assignee && <span className="pm-kpi-drawer-assignee">{issue.assignee}</span>}
+                    {issue.is_delayed && (
+                      <span className={`pm-kpi-drawer-chip pm-kpi-drawer-chip--${issue.overdue_level === 'deadline' ? 'danger' : 'warn'}`}>
+                        {issue.overdue_level || 'overdue'}
+                      </span>
+                    )}
+                    {issue.bounce_count > 0 && (
+                      <span className="pm-kpi-drawer-chip pm-kpi-drawer-chip--warn">↩ {issue.bounce_count}</span>
+                    )}
+                  </div>
+                ))
+            )}
+
+            {/* ── Blocked ── */}
+            {kpiDrawer === 'blocked' && (
+              allBlockedIssues.length === 0
+                ? <div className="pm-kpi-drawer-empty">No blocked tickets right now.</div>
+                : allBlockedIssues.map(issue => (
+                  <div key={issue.id} className="pm-kpi-drawer-row">
+                    <span className="pm-kpi-drawer-id pm-tracking-issue-id--link"
+                      onClick={(e) => openInYouTrack(issue.idReadable || issue.id, e)}>
+                      {issue.idReadable || issue.id}
+                    </span>
+                    <span className="pm-kpi-drawer-summary pm-tracking-issue-summary--clickable"
+                      onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}>
+                      {issue.summary}
+                    </span>
+                    {issue.assignee && <span className="pm-kpi-drawer-assignee">{issue.assignee}</span>}
+                    {(issue.total_active_hours || 0) > 0 && (
+                      <span className="pm-kpi-drawer-chip pm-kpi-drawer-chip--danger">
+                        {Math.round(issue.total_active_hours || 0)}h blocked
+                      </span>
+                    )}
+                  </div>
+                ))
+            )}
+
+            {/* ── Bounced ── */}
+            {kpiDrawer === 'bounced' && (
+              allBouncedIssues.length === 0
+                ? <div className="pm-kpi-drawer-empty">No bounced tickets.</div>
+                : allBouncedIssues.map(issue => (
+                  <div key={issue.id} className="pm-kpi-drawer-row">
+                    <span className="pm-kpi-drawer-id pm-tracking-issue-id--link"
+                      onClick={(e) => openInYouTrack(issue.idReadable || issue.id, e)}>
+                      {issue.idReadable || issue.id}
+                    </span>
+                    <span className="pm-kpi-drawer-summary pm-tracking-issue-summary--clickable"
+                      onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}>
+                      {issue.summary}
+                    </span>
+                    {issue.assignee && <span className="pm-kpi-drawer-assignee">{issue.assignee}</span>}
+                    <span className="pm-kpi-drawer-chip pm-kpi-drawer-chip--warn">↩ {issue.bounce_count}</span>
+                  </div>
+                ))
+            )}
+
+            {/* ── Completion ── */}
+            {kpiDrawer === 'completion' && (() => {
+              const pct = Math.round(summary.completion_pct)
+              const doneIds = new Set(
+                filteredColumns.filter(c => getColumnType(c) === 'compact').flatMap(c => c.issues.map(i => i.id))
+              )
+              const activeIds = new Set(
+                filteredColumns.filter(c => getColumnType(c) === 'inprogress').flatMap(c => c.issues.map(i => i.id))
+              )
+              return (
+                <div className="pm-kpi-drawer-completion">
+                  <div className="pm-kpi-drawer-prog-row">
+                    <span className="pm-kpi-drawer-prog-label">{summary.done_issues} / {summary.total_issues} done</span>
+                    <span className="pm-kpi-drawer-prog-pct">{pct}%</span>
+                  </div>
+                  <div className="pm-kpi-drawer-prog-track">
+                    <div className="pm-kpi-drawer-prog-fill pm-kpi-drawer-prog-fill--green" style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="pm-kpi-drawer-person-list">
+                    {byPersonList.map(person => {
+                      const done   = person.issues.filter(i => doneIds.has(i.id)).length
+                      const active = person.issues.filter(i => activeIds.has(i.id)).length
+                      const total  = person.issues.length
+                      const personPct = total > 0 ? Math.round((done / total) * 100) : 0
+                      const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
+                      return (
+                        <div key={person.name} className="pm-kpi-drawer-person-row">
+                          <div className="pm-kpi-drawer-avatar">
+                            {avatarSrc ? <img src={avatarSrc} alt="" /> : <span>{(person.name || '?')[0]}</span>}
+                          </div>
+                          <span className="pm-kpi-drawer-person-name">{person.name}</span>
+                          <div className="pm-kpi-drawer-mini-track">
+                            <div className="pm-kpi-drawer-mini-fill" style={{ width: `${personPct}%` }} />
+                          </div>
+                          <span className="pm-kpi-drawer-person-stats">{done} done · {active} active</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* ── Sprint ── */}
+            {kpiDrawer === 'sprint' && (() => {
+              const notStarted = Math.max(0, summary.total_issues - summary.done_issues - summary.in_progress_count - summary.blocked_count)
+              const segments = [
+                { label: 'Done', count: summary.done_issues, cls: 'green' },
+                { label: 'In Progress', count: summary.in_progress_count, cls: 'blue' },
+                { label: 'Blocked', count: summary.blocked_count, cls: 'red' },
+                { label: 'Not Started', count: notStarted, cls: 'muted' },
+              ]
+              const atRisk = allIssuesByDelay.filter(i => i.is_delayed)
+              return (
+                <div className="pm-kpi-drawer-sprint">
+                  <div className={`pm-kpi-drawer-sprint-countdown${sprintDeadlineLabel === 'OVERDUE' ? ' pm-kpi-drawer-sprint-countdown--danger' : ''}`}>
+                    {sprintDeadlineLabel === 'OVERDUE' ? '⚠ Sprint Overdue' : `⏱ ${sprintDeadlineLabel}`}
+                  </div>
+                  <div className="pm-kpi-drawer-sprint-segs">
+                    {segments.map(seg => (
+                      <div key={seg.label} className="pm-kpi-drawer-sprint-seg">
+                        <span className={`pm-kpi-drawer-sprint-seg-count pm-kpi-drawer-sprint-seg-count--${seg.cls}`}>{seg.count}</span>
+                        <div className="pm-kpi-drawer-sprint-bar">
+                          <div className={`pm-kpi-drawer-sprint-bar-fill pm-kpi-drawer-sprint-bar-fill--${seg.cls}`}
+                            style={{ width: `${summary.total_issues > 0 ? Math.round((seg.count / summary.total_issues) * 100) : 0}%` }} />
+                        </div>
+                        <span className="pm-kpi-drawer-sprint-seg-label">{seg.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {atRisk.length > 0 && (
+                    <>
+                      <div className="pm-kpi-drawer-at-risk-header">At Risk ({atRisk.length})</div>
+                      {atRisk.slice(0, 6).map(issue => (
+                        <div key={issue.id} className="pm-kpi-drawer-row">
+                          <span className="pm-kpi-drawer-id pm-tracking-issue-id--link"
+                            onClick={(e) => openInYouTrack(issue.idReadable || issue.id, e)}>
+                            {issue.idReadable || issue.id}
+                          </span>
+                          <span className="pm-kpi-drawer-summary pm-tracking-issue-summary--clickable"
+                            onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}>
+                            {issue.summary}
+                          </span>
+                          {issue.assignee && <span className="pm-kpi-drawer-assignee">{issue.assignee}</span>}
+                          {issue.overdue_level && (
+                            <span className={`pm-kpi-drawer-chip pm-kpi-drawer-chip--${issue.overdue_level === 'deadline' ? 'danger' : 'warn'}`}>
+                              {issue.overdue_level}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {atRisk.length === 0 && <div className="pm-kpi-drawer-empty">No at-risk tickets.</div>}
+                </div>
+              )
+            })()}
+
           </div>
         </div>
       )}

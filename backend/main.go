@@ -257,6 +257,14 @@ func main() {
 	slackRoutes.HandleFunc("/digest", slackHandler.PostDigest).Methods("POST")
 	slackRoutes.HandleFunc("/reminders", slackHandler.CreateFollowupReminder).Methods("POST")
 	slackRoutes.HandleFunc("/post-morning-report", slackHandler.PostMorningReport).Methods("POST")
+	// Slack Intelligence v2
+	slackRoutes.HandleFunc("/reply", slackHandler.ReplyToThread).Methods("POST")
+	slackRoutes.HandleFunc("/thread-replies", slackHandler.GetThreadRepliesHandler).Methods("GET")
+	slackRoutes.HandleFunc("/mentions/{messageTS}/pin", slackHandler.PinMention).Methods("POST")
+	slackRoutes.HandleFunc("/templates", slackHandler.GetTemplates).Methods("GET")
+	slackRoutes.HandleFunc("/templates", slackHandler.CreateTemplate).Methods("POST")
+	slackRoutes.HandleFunc("/templates/{id}", slackHandler.DeleteTemplate).Methods("DELETE")
+	slackRoutes.HandleFunc("/saved-items", slackHandler.GetSavedItems).Methods("GET")
 
 	// AI Analysis routes (protected)
 	aiHandler := handlers.NewAIHandler()
