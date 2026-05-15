@@ -2829,6 +2829,21 @@
 }
 .pm-tracking-issue-id--link:hover { color: #818cf8; }
 
+/* ── Ticket title as clickable (opens detail panel) ─────────────────── */
+.pm-tracking-issue-summary--clickable,
+.pm-tracking-ip-card-title--clickable,
+.pm-tracking-delay-title-text--clickable {
+  cursor: pointer; transition: color 150ms;
+}
+.pm-tracking-issue-summary--clickable:hover,
+.pm-tracking-ip-card-title--clickable:hover,
+.pm-tracking-delay-title-text--clickable:hover {
+  color: #818cf8; text-decoration: underline; text-underline-offset: 2px;
+}
+[data-theme="light"] .pm-tracking-issue-summary--clickable:hover,
+[data-theme="light"] .pm-tracking-ip-card-title--clickable:hover,
+[data-theme="light"] .pm-tracking-delay-title-text--clickable:hover { color: #4f46e5; }
+
 /* ── Dev time secondary label ─────────────────────────────────────────── */
 .pm-tracking-dev-time {
   font-size: 0.6rem; color: rgba(255,255,255,0.3); margin-left: 2px;

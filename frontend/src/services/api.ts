@@ -1625,6 +1625,7 @@ export interface YouTrackIssue {
   status: string
   subsystem?: string
   priority: string
+  type?: string
   assignee?: YouTrackUser
   created: number
   updated: number

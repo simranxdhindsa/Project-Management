@@ -1635,11 +1635,13 @@ function IssueDetailModal({
   logs,
   onClose,
   columnHierarchy,
+  ytBaseUrl,
 }: {
   issue: SprintBoardIssue
   logs: IssueStateLogEntry[]
   onClose: () => void
   columnHierarchy?: { state: string; rank: number }[]
+  ytBaseUrl?: string
 }) {
   const isBounce = (entry: IssueStateLogEntry) => {
     if (!columnHierarchy) return false
@@ -1663,7 +1665,14 @@ function IssueDetailModal({
       <div className="pm-tracking-detail-modal" onClick={e => e.stopPropagation()}>
         <div className="pm-tracking-detail-header">
           <div className="pm-tracking-detail-title">
-            <span className="pm-tracking-detail-id">{issue.idReadable}</span>
+            <span
+              className="pm-tracking-detail-id pm-tracking-issue-id--link"
+              onClick={() => {
+                const url = ytBaseUrl ? `${ytBaseUrl}/issue/${issue.idReadable}` : null
+                if (url) window.open(url, '_blank', 'noopener,noreferrer')
+              }}
+              title={`Open ${issue.idReadable} in YouTrack`}
+            >{issue.idReadable}</span>
             <span className="pm-tracking-detail-summary">{issue.summary}</span>
           </div>
           <button className="pm-tracking-detail-close" onClick={onClose} aria-label="Close">
@@ -1769,6 +1778,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
   const [detailIssue, setDetailIssue] = useState<{ issue: SprintBoardIssue; logs: IssueStateLogEntry[] } | null>(null)
   const [ytDetailIssue, setYtDetailIssue] = useState<import('../services/api').YouTrackIssue | null>(null)
   const [ytDetailLoading, setYtDetailLoading] = useState(false)
+  const [ytBaseUrl, setYtBaseUrl] = useState('')
   const assigneeRef = useRef<HTMLDivElement>(null)
   const sortRef = useRef<HTMLDivElement>(null)
   const viewModeRef = useRef<HTMLDivElement>(null)
@@ -1792,6 +1802,12 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
 
   useEffect(() => { fetchBoardStatus() }, [fetchBoardStatus])
   useEffect(() => { getAvatarMap().then(setAvatarMap) }, [])
+  useEffect(() => {
+    api.getYouTrackIntegration().then(res => {
+      const d = (res as any)
+      setYtBaseUrl((d?.base_url || d?.data?.base_url || '').replace(/\/$/, ''))
+    }).catch(() => {})
+  }, [])
 
   // ── Close dropdowns on outside click ─────────────────────────────────────
   useEffect(() => {
@@ -1866,7 +1882,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     })
   }, [sortField, PRIORITY_ORDER])
 
-  // ── Open YT issue detail (same panel as board view) ──────────────────────
+  // ── Open YT issue detail panel (title click) ──────────────────────────────
   const openYtIssue = useCallback(async (idReadable: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (ytDetailLoading) return
@@ -1878,6 +1894,14 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     } catch {}
     finally { setYtDetailLoading(false) }
   }, [ytDetailLoading])
+
+  // ── Open ticket ID in YouTrack (ID click) ────────────────────────────────
+  const openInYouTrack = useCallback((idReadable: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!idReadable) return
+    const url = ytBaseUrl ? `${ytBaseUrl}/issue/${idReadable}` : null
+    if (url) window.open(url, '_blank', 'noopener,noreferrer')
+  }, [ytBaseUrl])
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const allAssignees = useMemo(() => {
@@ -2081,13 +2105,12 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
           className={`pm-tracking-issue-row pm-tracking-issue-row--clickable${overdueClass}${bounceClass}${hotfixClass}${blockerIssueIds?.has(issue.idReadable) ? ' pm-tracking-issue-row--blocked' : ''}${isExpanded ? ' pm-tracking-issue-row--expanded' : ''}`}
           onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
         >
-          {/* Ticket ID — click opens YT detail panel */}
+          {/* Ticket ID — click opens in YouTrack */}
           <span
             className="pm-tracking-issue-id pm-tracking-issue-id--link"
-            title={`Open ${issue.idReadable} in detail view`}
-            onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}
+            title={`Open ${issue.idReadable} in YouTrack`}
+            onClick={(e) => openInYouTrack(issue.idReadable || issue.id, e)}
           >
-            {ytDetailLoading ? <Loader2 size={10} className="animate-spin" /> : null}
             {issue.idReadable || issue.id}
           </span>
           {/* Priority — dynamic YT colors */}
@@ -2097,7 +2120,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
           >
             {issue.priority}
           </span>
-          <span className="pm-tracking-issue-summary" title={issue.summary}>
+          <span
+            className="pm-tracking-issue-summary pm-tracking-issue-summary--clickable"
+            title={`Open ${issue.idReadable} details`}
+            onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}
+          >
             {issue.summary}
             {issue.bounce_count > 0 && (
               <span className="pm-tracking-bounce-badge" title={`${issue.bounce_count} backward move${issue.bounce_count > 1 ? 's' : ''}${issue.stint_count > 1 ? ` · picked up ${issue.stint_count}×` : ''}`}>
@@ -2185,7 +2212,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
       <React.Fragment key={issue.id || issue.idReadable}>
         <div className={`pm-tracking-ip-card${urgencyClass}`} onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}>
           <div className="pm-tracking-ip-card-top">
-            <span className="pm-tracking-ip-card-id" onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}>
+            <span
+              className="pm-tracking-ip-card-id"
+              onClick={(e) => openInYouTrack(issue.idReadable || issue.id, e)}
+              title={`Open ${issue.idReadable} in YouTrack`}
+            >
               {issue.idReadable}
             </span>
             <div className="pm-tracking-ip-card-badges">
@@ -2197,7 +2228,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               {issue.is_hotfix && <span className="pm-tracking-hotfix-chip"><Zap size={8} /> HF</span>}
             </div>
           </div>
-          <div className="pm-tracking-ip-card-title">{issue.summary}</div>
+          <div
+            className="pm-tracking-ip-card-title pm-tracking-ip-card-title--clickable"
+            onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}
+            title={`View ${issue.idReadable} details`}
+          >{issue.summary}</div>
           <div className="pm-tracking-ip-card-tags">
             {issue.bounce_count > 0 && <span className="pm-tracking-ip-card-tag pm-tracking-ip-card-tag--bounce">↩ Bounced ×{issue.bounce_count}</span>}
             {issue.move_type === 'qa_rejected' && <span className="pm-tracking-ip-card-tag pm-tracking-ip-card-tag--qa">QA Rejected</span>}
@@ -2262,7 +2297,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     return (
       <div key={issue.idReadable} className={`pm-tracking-blocked-row${rowClass}`}
         onClick={() => setExpandedIssue(expandedIssue === issue.idReadable ? null : issue.idReadable)}>
-        <span className="pm-tracking-blocked-id">{issue.idReadable}</span>
+        <span
+          className="pm-tracking-blocked-id pm-tracking-issue-id--link"
+          onClick={(e) => openInYouTrack(issue.idReadable, e)}
+          title={`Open ${issue.idReadable} in YouTrack`}
+        >{issue.idReadable}</span>
         <span className="pm-tracking-blocked-pri">
           {issue.priority && (
             <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
@@ -2271,7 +2310,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
           )}
         </span>
         <div className="pm-tracking-blocked-title">
-          <span className="pm-tracking-blocked-title-text" title={issue.summary}>{issue.summary}</span>
+          <span
+            className="pm-tracking-blocked-title-text pm-tracking-issue-summary--clickable"
+            title={`View ${issue.idReadable} details`}
+            onClick={(e) => openYtIssue(issue.idReadable, e)}
+          >{issue.summary}</span>
           {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
           {issue.is_hotfix && <span className="pm-tracking-hotfix-chip"><Zap size={8} /></span>}
         </div>
@@ -2554,8 +2597,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       <span
                         key={i.idReadable}
                         className={`pm-tracking-swimlane-chip ${getChipClass(i)}`}
-                        title={tooltipParts.join(' · ')}
-                        onClick={() => setExpandedIssue(expandedIssue === i.idReadable ? null : i.idReadable)}
+                        title={tooltipParts.join(' · ') + '\nClick to open in YouTrack'}
+                        onClick={(e) => openInYouTrack(i.idReadable, e)}
                       >
                         {i.idReadable}
                         {i.bounce_count > 0 && <span className="pm-tracking-chip-bounce">↩{i.bounce_count}</span>}
@@ -2763,7 +2806,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                     onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
                   >
                     <span>{isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
-                    <span className="pm-tracking-issue-id">{issue.idReadable}</span>
+                    <span
+                      className="pm-tracking-issue-id pm-tracking-issue-id--link"
+                      onClick={(e) => openInYouTrack(issue.idReadable, e)}
+                      title={`Open ${issue.idReadable} in YouTrack`}
+                    >{issue.idReadable}</span>
                     <span>
                       {issue.priority && (
                         <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
@@ -2772,7 +2819,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       )}
                     </span>
                     <div className="pm-tracking-delay-title-cell">
-                      <span className="pm-tracking-delay-title-text" title={issue.summary}>{issue.summary}</span>
+                      <span
+                        className="pm-tracking-delay-title-text pm-tracking-delay-title-text--clickable"
+                        title={`View ${issue.idReadable} details`}
+                        onClick={(e) => openYtIssue(issue.idReadable, e)}
+                      >{issue.summary}</span>
                       {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
                       {issue.is_hotfix && <span className="pm-tracking-hotfix-chip">HF</span>}
                       {(issue.verified_on_dev || issue.verified_on_stage || issue.verified_on_prod) && (
@@ -2847,10 +2898,20 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       }
                       <div className="pm-tracking-alert-blocked-info">
                         <div className="pm-tracking-alert-blocked-id">
-                          {issue.idReadable}
+                          <span
+                            className="pm-tracking-issue-id--link"
+                            onClick={(e) => openInYouTrack(issue.idReadable, e)}
+                            title={`Open ${issue.idReadable} in YouTrack`}
+                            style={{ cursor: 'pointer' }}
+                          >{issue.idReadable}</span>
                           {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge" style={{ marginLeft: 4 }}>↩{issue.bounce_count}</span>}
                         </div>
-                        <div className="pm-tracking-alert-blocked-title" title={issue.summary}>{issue.summary}</div>
+                        <div
+                          className="pm-tracking-alert-blocked-title"
+                          title={`View ${issue.idReadable} details`}
+                          onClick={(e) => openYtIssue(issue.idReadable, e)}
+                          style={{ cursor: 'pointer' }}
+                        >{issue.summary}</div>
                         {(issue.verified_on_dev || issue.verified_on_stage || issue.verified_on_prod) && (
                           <div className="pm-tracking-verif-badges" style={{ marginTop: 3 }}>
                             {issue.verified_on_dev && <span className="pm-tracking-verif-chip pm-tracking-verif-chip--dev" title={`DEV verified by ${issue.verified_on_dev}`}>DEV✓</span>}
@@ -2885,7 +2946,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
                     >
                       <div className="pm-tracking-alert-card-header">
-                        <span className="pm-tracking-alert-card-id">{issue.idReadable}</span>
+                        <span
+                          className="pm-tracking-alert-card-id pm-tracking-issue-id--link"
+                          onClick={(e) => openInYouTrack(issue.idReadable, e)}
+                          title={`Open ${issue.idReadable} in YouTrack`}
+                        >{issue.idReadable}</span>
                         {issue.priority && (
                           <span className="pm-tracking-pri-badge" style={priColors ? { background: priColors.bg, color: priColors.text } : undefined}>
                             {issue.priority}
@@ -2893,7 +2958,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                         )}
                         {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
                       </div>
-                      <div className="pm-tracking-alert-card-title">{issue.summary}</div>
+                      <div
+                        className="pm-tracking-alert-card-title pm-tracking-ip-card-title--clickable"
+                        onClick={(e) => openYtIssue(issue.idReadable, e)}
+                        title={`View ${issue.idReadable} details`}
+                      >{issue.summary}</div>
                       <div className="pm-tracking-alert-card-footer">
                         <div className="pm-tracking-alert-card-stats">
                           {issue.cycle_time_hours > 0 && (
@@ -3077,7 +3146,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               return (
                 <div key={issue.idReadable} className={`pm-tracking-focus-card pm-tracking-focus-card${urgency}`}>
                   <div className="pm-tracking-focus-card-top">
-                    <span className="pm-tracking-focus-id">{issue.idReadable}</span>
+                    <span
+                      className="pm-tracking-focus-id pm-tracking-issue-id--link"
+                      onClick={(e) => openInYouTrack(issue.idReadable, e)}
+                      title={`Open ${issue.idReadable} in YouTrack`}
+                    >{issue.idReadable}</span>
                     {issue.overdue_level === 'deadline' && <span className="pm-tracking-overdue-badge">Overdue</span>}
                     {(issue.overdue_level === 'sprint' || issue.is_delayed) && issue.overdue_level !== 'deadline' && (
                       <span className="pm-tracking-atrisk-badge">At Risk</span>
@@ -3090,7 +3163,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                     {issue.is_hotfix && <span className="pm-tracking-hotfix-chip">HF</span>}
                     {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>}
                   </div>
-                  <div className="pm-tracking-focus-title">{issue.summary}</div>
+                  <div
+                    className="pm-tracking-focus-title pm-tracking-ip-card-title--clickable"
+                    onClick={(e) => openYtIssue(issue.idReadable, e)}
+                    title={`View ${issue.idReadable} details`}
+                  >{issue.summary}</div>
                   <div className="pm-tracking-focus-stats">
                     {issue.cycle_time_hours > 0 && (
                       <div className="pm-tracking-focus-stat">
@@ -3322,8 +3399,9 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       <div className="pm-qa-cell pm-qa-cell--ticket">
                         <div className="pm-qa-ticket-top">
                           <span
-                            className="pm-qa-ticket-id"
-                            onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}
+                            className="pm-qa-ticket-id pm-tracking-issue-id--link"
+                            onClick={(e) => openInYouTrack(issue.idReadable || issue.id, e)}
+                            title={`Open ${issue.idReadable} in YouTrack`}
                           >
                             {issue.idReadable}
                           </span>
@@ -3337,7 +3415,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                             <span className="pm-tracking-bounce-badge">↩{issue.bounce_count}</span>
                           )}
                         </div>
-                        <div className="pm-qa-ticket-title" title={issue.summary}>{issue.summary}</div>
+                        <div
+                          className="pm-qa-ticket-title pm-tracking-ip-card-title--clickable"
+                          title={`View ${issue.idReadable} details`}
+                          onClick={(e) => openYtIssue(issue.idReadable || issue.id, e)}
+                        >{issue.summary}</div>
                         <div className="pm-qa-ticket-state">{issue.current_state}</div>
                       </div>
 
@@ -3485,14 +3567,16 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
           logs={detailIssue.logs}
           columnHierarchy={columnHierarchy}
           onClose={() => setDetailIssue(null)}
+          ytBaseUrl={ytBaseUrl}
         />
       )}
 
-      {/* ── YouTrack issue detail panel (same as board view) ── */}
+      {/* ── YouTrack issue detail panel ── */}
       {ytDetailIssue && (
         <IssueDetailPanel
           issue={ytDetailIssue}
           onClose={() => setYtDetailIssue(null)}
+          ytBaseUrl={ytBaseUrl}
         />
       )}
     </div>

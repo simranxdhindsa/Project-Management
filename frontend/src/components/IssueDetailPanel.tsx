@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { ExternalLink, X, Send, MessageSquare, Paperclip, Clock, User, FileText, Film, Music, FileCode, File, FileSpreadsheet } from 'lucide-react'
+import { ExternalLink, X, Send, MessageSquare, Paperclip, Clock, User, FileText, Film, Music, FileCode, File, FileSpreadsheet, Tag, GitBranch, Activity } from 'lucide-react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import api from '@/services/api'
-import type { YouTrackIssue, YouTrackComment } from '@/services/api'
+import type { YouTrackIssue, YouTrackComment, IssueStateLogEntry } from '@/services/api'
 import { getActiveSource } from '@/services/pmDataService'
 import { AttachmentViewer } from '@/components/AttachmentViewer'
 
@@ -38,6 +38,21 @@ function formatCommentTime(ms: number): string {
   if (hours < 24) return `${hours}h ago`
   if (days < 7) return `${days}d ago`
   return fmtDate(ms)
+}
+
+function formatTransitionTime(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' +
+    d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
+function fmtDuration(hours: number | null): string {
+  if (hours == null || hours <= 0) return ''
+  const d = Math.floor(hours / 24)
+  const h = Math.round(hours % 24)
+  if (d > 0 && h > 0) return `${d}d ${h}h`
+  if (d > 0) return `${d}d`
+  return `${h}h`
 }
 
 function priorityBadgeStyle(priority: string): { background: string; color: string } {
@@ -81,6 +96,8 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
   const [commentText, setCommentText] = useState('')
   const [posting, setPosting] = useState(false)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
+  const [transitions, setTransitions] = useState<IssueStateLogEntry[]>([])
+  const [transitionsLoading, setTransitionsLoading] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isYouTrack = getActiveSource() === 'youtrack'
   const allAttachments = issue.attachments || []
@@ -97,6 +114,18 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
       .finally(() => setCommentsLoading(false))
   }, [issue.id, isYouTrack])
 
+  useEffect(() => {
+    setTransitionsLoading(true)
+    api.getIssueTransitions(issue.id)
+      .then(res => {
+        const r = res as { success: boolean; data: IssueStateLogEntry[] }
+        const data = (r.data ?? r) as IssueStateLogEntry[]
+        setTransitions(Array.isArray(data) ? data : [])
+      })
+      .catch(() => {})
+      .finally(() => setTransitionsLoading(false))
+  }, [issue.id])
+
   const handlePostComment = async () => {
     const text = commentText.trim()
     if (!text || posting) return
@@ -104,7 +133,6 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
     try {
       await api.addYouTrackIssueComment(issue.id, text)
       setCommentText('')
-      // Reload comments
       const res = await api.getYouTrackIssueComments(issue.id)
       const r = res as { success: boolean; data: YouTrackComment[] }
       if (r.success && r.data) setComments(r.data)
@@ -118,7 +146,6 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
 
   const priStyle = priorityBadgeStyle(issue.priority || '')
   const imageAttachments = (issue.attachments || []).filter(a => isImageAttachment(a.mimeType, a.url))
-  const fileAttachments  = (issue.attachments || []).filter(a => !isImageAttachment(a.mimeType, a.url))
 
   return (
     <>
@@ -127,7 +154,10 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
 
         {/* ── Top bar: ID + close ── */}
         <div className="idp-topbar">
-          <span className="idp-issue-id">{issue.id}</span>
+          <div className="idp-topbar-left">
+            <span className="idp-issue-id">{issue.id}</span>
+            {issue.type && <span className="idp-type-chip">{issue.type}</span>}
+          </div>
           <div className="idp-topbar-actions">
             <a href={issueUrl} target="_blank" rel="noopener noreferrer" className="idp-ext-link">
               <ExternalLink size={13} />
@@ -144,8 +174,17 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
           <div className="idp-main">
             <h2 className="idp-title">{issue.summary}</h2>
 
+            {/* Created/Updated meta line */}
+            <div className="idp-meta-line">
+              {issue.created ? <span>Created {fmtDateTime(issue.created)}</span> : null}
+              {issue.updated ? <span>· Updated {fmtDateTime(issue.updated)}</span> : null}
+            </div>
+
             {issue.description && (
               <div className="idp-section">
+                <div className="idp-section-label">
+                  <FileText size={12} /> Description
+                </div>
                 <div
                   className="idp-description idp-markdown"
                   dangerouslySetInnerHTML={{
@@ -154,6 +193,47 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                 />
               </div>
             )}
+
+            {/* Activity Log (State Transitions) */}
+            <div className="idp-section">
+              <div className="idp-section-label">
+                <Activity size={12} /> Activity
+              </div>
+              {transitionsLoading ? (
+                <div className="idp-activity-list">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="idp-activity-row idp-activity-row--skeleton">
+                      <div className="skeleton" style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0 }} />
+                      <div className="skeleton" style={{ width: 80, height: 10, borderRadius: 4 }} />
+                      <div className="skeleton" style={{ width: '40%', height: 10, borderRadius: 4 }} />
+                      <div className="skeleton" style={{ width: 60, height: 10, borderRadius: 4 }} />
+                    </div>
+                  ))}
+                </div>
+              ) : transitions.length === 0 ? (
+                <p className="idp-no-comments">No state transitions recorded.</p>
+              ) : (
+                <div className="idp-activity-list">
+                  {transitions.map((t, i) => (
+                    <div key={i} className="idp-activity-row">
+                      <div className="idp-activity-dot" />
+                      <span className="idp-activity-time">{formatTransitionTime(t.transitioned_at)}</span>
+                      <div className="idp-activity-states">
+                        <span className="idp-activity-from">{t.from_state || '—'}</span>
+                        <span className="idp-activity-arrow">→</span>
+                        <span className="idp-activity-to">{t.to_state}</span>
+                      </div>
+                      {t.duration_in_prev_state_hours != null && t.duration_in_prev_state_hours > 0 && (
+                        <span className="idp-activity-dur">{fmtDuration(t.duration_in_prev_state_hours)}</span>
+                      )}
+                      {t.moved_by && (
+                        <span className="idp-activity-by">{t.moved_by}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Attachments */}
             {(issue.attachments?.length ?? 0) > 0 && (
@@ -272,7 +352,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
             <div className="idp-meta-group">
 
               <div className="idp-meta-row">
-                <span className="idp-meta-label">Status</span>
+                <span className="idp-meta-label">State</span>
                 <span className="idp-status-badge">{issue.status || '—'}</span>
               </div>
 
@@ -282,6 +362,13 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                   ? <span className="idp-priority-badge" style={priStyle}>{issue.priority}</span>
                   : <span className="idp-meta-value">—</span>}
               </div>
+
+              {issue.type && (
+                <div className="idp-meta-row">
+                  <span className="idp-meta-label"><Tag size={11} style={{ opacity: 0.6 }} /> Type</span>
+                  <span className="idp-meta-badge">{issue.type}</span>
+                </div>
+              )}
 
               <div className="idp-meta-row">
                 <span className="idp-meta-label">
@@ -294,14 +381,25 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                         ? <img src={issue.assignee.avatarUrl} alt={issue.assignee.fullName} />
                         : <span>{getInitials(issue.assignee.fullName || issue.assignee.login)}</span>}
                     </div>
-                    <span className="idp-assignee-name">{issue.assignee.fullName || issue.assignee.login}</span>
+                    <div className="idp-assignee-info">
+                      <span className="idp-assignee-name">{issue.assignee.fullName || issue.assignee.login}</span>
+                      {issue.assignee.email && (
+                        <a
+                          href={`mailto:${issue.assignee.email}`}
+                          className="idp-assignee-email"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          {issue.assignee.email}
+                        </a>
+                      )}
+                    </div>
                   </div>
                 ) : <span className="idp-meta-value">Unassigned</span>}
               </div>
 
               {issue.subsystem && (
                 <div className="idp-meta-row">
-                  <span className="idp-meta-label">Subsystem</span>
+                  <span className="idp-meta-label"><GitBranch size={11} style={{ opacity: 0.6 }} /> Subsystem</span>
                   <span className="idp-meta-value">{issue.subsystem}</span>
                 </div>
               )}
@@ -315,15 +413,24 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                 </span>
               </div>
 
+              <div className="idp-meta-divider" />
+
               <div className="idp-meta-row">
                 <span className="idp-meta-label">Created</span>
-                <span className="idp-meta-value">{fmtDateTime(issue.created)}</span>
+                <span className="idp-meta-value idp-meta-value--sm">{fmtDateTime(issue.created)}</span>
               </div>
 
               <div className="idp-meta-row">
                 <span className="idp-meta-label">Updated</span>
-                <span className="idp-meta-value">{fmtDateTime(issue.updated)}</span>
+                <span className="idp-meta-value idp-meta-value--sm">{fmtDateTime(issue.updated)}</span>
               </div>
+
+              {transitions.length > 0 && (
+                <div className="idp-meta-row">
+                  <span className="idp-meta-label">Transitions</span>
+                  <span className="idp-meta-value">{transitions.length}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>

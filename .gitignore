@@ -74,6 +74,7 @@ backend/cmd/server/server.exe
 
 # Claude AI
 .claude/
+.mcp.json
 
 # Secrets and credentials (NEVER commit these)
 *.pem

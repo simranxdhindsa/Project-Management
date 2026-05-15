@@ -1088,16 +1088,17 @@
    ============================================================ */
 
 .idp-modal {
-  background: rgba(11,9,30,0.98);
+  background: var(--bg-elevated);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-2xl), inset 0 1px 0 rgba(255,255,255,0.06);
   animation: modalScaleIn var(--transition-normal) cubic-bezier(0.34,1.56,0.64,1);
   width: 100%;
-  max-width: 900px;
-  max-height: 88vh;
+  max-width: 960px;
+  max-height: 76vh;
+  min-height: 300px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1109,9 +1110,26 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid rgba(255,255,255,0.07);
+  border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
   gap: 0.75rem;
+}
+
+.idp-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.idp-type-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-full);
+  background: rgba(99,102,241,0.15);
+  color: #818cf8;
+  border: 1px solid rgba(99,102,241,0.25);
+  letter-spacing: 0.03em;
 }
 
 .idp-issue-id {
@@ -1201,7 +1219,7 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--glass-border, rgba(255,255,255,0.06));
 }
 
 .idp-description {
@@ -1482,10 +1500,10 @@
 .idp-sidebar {
   width: 240px;
   flex-shrink: 0;
-  border-left: 1px solid rgba(255,255,255,0.07);
+  border-left: 1px solid var(--glass-border);
   overflow-y: auto;
   padding: 1.25rem 1rem;
-  background: rgba(255,255,255,0.015);
+  background: var(--bg-surface);
 }
 
 .idp-meta-group {
@@ -1569,10 +1587,145 @@
   color: var(--text-secondary);
 }
 
+.idp-assignee-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.idp-assignee-email {
+  font-size: 0.7rem;
+  color: var(--color-primary-light, #818cf8);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.idp-assignee-email:hover { text-decoration: underline; }
+
+/* Meta line (created/updated) below the title */
+.idp-meta-line {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: -0.5rem;
+}
+
+/* Divider inside sidebar */
+.idp-meta-divider {
+  border: none;
+  border-top: 1px solid var(--glass-border, rgba(255,255,255,0.07));
+  margin: 0.25rem 0;
+}
+
+/* Badge for Type / Sprint etc */
+.idp-meta-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-md);
+  background: rgba(99,102,241,0.12);
+  color: #818cf8;
+  width: fit-content;
+}
+
+/* Smaller meta value text */
+.idp-meta-value--sm {
+  font-size: 0.75rem;
+}
+
+/* ── Activity log ── */
+.idp-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--glass-border, rgba(255,255,255,0.07));
+}
+
+.idp-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0 0.4rem 0.75rem;
+  position: relative;
+  flex-wrap: wrap;
+}
+
+.idp-activity-row--skeleton {
+  gap: 0.5rem;
+}
+
+.idp-activity-dot {
+  position: absolute;
+  left: -0.45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(99,102,241,0.6);
+  flex-shrink: 0;
+}
+
+.idp-activity-time {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 90px;
+}
+
+.idp-activity-states {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.idp-activity-from {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.idp-activity-arrow {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.idp-activity-to {
+  font-size: 0.78rem;
+  color: var(--color-primary-light, #818cf8);
+  font-weight: 600;
+}
+
+.idp-activity-dur {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border: 1px solid var(--glass-border, rgba(255,255,255,0.07));
+  border-radius: var(--radius-sm, 3px);
+  padding: 0.05rem 0.35rem;
+  white-space: nowrap;
+}
+
+.idp-activity-by {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+}
+
 /* ── Light theme overrides ── */
 [data-theme="light"] .idp-modal {
-  background: rgba(255,255,255,0.98);
-  border-color: rgba(0,0,0,0.08);
+  border-color: var(--glass-border);
 }
 [data-theme="light"] .idp-topbar {
   border-bottom-color: rgba(0,0,0,0.07);
@@ -1584,8 +1737,7 @@
   border-bottom-color: rgba(0,0,0,0.07);
 }
 [data-theme="light"] .idp-sidebar {
-  background: rgba(0,0,0,0.02);
-  border-left-color: rgba(0,0,0,0.07);
+  border-left-color: var(--glass-border);
 }
 [data-theme="light"] .idp-comment-body {
   background: rgba(0,0,0,0.03);
@@ -1605,10 +1757,22 @@
 [data-theme="light"] .idp-status-badge { background: rgba(16,185,129,0.12); color: #059669; }
 [data-theme="light"] .idp-overdue { color: #dc2626; }
 [data-theme="light"] .idp-meta-badge { background: rgba(99,102,241,0.1); color: #4f46e5; }
+[data-theme="light"] .idp-type-chip { background: rgba(99,102,241,0.1); color: #4f46e5; border-color: rgba(99,102,241,0.2); }
+[data-theme="light"] .idp-assignee-email { color: #4f46e5; }
+[data-theme="light"] .idp-meta-divider { border-top-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .idp-activity-list { border-left-color: rgba(0,0,0,0.1); }
+[data-theme="light"] .idp-activity-dot { background: rgba(99,102,241,0.5); }
+[data-theme="light"] .idp-activity-to { color: #4f46e5; }
+[data-theme="light"] .idp-activity-dur {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+}
+[data-theme="light"] .idp-modal { box-shadow: 0 20px 60px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.8); }
+[data-theme="light"] .idp-topbar { border-bottom-color: rgba(0,0,0,0.07); }
 
 /* ── Responsive ── */
 @media (max-width: 680px) {
-  .idp-modal { max-width: 100%; border-radius: var(--radius-lg); }
+  .idp-modal { max-width: 100%; border-radius: var(--radius-lg); max-height: 90vh; }
   .idp-body { flex-direction: column; }
   .idp-sidebar { width: 100%; border-left: none; border-top: 1px solid rgba(255,255,255,0.07); }
 }
