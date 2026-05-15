@@ -209,15 +209,30 @@ export default function Dashboard() {
     localStorage.setItem('theme', theme)
   }, [darkMode])
 
-  // Load and apply per-user theme preferences on mount
+  // Load and apply per-user theme — apply cached immediately, then update from backend
   useEffect(() => {
     if (!user) return
+    // Apply cached theme instantly to avoid flash of default colors
+    const THEME_CACHE_KEY = 'user-theme-cache'
+    try {
+      const cached = localStorage.getItem(THEME_CACHE_KEY)
+      if (cached) {
+        const { dark_accent, dark_bg, light_accent, light_bg } = JSON.parse(cached)
+        applyUserTheme(dark_accent, dark_bg, light_accent, light_bg)
+      }
+    } catch { /* ignore bad cache */ }
+
     api.getUserTheme().then(res => {
       if (res.data) {
         const { dark_accent, dark_bg, light_accent, light_bg } = res.data
-        applyUserTheme(dark_accent, dark_bg, light_accent, light_bg)
+        const fresh = JSON.stringify({ dark_accent, dark_bg, light_accent, light_bg })
+        const cached = localStorage.getItem(THEME_CACHE_KEY)
+        if (fresh !== cached) {
+          localStorage.setItem(THEME_CACHE_KEY, fresh)
+          applyUserTheme(dark_accent, dark_bg, light_accent, light_bg)
+        }
       }
-    }).catch(() => {})
+    }).catch(() => { /* keep cached theme if backend unreachable */ })
   }, [user])
 
   useEffect(() => {

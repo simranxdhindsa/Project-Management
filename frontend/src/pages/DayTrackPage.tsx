@@ -512,17 +512,29 @@ export function DayTrackPage() {
   const [ruleTypePos, setRuleTypePos] = useState<{ top: number; left: number; width: number } | null>(null)
   const ruleTypeRefs = useRef<(HTMLButtonElement | null)[]>([])
 
-  // Manual form
-  const [mName, setMName] = useState('')
-  const [mCat, setMCat] = useState('')
-  const [mStart, setMStart] = useState('')
-  const [mEnd, setMEnd] = useState('')
-  const [mNotes, setMNotes] = useState('')
+  // Draft persistence helpers
+  const DRAFT_KEY = 'dt-draft'
+  function saveDraft() {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      mName, mCat, mStart, mEnd, mNotes,
+      tName, tCat, tNotes,
+      pName, pCat, pTime, pWhen, pNotes,
+    }))
+  }
+  function clearDraft() { localStorage.removeItem(DRAFT_KEY) }
 
-  // Timer form
-  const [tName, setTName] = useState('')
-  const [tCat, setTCat] = useState('')
-  const [tNotes, setTNotes] = useState('')
+  // Manual form — restored from draft on mount
+  const _draft = (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null') } catch { return null } })()
+  const [mName, setMName] = useState(_draft?.mName ?? '')
+  const [mCat, setMCat] = useState(_draft?.mCat ?? '')
+  const [mStart, setMStart] = useState(_draft?.mStart ?? '')
+  const [mEnd, setMEnd] = useState(_draft?.mEnd ?? '')
+  const [mNotes, setMNotes] = useState(_draft?.mNotes ?? '')
+
+  // Timer form — restored from draft
+  const [tName, setTName] = useState(_draft?.tName ?? '')
+  const [tCat, setTCat] = useState(_draft?.tCat ?? '')
+  const [tNotes, setTNotes] = useState(_draft?.tNotes ?? '')
   const [timerRunning, setTimerRunning] = useState(false)
   const [timerPaused, setTimerPaused] = useState(false)
   const [timerDisplay, setTimerDisplay] = useState('00:00:00')
@@ -532,12 +544,12 @@ export function DayTrackPage() {
   const pauseStartRef = useRef<number>(0)
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Plan form
-  const [pName, setPName] = useState('')
-  const [pCat, setPCat] = useState('')
-  const [pTime, setPTime] = useState('')
-  const [pWhen, setPWhen] = useState<'today'|'tomorrow'>('today')
-  const [pNotes, setPNotes] = useState('')
+  // Plan form — restored from draft
+  const [pName, setPName] = useState(_draft?.pName ?? '')
+  const [pCat, setPCat] = useState(_draft?.pCat ?? '')
+  const [pTime, setPTime] = useState(_draft?.pTime ?? '')
+  const [pWhen, setPWhen] = useState<'today'|'tomorrow'>(_draft?.pWhen ?? 'today')
+  const [pNotes, setPNotes] = useState(_draft?.pNotes ?? '')
 
   // Export modal
   const [exportOpen, setExportOpen] = useState(false)
@@ -671,12 +683,21 @@ export function DayTrackPage() {
     dayTrackApi.getSuggestions().then(setSuggestions).catch(() => {})
   }, [])
 
-  // Default category to first in list
+  // Default category to first in list (only if not restored from draft)
   useEffect(() => {
     if (categories.length > 0 && !mCat) setMCat(categories[0])
     if (categories.length > 0 && !tCat) setTCat(categories[0])
     if (categories.length > 0 && !pCat) setPCat(categories[0])
   }, [categories]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save draft whenever any form field changes; clear on unmount so stale drafts don't persist forever
+  useEffect(() => {
+    saveDraft()
+  }, [mName, mCat, mStart, mEnd, mNotes, tName, tCat, tNotes, pName, pCat, pTime, pWhen, pNotes]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    return () => { saveDraft() }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Timer tick
   useEffect(() => {
@@ -711,6 +732,7 @@ export function DayTrackPage() {
       })
       const nextStart = mEnd ? addMinute(mEnd) : ''
       setMName(''); setMStart(nextStart); setMEnd(''); setMNotes('')
+      clearDraft()
       await loadAll()
       dayTrackApi.getSuggestions().then(setSuggestions).catch(() => {})
       toast(`"${mName.trim()}" logged`)
@@ -766,6 +788,7 @@ export function DayTrackPage() {
     setTimerRunning(false); setTimerPaused(false); setTimerStatus('idle')
     setTimerDisplay('00:00:00')
     setTName(''); setTNotes('')
+    clearDraft()
   }
 
   async function addPlanned() {
@@ -781,6 +804,7 @@ export function DayTrackPage() {
         status: 'planned',
       })
       setPName(''); setPTime(''); setPNotes('')
+      clearDraft()
       await loadAll()
       toast(`"${pName.trim()}" scheduled for ${pWhen}`)
     } catch { toast('Failed to schedule task', 'warn') }
