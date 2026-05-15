@@ -721,6 +721,19 @@ func RunMigrations() error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_daytrack_entries_external_ref_unique
 		 ON daytrack_entries(user_id, external_ref)
 		 WHERE external_ref IS NOT NULL AND external_ref != ''`,
+
+		// ── Slack Intelligence: pin support ─────────────────────────────────────
+		`ALTER TABLE slack_mentions ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false`,
+
+		// ── Slack Intelligence: quick reply templates ────────────────────────────
+		`CREATE TABLE IF NOT EXISTS slack_reply_templates (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id    TEXT NOT NULL,
+			body       TEXT NOT NULL,
+			sort_order INT  NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_slack_reply_templates_user ON slack_reply_templates(user_id, sort_order)`,
 	}
 
 	for i, migration := range migrations {
