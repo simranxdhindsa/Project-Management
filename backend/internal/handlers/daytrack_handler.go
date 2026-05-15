@@ -279,19 +279,43 @@ func (h *DayTrackHandler) Summarize(w http.ResponseWriter, r *http.Request) {
 		sb.WriteString("\n")
 	}
 
-	systemPrompt := `You are a professional standup report writer. The user gives you a list of work items they did today, grouped loosely by category.
-Your job: rewrite them as a concise, natural standup update grouped by category.
-Rules:
-- Keep the category headers exactly as given (bold them with **)
-- Merge related items into flowing sentences — don't just list them
-- Preserve durations in brackets like (2h 30m)
-- Do NOT invent or add anything not in the input
-- Output only the final text, no preamble or explanation
-- Keep it professional and first-person`
+	systemPrompt := `You are a work log editor. Fix grammar and clarity only — do NOT change structure, tone, or length.
 
-	userPrompt := "Work items for " + req.DateLabel + ":\n" + sb.String() + "\nWrite the standup summary:"
+RULES (non-negotiable):
+- Every input bullet → exactly one output bullet starting with "- "
+- NEVER merge two bullets into one. NEVER split one bullet into two.
+- NEVER write paragraphs. NEVER add intros or closing lines.
+- Keep entries SHORT and direct — 1 line per bullet, no filler words
+- Do not add "I" at the start. Keep lowercase action verbs.
+- Expand abbreviations: FE→Frontend, BE→Backend, MC→Mission Control, SW/Studio→Studio-Web, UI→UI app
+- Omit Sign In, Sign Off, and break entries entirely
 
-	body, err := callGroqChat(r.Context(), groqKey, "llama-3.1-8b-instant", systemPrompt, userPrompt)
+TONE — casual and direct (not formal):
+  BAD:  "investigated and resolved the Postman running issue on Rohit's laptop"
+  GOOD: "fixed Postman issue on Rohit's laptop"
+
+  BAD:  "gave a KT session to Rohit on how to create a JSON collection in Postman"
+  GOOD: "gave KT to Rohit on creating JSON collection in Postman"
+
+  BAD:  "tested and validated SCORM scraping behaviour on the DEV environment"
+  GOOD: "tested SCORM scraping on DEV"
+
+EXAMPLE (input → output, bullet-for-bullet):
+Input:
+- [Testing] Tested SCORM scraping on DEV and STAGE
+- [Testing] ARD-1700: Verified publish flow on Studio-Web
+- [Meetings] KT to Rohit on Voiden
+
+Output:
+- tested SCORM scraping on DEV and STAGE
+- verified publish flow on Studio-Web (ARD-1700)
+- gave KT to Rohit on Voiden
+
+Output only the bullets — nothing else.`
+
+	userPrompt := "Work entries for " + req.DateLabel + ":\n" + sb.String() + "\nOutput one bullet per entry:"
+
+	body, err := callGroqChat(r.Context(), groqKey, "llama-3.3-70b-versatile", systemPrompt, userPrompt)
 	if err != nil {
 		http.Error(w, "AI call failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -306,7 +330,8 @@ func callGroqChat(ctx context.Context, apiKey, model, system, user string) (stri
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},
 		},
-		"stream": false,
+		"stream":      false,
+		"temperature": 0,
 	}
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(b))

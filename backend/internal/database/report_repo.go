@@ -637,6 +637,41 @@ func (r *ReportRepository) GetPinnedIssueIDs(ctx context.Context, userID string)
 }
 
 // GetInProgressOlderThan returns issues currently In Progress for longer than given hours
+// GetTodayVerifiedMovesByMover returns state log entries for today where the given user
+// moved a ticket to a verified/QA column (Ready for Stage, Ready for PROD, Verified, Mobile Done).
+func (r *ReportRepository) GetTodayVerifiedMovesByMover(ctx context.Context, moverName, today string) ([]IssueStateLog, error) {
+	pool := GetPool()
+	rows, err := pool.Query(ctx, `
+		SELECT id, issue_id, issue_summary,
+		       COALESCE(assignee,''), COALESCE(moved_by,''),
+		       COALESCE(from_state,''), to_state, COALESCE(priority,''),
+		       transitioned_at, duration_in_prev_state_hours, COALESCE(comment,''), COALESCE(issue_type,'')
+		FROM issue_state_log
+		WHERE DATE(transitioned_at AT TIME ZONE 'UTC') = $1::date
+		  AND LOWER(moved_by) = LOWER($2)
+		  AND (
+		        LOWER(to_state) LIKE '%ready for stage%'
+		     OR LOWER(to_state) LIKE '%ready for prod%'
+		     OR LOWER(to_state) = 'verified'
+		     OR LOWER(to_state) LIKE '%mobile done%'
+		  )
+		ORDER BY transitioned_at ASC
+	`, today, moverName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var logs []IssueStateLog
+	for rows.Next() {
+		l, err := scanStateLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
 func (r *ReportRepository) GetInProgressOlderThan(ctx context.Context, hours float64) ([]IssueStateLog, error) {
 	pool := GetPool()
 

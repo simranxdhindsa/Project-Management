@@ -1266,7 +1266,7 @@ func (c *Client) GetProjectActivities(ctx context.Context, top int) ([]IssueActi
 	// Note: fields must NOT be URL-encoded — YouTrack parses the parentheses literally.
 	// $top must be encoded as %24top to avoid shell/framework misinterpretation.
 	path := fmt.Sprintf(
-		"/api/activitiesPage?categories=CustomFieldCategory&query=%s&reverse=false"+
+		"/api/activitiesPage?categories=CustomFieldCategory&query=%s&reverse=true"+
 			"&fields=id,activities(id,timestamp,author(id,fullName,login),field(id,presentation),added(id,name),removed(id,name),target(id,idReadable,summary))"+
 			"&%%24top=%d",
 		query, top,

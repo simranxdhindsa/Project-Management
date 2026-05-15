@@ -2369,6 +2369,15 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 				} else {
 					log.Printf("[YouTrack Webhook] State log recorded: %s → %s for %s (moved by: %s)", oldValue, newValue, issueID, movedBy)
 				}
+
+				// --- DayTrack: log ticket tested when moved to a verified/QA column ---
+				if h.dayTrackRepo != nil {
+					mover := movedBy
+					if mover == "" {
+						mover = assignee
+					}
+					h.logYouTrackTestedToDayTrack(ctx, issueID, summary, mover, newValue)
+				}
 			}
 
 			// --- Moved-by mismatch: notify when someone else moves a ticket ---
@@ -2466,6 +2475,57 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 				h.logYouTrackCreationToDayTrack(ctx, issueID, summary, movedBy)
 			}
 		}
+	}
+}
+
+// testedEnvFromState maps a YouTrack toState column name to the environment that was tested.
+// Returns ("", "", false) if the state is not a verified/QA column.
+func testedEnvFromState(toState string) (env, extSuffix string, ok bool) {
+	lower := strings.ToLower(toState)
+	switch {
+	case strings.Contains(lower, "ready for stage") || strings.Contains(lower, "ready for staging"):
+		return "DEV", "dev", true
+	case strings.Contains(lower, "ready for prod"):
+		return "STAGE", "stage", true
+	case strings.Contains(lower, "mobile done"):
+		return "Mobile", "mobile", true
+	case lower == "verified":
+		return "PROD", "prod", true
+	}
+	return "", "", false
+}
+
+// logYouTrackTestedToDayTrack logs a "Verified on <env>" DayTrack entry for the person who moved the ticket.
+func (h *YouTrackHandler) logYouTrackTestedToDayTrack(ctx context.Context, issueID, summary, moverName, toState string) {
+	env, extSuffix, ok := testedEnvFromState(toState)
+	if !ok || moverName == "" {
+		return
+	}
+	pool := database.GetPool()
+	var userID string
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE LOWER(name) = LOWER($1) LIMIT 1`, moverName,
+	).Scan(&userID); err != nil {
+		log.Printf("[YouTrack Webhook] DayTrack tested log: no user found for mover %q: %v", moverName, err)
+		return
+	}
+	now := time.Now()
+	entryName := issueID + ": Verified on " + env
+	if summary != "" {
+		full := issueID + ": " + summary + " – Verified on " + env
+		if len(full) <= 120 {
+			entryName = full
+		}
+	}
+	extRef := "yt-tested-" + issueID + "-" + extSuffix
+	_, err := h.dayTrackRepo.CreateEntrySourced(ctx, userID, now.Format("2006-01-02"),
+		entryName, "Testing",
+		now.Format("3:04 PM"), now.Format("3:04 PM"), nil, "", "done", nil,
+		"youtrack", extRef)
+	if err != nil {
+		log.Printf("[YouTrack Webhook] DayTrack tested log failed for %s on %s: %v", issueID, env, err)
+	} else {
+		log.Printf("[YouTrack Webhook] DayTrack tested entry: %s verified on %s by %s", issueID, env, moverName)
 	}
 }
 
@@ -2579,9 +2639,74 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	log.Printf("[ScanYTTickets] done: added=%d skipped=%d", added, skipped)
+	// --- Backfill: log tested entries by querying YouTrack activities API directly ---
+	// This avoids relying on issue_state_log being populated by webhook/scheduler.
+	testedAdded := 0
+	activities, actErr := ytClient.GetProjectActivities(ctx, 500)
+	if actErr != nil {
+		log.Printf("[ScanYTTickets] GetProjectActivities error: %v", actErr)
+	} else {
+		todayStart := time.Now().Truncate(24 * time.Hour)
+		todayEnd := todayStart.Add(24 * time.Hour)
+		for _, act := range activities {
+			// Only State-field changes by the current user
+			if act.Field.Presentation != "State" {
+				continue
+			}
+			if act.Author == nil {
+				continue
+			}
+			// Match by YT user ID (most reliable), then login as fallback
+			idMatch := act.Author.ID != "" && act.Author.ID == ytMe.ID
+			loginMatch := act.Author.Login != "" && strings.EqualFold(act.Author.Login, ytMe.Login)
+			if !idMatch && !loginMatch {
+				continue
+			}
+			// Only activities from today
+			actTime := time.UnixMilli(act.Timestamp)
+			if actTime.Before(todayStart) || !actTime.Before(todayEnd) {
+				continue
+			}
+			// Only moves to verified columns
+			if len(act.Added) == 0 {
+				continue
+			}
+			toState := act.Added[0].Name
+			env, extSuffix, ok := testedEnvFromState(toState)
+			if !ok {
+				continue
+			}
+			issueID := act.Target.IDReadable
+			if issueID == "" {
+				issueID = act.Target.ID
+			}
+			entryName := issueID + ": Verified on " + env
+			if act.Target.Summary != "" {
+				full := issueID + ": " + act.Target.Summary + " – Verified on " + env
+				if len(full) <= 120 {
+					entryName = full
+				}
+			}
+			timeStr := actTime.Format("3:04 PM")
+			dateStr := actTime.Format("2006-01-02")
+			extRef := "yt-tested-" + issueID + "-" + extSuffix
+			log.Printf("[ScanYTTickets] tested activity: issue=%s toState=%q env=%s author_id=%s", issueID, toState, env, act.Author.ID)
+			_, createErr := h.dayTrackRepo.CreateEntrySourced(ctx, userID, dateStr,
+				entryName, "Testing",
+				timeStr, timeStr, nil, "", "done", nil,
+				"youtrack", extRef)
+			if createErr != nil {
+				log.Printf("[ScanYTTickets] tested entry failed for %s: %v", issueID, createErr)
+			} else {
+				testedAdded++
+				log.Printf("[ScanYTTickets] tested entry logged: %s on %s", issueID, env)
+			}
+		}
+	}
+
+	log.Printf("[ScanYTTickets] done: created=%d skipped=%d tested=%d", added, skipped, testedAdded)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "added": added, "skipped": skipped})
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "added": added, "skipped": skipped, "tested": testedAdded})
 }
 
 // notifyBlocked fires a notification when a ticket moves to Blocked state.
