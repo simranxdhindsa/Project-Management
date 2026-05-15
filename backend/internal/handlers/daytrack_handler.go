@@ -279,53 +279,41 @@ func (h *DayTrackHandler) Summarize(w http.ResponseWriter, r *http.Request) {
 		sb.WriteString("\n")
 	}
 
-	systemPrompt := `You are a daily work log rewriter for a software QA and project management team. You receive raw work entries and rewrite them as a natural, descriptive first-person summary.
+	systemPrompt := `You are a work log editor. Fix grammar and clarity only — do NOT change structure, tone, or length.
 
-ABBREVIATION EXPANSIONS — always expand these wherever they appear:
-- FE        → Frontend
-- BE        → Backend
-- UI        → UI (the Ardoise learner-facing web app)
-- MC        → Mission Control (the admin/CMS app)
-- Studio    → Studio-Web (the course authoring tool)
-- SW        → Studio-Web
-- QA        → QA/Automation
-- STAGE     → the STAGE environment
-- ARD-XXXX  → keep the ticket ID as-is, describe what the ticket is about
+RULES (non-negotiable):
+- Every input bullet → exactly one output bullet starting with "- "
+- NEVER merge two bullets into one. NEVER split one bullet into two.
+- NEVER write paragraphs. NEVER add intros or closing lines.
+- Keep entries SHORT and direct — 1 line per bullet, no filler words
+- Do not add "I" at the start. Keep lowercase action verbs.
+- Expand abbreviations: FE→Frontend, BE→Backend, MC→Mission Control, SW/Studio→Studio-Web, UI→UI app
+- Omit Sign In, Sign Off, and break entries entirely
 
-TRANSFORMATION PATTERNS (input → output style):
-- "Tested X"                         → "tested and validated X" / "verified X behaviour"
-- "Fixed X"                          → "investigated and resolved X"
-- "Resolved X issue on Y's laptop"   → "investigated and resolved the X issue on Y's laptop"
-- "KT to [person] on X"              → "gave a KT session to [person] on X"
-- "Added X"                          → "added support for X" / "implemented X"
-- "Setup X" / "Set up X"             → "configured X" / "set up X on [environment]"
-- "Created ticket ARD-XXXX: ..."     → "raised ticket ARD-XXXX covering ..."
+TONE — casual and direct (not formal):
+  BAD:  "investigated and resolved the Postman running issue on Rohit's laptop"
+  GOOD: "fixed Postman issue on Rohit's laptop"
 
-CONCRETE EXAMPLES:
-Input:  "Tested org contextualization"
-Output: "tested contextualisation in the organisation flow in Mission Control"
+  BAD:  "gave a KT session to Rohit on how to create a JSON collection in Postman"
+  GOOD: "gave KT to Rohit on creating JSON collection in Postman"
 
-Input:  "Resolved Postman issue on Rohit's laptop"
-Output: "investigated and resolved the Postman running issue on Rohit's laptop"
+  BAD:  "tested and validated SCORM scraping behaviour on the DEV environment"
+  GOOD: "tested SCORM scraping on DEV"
 
-Input:  "KT to Rohit on creating JSON collection in Postman"
-Output: "gave a KT session to Rohit on how to create a JSON collection in Postman"
+EXAMPLE (input → output, bullet-for-bullet):
+Input:
+- [Testing] Tested SCORM scraping on DEV and STAGE
+- [Testing] ARD-1700: Verified publish flow on Studio-Web
+- [Meetings] KT to Rohit on Voiden
 
-Input:  "Added Git repo subfolder support in Scout"
-Output: "added support for Git repository subfolders in the Scout QA Automation project"
+Output:
+- tested SCORM scraping on DEV and STAGE
+- verified publish flow on Studio-Web (ARD-1700)
+- gave KT to Rohit on Voiden
 
-Input:  "setup default theme on STAGE"
-Output: "configured and verified the default theme setup on the STAGE environment"
+Output only the bullets — nothing else.`
 
-FORMATTING RULES:
-- Group by category with the category name as a **bold** header
-- Write each category group as 1–3 natural flowing sentences (not a bullet list)
-- Preserve durations in parentheses like (2h 30m) when provided
-- Omit Sign In, Sign Off, and break entries entirely — do not mention them
-- Do NOT invent or add anything not present in the input
-- Output only the report — no intro, no "Here is the summary", no closing remarks`
-
-	userPrompt := "Work entries for " + req.DateLabel + ":\n" + sb.String() + "\nRewrite as a descriptive daily summary:"
+	userPrompt := "Work entries for " + req.DateLabel + ":\n" + sb.String() + "\nOutput one bullet per entry:"
 
 	body, err := callGroqChat(r.Context(), groqKey, "llama-3.3-70b-versatile", systemPrompt, userPrompt)
 	if err != nil {
@@ -342,7 +330,8 @@ func callGroqChat(ctx context.Context, apiKey, model, system, user string) (stri
 			{"role": "system", "content": system},
 			{"role": "user", "content": user},
 		},
-		"stream": false,
+		"stream":      false,
+		"temperature": 0,
 	}
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(b))

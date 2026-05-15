@@ -1088,28 +1088,84 @@ export function DayTrackPage() {
   }
 
   async function copyStandup() {
-    let text = buildStandup()
-    if (exportSummarise) {
-      const visibleEntries = entries.filter(e =>
-        !e.parent_entry_id &&
-        e.entry_source !== 'youtrack' &&
-        e.category !== 'Tickets' &&
-        (exportBreaks || e.category !== 'Breaks')
-      )
-      const lines = visibleEntries.map(e => ({
-        category: e.category,
-        name: e.name,
-        duration: e.duration_mins != null ? minsLabel(e.duration_mins) : '',
-        notes: e.notes || ''
-      }))
-      if (lines.length > 0) {
-        try {
-          const res = await dayTrackApi.summarize({ date_label: fmtDate(new Date(date + 'T00:00:00')), lines })
-          if (res.summary) text = res.summary + '\n\n' + text
-        } catch { /* proceed without AI */ }
-      }
-    }
+    // Use • for Slack compatibility (- renders as literal text in Slack)
+    const text = buildStandup().replace(/^- /gm, '• ')
     navigator.clipboard.writeText(text).then(() => toast('DayTrack report copied!'))
+  }
+
+  // Parse AI output into a map of entryId → rephrased name, matched positionally
+  function buildAINameMap(allEntries: DayTrackEntry[], aiSummary: string): Map<number, string> {
+    const nameMap = new Map<number, string>()
+    // AI omits Sign In / Sign Off / Breaks / YouTrack entries — filter to keep positions in sync
+    const sentEntries = allEntries
+      .filter(e => !e.parent_entry_id)
+      .filter(e => !['Sign In', 'Sign Off', 'Breaks'].includes(e.category))
+      .filter(e => e.entry_source !== 'youtrack')
+    const rephrasedLines = aiSummary
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.startsWith('- ') || l.startsWith('• '))
+      .map(l => l.replace(/^[-•]\s+/, '').replace(/\*\*(.+?)\*\*/g, '$1').trim())
+    sentEntries.forEach((e, i) => {
+      if (i < rephrasedLines.length && rephrasedLines[i]) nameMap.set(e.id, rephrasedLines[i])
+    })
+    return nameMap
+  }
+
+  // Build the full structured report (same layout as buildStandup) with • bullets.
+  // nameMap optionally substitutes AI-rephrased text for each entry's name.
+  function buildReportText(sourceEntries: DayTrackEntry[], nameMap: Map<number, string>): string {
+    const today = fmtDate(new Date(date))
+    const parents = sourceEntries.filter(e => !e.parent_entry_id)
+
+    const catHeading = (cat: string): string => {
+      const map: Record<string, string> = {
+        'Tickets': 'Tickets Created', 'Testing': 'Testing',
+        'Project Management': 'Project Management', 'Meetings': 'Meetings',
+        'Breaks': 'Breaks', 'Sign In': 'Sign In', 'Sign Off': 'Sign Off',
+      }
+      return map[cat] ?? cat
+    }
+    const isDoneInReport = (e: DayTrackEntry) =>
+      e.status === 'done' || (e.status === 'active' && !e.start_time && !e.end_time)
+    const getName = (e: DayTrackEntry) => nameMap.get(e.id) ?? e.name
+
+    const testedEntries = parents.filter(e => e.external_ref?.startsWith('yt-tested-'))
+    const testedIDs = new Set(testedEntries.map(e => e.id))
+
+    const doneByCategory = new Map<string, DayTrackEntry[]>()
+    parents.filter(e => isDoneInReport(e) && !testedIDs.has(e.id)).forEach(e => {
+      const list = doneByCategory.get(e.category) ?? []
+      list.push(e)
+      doneByCategory.set(e.category, list)
+    })
+
+    let doneBlock = ''
+    doneByCategory.forEach((items, cat) => {
+      doneBlock += `${catHeading(cat)}:\n`
+      items.forEach(e => {
+        doneBlock += `• ${getName(e)}${e.duration_mins != null ? ` (${minsLabel(e.duration_mins)})` : ''}\n`
+      })
+      doneBlock += '\n'
+    })
+
+    const activeList = parents
+      .filter(e => e.status === 'active' && (e.start_time || e.end_time))
+      .map(e => `• ${getName(e)} (${e.category})`).join('\n')
+    const planList = planned.filter(p => p.when_type === 'today')
+      .map(p => `• ${p.name} (${p.category})`).join('\n')
+    const testedBlock = testedEntries.length > 0
+      ? testedEntries.map(e => `• ${getName(e)}`).join('\n') + '\n'
+      : '• (none)\n'
+
+    let text = `📋 DayTrack Report – ${today}\n`
+    text += `⏱ Total: ${totalMins ? minsLabel(totalMins) : '—'} | Focus Rate: ${focusRate != null ? focusRate + '%' : '—'}\n\n`
+    text += `✅ Done Today:\n\n${doneBlock || '• (none)\n\n'}`
+    text += `🧪 Tickets Tested:\n${testedBlock}\n`
+    if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
+    text += `📌 Planned / Upcoming:\n${planList || '• (none)'}\n\n`
+    text += `🚧 Blockers:\n• None`
+    return text
   }
 
   // Shared helper — fetches entries for the selected range, runs AI once and caches it
@@ -1148,6 +1204,7 @@ export function DayTrackPage() {
       setExportAILoading(true)
       const lines = allEntries
         .filter(e => !e.parent_entry_id)
+        .filter(e => e.entry_source !== 'youtrack')
         .map(e => ({
           category: e.category,
           name: e.name,
@@ -1294,25 +1351,8 @@ ${aiSummaryBlock}
     setExportCopyLoading(true)
     try {
       const { allEntries, aiSummary } = await prepareExportData()
-      let text: string
-      if (aiSummary) {
-        // Strip **bold** markdown — Slack renders it as literal asterisks
-        text = aiSummary.replace(/\*\*(.+?)\*\*/g, '$1')
-      } else {
-        const parents = allEntries.filter(e => !e.parent_entry_id)
-        const isDoneInReport = (e: DayTrackEntry) =>
-          e.status === 'done' || (e.status === 'active' && !e.start_time && !e.end_time)
-        const doneList = parents.filter(isDoneInReport)
-          .map(e => `- ${e.name} (${e.category})${e.duration_mins != null ? ` – ${minsLabel(e.duration_mins)}` : ''}`)
-          .join('\n')
-        const activeList = parents.filter(e => e.status === 'active' && (e.start_time || e.end_time))
-          .map(e => `- ${e.name} (${e.category})`).join('\n')
-        const totalMinsAll = parents.reduce((a, e) => a + (e.duration_mins ?? 0), 0)
-        text = `📋 DayTrack Report\n⏱ Total: ${minsLabel(totalMinsAll)}\n\n`
-        text += `✅ Done:\n${doneList || '- (none)'}\n\n`
-        if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
-        text += `🚧 Blockers:\n- None`
-      }
+      const nameMap = aiSummary ? buildAINameMap(allEntries, aiSummary) : new Map<number, string>()
+      const text = buildReportText(allEntries, nameMap)
       await navigator.clipboard.writeText(text)
       toast('Summary copied!', 'success')
     } catch { toast('Copy failed', 'warn') }
@@ -1381,9 +1421,13 @@ ${aiSummaryBlock}
     const isDoneInReport = (e: DayTrackEntry) =>
       e.status === 'done' || (e.status === 'active' && !e.start_time && !e.end_time)
 
-    // Group done entries by category, preserving insertion order
+    // Separate tickets-tested entries (yt-tested-*) from the rest
+    const testedEntries = parents.filter(e => e.external_ref?.startsWith('yt-tested-'))
+    const testedIDs = new Set(testedEntries.map(e => e.id))
+
+    // Group done entries by category, preserving insertion order (exclude tested entries — shown separately)
     const doneByCategory = new Map<string, DayTrackEntry[]>()
-    parents.filter(isDoneInReport).forEach(e => {
+    parents.filter(e => isDoneInReport(e) && !testedIDs.has(e.id)).forEach(e => {
       const list = doneByCategory.get(e.category) ?? []
       list.push(e)
       doneByCategory.set(e.category, list)
@@ -1406,9 +1450,14 @@ ${aiSummaryBlock}
       .map(p => `- ${p.name} (${p.category})`)
       .join('\n')
 
+    const testedBlock = testedEntries.length > 0
+      ? testedEntries.map(e => `- ${e.name}`).join('\n') + '\n'
+      : '- (none)\n'
+
     let text = `📋 DayTrack Report – ${today}\n`
     text += `⏱ Total: ${totalMins ? minsLabel(totalMins) : '—'} | Focus Rate: ${focusRate != null ? focusRate + '%' : '—'}\n\n`
     text += `✅ Done Today:\n\n${doneBlock || '- (none)\n\n'}`
+    text += `🧪 Tickets Tested:\n${testedBlock}\n`
     if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
     text += `📌 Planned / Upcoming:\n${planList || '- (none)'}\n\n`
     text += `🚧 Blockers:\n- None`
