@@ -1363,24 +1363,52 @@ ${aiSummaryBlock}
 
   function buildStandup(): string {
     const today = fmtDate(new Date(date))
-    const visibleEntries = exportBreaks ? entries : entries.filter(e => e.category !== 'Breaks')
-    // entries with no time info at all → treat as done in the report regardless of status
+    const parents = entries.filter(e => !e.parent_entry_id)
+
+    const catHeading = (cat: string): string => {
+      const map: Record<string, string> = {
+        'Tickets':            'Tickets Created',
+        'Testing':            'Testing',
+        'Project Management': 'Project Management',
+        'Meetings':           'Meetings',
+        'Breaks':             'Breaks',
+        'Sign In':            'Sign In',
+        'Sign Off':           'Sign Off',
+      }
+      return map[cat] ?? cat
+    }
+
     const isDoneInReport = (e: DayTrackEntry) =>
       e.status === 'done' || (e.status === 'active' && !e.start_time && !e.end_time)
-    const doneList = visibleEntries
-      .filter(e => isDoneInReport(e))
-      .map(e => `- ${e.name} (${e.category})${e.duration_mins != null ? ` – ${minsLabel(e.duration_mins)}` : ''}`)
-      .join('\n')
-    const activeList = visibleEntries
+
+    // Group done entries by category, preserving insertion order
+    const doneByCategory = new Map<string, DayTrackEntry[]>()
+    parents.filter(isDoneInReport).forEach(e => {
+      const list = doneByCategory.get(e.category) ?? []
+      list.push(e)
+      doneByCategory.set(e.category, list)
+    })
+
+    let doneBlock = ''
+    doneByCategory.forEach((items, cat) => {
+      doneBlock += `${catHeading(cat)}:\n`
+      items.forEach(e => {
+        doneBlock += `- ${e.name}${e.duration_mins != null ? ` (${minsLabel(e.duration_mins)})` : ''}\n`
+      })
+      doneBlock += '\n'
+    })
+
+    const activeList = parents
       .filter(e => e.status === 'active' && (e.start_time || e.end_time))
       .map(e => `- ${e.name} (${e.category})`)
       .join('\n')
     const planList = planned.filter(p => p.when_type === 'today')
       .map(p => `- ${p.name} (${p.category})`)
       .join('\n')
+
     let text = `📋 DayTrack Report – ${today}\n`
     text += `⏱ Total: ${totalMins ? minsLabel(totalMins) : '—'} | Focus Rate: ${focusRate != null ? focusRate + '%' : '—'}\n\n`
-    text += `✅ Done Today:\n${doneList || '- (none)'}\n\n`
+    text += `✅ Done Today:\n\n${doneBlock || '- (none)\n\n'}`
     if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
     text += `📌 Planned / Upcoming:\n${planList || '- (none)'}\n\n`
     text += `🚧 Blockers:\n- None`
