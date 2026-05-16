@@ -298,11 +298,23 @@ func (h *SlackHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetMentions returns unreplied @mentions for the logged-in user
+// GetMentions returns @mentions for the logged-in user.
+// Pass ?pinned=true to return only pinned/saved mentions.
 func (h *SlackHandler) GetMentions(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.URL.Query().Get("pinned") == "true" {
+		mentions, err := h.slackRepo.GetPinnedMentions(r.Context(), userID)
+		if err != nil || mentions == nil {
+			mentions = []models.SlackMention{}
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"mentions": mentions})
 		return
 	}
 
@@ -318,7 +330,6 @@ func (h *SlackHandler) GetMentions(w http.ResponseWriter, r *http.Request) {
 		mentions = []models.SlackMention{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":         true,
 		"mentions":        mentions,

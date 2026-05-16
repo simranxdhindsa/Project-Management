@@ -207,6 +207,9 @@ class ApiService {
     return this.request<{
       connected: boolean
       configured: boolean
+      base_url?: string
+      project_id?: string
+      board_id?: string
       error?: string
     }>('/youtrack/status')
   }
@@ -685,6 +688,10 @@ class ApiService {
 
   async getSlackSavedItems() {
     return this.request<{ items: Array<{ type: string; channel_id: string; text: string; user: string; ts: string }> }>('/slack/saved-items')
+  }
+
+  async getSlackPinnedMentions() {
+    return this.request<{ mentions: SlackMention[] }>('/slack/mentions?pinned=true')
   }
 
   async analyzeSlackMessages(projectId: string) {

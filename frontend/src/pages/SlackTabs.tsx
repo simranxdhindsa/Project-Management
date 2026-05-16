@@ -6,7 +6,7 @@ import {
   Sparkles, Bookmark, ExternalLink,
 } from 'lucide-react'
 import api from '../services/api'
-import type { ReminderItem } from '../services/api'
+import type { ReminderItem, SlackMention } from '../services/api'
 import { AvatarFallback, cleanSlackText, timeAgo } from './SlackCards'
 
 // ── Types shared by tab components ───────────────────────────────────────────
@@ -42,12 +42,10 @@ const SPRINT_TICKETS = [
   { id: 'ARD-1701', type: 'Bug', summary: 'Redis cache invalidation race — concurrent writes', hasDiscussion: true, mentions: 8, lastMention: '15m ago' },
 ]
 
-const YT_BASE_URL = 'https://simran.youtrack.cloud/issue/'
-
 // ── Feature Tickets Modal ─────────────────────────────────────────────────────
-function FeatureTicketsModal({ onClose }: { onClose: () => void }) {
+function FeatureTicketsModal({ onClose, ytBaseUrl }: { onClose: () => void; ytBaseUrl: string }) {
   const features = SPRINT_TICKETS.filter(t => t.type === 'Feature')
-  const openTicket = (id: string) => window.open(`${YT_BASE_URL}${id}`, '_blank', 'noopener')
+  const openTicket = (id: string) => window.open(`${ytBaseUrl}/issue/${id}`, '_blank', 'noopener')
 
   return (
     <div className="si2-modal-overlay" onClick={onClose}>
@@ -101,13 +99,16 @@ function FeatureTicketsModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-export function SprintPulseTab({ onOpenPMAssistant }: { onOpenPMAssistant?: () => void }) {
+export function SprintPulseTab({ onOpenPMAssistant, ytBaseUrl = '' }: { onOpenPMAssistant?: () => void; ytBaseUrl?: string }) {
   const [showFeaturesModal, setShowFeaturesModal] = useState(false)
-  const openTicket = (id: string) => window.open(`${YT_BASE_URL}${id}`, '_blank', 'noopener')
+  const openTicket = (id: string) => {
+    const base = ytBaseUrl || 'https://youtrack.cloud'
+    window.open(`${base}/issue/${id}`, '_blank', 'noopener')
+  }
 
   return (
     <div className="si2-tab-scroll">
-      {showFeaturesModal && <FeatureTicketsModal onClose={() => setShowFeaturesModal(false)} />}
+      {showFeaturesModal && <FeatureTicketsModal onClose={() => setShowFeaturesModal(false)} ytBaseUrl={ytBaseUrl || 'https://youtrack.cloud'} />}
 
       {/* KPI mini-cards */}
       <div className="si2-pulse-grid">
@@ -130,9 +131,9 @@ export function SprintPulseTab({ onOpenPMAssistant }: { onOpenPMAssistant?: () =
             <strong>4 features</strong> have had zero discussion.
           </div>
         </div>
-        <span className="si2-mismatch-cta" style={{ cursor: 'pointer' }} onClick={() => setShowFeaturesModal(true)}>
+        <button className="si2-mismatch-cta" onClick={() => setShowFeaturesModal(true)}>
           View features →
-        </span>
+        </button>
       </div>
 
       {/* Ticket coverage list */}
@@ -184,48 +185,53 @@ export function SprintPulseTab({ onOpenPMAssistant }: { onOpenPMAssistant?: () =
 }
 
 // ── Saved Items Tab ───────────────────────────────────────────────────────────
+// Shows mentions you've pinned (bookmarked) within Velocity using the pin icon on each card.
 export function SavedItemsTab({ slackTeamId }: { slackTeamId: string }) {
-  const [items, setItems] = useState<Array<{ type: string; channel_id: string; text: string; user: string; ts: string }>>([])
+  const [items, setItems] = useState<SlackMention[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.getSlackSavedItems().then(res => {
-      setItems(res.items ?? [])
+    api.getSlackPinnedMentions().then(res => {
+      setItems(res.mentions ?? [])
     }).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
-  const openSlack = (channelId: string, ts: string) => {
-    const t = ts.replace('.', '')
-    window.location.href = `slack://channel?team=${slackTeamId}&id=${channelId}&message=${t}`
-    setTimeout(() => window.open(`https://app.slack.com/client/${slackTeamId}/${channelId}/p${t}`, '_blank', 'noopener'), 1500)
+  const openInSlack = (m: SlackMention) => {
+    const t = m.message_ts.replace('.', '')
+    const url = `https://app.slack.com/client/${slackTeamId}/${m.channel_id}/p${t}`
+    window.open(url, '_blank', 'noopener')
   }
 
   if (loading) return (
-    <div className="si2-empty"><RefreshCw size={20} className="spin" /><p>Loading saved items…</p></div>
+    <div className="si2-empty"><RefreshCw size={20} className="spin" /><p>Loading saved…</p></div>
   )
 
   if (items.length === 0) return (
     <div className="si2-empty">
       <Bookmark size={36} />
-      <p>No saved messages</p>
-      <p className="si2-empty-sub">Star messages in Slack to see them here.</p>
+      <p>No pinned messages</p>
+      <p className="si2-empty-sub">Pin any mention using the bookmark icon on the card — it shows up here.</p>
     </div>
   )
 
   return (
     <div className="si2-tab-scroll">
       <div className="si2-card-list">
-        {items.map((item, i) => (
-          <div key={i} className="si2-card" onClick={() => openSlack(item.channel_id, item.ts)}>
-            <div className="si2-card-stripe" style={{ background: 'rgba(99,102,241,0.6)' }} />
+        {items.map(m => (
+          <div key={m.id} className="si2-card" style={{ cursor: 'pointer' }} onClick={() => openInSlack(m)}>
+            <div className="si2-card-stripe" style={{ background: 'rgba(99,102,241,0.7)' }} />
             <div className="si2-card-body">
               <div className="si2-card-head">
-                <AvatarFallback name={item.user || '?'} size={24} />
-                <span className="si2-card-sender">{item.user}</span>
+                {m.sender_avatar
+                  ? <img src={m.sender_avatar} alt={m.sender_name} className="si2-avatar" style={{ width: 28, height: 28 }} />
+                  : <AvatarFallback name={m.sender_name || '?'} size={28} />
+                }
+                <span className="si2-card-sender">{m.sender_name || 'Unknown'}</span>
                 <span style={{ flex: 1 }} />
-                <ExternalLink size={11} className="si2-card-time" />
+                <span className="si2-card-time">{timeAgo(m.created_at)}</span>
+                <ExternalLink size={11} style={{ opacity: 0.5, marginLeft: 6 }} />
               </div>
-              <p className="si2-card-text">{cleanSlackText(item.text)}</p>
+              <p className="si2-card-text">{cleanSlackText(m.message_text)}</p>
             </div>
           </div>
         ))}
@@ -365,7 +371,7 @@ export function RemindersTabContent({
             <button type="submit" className="si2-save-btn" disabled={!quickTitle.trim()}>
               <Plus size={12} /> Add
             </button>
-            <button type="button" className="si2-cancel-btn" onClick={() => setActivePreset(null)}>Cancel</button>
+            <button type="button" className="si2-cancel-btn" onClick={() => { setActivePreset(null); setQuickTitle(''); setQuickIssueId('') }}>Cancel</button>
           </form>
         )}
       </div>
@@ -397,8 +403,8 @@ export function RemindersTabContent({
                   {confirmingDelete.has(r.id) ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                       <span style={{ fontSize: '0.72rem', color: '#f87171' }}>Delete?</span>
-                      <button className="si2-act-btn si2-act-done" onClick={() => confirmDelete(r.id)}>✓</button>
-                      <button className="si2-act-btn" onClick={() => cancelDelete(r.id)}>✗</button>
+                      <button className="si2-act-btn si2-act-done" aria-label="Confirm delete" onClick={() => confirmDelete(r.id)}>Yes</button>
+                      <button className="si2-act-btn" aria-label="Cancel delete" onClick={() => cancelDelete(r.id)}>No</button>
                     </div>
                   ) : (
                     <button className="si2-act-btn" onClick={() => requestDelete(r.id)} title="Delete"><Trash2 size={12} /></button>
@@ -426,8 +432,8 @@ export function RemindersTabContent({
                   {confirmingDelete.has(r.id) ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                       <span style={{ fontSize: '0.72rem', color: '#f87171' }}>Delete?</span>
-                      <button className="si2-act-btn si2-act-done" onClick={() => confirmDelete(r.id)}>✓</button>
-                      <button className="si2-act-btn" onClick={() => cancelDelete(r.id)}>✗</button>
+                      <button className="si2-act-btn si2-act-done" aria-label="Confirm delete" onClick={() => confirmDelete(r.id)}>Yes</button>
+                      <button className="si2-act-btn" aria-label="Cancel delete" onClick={() => cancelDelete(r.id)}>No</button>
                     </div>
                   ) : (
                     <button className="si2-act-btn" onClick={() => requestDelete(r.id)} title="Delete"><Trash2 size={12} /></button>
@@ -456,8 +462,8 @@ export function RemindersTabContent({
                   {confirmingDelete.has(r.id) ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                       <span style={{ fontSize: '0.72rem', color: '#f87171' }}>Delete?</span>
-                      <button className="si2-act-btn si2-act-done" onClick={() => confirmDelete(r.id)}>✓</button>
-                      <button className="si2-act-btn" onClick={() => cancelDelete(r.id)}>✗</button>
+                      <button className="si2-act-btn si2-act-done" aria-label="Confirm delete" onClick={() => confirmDelete(r.id)}>Yes</button>
+                      <button className="si2-act-btn" aria-label="Cancel delete" onClick={() => cancelDelete(r.id)}>No</button>
                     </div>
                   ) : (
                     <button className="si2-act-btn" onClick={() => requestDelete(r.id)} title="Delete"><Trash2 size={12} /></button>

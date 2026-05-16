@@ -499,6 +499,22 @@
 [data-theme="light"] .si2-done-chip { background: rgba(16, 185, 129, 0.1); color: #16a34a; }
 [data-theme="light"] .si2-snooze-chip { background: rgba(245, 158, 11, 0.1); color: #d97706; }
 
+.si2-thread-channel-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+  flex-shrink: 0;
+}
+[data-theme="light"] .si2-thread-channel-icon {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+}
+
 .si2-reply-chip {
   display: inline-flex;
   align-items: center;
@@ -840,7 +856,7 @@
 [data-theme="light"] .si2-mismatch-title { color: #d97706; }
 .si2-mismatch-desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.5; }
 [data-theme="light"] .si2-mismatch-desc { color: #475569; }
-.si2-mismatch-cta { font-size: 0.74rem; font-weight: 600; color: #f59e0b; cursor: pointer; white-space: nowrap; flex-shrink: 0; align-self: center; }
+.si2-mismatch-cta { font-size: 0.74rem; font-weight: 600; color: #f59e0b; cursor: pointer; white-space: nowrap; flex-shrink: 0; align-self: center; background: none; border: none; padding: 0; }
 
 /* ── Coverage list ────────────────────────────────────────────────────────── */
 .si2-coverage-list { display: flex; flex-direction: column; gap: 0.45rem; }
@@ -1155,25 +1171,25 @@
 }
 
 .si2-modal {
-  background: var(--surface-raised);
-  border: 1px solid var(--glass-border-hover);
+  background: #1a1a2e;
+  border: 1px solid rgba(139, 92, 246, 0.25);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-xl);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
   width: 100%;
   max-width: 420px;
   overflow: hidden;
   animation: si2-slide-up 0.22s ease;
 }
 
-[data-theme="light"] .si2-modal { background: #fff; border-color: rgba(99, 102, 241, 0.2); box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
+[data-theme="light"] .si2-modal { background: #ffffff; border-color: rgba(99, 102, 241, 0.2); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.18); }
 
 .si2-modal-header {
   display: flex;
   align-items: center;
   gap: 0.65rem;
   padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-primary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 [data-theme="light"] .si2-modal-header { border-bottom-color: rgba(99, 102, 241, 0.1); color: #1e293b; }

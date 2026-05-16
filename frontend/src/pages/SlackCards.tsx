@@ -103,9 +103,10 @@ interface ReplyComposerProps {
   mentionTs?: string
   savedTemplates?: string[]
   onClose: () => void
+  onSent?: () => void
 }
 
-export function ReplyComposer({ open, channelId, threadTs, mentionTs, savedTemplates = [], onClose }: ReplyComposerProps) {
+export function ReplyComposer({ open, channelId, threadTs, mentionTs, savedTemplates = [], onClose, onSent }: ReplyComposerProps) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
@@ -118,7 +119,7 @@ export function ReplyComposer({ open, channelId, threadTs, mentionTs, savedTempl
     try {
       await api.slackReplyToThread(channelId, threadTs, text.trim(), mentionTs)
       setSent(true)
-      setTimeout(() => { setSent(false); setText(''); onClose() }, 1500)
+      setTimeout(() => { setSent(false); setText(''); onClose(); onSent?.() }, 1500)
     } catch {
       setSending(false)
     }
@@ -167,6 +168,7 @@ export function ThreadPreviewInline({ channelId, threadTs, replyCount }: {
   const [open, setOpen] = useState(false)
   const [replies, setReplies] = useState<Array<{ sender_name: string; text: string; timestamp: string }>>([])
   const [loading, setLoading] = useState(false)
+  const [fetchError, setFetchError] = useState(false)
 
   const count = replyCount ?? 0
   if (count === 0) return null
@@ -175,10 +177,13 @@ export function ThreadPreviewInline({ channelId, threadTs, replyCount }: {
     e.stopPropagation()
     if (!open && replies.length === 0) {
       setLoading(true)
+      setFetchError(false)
       try {
         const res = await api.getSlackThreadReplies(channelId, threadTs)
         setReplies(res.replies?.slice(-3) ?? [])
-      } catch {}
+      } catch {
+        setFetchError(true)
+      }
       setLoading(false)
     }
     setOpen(v => !v)
@@ -191,16 +196,21 @@ export function ThreadPreviewInline({ channelId, threadTs, replyCount }: {
       </button>
       {open && (
         <div className="si2-thread-replies">
-          {loading ? <div className="si2-thread-loading">Loading…</div> : replies.map((r, i) => (
-            <div key={i} className="si2-thread-reply-row">
-              <AvatarFallback name={r.sender_name || '?'} size={20} />
-              <div className="si2-thread-reply-body">
-                <span className="si2-thread-reply-name">{r.sender_name}</span>
-                <span className="si2-thread-reply-text">{cleanSlackText(r.text).slice(0, 90)}</span>
-              </div>
-              <span className="si2-thread-reply-time">{timeAgo(r.timestamp)}</span>
-            </div>
-          ))}
+          {loading
+            ? <div className="si2-thread-loading">Loading…</div>
+            : fetchError
+              ? <div className="si2-thread-loading" style={{ color: '#f87171' }}>Could not load replies</div>
+              : replies.map(r => (
+                <div key={r.timestamp} className="si2-thread-reply-row">
+                  <AvatarFallback name={r.sender_name || '?'} size={20} />
+                  <div className="si2-thread-reply-body">
+                    <span className="si2-thread-reply-name">{r.sender_name}</span>
+                    <span className="si2-thread-reply-text">{cleanSlackText(r.text).slice(0, 90)}</span>
+                  </div>
+                  <span className="si2-thread-reply-time">{timeAgo(r.timestamp)}</span>
+                </div>
+              ))
+          }
         </div>
       )}
     </div>
@@ -325,6 +335,7 @@ export function MentionCard({ m, slackTeamId, channelName, savedTemplates, onDis
           mentionTs={m.message_ts}
           savedTemplates={savedTemplates}
           onClose={() => setReplyOpen(false)}
+          onSent={() => onDismiss(m.message_ts)}
         />
       </div>
     </div>

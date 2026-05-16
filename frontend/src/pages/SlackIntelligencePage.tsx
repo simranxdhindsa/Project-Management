@@ -39,12 +39,14 @@ export function SlackIntelligencePage({
   const [remindersAll, setRemindersAll] = useState<ReminderItem[]>([])
   const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; body: string }>>([])
   const [loading, setLoading] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
 
   // ── Settings state ────────────────────────────────────────────────────────
   const [slackTeamId, setSlackTeamId] = useState('T03Q9638YJJ')
   const [monitorChannelId, setMonitorChannelId] = useState('')
   const [monitorChannelName, setMonitorChannelName] = useState('')
   const [resolvedMonitorChannelName, setResolvedMonitorChannelName] = useState('')
+  const [ytBaseUrl, setYtBaseUrl] = useState('')
 
   // ── Scan state ────────────────────────────────────────────────────────────
   const [scanning, setScanning] = useState(false)
@@ -60,23 +62,28 @@ export function SlackIntelligencePage({
 
   // ── Data fetchers ─────────────────────────────────────────────────────────
   const fetchMentions = useCallback(async () => {
-    try { const res: any = await api.getSlackMentions(); if (res.success) setMentions(res.mentions ?? []) } catch {}
+    try { const res: any = await api.getSlackMentions(); if (res.success) setMentions(res.mentions ?? []) }
+    catch { setFetchError('Could not load mentions. Check your Slack connection.') }
   }, [])
 
   const fetchThreads = useCallback(async () => {
-    try { const res: any = await api.getSlackThreads(); if (res.success) setThreads(res.threads ?? []) } catch {}
+    try { const res: any = await api.getSlackThreads(); if (res.success) setThreads(res.threads ?? []) }
+    catch { setFetchError('Could not load threads.') }
   }, [])
 
   const fetchReminders = useCallback(async () => {
-    try { const res = await api.getReminders(); if (res.success && res.data) setRemindersAll(res.data) } catch {}
+    try { const res = await api.getReminders(); if (res.success && res.data) setRemindersAll(res.data) }
+    catch {}
   }, [])
 
   const fetchTemplates = useCallback(async () => {
-    try { const res = await api.getSlackTemplates(); setSavedTemplates(res.templates ?? []) } catch {}
+    try { const res = await api.getSlackTemplates(); setSavedTemplates(res.templates ?? []) }
+    catch {}
   }, [])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
+    setFetchError(null)
     await Promise.all([fetchMentions(), fetchThreads(), fetchReminders(), fetchTemplates()])
     setLoading(false)
   }, [fetchMentions, fetchThreads, fetchReminders, fetchTemplates])
@@ -90,6 +97,9 @@ export function SlackIntelligencePage({
         setMonitorChannelName(res.monitor_channel_name)
         setResolvedMonitorChannelName(res.monitor_channel_name)
       }
+    }).catch(() => {})
+    api.getYouTrackStatus().then(res => {
+      if (res.base_url) setYtBaseUrl(res.base_url.replace(/\/$/, ''))
     }).catch(() => {})
   }, [fetchAll])
 
@@ -256,6 +266,13 @@ export function SlackIntelligencePage({
         <div className={`si2-scan-msg${scanMsg === 'All caught up' ? ' ok' : ''}`}>{scanMsg}</div>
       )}
 
+      {fetchError && (
+        <div className="si2-scan-msg" style={{ background: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.3)', color: '#f87171' }}>
+          {fetchError}
+          <button onClick={() => { setFetchError(null); fetchAll() }} style={{ marginLeft: 8, textDecoration: 'underline', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 'inherit' }}>Retry</button>
+        </div>
+      )}
+
       {/* KPI row */}
       <div className="si2-kpi-row">
         {[
@@ -380,7 +397,7 @@ export function SlackIntelligencePage({
           />
         )}
 
-        {tab === 'pulse' && <SprintPulseTab onOpenPMAssistant={onOpenPMAssistant} />}
+        {tab === 'pulse' && <SprintPulseTab onOpenPMAssistant={onOpenPMAssistant} ytBaseUrl={ytBaseUrl} />}
 
         {tab === 'saved' && <SavedItemsTab slackTeamId={slackTeamId} />}
 
