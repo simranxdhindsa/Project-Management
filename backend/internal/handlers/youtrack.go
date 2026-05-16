@@ -1003,12 +1003,13 @@ func (h *YouTrackHandler) GetIssueFormMeta(w http.ResponseWriter, r *http.Reques
 	}
 
 	type result struct {
-		states     []youtrack.State
-		priorities []youtrack.PriorityValue
-		types      []youtrack.PriorityValue
-		subsystems []youtrack.PriorityValue
-		users      []youtrack.User
-		sprints    []youtrack.Sprint
+		states           []youtrack.State
+		priorities       []youtrack.PriorityValue
+		types            []youtrack.PriorityValue
+		subsystems       []youtrack.PriorityValue
+		users            []youtrack.User
+		sprints          []youtrack.Sprint
+		developerConfigs []*database.DeveloperSubsystemConfig
 	}
 	var res result
 	var mu sync.Mutex
@@ -1080,6 +1081,17 @@ func (h *YouTrackHandler) GetIssueFormMeta(w http.ResponseWriter, r *http.Reques
 		}
 		return e
 	})
+	fetch(func() error {
+		devRepo := database.NewDeveloperConfigRepository()
+		v, e := devRepo.GetAll(r.Context())
+		if e == nil {
+			if v == nil {
+				v = []*database.DeveloperSubsystemConfig{}
+			}
+			mu.Lock(); res.developerConfigs = v; mu.Unlock()
+		}
+		return e
+	})
 
 	wg.Wait()
 
@@ -1087,13 +1099,14 @@ func (h *YouTrackHandler) GetIssueFormMeta(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"data": map[string]interface{}{
-			"states":     res.states,
-			"priorities": res.priorities,
-			"types":      res.types,
-			"subsystems": res.subsystems,
-			"users":      res.users,
-			"sprints":    res.sprints,
-			"errors":     errs,
+			"states":            res.states,
+			"priorities":        res.priorities,
+			"types":             res.types,
+			"subsystems":        res.subsystems,
+			"users":             res.users,
+			"sprints":           res.sprints,
+			"developer_configs": res.developerConfigs,
+			"errors":            errs,
 		},
 	})
 }

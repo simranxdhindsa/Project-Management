@@ -300,6 +300,13 @@ func main() {
 	dailyTaskRoutes.HandleFunc("/next-day/reorder", dailyTaskHandler.ReorderNextDayTasks).Methods("PATCH")
 	dailyTaskRoutes.HandleFunc("/next-day/{date}/slack-format", dailyTaskHandler.GetFormattedSlackMessage).Methods("GET")
 
+	// Developer-subsystem config routes (protected)
+	devConfigHandler := handlers.NewDeveloperConfigHandler()
+	devConfigRoutes := api.PathPrefix("/developer-config").Subrouter()
+	devConfigRoutes.Use(middleware.AuthMiddleware)
+	devConfigRoutes.HandleFunc("", devConfigHandler.GetDeveloperConfigs).Methods("GET")
+	devConfigRoutes.HandleFunc("", devConfigHandler.SaveDeveloperConfigs).Methods("POST")
+
 	// Bot Config routes (protected)
 	botConfigHandler := handlers.NewBotConfigHandler()
 	botRoutes := api.PathPrefix("/bots").Subrouter()
