@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"sort"
@@ -1299,4 +1300,50 @@ func (c *Client) IsDuplicateIssue(ctx context.Context, summary string) (bool, er
 	}
 
 	return false, nil
+}
+
+// UploadAttachment uploads a file to a YouTrack issue.
+func (c *Client) UploadAttachment(ctx context.Context, issueID, filename, mimeType string, content []byte) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return fmt.Errorf("failed to create form file: %w", err)
+	}
+	if _, err = part.Write(content); err != nil {
+		return fmt.Errorf("failed to write file content: %w", err)
+	}
+	writer.Close()
+
+	path := fmt.Sprintf("/api/issues/%s/attachments?fields=id,name", url.PathEscape(issueID))
+	fullURL := c.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, &body)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("YouTrack attachment upload error: status %d - %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// AddIssueToSprint adds an existing issue to a sprint.
+func (c *Client) AddIssueToSprint(ctx context.Context, sprintID, issueID string) error {
+	boardID, err := c.resolveBoard(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to resolve board: %w", err)
+	}
+	path := fmt.Sprintf("/api/agiles/%s/sprints/%s/issues", url.PathEscape(boardID), url.PathEscape(sprintID))
+	_, err = c.doRequest(ctx, http.MethodPost, path, map[string]string{"id": issueID})
+	return err
 }

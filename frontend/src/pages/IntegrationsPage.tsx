@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import api from '../services/api'
-import type { WorkflowConfig, PriorityTag, ColumnState, HotfixRules, ReportConfig } from '../services/api'
+import type { WorkflowConfig, PriorityTag, ColumnState, HotfixRules, ReportConfig, DeveloperSubsystemConfig, YouTrackUser } from '../services/api'
 import { getActiveSource, loadActiveSourceFromDB, setActiveSource } from '../services/pmDataService'
 import type { DataSource } from '../services/pmDataService'
 import {
@@ -54,7 +54,7 @@ interface YouTrackStatus {
   source?: 'user_db' | 'global_db' | 'env'
 }
 
-type MainTab = 'youtrack' | 'asana' | 'slack' | 'workflow'
+type MainTab = 'youtrack' | 'asana' | 'slack' | 'workflow' | 'developers'
 
 interface IntegrationsPageProps {
   initialTab?: MainTab
@@ -921,6 +921,10 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
         <button className={`int-tab ${mainTab === 'workflow' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('workflow'); onTabChange?.('workflow') }}>
           <Sliders size={14} />
           Workflow
+        </button>
+        <button className={`int-tab ${mainTab === 'developers' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('developers'); onTabChange?.('developers') }}>
+          <User size={14} />
+          Developers
         </button>
       </div>
 
@@ -1798,6 +1802,139 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* ══════════════ DEVELOPERS ══════════════ */}
+      {mainTab === 'developers' && <DevelopersTab />}
+    </div>
+  )
+}
+
+// ─── Developers Tab ──────────────────────────────────────────────────────────
+
+function DevelopersTab() {
+  const [users, setUsers] = useState<YouTrackUser[]>([])
+  const [subsystems, setSubsystems] = useState<string[]>([])
+  const [configs, setConfigs] = useState<DeveloperSubsystemConfig[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    Promise.all([
+      api.getYouTrackFormMeta(),
+      api.getDeveloperConfigs(),
+    ]).then(([metaRes, configRes]) => {
+      if (metaRes.success && metaRes.data) {
+        setUsers(metaRes.data.users)
+        setSubsystems(metaRes.data.subsystems.map(s => s.name))
+        const saved = configRes.success && configRes.data ? configRes.data as DeveloperSubsystemConfig[] : []
+        const savedMap = new Map(saved.map((c: DeveloperSubsystemConfig) => [c.developer_login, c]))
+        setConfigs(metaRes.data.users.map(u => ({
+          developer_login: u.login,
+          developer_name:  u.fullName || u.login,
+          subsystems:      savedMap.get(u.login)?.subsystems ?? [],
+          is_qa:           savedMap.get(u.login)?.is_qa ?? false,
+        })))
+      }
+    }).catch(() => setError('Failed to load developers')).finally(() => setLoading(false))
+  }, [])
+
+  const toggle = (login: string, subsystem: string) => {
+    setConfigs(prev => prev.map(c => {
+      if (c.developer_login !== login) return c
+      const has = c.subsystems.includes(subsystem)
+      return { ...c, subsystems: has ? c.subsystems.filter(s => s !== subsystem) : [...c.subsystems, subsystem] }
+    }))
+    setSaved(false)
+  }
+
+  const toggleQA = (login: string) => {
+    setConfigs(prev => prev.map(c =>
+      c.developer_login === login ? { ...c, is_qa: !c.is_qa } : c
+    ))
+    setSaved(false)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await api.saveDeveloperConfigs(configs)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {
+      setError('Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <div className="int-content"><div className="int-loading">Loading developers…</div></div>
+
+  return (
+    <div className="int-content">
+      <div className="int-service-header">
+        <div>
+          <div className="int-service-name">Developer Subsystem Config</div>
+          <div className="int-service-desc">
+            Map each developer to the subsystems they own. AI Fill uses this to auto-assign tickets to the right person based on the ticket subsystem.
+          </div>
+        </div>
+        <button className={`int-btn int-btn-primary${saving ? ' int-btn-loading' : ''}`} onClick={handleSave} disabled={saving}>
+          {saved ? '✓ Saved' : saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      {error && <div className="int-error-banner">{error}</div>}
+
+      {subsystems.length === 0 ? (
+        <div className="dev-cfg-empty">No subsystems found — connect YouTrack first.</div>
+      ) : (
+        <div className="dev-cfg-wrap">
+          <div className="dev-cfg-table">
+            <div className="dev-cfg-header">
+              <div className="dev-cfg-col-dev">Developer</div>
+              {subsystems.map(s => (
+                <div key={s} className="dev-cfg-col-sub" title={s}>{s}</div>
+              ))}
+              <div className="dev-cfg-col-qa" title="Mark as QA — excluded from AI auto-assign">QA</div>
+            </div>
+            {configs.map(cfg => {
+              const user = users.find(u => u.login === cfg.developer_login)
+              return (
+                <div key={cfg.developer_login} className={`dev-cfg-row${cfg.is_qa ? ' dev-cfg-row--qa' : ''}`}>
+                  <div className="dev-cfg-col-dev">
+                    {user?.avatarUrl
+                      ? <img src={user.avatarUrl} alt="" className="dev-cfg-avatar" />
+                      : <span className="dev-cfg-avatar-init">{(cfg.developer_name || cfg.developer_login).charAt(0).toUpperCase()}</span>
+                    }
+                    <span className="dev-cfg-name">{cfg.developer_name || cfg.developer_login}</span>
+                    {cfg.is_qa && <span className="dev-cfg-qa-badge">QA</span>}
+                  </div>
+                  {subsystems.map(s => (
+                    <div key={s} className="dev-cfg-col-sub">
+                      <button
+                        className={`dev-cfg-check${cfg.subsystems.includes(s) && !cfg.is_qa ? ' dev-cfg-check--on' : ''}`}
+                        onClick={() => !cfg.is_qa && toggle(cfg.developer_login, s)}
+                        disabled={cfg.is_qa}
+                        title={cfg.is_qa ? 'QA — not assigned to subsystems' : cfg.subsystems.includes(s) ? `Remove ${s}` : `Add ${s}`}
+                      />
+                    </div>
+                  ))}
+                  <div className="dev-cfg-col-qa">
+                    <button
+                      className={`dev-cfg-check dev-cfg-check--qa${cfg.is_qa ? ' dev-cfg-check--on' : ''}`}
+                      onClick={() => toggleQA(cfg.developer_login)}
+                      title={cfg.is_qa ? 'Remove QA flag' : 'Mark as QA team (excluded from auto-assign)'}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>

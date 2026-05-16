@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import HoverCard, { HCRow, HCBar, HCDivider, HCBadge } from '../components/HoverCard'
 import DeploymentProjectBrowser from '../components/deployment/DeploymentProjectBrowser'
 import DeploymentTicketInput from '../components/deployment/DeploymentTicketInput'
 import DeploymentTicketList from '../components/deployment/DeploymentTicketList'
@@ -1542,6 +1543,231 @@ function getInitialsFromName(name: string): string {
   return (name || '?').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
+// ── Hover card content builders ──────────────────────────────────────────────
+
+function ticketHoverContent(issue: SprintBoardIssue, slaHours?: number) {
+  const cycleLabel = issue.cycle_time_hours > 0 ? fmtHoursCompact(issue.cycle_time_hours) : null
+  const devLabel   = issue.total_active_hours > 0 ? fmtHoursCompact(issue.total_active_hours) : null
+  const stateLabel = issue.hours_in_state > 0 ? fmtHoursCompact(issue.hours_in_state) : null
+  const overdueAccent = issue.overdue_level === 'deadline' ? 'danger'
+    : (issue.overdue_level === 'sprint' || issue.is_delayed) ? 'warn' : undefined
+  const slaUsedPct = slaHours && slaHours > 0 ? Math.min(100, (issue.total_active_hours / slaHours) * 100) : null
+  const hasVerif = issue.verified_on_dev || issue.verified_on_stage || issue.verified_on_prod
+  return (
+    <div>
+      <div className="hc-title" style={{ marginBottom: 2 }}>
+        {issue.idReadable}
+        {issue.is_hotfix && <HCBadge label="HF" variant="warn" />}
+        {issue.issue_type && issue.issue_type.toLowerCase() !== 'task' && <HCBadge label={issue.issue_type} />}
+      </div>
+      <div className="hc-subtitle">{issue.summary}</div>
+      <HCDivider />
+      {stateLabel && <HCRow label="In state" value={stateLabel} accent={overdueAccent} />}
+      {slaUsedPct !== null && (
+        <div className="hc-row" style={{ gap: 6 }}>
+          <span className="hc-label">SLA</span>
+          <HCBar pct={slaUsedPct} color={slaUsedPct >= 100 ? '#f87171' : slaUsedPct > 70 ? '#fbbf24' : '#4ade80'} />
+          <span className="hc-value" style={{ fontSize: '0.65rem', whiteSpace: 'nowrap' }}>
+            {fmtHoursCompact(slaHours!)} limit
+          </span>
+        </div>
+      )}
+      {cycleLabel && <HCRow label="Cycle time" value={cycleLabel} />}
+      {devLabel && <HCRow label="Dev active" value={devLabel} />}
+      {issue.bounce_count > 0 && (
+        <HCRow
+          label="Bounces"
+          value={`${issue.bounce_count}×${issue.stint_count > 1 ? ` (${issue.stint_count} stints)` : ''}`}
+          accent="warn"
+        />
+      )}
+      {issue.move_type === 'qa_rejected' && <HCRow label="Flag" value="QA Rejected" accent="danger" />}
+      {issue.move_type === 'dev_stalled'  && <HCRow label="Flag" value="Dev Stalled"  accent="warn" />}
+      {hasVerif && (
+        <>
+          <HCDivider />
+          <div style={{ display: 'flex', gap: 4 }}>
+            {issue.verified_on_dev   && <HCBadge label={`DEV✓ ${issue.verified_on_dev}`}   variant="dev" />}
+            {issue.verified_on_stage && <HCBadge label={`STG✓ ${issue.verified_on_stage}`} variant="stg" />}
+            {issue.verified_on_prod  && <HCBadge label={`PRD✓ ${issue.verified_on_prod}`}  variant="prd" />}
+          </div>
+        </>
+      )}
+      {issue.from_state && issue.current_state && issue.from_state !== issue.current_state && (
+        <>
+          <HCDivider />
+          <div className="hc-label" style={{ fontSize: '0.65rem' }}>
+            {issue.from_state} → {issue.current_state}
+          </div>
+        </>
+      )}
+      {issue.assignee && (
+        <div className="hc-label" style={{ marginTop: 4 }}>👤 {issue.assignee}</div>
+      )}
+    </div>
+  )
+}
+
+function assigneeHoverContent(name: string, issues: SprintBoardIssue[]) {
+  const active  = issues.filter(i => i.current_state?.toLowerCase().includes('progress')).length
+  const blocked = issues.filter(i => i.current_state?.toLowerCase().includes('block')).length
+  const done    = issues.filter(i => {
+    const s = i.current_state?.toLowerCase() || ''
+    return s.includes('done') || s.includes('verified') || s.includes('deployed') || s.includes('closed')
+  }).length
+  const total = issues.length
+  const totalWork = issues.reduce((s, i) => s + (i.total_active_hours || 0), 0)
+  const overdue   = issues.filter(i => i.is_delayed && !i.current_state?.toLowerCase().includes('block')).length
+  return (
+    <div>
+      <div className="hc-title">{name}</div>
+      <div className="hc-subtitle">{total} ticket{total !== 1 ? 's' : ''} this sprint</div>
+      <HCDivider />
+      <HCRow label="Active"  value={active}  accent={active > 4 ? 'warn' : undefined} />
+      <HCRow label="Blocked" value={blocked} accent={blocked > 0 ? 'danger' : undefined} />
+      <HCRow label="Done"    value={done}    accent={done > 0 ? 'ok' : undefined} />
+      {overdue > 0 && <HCRow label="Overdue" value={overdue} accent="danger" />}
+      {totalWork > 0 && <HCRow label="Dev hours" value={fmtHoursCompact(totalWork)} />}
+      {total > 0 && (
+        <>
+          <HCDivider />
+          <div className="hc-stack">
+            {active  > 0 && <div className="hc-stack-seg hc-stack-seg--active"  style={{ flex: active }}  />}
+            {blocked > 0 && <div className="hc-stack-seg hc-stack-seg--blocked" style={{ flex: blocked }} />}
+            {done    > 0 && <div className="hc-stack-seg hc-stack-seg--done"    style={{ flex: done }}    />}
+            {Math.max(0, total - active - blocked - done) > 0 && (
+              <div className="hc-stack-seg hc-stack-seg--other" style={{ flex: total - active - blocked - done }} />
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function columnHeaderHoverContent(col: SprintBoardColumn) {
+  const overdue  = col.issues.filter(i => i.overdue_level === 'deadline').length
+  const atrisk   = col.issues.filter(i => i.overdue_level === 'sprint' || (i.is_delayed && i.overdue_level !== 'deadline')).length
+  const blocked  = col.issues.filter(i => i.current_state?.toLowerCase().includes('block')).length
+  const ontrack  = col.issues.length - overdue - atrisk
+  const avgHrs   = col.issues.length > 0
+    ? col.issues.reduce((s, i) => s + (i.hours_in_state || 0), 0) / col.issues.length
+    : 0
+  return (
+    <div>
+      <div className="hc-title">{col.name}</div>
+      <div className="hc-subtitle">{col.issues.length} issue{col.issues.length !== 1 ? 's' : ''}</div>
+      {col.issues.length > 0 && (
+        <>
+          <HCDivider />
+          {overdue > 0  && <HCRow label="Overdue"  value={overdue}  accent="danger" />}
+          {atrisk  > 0  && <HCRow label="At risk"  value={atrisk}   accent="warn" />}
+          {blocked > 0  && <HCRow label="Blocked"  value={blocked}  accent="danger" />}
+          {ontrack > 0  && <HCRow label="On track" value={ontrack}  accent="ok" />}
+          {avgHrs  > 0  && <HCRow label="Avg time" value={fmtHoursCompact(avgHrs)} />}
+        </>
+      )}
+    </div>
+  )
+}
+
+function heatmapCellHoverContent(person: string, col: SprintBoardColumn, issues: SprintBoardIssue[]) {
+  return (
+    <div>
+      <div className="hc-title">{person} × {col.name}</div>
+      <div className="hc-subtitle">{issues.length} issue{issues.length !== 1 ? 's' : ''}</div>
+      <div className="hc-issue-list">
+        {issues.slice(0, 6).map(i => {
+          const dotClass = i.overdue_level === 'deadline' ? 'hc-issue-dot--overdue'
+            : (i.overdue_level === 'sprint' || i.is_delayed) ? 'hc-issue-dot--atrisk'
+            : i.current_state?.toLowerCase().includes('block') ? 'hc-issue-dot--blocked'
+            : 'hc-issue-dot--ok'
+          return (
+            <div key={i.idReadable} className="hc-issue-item">
+              <div className={`hc-issue-dot ${dotClass}`} />
+              <span className="hc-issue-id">{i.idReadable}</span>
+              <span className="hc-issue-summary">{i.summary}</span>
+              <span className="hc-label" style={{ whiteSpace: 'nowrap' }}>{fmtHoursCompact(i.hours_in_state)}</span>
+            </div>
+          )
+        })}
+        {issues.length > 6 && (
+          <div className="hc-label" style={{ marginTop: 2 }}>+{issues.length - 6} more</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function delayBarHoverContent(issue: SprintBoardIssue, workDays: number, bounceDays: number, reviewDays: number, slaDays: number) {
+  const totalDays = workDays + bounceDays + reviewDays
+  const overSla = slaDays > 0 && totalDays > slaDays
+  return (
+    <div>
+      <div className="hc-title">{issue.idReadable} — time breakdown</div>
+      <div className="hc-subtitle">{issue.summary}</div>
+      <HCDivider />
+      {workDays > 0 && (
+        <div>
+          <HCRow label="Working"     value={`${workDays.toFixed(1)}d`} />
+          <HCBar pct={(workDays / Math.max(totalDays, slaDays || totalDays)) * 100} color="#6366f1" />
+        </div>
+      )}
+      {bounceDays > 0 && (
+        <div style={{ marginTop: 4 }}>
+          <HCRow label="Bounce rework" value={`${bounceDays.toFixed(1)}d (${issue.bounce_count}×)`} accent="warn" />
+          <HCBar pct={(bounceDays / Math.max(totalDays, slaDays || totalDays)) * 100} color="#f59e0b" />
+        </div>
+      )}
+      {reviewDays > 0 && (
+        <div style={{ marginTop: 4 }}>
+          <HCRow label="Review/Idle" value={`${reviewDays.toFixed(1)}d`} />
+          <HCBar pct={(reviewDays / Math.max(totalDays, slaDays || totalDays)) * 100} color="#818cf8" />
+        </div>
+      )}
+      {slaDays > 0 && (
+        <>
+          <HCDivider />
+          <HCRow
+            label={`SLA (${issue.priority})`}
+            value={`${slaDays.toFixed(1)}d`}
+          />
+          <HCRow
+            label="Status"
+            value={overSla ? `+${(totalDays - slaDays).toFixed(1)}d over` : `${(slaDays - totalDays).toFixed(1)}d left`}
+            accent={overSla ? 'danger' : 'ok'}
+          />
+        </>
+      )}
+    </div>
+  )
+}
+
+function qaStageHoverContent(stage: 'DEV' | 'STAGE' | 'PROD', verifier: string, issue: SprintBoardIssue) {
+  const stageLabel = stage === 'DEV' ? 'Development' : stage === 'STAGE' ? 'Staging' : 'Production'
+  return (
+    <div>
+      <div className="hc-title">{stageLabel} Verification</div>
+      <HCDivider />
+      {verifier ? (
+        <>
+          <HCRow label="Verified by" value={verifier} accent="ok" />
+          <div className="hc-label" style={{ marginTop: 4 }}>✓ Passed {stageLabel}</div>
+        </>
+      ) : (
+        <div className="hc-label" style={{ marginTop: 2 }}>
+          ○ Awaiting {stageLabel} verification
+          {issue.total_active_hours > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {fmtHoursCompact(issue.total_active_hours)} active dev time
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ttPriorityClass(p: string): string {
   const s = (p || '').toLowerCase()
   if (s === 'p0' || s.includes('critical') || s.includes('show-stopper')) return 'tt-pri tt-pri-p0'
@@ -2106,7 +2332,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     const devTimeLabel = issue.total_active_hours > 0 ? fmtHoursCompact(issue.total_active_hours) : null
     const cycleLabel = issue.cycle_time_hours > 0 ? fmtHoursCompact(issue.cycle_time_hours) : null
     return (
-      <React.Fragment key={issue.id}>
+      <HoverCard key={issue.id} content={ticketHoverContent(issue)}>
+      <React.Fragment>
         <div
           className={`pm-tracking-issue-row pm-tracking-issue-row--clickable${overdueClass}${bounceClass}${hotfixClass}${blockerIssueIds?.has(issue.idReadable) ? ' pm-tracking-issue-row--blocked' : ''}${isExpanded ? ' pm-tracking-issue-row--expanded' : ''}`}
           onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
@@ -2200,6 +2427,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
           </div>
         )}
       </React.Fragment>
+      </HoverCard>
     )
   }
 
@@ -2215,7 +2443,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     const statClass = issue.overdue_level === 'deadline' ? ' pm-tracking-ip-stat-value--crit'
       : (issue.overdue_level === 'sprint' || issue.is_delayed) ? ' pm-tracking-ip-stat-value--warn' : ''
     return (
-      <React.Fragment key={issue.id || issue.idReadable}>
+      <HoverCard key={issue.id || issue.idReadable} content={ticketHoverContent(issue)} maxWidth={280}>
+      <React.Fragment>
         <div className={`pm-tracking-ip-card${urgencyClass}`} onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}>
           <div className="pm-tracking-ip-card-top">
             <span
@@ -2289,6 +2518,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
           )}
         </div>
       </React.Fragment>
+      </HoverCard>
     )
   }
 
@@ -2301,7 +2531,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     const rowClass = issue.overdue_level === 'deadline' ? ' pm-tracking-blocked-row--crit'
       : (issue.overdue_level === 'sprint' || issue.is_delayed) ? ' pm-tracking-blocked-row--warn' : ''
     return (
-      <div key={issue.idReadable} className={`pm-tracking-blocked-row${rowClass}`}
+      <HoverCard key={issue.idReadable} content={ticketHoverContent(issue)} maxWidth={280}>
+      <div className={`pm-tracking-blocked-row${rowClass}`}
         onClick={() => setExpandedIssue(expandedIssue === issue.idReadable ? null : issue.idReadable)}>
         <span
           className="pm-tracking-blocked-id pm-tracking-issue-id--link"
@@ -2333,6 +2564,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
           <span className="pm-tracking-blocked-assignee-name">{issue.assignee}</span>
         </div>
       </div>
+      </HoverCard>
     )
   }
 
@@ -2689,6 +2921,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               : colType === 'todo' ? '#4b5563' : '#3b82f6'
             return (
               <div key={col.name} className="pm-tracking-sec">
+                <HoverCard content={columnHeaderHoverContent(col)} delay={400}>
                 <div className="pm-tracking-sec-hdr" onClick={() => toggleColCollapse(col.name)}>
                   <div className="pm-tracking-sec-title">
                     <span className="pm-tracking-sec-dot" style={{ background: dotColor, boxShadow: colType === 'inprogress' ? `0 0 6px ${dotColor}` : colType === 'blocked' ? '0 0 6px #ef4444' : 'none' }} />
@@ -2705,6 +2938,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                     <ChevronDown size={13} className={`dropdown-chevron${isCollapsed ? '' : ' open'}`} />
                   </div>
                 </div>
+                </HoverCard>
                 {!isCollapsed && (
                   <div className="pm-tracking-sec-body">
                     {colType === 'inprogress' && (
@@ -2780,6 +3014,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
             }
             return (
               <div key={person.name} className="pm-tracking-swimlane-row">
+                <HoverCard content={assigneeHoverContent(person.name, person.issues)} delay={350} maxWidth={240}>
                 <div className="pm-tracking-swimlane-person">
                   <div className="pm-tracking-swimlane-person-header">
                     {avatarSrc
@@ -2790,19 +3025,12 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                   </div>
                   <span className="pm-tracking-swimlane-count">{total} ticket{total !== 1 ? 's' : ''}</span>
                 </div>
+                </HoverCard>
                 <div className="pm-tracking-swimlane-chips">
-                  {person.issues.map(i => {
-                    const tooltipParts = [i.summary]
-                    if (i.bounce_count > 0) tooltipParts.push(`↩${i.bounce_count} bounce${i.bounce_count !== 1 ? 's' : ''}`)
-                    if (i.total_active_hours > 0) tooltipParts.push(`${fmtHoursCompact(i.total_active_hours)} active`)
-                    if (i.verified_on_dev) tooltipParts.push(`DEV✓ ${i.verified_on_dev}`)
-                    if (i.verified_on_stage) tooltipParts.push(`STG✓ ${i.verified_on_stage}`)
-                    if (i.verified_on_prod) tooltipParts.push(`PRD✓ ${i.verified_on_prod}`)
-                    return (
+                  {person.issues.map(i => (
+                    <HoverCard key={i.idReadable} content={ticketHoverContent(i)} maxWidth={280}>
                       <span
-                        key={i.idReadable}
                         className={`pm-tracking-swimlane-chip ${getChipClass(i)}`}
-                        title={tooltipParts.join(' · ') + '\nClick to open in YouTrack'}
                         onClick={(e) => openInYouTrack(i.idReadable, e)}
                       >
                         {i.idReadable}
@@ -2810,9 +3038,10 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                         {i.total_active_hours > 0 && isActive(i) && <span className="pm-tracking-chip-time">{fmtHoursCompact(i.total_active_hours)}</span>}
                         {qaLabel(i) && <span className="pm-tracking-chip-qa">{qaLabel(i)}</span>}
                       </span>
-                    )
-                  })}
+                    </HoverCard>
+                  ))}
                 </div>
+                <HoverCard content={assigneeHoverContent(person.name, person.issues)} delay={350}>
                 <div className="pm-tracking-swimlane-loadbar-wrap">
                   <div className="pm-tracking-swimlane-loadbar">
                     {total > 0 && <div className="pm-tracking-swimlane-seg pm-tracking-swimlane-seg--active" style={{ width: `${(activeCount / total) * 100}%` }} />}
@@ -2825,6 +3054,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                     <span>{total} total</span>
                   </div>
                 </div>
+                </HoverCard>
               </div>
             )
           })}
@@ -2847,8 +3077,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                 const idleCount = total - activeCount - blockedCount - devCount
                 const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
                 return (
+                  <HoverCard key={person.name} content={assigneeHoverContent(person.name, person.issues)} delay={350} maxWidth={230}>
                   <div
-                    key={person.name}
                     className={`pm-tracking-sidebar-person${activePerson === person.name ? ' active' : ''}`}
                     onClick={() => setSidebarPerson(person.name)}
                   >
@@ -2867,6 +3097,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       </div>
                     </div>
                   </div>
+                  </HoverCard>
                 )
               })}
             </div>
@@ -2916,6 +3147,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                   const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
                   return (
                     <React.Fragment key={person.name}>
+                      <HoverCard content={assigneeHoverContent(person.name, person.issues)} delay={350} maxWidth={230}>
                       <div className="pm-tracking-heatmap-row-label">
                         {avatarSrc
                           ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={person.name} style={{ width: 20, height: 20 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
@@ -2923,6 +3155,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                         }
                         {person.name}
                       </div>
+                      </HoverCard>
                       {filteredColumns.map(col => {
                         const count = col.issues.filter(i => (i.assignee || 'Unassigned') === person.name).length
                         const issues = col.issues.filter(i => (i.assignee || 'Unassigned') === person.name)
@@ -2933,9 +3166,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                           : hasRisk ? 'pm-tracking-heatmap-cell--atrisk'
                           : 'pm-tracking-heatmap-cell--ok'
                         return (
-                          <div key={col.name} className={`pm-tracking-heatmap-cell ${cellClass}`}>
+                          <HoverCard key={col.name} content={count > 0 ? heatmapCellHoverContent(person.name, col, issues) : null} delay={300} maxWidth={260}>
+                          <div className={`pm-tracking-heatmap-cell ${cellClass}`}>
                             {count > 0 ? count : '·'}
                           </div>
+                          </HoverCard>
                         )
                       })}
                     </React.Fragment>
@@ -3005,7 +3240,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               const isExpanded = expandedIssue === issue.idReadable
               const priColors = priorityColorMap[issue.priority?.toLowerCase()] || null
               return (
-                <React.Fragment key={issue.idReadable}>
+                <HoverCard key={issue.idReadable} content={delayBarHoverContent(issue, workDays, bounceDays, reviewDays, slaDays)} maxWidth={290}>
+                <React.Fragment>
                   <div
                     className={`pm-tracking-delay-row${rowClass}`}
                     onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
@@ -3076,6 +3312,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                     </div>
                   )}
                 </React.Fragment>
+                </HoverCard>
               )
             })}
           </div>
@@ -3096,7 +3333,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                   const rowUrgency = issue.overdue_level === 'deadline' ? '--critical' : '--atrisk'
                   const avatarSrc = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
                   return (
-                    <div key={issue.idReadable} className={`pm-tracking-alert-blocked-row pm-tracking-alert-blocked-row${rowUrgency}`}>
+                    <HoverCard key={issue.idReadable} content={ticketHoverContent(issue)} maxWidth={280}>
+                    <div className={`pm-tracking-alert-blocked-row pm-tracking-alert-blocked-row${rowUrgency}`}>
                       {avatarSrc
                         ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={issue.assignee} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                         : <div className="pm-tracking-swimlane-avatar">{getInitialsFromName(issue.assignee)}</div>
@@ -3127,6 +3365,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       </div>
                       <div className="pm-tracking-alert-blocked-time">{fmtHoursCompact(issue.hours_in_state)}</div>
                     </div>
+                    </HoverCard>
                   )
                 })}
               </div>
@@ -3294,7 +3533,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                   const otherCount = total - activeCount - blockedCount
                   const avatarSrc = person.avatarUrl || avatarMap[person.name] || avatarMap[person.login]
                   return (
-                    <div key={person.name} className="pm-tracking-split-person-row">
+                    <HoverCard key={person.name} content={assigneeHoverContent(person.name, person.issues)} delay={350} maxWidth={230}>
+                    <div className="pm-tracking-split-person-row">
                       {avatarSrc
                         ? <img className="pm-tracking-swimlane-avatar" src={avatarSrc} alt={person.name} style={{ width: 22, height: 22 }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                         : <div className="pm-tracking-swimlane-avatar" style={{ width: 22, height: 22, fontSize: 9 }}>{getInitialsFromName(person.name)}</div>
@@ -3309,6 +3549,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                       </div>
                       <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 16, textAlign: 'right' }}>{total}</span>
                     </div>
+                    </HoverCard>
                   )
                 })}
               </div>
@@ -3349,7 +3590,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               const isExpanded = expandedIssue === issue.idReadable
               const avatarSrc = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
               return (
-                <div key={issue.idReadable} className={`pm-tracking-focus-card pm-tracking-focus-card${urgency}`}>
+                <HoverCard key={issue.idReadable} content={ticketHoverContent(issue)} maxWidth={290} delay={350}>
+                <div className={`pm-tracking-focus-card pm-tracking-focus-card${urgency}`}>
                   <div className="pm-tracking-focus-card-top">
                     <span
                       className="pm-tracking-focus-id pm-tracking-issue-id--link"
@@ -3423,6 +3665,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                     </div>
                   )}
                 </div>
+                </HoverCard>
               )
             })}
             {!showAllFocus && restIssues.length > 0 && (
@@ -3641,17 +3884,23 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
 
                       {/* DEV cell */}
                       <div className="pm-qa-cell pm-qa-cell--stage">
-                        <VerifCell verified={issue.verified_on_dev} pending={isPendingDev(issue)} name="DEV" />
+                        <HoverCard content={qaStageHoverContent('DEV', issue.verified_on_dev, issue)} maxWidth={220}>
+                          <VerifCell verified={issue.verified_on_dev} pending={isPendingDev(issue)} name="DEV" />
+                        </HoverCard>
                       </div>
 
                       {/* STAGE cell */}
                       <div className="pm-qa-cell pm-qa-cell--stage">
-                        <VerifCell verified={issue.verified_on_stage} pending={isPendingStg(issue)} name="STAGE" />
+                        <HoverCard content={qaStageHoverContent('STAGE', issue.verified_on_stage, issue)} maxWidth={220}>
+                          <VerifCell verified={issue.verified_on_stage} pending={isPendingStg(issue)} name="STAGE" />
+                        </HoverCard>
                       </div>
 
                       {/* PROD cell */}
                       <div className="pm-qa-cell pm-qa-cell--stage">
-                        <VerifCell verified={issue.verified_on_prod} pending={isPendingPrd(issue)} name="PROD" />
+                        <HoverCard content={qaStageHoverContent('PROD', issue.verified_on_prod, issue)} maxWidth={220}>
+                          <VerifCell verified={issue.verified_on_prod} pending={isPendingPrd(issue)} name="PROD" />
+                        </HoverCard>
                       </div>
                     </div>
                     {isExpanded && (

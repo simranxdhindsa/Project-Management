@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
@@ -792,14 +793,16 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Summary             string `json:"summary"`
-		Description         string `json:"description"`
-		State               string `json:"state,omitempty"`
-		Priority            string `json:"priority,omitempty"`
-		AssigneeLogin       string `json:"assignee_login,omitempty"`
-		Subsystem           string `json:"subsystem,omitempty"`
-		DueDate             *int64 `json:"due_date,omitempty"`       // Unix ms timestamp
-		EstimationMinutes   *int   `json:"estimation_minutes,omitempty"`
+		Summary           string `json:"summary"`
+		Description       string `json:"description"`
+		State             string `json:"state,omitempty"`
+		Priority          string `json:"priority,omitempty"`
+		TypeName          string `json:"type_name,omitempty"`
+		AssigneeLogin     string `json:"assignee_login,omitempty"`
+		Subsystem         string `json:"subsystem,omitempty"`
+		SprintID          string `json:"sprint_id,omitempty"`
+		DueDate           *int64 `json:"due_date,omitempty"`
+		EstimationMinutes *int   `json:"estimation_minutes,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -830,6 +833,13 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			Type:  "SingleEnumIssueCustomField",
 			Name:  "Priority",
 			Value: map[string]string{"name": req.Priority},
+		})
+	}
+	if req.TypeName != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "SingleEnumIssueCustomField",
+			Name:  "Type",
+			Value: map[string]string{"name": req.TypeName},
 		})
 	}
 	if req.AssigneeLogin != "" {
@@ -868,6 +878,16 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to create issue: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Assign to sprint if requested (best-effort — don't fail the whole create)
+	if req.SprintID != "" && issue != nil && issue.ID != "" {
+		go func() {
+			ctx2 := context.Background()
+			if addErr := client.AddIssueToSprint(ctx2, req.SprintID, issue.ID); addErr != nil {
+				log.Printf("failed to add issue %s to sprint %s: %v", issue.ID, req.SprintID, addErr)
+			}
+		}()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -968,7 +988,317 @@ func (h *YouTrackHandler) UpdateIssueState(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// GetIssueFormMeta returns all dynamic data needed to render the Create Issue form in one call:
+// states, priorities, types, subsystems, users, and sprints — all fetched in parallel.
+func (h *YouTrackHandler) GetIssueFormMeta(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	type result struct {
+		states           []youtrack.State
+		priorities       []youtrack.PriorityValue
+		types            []youtrack.PriorityValue
+		subsystems       []youtrack.PriorityValue
+		users            []youtrack.User
+		sprints          []youtrack.Sprint
+		developerConfigs []*database.DeveloperSubsystemConfig
+	}
+	var res result
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	errs := make([]string, 0)
+
+	fetch := func(fn func() error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if e := fn(); e != nil {
+				mu.Lock()
+				errs = append(errs, e.Error())
+				mu.Unlock()
+			}
+		}()
+	}
+
+	fetch(func() error {
+		v, e := client.GetStates(r.Context())
+		if e == nil {
+			mu.Lock(); res.states = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetPriorities(r.Context())
+		if e == nil {
+			mu.Lock(); res.priorities = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetCustomFieldValues(r.Context(), "Type")
+		if e == nil {
+			mu.Lock(); res.types = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetCustomFieldValues(r.Context(), "Subsystem")
+		if e == nil {
+			mu.Lock(); res.subsystems = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetUsers(r.Context())
+		if e == nil {
+			// Proxy avatar URLs
+			scheme := "http"
+			if r.TLS != nil {
+				scheme = "https"
+			}
+			base := scheme + "://" + r.Host + "/api/youtrack/proxy?url="
+			for i := range v {
+				if v[i].AvatarUrl != "" {
+					v[i].AvatarUrl = base + url.QueryEscape(base64.StdEncoding.EncodeToString([]byte(v[i].AvatarUrl)))
+				}
+			}
+			mu.Lock(); res.users = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetSprints(r.Context())
+		if e == nil {
+			mu.Lock(); res.sprints = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		devRepo := database.NewDeveloperConfigRepository()
+		v, e := devRepo.GetAll(r.Context())
+		if e == nil {
+			if v == nil {
+				v = []*database.DeveloperSubsystemConfig{}
+			}
+			mu.Lock(); res.developerConfigs = v; mu.Unlock()
+		}
+		return e
+	})
+
+	wg.Wait()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"states":            res.states,
+			"priorities":        res.priorities,
+			"types":             res.types,
+			"subsystems":        res.subsystems,
+			"users":             res.users,
+			"sprints":           res.sprints,
+			"developer_configs": res.developerConfigs,
+			"errors":            errs,
+		},
+	})
+}
+
+// UploadIssueAttachment receives a multipart file from the frontend and proxies it to YouTrack.
+func (h *YouTrackHandler) UploadIssueAttachment(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	issueID := mux.Vars(r)["issue_id"]
+	if issueID == "" {
+		http.Error(w, "issue_id required", http.StatusBadRequest)
+		return
+	}
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, "Failed to parse multipart: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "No file in request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	if err := client.UploadAttachment(r.Context(), issueID, header.Filename, mimeType, content); err != nil {
+		http.Error(w, "Failed to upload attachment: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// AIParseTicket uses the AI provider to extract structured issue fields from raw natural-language text.
+func (h *YouTrackHandler) AIParseTicket(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		RawText    string                   `json:"raw_text"`
+		Users      []map[string]string      `json:"users"`      // [{login, fullName}]
+		Types      []string                 `json:"types"`      // ["Bug","Feature",...]
+		Subsystems []string                 `json:"subsystems"` // ["FE UI","BE API",...]
+		Sprints    []map[string]interface{} `json:"sprints"`    // [{id, name}]
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.RawText) == "" {
+		http.Error(w, "raw_text is required", http.StatusBadRequest)
+		return
+	}
+
+	usersJSON, _ := json.Marshal(req.Users)
+	sprintsJSON, _ := json.Marshal(req.Sprints)
+
+	// Load editable instructions from the ticket_parser bot config in DB.
+	// The admin can customise the instructions; dynamic field values are always
+	// appended here at runtime so the DB prompt never needs to list them.
+	const defaultTicketParserInstructions = `You are a project management assistant. Convert raw text into a YouTrack ticket.
+
+RESPOND ONLY WITH A SINGLE JSON OBJECT. No explanation, no markdown, no extra text — just JSON.
+
+Title rules: "{subsystem}: {concise action-oriented description}" — max 80 chars, never copy raw text verbatim. The subsystem prefix MUST be copied EXACTLY from the available subsystems list — never invent or abbreviate. Do NOT include a priority prefix in the title. Examples of good titles: "FE UI: Handle Empty Transcribe Requests Gracefully", "FE MC: Courses Tab Fails to Open", "BE: Prevent Deletion During File Processing".
+
+Description rules: 1-2 sentence overview of what is broken or missing, then "\n\n**Expected Behavior**\n- bullet\n- bullet". Remove filler words (okay, like, so, yeah, uh). For bugs: what is broken + what should happen. For features: what is missing + what should happen.
+
+Priority: Show-stopper=crash/data-loss/security, Critical=completely broken feature, Major=significant regression or important feature broken, Normal=standard bug or feature request, Minor=cosmetic.
+
+CRITICAL: subsystem MUST exactly match one of the available subsystems — never invent one. type_name must exactly match one of the available types. Both are REQUIRED.
+assignee_login: match login from users list only if a person's name is mentioned, else "".
+sprint_id: id of the most recent non-completed sprint from the sprints list, else "".`
+
+	instructions := defaultTicketParserInstructions
+	botRepo := database.NewBotConfigRepository()
+	if bots, err2 := botRepo.GetByType(r.Context(), models.BotTypeTicketParser); err2 == nil {
+		for _, b := range bots {
+			if b.IsActive && strings.TrimSpace(b.Prompt) != "" {
+				instructions = b.Prompt
+				break
+			}
+		}
+	}
+
+	// Always append the dynamic runtime data — these are never editable in the DB
+	// because they come live from YouTrack.
+	systemPrompt := fmt.Sprintf(`%s
+
+Available values — choose ONLY from these lists:
+- types: %s
+- subsystems: %s
+- users (login → fullName): %s
+- sprints: %s
+
+Return ONLY this JSON object (no other text):
+{"summary":"","description":"","priority":"Normal","type_name":"","subsystem":"","assignee_login":"","sprint_id":""}`,
+		instructions,
+		strings.Join(req.Types, ", "),
+		strings.Join(req.Subsystems, ", "),
+		string(usersJSON),
+		string(sprintsJSON),
+	)
+
+	response, err := ai.QueryWithHistory(r.Context(), systemPrompt, nil, req.RawText)
+	if err != nil {
+		http.Error(w, "AI query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Extract the first valid JSON object from the AI response.
+	// Handles markdown fences, bold wrappers, leading prose, nested braces in descriptions.
+	cleaned := extractFirstJSONObject(strings.TrimSpace(response))
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
+		http.Error(w, "AI returned invalid JSON: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    parsed,
+	})
+}
+
 // DeleteIssue deletes an issue from YouTrack
+// extractFirstJSONObject finds the first complete, balanced JSON object in s.
+// Handles markdown fences, bold wrappers, leading prose, and nested braces inside string values.
+func extractFirstJSONObject(s string) string {
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		if runes[i] != '{' {
+			continue
+		}
+		depth := 0
+		inStr := false
+		escaped := false
+		for j := i; j < len(runes); j++ {
+			c := runes[j]
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' && inStr {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inStr = !inStr
+				continue
+			}
+			if inStr {
+				continue
+			}
+			if c == '{' {
+				depth++
+			} else if c == '}' {
+				depth--
+				if depth == 0 {
+					return string(runes[i : j+1])
+				}
+			}
+		}
+	}
+	return s
+}
+
 func (h *YouTrackHandler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {

@@ -351,19 +351,77 @@ class ApiService {
     return resp.text()
   }
 
+  async getYouTrackFormMeta() {
+    return this.request<{
+      states: YouTrackState[]
+      priorities: { name: string; background: string; foreground: string }[]
+      types: { name: string; background: string; foreground: string }[]
+      subsystems: { name: string; background: string; foreground: string }[]
+      users: YouTrackUser[]
+      sprints: { id: string; name: string; start: number; finish: number; isCompleted: boolean }[]
+      developer_configs: DeveloperSubsystemConfig[]
+      errors: string[]
+    }>('/youtrack/form-meta')
+  }
+
+  async getDeveloperConfigs() {
+    return this.request<DeveloperSubsystemConfig[]>('/developer-config')
+  }
+
+  async saveDeveloperConfigs(configs: DeveloperSubsystemConfig[]) {
+    return this.request('/developer-config', {
+      method: 'POST',
+      body: JSON.stringify(configs),
+    })
+  }
+
   async createYouTrackIssue(params: {
     summary: string
     description?: string
     state?: string
     priority?: string
+    type_name?: string
     assignee_login?: string
     subsystem?: string
-    due_date?: number        // Unix ms timestamp
+    sprint_id?: string
+    due_date?: number
     estimation_minutes?: number
   }) {
     return this.request<YouTrackIssue>('/youtrack/issues', {
       method: 'POST',
       body: JSON.stringify(params),
+    })
+  }
+
+  async uploadYouTrackAttachment(issueId: string, file: File) {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    const res = await fetch(`${API_URL}/youtrack/issues/${issueId}/attachments`, {
+      method: 'POST',
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+      body: fd,
+    })
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+    return res.json() as Promise<{ success: boolean }>
+  }
+
+  async aiParseTicket(rawText: string, context: {
+    users: { login: string; fullName: string }[]
+    types: string[]
+    subsystems: string[]
+    sprints: { id: string; name: string }[]
+  }) {
+    return this.request<{
+      summary: string
+      description: string
+      priority: string
+      type_name: string
+      subsystem: string
+      assignee_login: string
+      sprint_id: string
+    }>('/youtrack/ai/parse-ticket', {
+      method: 'POST',
+      body: JSON.stringify({ raw_text: rawText, ...context }),
     })
   }
 
@@ -1663,6 +1721,13 @@ export interface YouTrackUser {
   fullName: string
   email?: string
   avatarUrl?: string
+}
+
+export interface DeveloperSubsystemConfig {
+  developer_login: string
+  developer_name:  string
+  subsystems:      string[]
+  is_qa:           boolean
 }
 
 export interface YouTrackIssue {
