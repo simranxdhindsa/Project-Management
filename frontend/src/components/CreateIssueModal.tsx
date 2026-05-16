@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { marked } from 'marked'
 import api from '../services/api'
-import type { YouTrackUser, YouTrackState } from '../services/api'
+import type { YouTrackUser, YouTrackState, DeveloperSubsystemConfig } from '../services/api'
 import MicButton from './MicButton'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -18,6 +18,7 @@ interface FormMeta {
   subsystems: { name: string; background: string; foreground: string }[]
   users: YouTrackUser[]
   sprints: { id: string; name: string; start: number; finish: number; isCompleted: boolean }[]
+  developerConfigs: DeveloperSubsystemConfig[]
 }
 
 interface CreateIssueFormData {
@@ -63,7 +64,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
   })
 
   const [meta, setMeta] = useState<FormMeta>({
-    states: [], priorities: [], types: [], subsystems: [], users: [], sprints: [],
+    states: [], priorities: [], types: [], subsystems: [], users: [], sprints: [], developerConfigs: [],
   })
   const [metaLoading, setMetaLoading] = useState(true)
 
@@ -89,7 +90,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
     api.getYouTrackFormMeta().then(res => {
       if (res.success && res.data) {
         const d = res.data
-        setMeta(d)
+        setMeta({ ...d, developerConfigs: d.developer_configs ?? [] })
         // Default state: prefer "To Do", fall back to "Backlog", then first state
         const todoState =
           d.states.find(s => s.name.toLowerCase() === 'to do') ??
@@ -173,7 +174,6 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
         const pCode = PRIORITY_CODE[priority] ?? 'P3'
         const baseTitle = d.summary || form.summary
         const subsystemPrefix = validSubsystem || d.subsystem || ''
-        // Strip any existing "Px " or "{subsystem}: " prefix the AI may have added before prepending ours
         const cleanTitle = baseTitle
           .replace(/^P\d+\s+/, '')
           .replace(new RegExp(`^${subsystemPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`), '')
@@ -182,7 +182,19 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           ? `${pCode} ${subsystemPrefix}: ${cleanTitle}`
           : `${pCode} ${cleanTitle}`
 
-        const matchedUser = meta.users.find(u => u.login === d.assignee_login)
+        // Smart assignee: use developer-subsystem config if available for this subsystem.
+        // Priority: (1) AI matched someone configured for this subsystem → keep
+        //           (2) AI picked someone not configured → use first configured dev
+        //           (3) No config for this subsystem → use AI's pick as-is
+        let resolvedLogin = d.assignee_login
+        if (validSubsystem && meta.developerConfigs.length > 0) {
+          const configuredDevs = meta.developerConfigs.filter(c => !c.is_qa && c.subsystems.includes(validSubsystem))
+          if (configuredDevs.length > 0) {
+            const aiPickIsConfigured = configuredDevs.some(c => c.developer_login === d.assignee_login)
+            resolvedLogin = aiPickIsConfigured ? d.assignee_login : configuredDevs[0].developer_login
+          }
+        }
+        const matchedUser = meta.users.find(u => u.login === resolvedLogin)
         const matchedSprint = meta.sprints.find(s => s.id === d.sprint_id)
         setForm(f => ({
           ...f,

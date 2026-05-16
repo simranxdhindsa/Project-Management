@@ -359,8 +359,20 @@ class ApiService {
       subsystems: { name: string; background: string; foreground: string }[]
       users: YouTrackUser[]
       sprints: { id: string; name: string; start: number; finish: number; isCompleted: boolean }[]
+      developer_configs: DeveloperSubsystemConfig[]
       errors: string[]
     }>('/youtrack/form-meta')
+  }
+
+  async getDeveloperConfigs() {
+    return this.request<DeveloperSubsystemConfig[]>('/developer-config')
+  }
+
+  async saveDeveloperConfigs(configs: DeveloperSubsystemConfig[]) {
+    return this.request('/developer-config', {
+      method: 'POST',
+      body: JSON.stringify(configs),
+    })
   }
 
   async createYouTrackIssue(params: {
@@ -1709,6 +1721,13 @@ export interface YouTrackUser {
   fullName: string
   email?: string
   avatarUrl?: string
+}
+
+export interface DeveloperSubsystemConfig {
+  developer_login: string
+  developer_name:  string
+  subsystems:      string[]
+  is_qa:           boolean
 }
 
 export interface YouTrackIssue {

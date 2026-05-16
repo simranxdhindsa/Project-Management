@@ -630,6 +630,16 @@ func RunMigrations() error {
 			'system'
 		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'ticket_parser')`,
 
+		// ── Developer → Subsystem config ─────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS developer_subsystem_configs (
+			developer_login VARCHAR(255) PRIMARY KEY,
+			developer_name  VARCHAR(255) NOT NULL DEFAULT '',
+			subsystems      TEXT[]       NOT NULL DEFAULT '{}',
+			is_qa           BOOLEAN      NOT NULL DEFAULT FALSE,
+			updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+		)`,
+		`ALTER TABLE developer_subsystem_configs ADD COLUMN IF NOT EXISTS is_qa BOOLEAN NOT NULL DEFAULT FALSE`,
+
 		// ── DayTrack: per-user daily time-sheet ──────────────────────────────────
 		`CREATE TABLE IF NOT EXISTS daytrack_entries (
 			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
