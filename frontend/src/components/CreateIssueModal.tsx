@@ -314,85 +314,88 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
             </div>
           </div>
 
-          {/* Description with AI button */}
-          <div className="ci-desc-wrap">
-            {descMode === 'markdown' ? (
-              <textarea
-                ref={descRef}
-                className="ci-desc-input"
-                placeholder="Describe the issue or paste raw text — AI button appears when you start typing"
-                value={form.description}
-                onChange={e => set('description', e.target.value)}
-              />
-            ) : (
-              <div
-                className="ci-desc-input ci-desc-preview"
-                onClick={() => { setDescMode('markdown'); setTimeout(() => descRef.current?.focus(), 50) }}
-              >
-                {form.description
-                  ? <pre className="ci-desc-pre">{form.description}</pre>
-                  : <span className="ci-desc-placeholder">Describe the issue or paste raw text — AI button appears when you start typing</span>
-                }
+          {/* Scrollable body: description + attach + validation */}
+          <div className="ci-left-body">
+            {/* Description with AI button */}
+            <div className="ci-desc-wrap">
+              {descMode === 'markdown' ? (
+                <textarea
+                  ref={descRef}
+                  className="ci-desc-input"
+                  placeholder="Describe the issue or paste raw text — AI button appears when you start typing"
+                  value={form.description}
+                  onChange={e => set('description', e.target.value)}
+                />
+              ) : (
+                <div
+                  className="ci-desc-input ci-desc-preview"
+                  onClick={() => { setDescMode('markdown'); setTimeout(() => descRef.current?.focus(), 50) }}
+                >
+                  {form.description
+                    ? <pre className="ci-desc-pre">{form.description}</pre>
+                    : <span className="ci-desc-placeholder">Describe the issue or paste raw text — AI button appears when you start typing</span>
+                  }
+                </div>
+              )}
+              {descHasText && (
+                <button
+                  className={`ci-ai-btn${aiLoading ? ' ci-ai-btn--loading' : ''}`}
+                  onClick={handleAiFill}
+                  disabled={aiLoading}
+                  title="Fill form with AI"
+                >
+                  {aiLoading
+                    ? <Loader2 size={13} className="animate-spin" />
+                    : <Sparkles size={13} />
+                  }
+                  {aiLoading ? 'Analysing…' : 'AI Fill'}
+                </button>
+              )}
+            </div>
+
+            {/* Attach files */}
+            <div
+              className="ci-attach-row"
+              onDragOver={e => e.preventDefault()}
+              onDrop={handleFileDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip size={14} />
+              <span>Click to <span className="ci-browse-link">browse</span> or drag files here</span>
+              <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFileSelect} />
+            </div>
+            {stagedFiles.length > 0 && (
+              <div className="ci-staged-files">
+                {stagedFiles.map((f, i) => (
+                  <div key={i} className="ci-staged-file">
+                    <Paperclip size={11} />
+                    <span>{f.name}</span>
+                    <button className="ci-staged-remove" onClick={() => removeFile(i)}><X size={11} /></button>
+                  </div>
+                ))}
               </div>
             )}
-            {descHasText && (
-              <button
-                className={`ci-ai-btn${aiLoading ? ' ci-ai-btn--loading' : ''}`}
-                onClick={handleAiFill}
-                disabled={aiLoading}
-                title="Fill form with AI"
-              >
-                {aiLoading
-                  ? <Loader2 size={13} className="animate-spin" />
-                  : <Sparkles size={13} />
-                }
-                {aiLoading ? 'Analysing…' : 'AI Fill'}
-              </button>
+
+            {/* Validation errors */}
+            {submitAttempted && (!form.type_name || !form.subsystem) && (
+              <div className="ci-error">
+                <AlertCircle size={13} />
+                {!form.type_name && !form.subsystem ? 'Type and Subsystem are required'
+                 : !form.type_name ? 'Type is required'
+                 : 'Subsystem is required'}
+              </div>
             )}
-          </div>
+            {error && <div className="ci-error"><AlertCircle size={13} /> {error}</div>}
 
-          {/* Attach files */}
-          <div
-            className="ci-attach-row"
-            onDragOver={e => e.preventDefault()}
-            onDrop={handleFileDrop}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip size={14} />
-            <span>Click to <span className="ci-browse-link">browse</span> or drag files here</span>
-            <input ref={fileInputRef} type="file" multiple style={{ display: 'none' }} onChange={handleFileSelect} />
-          </div>
-          {stagedFiles.length > 0 && (
-            <div className="ci-staged-files">
-              {stagedFiles.map((f, i) => (
-                <div key={i} className="ci-staged-file">
-                  <Paperclip size={11} />
-                  <span>{f.name}</span>
-                  <button className="ci-staged-remove" onClick={() => removeFile(i)}><X size={11} /></button>
-                </div>
-              ))}
+            {/* Similar issues */}
+            <div style={{ marginTop: '0.4rem' }}>
+              <button className="ci-tb-btn" style={{ gap: '5px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                <ChevronDown size={13} /> Similar Issues and Articles
+              </button>
             </div>
-          )}
-
-          {/* Validation errors */}
-          {submitAttempted && (!form.type_name || !form.subsystem) && (
-            <div className="ci-error">
-              <AlertCircle size={13} />
-              {!form.type_name && !form.subsystem ? 'Type and Subsystem are required'
-               : !form.type_name ? 'Type is required'
-               : 'Subsystem is required'}
-            </div>
-          )}
-          {error && <div className="ci-error"><AlertCircle size={13} /> {error}</div>}
-
-          {/* Similar issues */}
-          <div style={{ marginTop: '0.4rem' }}>
-            <button className="ci-tb-btn" style={{ gap: '5px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              <ChevronDown size={13} /> Similar Issues and Articles
-            </button>
           </div>
 
-          {/* Footer actions */}
+          {/* Footer actions — always pinned to bottom */}
           <div className="ci-actions">
             <button className="ci-btn-create" onClick={handleCreate} disabled={!canCreate}>
               {created ? <><Check size={14} /> Created</>

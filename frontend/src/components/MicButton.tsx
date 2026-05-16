@@ -26,6 +26,7 @@ export default function MicButton({ onResult, onError, className = '' }: MicButt
   const [state, setState] = useState<'idle' | 'recording' | 'transcribing'>('idle')
   const mrRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const startTimeRef = useRef<number>(0)
 
   function startBrowserFallback() {
     const SR = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition
@@ -57,18 +58,30 @@ export default function MicButton({ onResult, onError, className = '' }: MicButt
       mr.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data) }
       mr.onstop = async () => {
         stream.getTracks().forEach(t => t.stop())
+        const duration = Date.now() - startTimeRef.current
+        if (duration < 400) {
+          onError?.('Recording too short — please hold and speak, then tap to stop')
+          setState('idle')
+          return
+        }
         setState('transcribing')
         const blob = new Blob(chunksRef.current, { type: mr.mimeType })
         try {
           const text = await transcribeBlob(blob)
           if (text) onResult(text.trim())
-          else onError?.('Empty transcription')
-        } catch {
-          onError?.('Transcription failed')
+          else onError?.('No speech detected — please try again')
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : ''
+          if (msg.includes('400') || msg.includes('empty') || msg.includes('no audio')) {
+            onError?.('No audio detected — please try again')
+          } else {
+            onError?.('Transcription failed — please try again')
+          }
         }
         setState('idle')
       }
       mr.start()
+      startTimeRef.current = Date.now()
       mrRef.current = mr
       setState('recording')
     } catch {

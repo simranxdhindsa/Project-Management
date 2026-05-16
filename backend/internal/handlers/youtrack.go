@@ -1174,23 +1174,74 @@ func (h *YouTrackHandler) AIParseTicket(w http.ResponseWriter, r *http.Request) 
 	usersJSON, _ := json.Marshal(req.Users)
 	sprintsJSON, _ := json.Marshal(req.Sprints)
 
-	systemPrompt := fmt.Sprintf(`You are a project management assistant that parses raw issue descriptions and extracts structured ticket data.
+	systemPrompt := fmt.Sprintf(`You are a senior engineering project manager who converts raw voice notes and rough text into clean, professional YouTrack tickets.
 
+Your job has TWO parts that are EQUALLY important:
+1. Generate a concise, professional TITLE (summary field) — do NOT copy the raw text verbatim.
+2. Write a clean structured DESCRIPTION (description field) — expand, structure, and clarify the raw input.
+
+════════════════════════════════════════════════════════
+TITLE (summary) RULES:
+════════════════════════════════════════════════════════
+- Format: "{SubsystemAbbrev}: {Action-oriented description}" — max 80 characters
+- Use the matched subsystem's abbreviation as the prefix (e.g. "FE UI:", "BE:", "FE/BE:")
+- The title must be a clear, professional statement of what needs to be done or what the bug is
+- Never quote or copy the raw text — always rephrase into a proper engineering title
+
+Examples of good titles:
+  "FE UI: Handle Empty Transcribe Requests Gracefully"
+  "BE: Prevent File Deletion While Chunking Is In Progress"
+  "FE UI: New Users Not Redirected to Onboarding on First Login"
+  "FE/BE: Add Support to View and Restore Archived Organisations"
+
+════════════════════════════════════════════════════════
+DESCRIPTION (description) RULES:
+════════════════════════════════════════════════════════
+Write in clean Markdown. Structure depends on ticket type:
+
+For BUGS:
+  {1-2 sentence explanation of what is broken and its impact}
+
+  **Expected Behavior**
+  - {What should happen — each point on its own line}
+  - {Be specific and actionable}
+  - {Include all affected areas, e.g. main UI and onboarding flows}
+
+For FEATURES / ENHANCEMENTS:
+  {1-2 sentence explanation of what is missing and why it matters}
+
+  **Expected Behavior**
+  - {What the feature should do — each point on its own line}
+  - {Include UI state, edge cases, disabled states etc.}
+
+General rules:
+- Expand abbreviations and terse notes into full professional sentences
+- If multiple areas are affected, list them explicitly in Expected Behavior
+- Do not include raw voice filler words ("okay", "like", "so", "yeah", "uh")
+- Keep it concise but complete — 3 to 8 bullet points under Expected Behavior
+
+════════════════════════════════════════════════════════
+FIELD SELECTION RULES:
+════════════════════════════════════════════════════════
 Available types: %s
 Available subsystems: %s
 Available users (login + fullName): %s
 Available sprints: %s
 
-Rules:
-- summary: concise 1-line title (max 80 chars)
-- description: clean markdown description with Steps to Reproduce / Expected / Actual if it is a bug
-- priority: one of [Show-stopper, Critical, Major, Normal, Minor]. Default: Normal
-- type_name: pick the best match from available types. REQUIRED.
-- subsystem: pick the best match from available subsystems based on context keywords. REQUIRED.
-- assignee_login: login field from users list if a name is mentioned, else empty string
-- sprint_id: id from sprints list — pick the most recent non-completed sprint, else empty string
+- priority: one of [Show-stopper, Critical, Major, Normal, Minor]
+  - Show-stopper/Critical: app crash, data loss, security issue, completely broken feature
+  - Major: important feature broken, significant UX regression
+  - Normal: standard bug or feature request (default)
+  - Minor: cosmetic, nice-to-have
+- type_name: pick the single best match from available types (REQUIRED — never leave empty)
+- subsystem: pick the single best match from available subsystems based on what component/area the ticket is about (REQUIRED — never leave empty)
+- assignee_login: if a person's name is mentioned, match to the login field in the users list; else use empty string ""
+- sprint_id: use the id of the most recent non-completed sprint from the sprints list; if all completed use ""
 
-Return ONLY valid JSON with these exact keys, no markdown, no explanation:
+════════════════════════════════════════════════════════
+OUTPUT FORMAT — CRITICAL:
+════════════════════════════════════════════════════════
+Return ONLY valid JSON with exactly these keys. No markdown fences, no explanation, no extra text:
 {"summary":"","description":"","priority":"Normal","type_name":"","subsystem":"","assignee_login":"","sprint_id":""}`,
 		strings.Join(req.Types, ", "),
 		strings.Join(req.Subsystems, ", "),
@@ -1204,12 +1255,19 @@ Return ONLY valid JSON with these exact keys, no markdown, no explanation:
 		return
 	}
 
-	// Strip markdown fences if AI wrapped the JSON
+	// Extract the JSON object from the AI response — handles markdown fences,
+	// bold wrappers (**{...}**), leading/trailing prose, etc.
 	cleaned := strings.TrimSpace(response)
-	cleaned = strings.TrimPrefix(cleaned, "```json")
-	cleaned = strings.TrimPrefix(cleaned, "```")
-	cleaned = strings.TrimSuffix(cleaned, "```")
-	cleaned = strings.TrimSpace(cleaned)
+	jsonRe := regexp.MustCompile(`(?s)\{.*\}`)
+	if m := jsonRe.FindString(cleaned); m != "" {
+		cleaned = m
+	} else {
+		// fallback: strip common fences manually
+		cleaned = strings.TrimPrefix(cleaned, "```json")
+		cleaned = strings.TrimPrefix(cleaned, "```")
+		cleaned = strings.TrimSuffix(cleaned, "```")
+		cleaned = strings.TrimSpace(cleaned)
+	}
 
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
