@@ -188,6 +188,8 @@ func main() {
 	youtrackRoutes.HandleFunc("/priorities", youtrackHandler.GetPriorities).Methods("GET")
 	youtrackRoutes.HandleFunc("/type-field-values", youtrackHandler.GetTypeFieldValues).Methods("GET")
 	youtrackRoutes.HandleFunc("/users", youtrackHandler.GetUsers).Methods("GET")
+	youtrackRoutes.HandleFunc("/form-meta", youtrackHandler.GetIssueFormMeta).Methods("GET")
+	youtrackRoutes.HandleFunc("/ai/parse-ticket", youtrackHandler.AIParseTicket).Methods("POST")
 	youtrackRoutes.HandleFunc("/issues", youtrackHandler.GetIssues).Methods("GET")
 	youtrackRoutes.HandleFunc("/issues", youtrackHandler.CreateIssue).Methods("POST")
 	youtrackRoutes.HandleFunc("/issues/grouped-by-assignee", youtrackHandler.GetIssuesGroupedByAssignee).Methods("GET") // Must be before {issue_id} wildcard
@@ -195,6 +197,7 @@ func main() {
 	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.UpdateIssue).Methods("PUT", "PATCH")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}", youtrackHandler.DeleteIssue).Methods("DELETE")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/state", youtrackHandler.UpdateIssueState).Methods("PATCH")
+	youtrackRoutes.HandleFunc("/issues/{issue_id}/attachments", youtrackHandler.UploadIssueAttachment).Methods("POST")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/comments", youtrackHandler.GetIssueComments).Methods("GET")
 	youtrackRoutes.HandleFunc("/issues/{issue_id}/comments", youtrackHandler.AddIssueComment).Methods("POST")
 	// Proxy is public (no JWT) — browser <img> tags can't send Authorization headers.

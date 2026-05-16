@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
@@ -792,14 +793,16 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Summary             string `json:"summary"`
-		Description         string `json:"description"`
-		State               string `json:"state,omitempty"`
-		Priority            string `json:"priority,omitempty"`
-		AssigneeLogin       string `json:"assignee_login,omitempty"`
-		Subsystem           string `json:"subsystem,omitempty"`
-		DueDate             *int64 `json:"due_date,omitempty"`       // Unix ms timestamp
-		EstimationMinutes   *int   `json:"estimation_minutes,omitempty"`
+		Summary           string `json:"summary"`
+		Description       string `json:"description"`
+		State             string `json:"state,omitempty"`
+		Priority          string `json:"priority,omitempty"`
+		TypeName          string `json:"type_name,omitempty"`
+		AssigneeLogin     string `json:"assignee_login,omitempty"`
+		Subsystem         string `json:"subsystem,omitempty"`
+		SprintID          string `json:"sprint_id,omitempty"`
+		DueDate           *int64 `json:"due_date,omitempty"`
+		EstimationMinutes *int   `json:"estimation_minutes,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -830,6 +833,13 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			Type:  "SingleEnumIssueCustomField",
 			Name:  "Priority",
 			Value: map[string]string{"name": req.Priority},
+		})
+	}
+	if req.TypeName != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "SingleEnumIssueCustomField",
+			Name:  "Type",
+			Value: map[string]string{"name": req.TypeName},
 		})
 	}
 	if req.AssigneeLogin != "" {
@@ -868,6 +878,16 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to create issue: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Assign to sprint if requested (best-effort — don't fail the whole create)
+	if req.SprintID != "" && issue != nil && issue.ID != "" {
+		go func() {
+			ctx2 := context.Background()
+			if addErr := client.AddIssueToSprint(ctx2, req.SprintID, issue.ID); addErr != nil {
+				log.Printf("failed to add issue %s to sprint %s: %v", issue.ID, req.SprintID, addErr)
+			}
+		}()
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -965,6 +985,242 @@ func (h *YouTrackHandler) UpdateIssueState(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": "State updated successfully",
+	})
+}
+
+// GetIssueFormMeta returns all dynamic data needed to render the Create Issue form in one call:
+// states, priorities, types, subsystems, users, and sprints — all fetched in parallel.
+func (h *YouTrackHandler) GetIssueFormMeta(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	type result struct {
+		states     []youtrack.State
+		priorities []youtrack.PriorityValue
+		types      []youtrack.PriorityValue
+		subsystems []youtrack.PriorityValue
+		users      []youtrack.User
+		sprints    []youtrack.Sprint
+	}
+	var res result
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	errs := make([]string, 0)
+
+	fetch := func(fn func() error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if e := fn(); e != nil {
+				mu.Lock()
+				errs = append(errs, e.Error())
+				mu.Unlock()
+			}
+		}()
+	}
+
+	fetch(func() error {
+		v, e := client.GetStates(r.Context())
+		if e == nil {
+			mu.Lock(); res.states = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetPriorities(r.Context())
+		if e == nil {
+			mu.Lock(); res.priorities = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetCustomFieldValues(r.Context(), "Type")
+		if e == nil {
+			mu.Lock(); res.types = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetCustomFieldValues(r.Context(), "Subsystem")
+		if e == nil {
+			mu.Lock(); res.subsystems = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetUsers(r.Context())
+		if e == nil {
+			// Proxy avatar URLs
+			scheme := "http"
+			if r.TLS != nil {
+				scheme = "https"
+			}
+			base := scheme + "://" + r.Host + "/api/youtrack/proxy?url="
+			for i := range v {
+				if v[i].AvatarUrl != "" {
+					v[i].AvatarUrl = base + url.QueryEscape(base64.StdEncoding.EncodeToString([]byte(v[i].AvatarUrl)))
+				}
+			}
+			mu.Lock(); res.users = v; mu.Unlock()
+		}
+		return e
+	})
+	fetch(func() error {
+		v, e := client.GetSprints(r.Context())
+		if e == nil {
+			mu.Lock(); res.sprints = v; mu.Unlock()
+		}
+		return e
+	})
+
+	wg.Wait()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"states":     res.states,
+			"priorities": res.priorities,
+			"types":      res.types,
+			"subsystems": res.subsystems,
+			"users":      res.users,
+			"sprints":    res.sprints,
+			"errors":     errs,
+		},
+	})
+}
+
+// UploadIssueAttachment receives a multipart file from the frontend and proxies it to YouTrack.
+func (h *YouTrackHandler) UploadIssueAttachment(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	issueID := mux.Vars(r)["issue_id"]
+	if issueID == "" {
+		http.Error(w, "issue_id required", http.StatusBadRequest)
+		return
+	}
+	client, err := h.getYouTrackClient(r.Context())
+	if err != nil || client == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		http.Error(w, "Failed to parse multipart: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "No file in request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	if err := client.UploadAttachment(r.Context(), issueID, header.Filename, mimeType, content); err != nil {
+		http.Error(w, "Failed to upload attachment: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// AIParseTicket uses the AI provider to extract structured issue fields from raw natural-language text.
+func (h *YouTrackHandler) AIParseTicket(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		RawText    string                   `json:"raw_text"`
+		Users      []map[string]string      `json:"users"`      // [{login, fullName}]
+		Types      []string                 `json:"types"`      // ["Bug","Feature",...]
+		Subsystems []string                 `json:"subsystems"` // ["FE UI","BE API",...]
+		Sprints    []map[string]interface{} `json:"sprints"`    // [{id, name}]
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.RawText) == "" {
+		http.Error(w, "raw_text is required", http.StatusBadRequest)
+		return
+	}
+
+	usersJSON, _ := json.Marshal(req.Users)
+	sprintsJSON, _ := json.Marshal(req.Sprints)
+
+	systemPrompt := fmt.Sprintf(`You are a project management assistant that parses raw issue descriptions and extracts structured ticket data.
+
+Available types: %s
+Available subsystems: %s
+Available users (login + fullName): %s
+Available sprints: %s
+
+Rules:
+- summary: concise 1-line title (max 80 chars)
+- description: clean markdown description with Steps to Reproduce / Expected / Actual if it is a bug
+- priority: one of [Show-stopper, Critical, Major, Normal, Minor]. Default: Normal
+- type_name: pick the best match from available types. REQUIRED.
+- subsystem: pick the best match from available subsystems based on context keywords. REQUIRED.
+- assignee_login: login field from users list if a name is mentioned, else empty string
+- sprint_id: id from sprints list — pick the most recent non-completed sprint, else empty string
+
+Return ONLY valid JSON with these exact keys, no markdown, no explanation:
+{"summary":"","description":"","priority":"Normal","type_name":"","subsystem":"","assignee_login":"","sprint_id":""}`,
+		strings.Join(req.Types, ", "),
+		strings.Join(req.Subsystems, ", "),
+		string(usersJSON),
+		string(sprintsJSON),
+	)
+
+	response, err := ai.QueryWithHistory(r.Context(), systemPrompt, nil, req.RawText)
+	if err != nil {
+		http.Error(w, "AI query failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Strip markdown fences if AI wrapped the JSON
+	cleaned := strings.TrimSpace(response)
+	cleaned = strings.TrimPrefix(cleaned, "```json")
+	cleaned = strings.TrimPrefix(cleaned, "```")
+	cleaned = strings.TrimSuffix(cleaned, "```")
+	cleaned = strings.TrimSpace(cleaned)
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
+		http.Error(w, "AI returned invalid JSON: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    parsed,
 	})
 }
 
