@@ -799,6 +799,7 @@ export default function Dashboard() {
           <SlackIntelligencePage
             initialTab={slackTab}
             onTabChange={(tab) => navigate(`/slack/${tab}`)}
+            onOpenPMAssistant={() => setChatOpen(true)}
           />
         )}
 

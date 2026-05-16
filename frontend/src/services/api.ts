@@ -207,6 +207,9 @@ class ApiService {
     return this.request<{
       connected: boolean
       configured: boolean
+      base_url?: string
+      project_id?: string
+      board_id?: string
       error?: string
     }>('/youtrack/status')
   }
@@ -645,6 +648,50 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(params),
     })
+  }
+
+  // ── Slack Intelligence v2 ──────────────────────────────────────────────────
+  async slackReplyToThread(channelId: string, threadTs: string, text: string, mentionTs?: string) {
+    return this.request<{ ok: boolean }>('/slack/reply', {
+      method: 'POST',
+      body: JSON.stringify({ channel_id: channelId, thread_ts: threadTs, text, mention_ts: mentionTs }),
+    })
+  }
+
+  async getSlackThreadReplies(channelId: string, threadTs: string) {
+    return this.request<{ replies: Array<{ sender_name: string; text: string; timestamp: string }> }>(
+      `/slack/thread-replies?channel_id=${encodeURIComponent(channelId)}&thread_ts=${encodeURIComponent(threadTs)}`
+    )
+  }
+
+  async pinSlackMention(messageTs: string, pinned: boolean) {
+    return this.request<{ ok: boolean }>(`/slack/mentions/${encodeURIComponent(messageTs)}/pin`, {
+      method: 'POST',
+      body: JSON.stringify({ pinned }),
+    })
+  }
+
+  async getSlackTemplates() {
+    return this.request<{ templates: Array<{ id: string; body: string; sort_order: number }> }>('/slack/templates')
+  }
+
+  async createSlackTemplate(body: string) {
+    return this.request<{ ok: boolean; id: string }>('/slack/templates', {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    })
+  }
+
+  async deleteSlackTemplate(id: string) {
+    return this.request<{ ok: boolean }>(`/slack/templates/${id}`, { method: 'DELETE' })
+  }
+
+  async getSlackSavedItems() {
+    return this.request<{ items: Array<{ type: string; channel_id: string; text: string; user: string; ts: string }> }>('/slack/saved-items')
+  }
+
+  async getSlackPinnedMentions() {
+    return this.request<{ mentions: SlackMention[] }>('/slack/mentions?pinned=true')
   }
 
   async analyzeSlackMessages(projectId: string) {
@@ -1698,6 +1745,7 @@ export interface SlackMention {
   replied: boolean
   reply_checked_at?: string
   snoozed_until?: string
+  pinned: boolean
   created_at: string
 }
 
