@@ -618,6 +618,18 @@ func RunMigrations() error {
 			'[]', true, 'system'
 		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'deployment_report')`,
 
+		// Seed default Ticket Parser bot config (editable instructions; dynamic field values injected at runtime).
+		`INSERT INTO bot_configs (name, description, bot_type, prompt, variables, is_active, created_by)
+		SELECT
+			'Ticket Parser',
+			'Instructions used when the AI Fill button converts raw text into a structured YouTrack ticket. The available types, subsystems, users, and sprints are injected automatically at runtime — edit only the instruction rules here.',
+			'ticket_parser',
+			E'You are a project management assistant. Convert raw text into a YouTrack ticket.\n\nRESPOND ONLY WITH A SINGLE JSON OBJECT. No explanation, no markdown, no extra text — just JSON.\n\nTitle rules: "{subsystem}: {concise action-oriented description}" — max 80 chars, never copy raw text verbatim. The subsystem prefix MUST be copied EXACTLY from the available subsystems list — never invent or abbreviate. Do NOT include a priority prefix in the title. Examples: "FE UI: Handle Empty Transcribe Requests Gracefully", "FE MC: Courses Tab Fails to Open", "BE: Prevent Deletion During File Processing".\n\nDescription rules: 1-2 sentence overview of what is broken or missing, then "\\n\\n**Expected Behavior**\\n- bullet\\n- bullet". Remove filler words (okay, like, so, yeah, uh). For bugs: what is broken + what should happen. For features: what is missing + what should happen.\n\nPriority: Show-stopper=crash/data-loss/security, Critical=completely broken feature, Major=significant regression or important feature broken, Normal=standard bug or feature request, Minor=cosmetic.\n\nCRITICAL: subsystem MUST exactly match one of the available subsystems — never invent one. type_name must exactly match one of the available types. Both are REQUIRED.\nassignee_login: match login from users list only if a person''s name is mentioned, else "".\nsprint_id: id of the most recent non-completed sprint from the sprints list, else "".',
+			'[]',
+			true,
+			'system'
+		WHERE NOT EXISTS (SELECT 1 FROM bot_configs WHERE bot_type = 'ticket_parser')`,
+
 		// ── DayTrack: per-user daily time-sheet ──────────────────────────────────
 		`CREATE TABLE IF NOT EXISTS daytrack_entries (
 			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),

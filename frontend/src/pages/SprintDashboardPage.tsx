@@ -10,6 +10,7 @@ import type {
   SprintSummary, SprintBoardStatusResponse, YouTrackIssue,
 } from '@/services/api'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
+import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '@/components/HoverCard'
 import '../styles/pages/dashboard.css'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -158,14 +159,176 @@ function Countdown({ finishMs }: { finishMs: number }) {
   )
 }
 
+// ─── Hover content builders ───────────────────────────────────────────────────
+
+function devHoverContent(dev: { name: string; active: SprintBoardIssue[]; blocked: SprintBoardIssue[]; done: SprintBoardIssue[]; bounceCount: number; totalActiveHours: number }) {
+  const total = dev.active.length + dev.blocked.length + dev.done.length
+  const overdue = dev.active.filter(i => i.is_delayed).length
+  return (
+    <div>
+      <div className="hc-title">{dev.name}</div>
+      <div className="hc-subtitle">{total} ticket{total !== 1 ? 's' : ''} this sprint</div>
+      <HCDivider />
+      <HCRow label="Active"  value={dev.active.length}  accent={dev.active.length > 4 ? 'warn' : undefined} />
+      <HCRow label="Blocked" value={dev.blocked.length} accent={dev.blocked.length > 0 ? 'danger' : undefined} />
+      <HCRow label="Done"    value={dev.done.length}    accent={dev.done.length > 0 ? 'ok' : undefined} />
+      {dev.bounceCount > 0 && <HCRow label="Bounces" value={dev.bounceCount} accent="warn" />}
+      {overdue > 0 && <HCRow label="Overdue" value={overdue} accent="danger" />}
+      {dev.totalActiveHours > 0 && <HCRow label="Dev hours" value={fmtHours(dev.totalActiveHours)} />}
+      {total > 0 && (
+        <>
+          <HCDivider />
+          <div className="hc-stack">
+            {dev.active.length  > 0 && <div className="hc-stack-seg hc-stack-seg--active"  style={{ flex: dev.active.length }}  />}
+            {dev.blocked.length > 0 && <div className="hc-stack-seg hc-stack-seg--blocked" style={{ flex: dev.blocked.length }} />}
+            {dev.done.length    > 0 && <div className="hc-stack-seg hc-stack-seg--done"    style={{ flex: dev.done.length }}    />}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function issueHoverContent(iss: SprintBoardIssue) {
+  const cycleLabel = iss.cycle_time_hours > 0 ? fmtHours(iss.cycle_time_hours) : null
+  const devLabel   = iss.total_active_hours > 0 ? fmtHours(iss.total_active_hours) : null
+  const overdueAccent = iss.overdue_level === 'deadline' ? 'danger'
+    : (iss.overdue_level === 'sprint' || iss.is_delayed) ? 'warn' : undefined
+  const hasVerif = iss.verified_on_dev || iss.verified_on_stage || iss.verified_on_prod
+  return (
+    <div>
+      <div className="hc-title">{iss.idReadable}</div>
+      <div className="hc-subtitle">{iss.summary}</div>
+      <HCDivider />
+      {iss.hours_in_state > 0 && <HCRow label="In state" value={fmtHours(iss.hours_in_state)} accent={overdueAccent} />}
+      {cycleLabel && <HCRow label="Cycle" value={cycleLabel} />}
+      {devLabel   && <HCRow label="Dev"   value={devLabel} />}
+      {iss.bounce_count > 0 && <HCRow label="Bounces" value={`${iss.bounce_count}×`} accent="warn" />}
+      {iss.assignee && <HCRow label="Assignee" value={iss.assignee} />}
+      {hasVerif && (
+        <>
+          <HCDivider />
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {iss.verified_on_dev   && <HCBadge label={`DEV✓`} variant="dev" />}
+            {iss.verified_on_stage && <HCBadge label={`STG✓`} variant="stg" />}
+            {iss.verified_on_prod  && <HCBadge label={`PRD✓`} variant="prd" />}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function kpiHoverContent(type: string, summary: SprintSummary, columns: SprintBoardColumn[]) {
+  if (type === 'completion') {
+    const remaining = summary.total_issues - summary.done_issues
+    return (
+      <div>
+        <div className="hc-title">Sprint Completion</div>
+        <HCDivider />
+        <HCRow label="Done"      value={summary.done_issues} accent="ok" />
+        <HCRow label="Remaining" value={remaining} accent={remaining > 0 ? 'warn' : undefined} />
+        <HCRow label="Total"     value={summary.total_issues} />
+        <div style={{ marginTop: 6 }}>
+          <HCBar pct={summary.completion_pct} color="#4ade80" />
+        </div>
+      </div>
+    )
+  }
+  if (type === 'blocked') {
+    const blocked = columns.flatMap(c => c.issues).filter(i => i.current_state?.toLowerCase().includes('block')).slice(0, 4)
+    return (
+      <div>
+        <div className="hc-title">{summary.blocked_count} Blocked</div>
+        <div className="hc-subtitle">Tickets awaiting external unblocking</div>
+        {blocked.length > 0 && (
+          <>
+            <HCDivider />
+            <div className="hc-issue-list">
+              {blocked.map(i => (
+                <div key={i.idReadable} className="hc-issue-item">
+                  <div className="hc-issue-dot hc-issue-dot--blocked" />
+                  <span className="hc-issue-id">{i.idReadable}</span>
+                  <span className="hc-issue-summary">{i.summary}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+  if (type === 'bounced') {
+    const bounced = columns.flatMap(c => c.issues).filter(i => i.bounce_count > 0).sort((a,b) => b.bounce_count - a.bounce_count).slice(0, 4)
+    return (
+      <div>
+        <div className="hc-title">{summary.bounced_count} Bounced</div>
+        <div className="hc-subtitle">Tickets moved backwards</div>
+        {bounced.length > 0 && (
+          <>
+            <HCDivider />
+            <div className="hc-issue-list">
+              {bounced.map(i => (
+                <div key={i.idReadable} className="hc-issue-item">
+                  <div className="hc-issue-dot hc-issue-dot--atrisk" />
+                  <span className="hc-issue-id">{i.idReadable}</span>
+                  <span className="hc-issue-summary">↩{i.bounce_count} {i.summary}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+  if (type === 'overdue') {
+    const overdue = columns.flatMap(c => c.issues).filter(i => i.is_delayed).sort((a,b) => urgencyScore(b) - urgencyScore(a)).slice(0, 4)
+    return (
+      <div>
+        <div className="hc-title">{summary.overdue_count} Overdue</div>
+        <div className="hc-subtitle">Tickets past SLA or sprint deadline</div>
+        {overdue.length > 0 && (
+          <>
+            <HCDivider />
+            <div className="hc-issue-list">
+              {overdue.map(i => (
+                <div key={i.idReadable} className="hc-issue-item">
+                  <div className={`hc-issue-dot ${i.overdue_level === 'deadline' ? 'hc-issue-dot--overdue' : 'hc-issue-dot--atrisk'}`} />
+                  <span className="hc-issue-id">{i.idReadable}</span>
+                  <span className="hc-issue-summary">{i.summary}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+  if (type === 'sprint') {
+    const isOver = Date.now() > summary.sprint_finish_ms
+    const daysLeft = Math.floor((summary.sprint_finish_ms - Date.now()) / 86400000)
+    return (
+      <div>
+        <div className="hc-title">Sprint Timeline</div>
+        <HCDivider />
+        <HCRow label="Status"    value={isOver ? 'Overdue' : `${daysLeft}d remaining`} accent={isOver ? 'danger' : daysLeft < 2 ? 'warn' : undefined} />
+        <HCRow label="End date"  value={new Date(summary.sprint_finish_ms).toLocaleDateString()} />
+        <HCRow label="Done"      value={`${summary.completion_pct}%`} accent="ok" />
+      </div>
+    )
+  }
+  return null
+}
+
 // ─── KPI Summary Bar (shared across all views) ────────────────────────────────
 
 type DbKpiDrawer = 'completion' | 'blocked' | 'bounced' | 'overdue' | 'in-progress' | 'hotfix' | 'sprint' | null
 
-function KpiBar({ summary, activeDrawer, onKpiClick }: {
+function KpiBar({ summary, activeDrawer, onKpiClick, columns = [] }: {
   summary: SprintSummary
   activeDrawer: DbKpiDrawer
   onKpiClick: (type: DbKpiDrawer) => void
+  columns?: SprintBoardColumn[]
 }) {
   const pct = toPct(summary.completion_pct)
   const isOverdue = summary.sprint_finish_ms > 0 && Date.now() > summary.sprint_finish_ms
@@ -174,6 +337,7 @@ function KpiBar({ summary, activeDrawer, onKpiClick }: {
   const tog = (type: DbKpiDrawer) => onKpiClick(activeDrawer === type ? null : type)
   return (
     <div className="db-kpi-bar">
+      <HoverCard content={kpiHoverContent('completion', summary, columns)} delay={400} maxWidth={220}>
       <button className={`db-kpi-bar-item db-kpi-bar-item--primary db-kpi-bar-item--btn${activeDrawer === 'completion' ? ' db-kpi-bar-item--active' : ''}`}
         onClick={() => tog('completion')}>
         <span className="db-kpi-bar-val">{summary.done_issues}/{summary.total_issues}</span>
@@ -183,26 +347,33 @@ function KpiBar({ summary, activeDrawer, onKpiClick }: {
         </div>
         <span className="db-kpi-bar-pct">{pct}%</span>
       </button>
+      </HoverCard>
 
       <div className="db-kpi-bar-sep" />
 
+      <HoverCard content={kpiHoverContent('blocked', summary, columns)} delay={400} maxWidth={260}>
       <button className={`db-kpi-bar-item db-kpi-bar-item--btn${summary.blocked_count > 0 ? ' db-kpi-bar-item--danger' : ''}${activeDrawer === 'blocked' ? ' db-kpi-bar-item--active' : ''}`}
         onClick={() => tog('blocked')}>
         <span className="db-kpi-bar-val">{summary.blocked_count}</span>
         <span className="db-kpi-bar-label">Blocked</span>
       </button>
+      </HoverCard>
 
+      <HoverCard content={kpiHoverContent('bounced', summary, columns)} delay={400} maxWidth={260}>
       <button className={`db-kpi-bar-item db-kpi-bar-item--btn${summary.bounced_count > 0 ? ' db-kpi-bar-item--warn' : ''}${activeDrawer === 'bounced' ? ' db-kpi-bar-item--active' : ''}`}
         onClick={() => tog('bounced')}>
         <span className="db-kpi-bar-val">{summary.bounced_count}</span>
         <span className="db-kpi-bar-label">Bounced</span>
       </button>
+      </HoverCard>
 
+      <HoverCard content={kpiHoverContent('overdue', summary, columns)} delay={400} maxWidth={260}>
       <button className={`db-kpi-bar-item db-kpi-bar-item--btn${summary.overdue_count > 0 ? ' db-kpi-bar-item--danger' : ''}${activeDrawer === 'overdue' ? ' db-kpi-bar-item--active' : ''}`}
         onClick={() => tog('overdue')}>
         <span className="db-kpi-bar-val">{summary.overdue_count}</span>
         <span className="db-kpi-bar-label">Overdue</span>
       </button>
+      </HoverCard>
 
       <button className={`db-kpi-bar-item db-kpi-bar-item--info db-kpi-bar-item--btn${activeDrawer === 'in-progress' ? ' db-kpi-bar-item--active' : ''}`}
         onClick={() => tog('in-progress')}>
@@ -221,11 +392,13 @@ function KpiBar({ summary, activeDrawer, onKpiClick }: {
       {summary.sprint_finish_ms > 0 && (
         <>
           <div className="db-kpi-bar-sep" />
+          <HoverCard content={kpiHoverContent('sprint', summary, columns)} delay={400} maxWidth={230}>
           <button className={`db-kpi-bar-item db-kpi-bar-item--btn${activeDrawer === 'sprint' ? ' db-kpi-bar-item--active' : ''}${isOverdue ? ' db-kpi-bar-item--danger' : isUrgent ? ' db-kpi-bar-item--warn' : ''}`}
             onClick={() => tog('sprint')}>
             <span className="db-kpi-bar-val">{fmtCountdown(summary.sprint_finish_ms)}</span>
             <span className="db-kpi-bar-label">Sprint ends</span>
           </button>
+          </HoverCard>
         </>
       )}
     </div>
@@ -471,7 +644,8 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
         {developers.map(dev => {
           const total = dev.active.length + dev.blocked.length + dev.done.length
           return (
-            <div key={dev.name} className="db-mc-dev-card">
+            <HoverCard key={dev.name} content={devHoverContent(dev)} delay={350} maxWidth={230}>
+            <div className="db-mc-dev-card">
               <div
                 className="db-mc-dev-header"
                 onClick={() => setExpandedDev(expandedDev === dev.name ? null : dev.name)}
@@ -515,6 +689,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
                 </div>
               )}
             </div>
+            </HoverCard>
           )
         })}
       </div>
@@ -527,7 +702,8 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
             {atRisk.length > 0 && <span className="db-mc-section-count">{atRisk.length}</span>}
           </div>
           {atRisk.slice(0, 4).map(iss => (
-            <div key={iss.idReadable} className={`db-mc-focus-card ${urgencyClass(iss)}`}>
+            <HoverCard key={iss.idReadable} content={issueHoverContent(iss)} maxWidth={270} delay={300}>
+            <div className={`db-mc-focus-card ${urgencyClass(iss)}`}>
               <div className="db-mc-focus-top">
                 <PriPill priority={iss.priority} />
                 <span
@@ -555,6 +731,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
                 <VerifBadges dev={iss.verified_on_dev} stg={iss.verified_on_stage} prd={iss.verified_on_prod} />
               </div>
             </div>
+            </HoverCard>
           ))}
           {atRisk.length === 0 && (
             <div style={{ fontSize: '0.72rem', color: 'var(--color-success)', padding: '8px 0' }}>
@@ -1231,7 +1408,7 @@ export function SprintDashboardPage() {
       {/* KPI bar — shown when data is loaded or loading */}
       {loading && <SkeletonKpiBar />}
       {!loading && boardData && (
-        <KpiBar summary={boardData.summary} activeDrawer={kpiDrawer} onKpiClick={setKpiDrawer} />
+        <KpiBar summary={boardData.summary} activeDrawer={kpiDrawer} onKpiClick={setKpiDrawer} columns={boardData.columns} />
       )}
 
       {/* KPI Drawer */}

@@ -46,5 +46,8 @@
 @import "./styles/pages/theme-customizer.css";
 @import "./styles/pages/theme-settings.css";
 
+/* ── Shared component overlays ── */
+@import "./styles/components/hover-card.css";
+
 /* ── Light mode theme overrides (must be last) ── */
 @import "./styles/theme-light.css";

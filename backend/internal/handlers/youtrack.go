@@ -1174,75 +1174,47 @@ func (h *YouTrackHandler) AIParseTicket(w http.ResponseWriter, r *http.Request) 
 	usersJSON, _ := json.Marshal(req.Users)
 	sprintsJSON, _ := json.Marshal(req.Sprints)
 
-	systemPrompt := fmt.Sprintf(`You are a senior engineering project manager who converts raw voice notes and rough text into clean, professional YouTrack tickets.
+	// Load editable instructions from the ticket_parser bot config in DB.
+	// The admin can customise the instructions; dynamic field values are always
+	// appended here at runtime so the DB prompt never needs to list them.
+	const defaultTicketParserInstructions = `You are a project management assistant. Convert raw text into a YouTrack ticket.
 
-Your job has TWO parts that are EQUALLY important:
-1. Generate a concise, professional TITLE (summary field) — do NOT copy the raw text verbatim.
-2. Write a clean structured DESCRIPTION (description field) — expand, structure, and clarify the raw input.
+RESPOND ONLY WITH A SINGLE JSON OBJECT. No explanation, no markdown, no extra text — just JSON.
 
-════════════════════════════════════════════════════════
-TITLE (summary) RULES:
-════════════════════════════════════════════════════════
-- Format: "{SubsystemAbbrev}: {Action-oriented description}" — max 80 characters
-- Use the matched subsystem's abbreviation as the prefix (e.g. "FE UI:", "BE:", "FE/BE:")
-- The title must be a clear, professional statement of what needs to be done or what the bug is
-- Never quote or copy the raw text — always rephrase into a proper engineering title
+Title rules: "{subsystem}: {concise action-oriented description}" — max 80 chars, never copy raw text verbatim. The subsystem prefix MUST be copied EXACTLY from the available subsystems list — never invent or abbreviate. Do NOT include a priority prefix in the title. Examples of good titles: "FE UI: Handle Empty Transcribe Requests Gracefully", "FE MC: Courses Tab Fails to Open", "BE: Prevent Deletion During File Processing".
 
-Examples of good titles:
-  "FE UI: Handle Empty Transcribe Requests Gracefully"
-  "BE: Prevent File Deletion While Chunking Is In Progress"
-  "FE UI: New Users Not Redirected to Onboarding on First Login"
-  "FE/BE: Add Support to View and Restore Archived Organisations"
+Description rules: 1-2 sentence overview of what is broken or missing, then "\n\n**Expected Behavior**\n- bullet\n- bullet". Remove filler words (okay, like, so, yeah, uh). For bugs: what is broken + what should happen. For features: what is missing + what should happen.
 
-════════════════════════════════════════════════════════
-DESCRIPTION (description) RULES:
-════════════════════════════════════════════════════════
-Write in clean Markdown. Structure depends on ticket type:
+Priority: Show-stopper=crash/data-loss/security, Critical=completely broken feature, Major=significant regression or important feature broken, Normal=standard bug or feature request, Minor=cosmetic.
 
-For BUGS:
-  {1-2 sentence explanation of what is broken and its impact}
+CRITICAL: subsystem MUST exactly match one of the available subsystems — never invent one. type_name must exactly match one of the available types. Both are REQUIRED.
+assignee_login: match login from users list only if a person's name is mentioned, else "".
+sprint_id: id of the most recent non-completed sprint from the sprints list, else "".`
 
-  **Expected Behavior**
-  - {What should happen — each point on its own line}
-  - {Be specific and actionable}
-  - {Include all affected areas, e.g. main UI and onboarding flows}
+	instructions := defaultTicketParserInstructions
+	botRepo := database.NewBotConfigRepository()
+	if bots, err2 := botRepo.GetByType(r.Context(), models.BotTypeTicketParser); err2 == nil {
+		for _, b := range bots {
+			if b.IsActive && strings.TrimSpace(b.Prompt) != "" {
+				instructions = b.Prompt
+				break
+			}
+		}
+	}
 
-For FEATURES / ENHANCEMENTS:
-  {1-2 sentence explanation of what is missing and why it matters}
+	// Always append the dynamic runtime data — these are never editable in the DB
+	// because they come live from YouTrack.
+	systemPrompt := fmt.Sprintf(`%s
 
-  **Expected Behavior**
-  - {What the feature should do — each point on its own line}
-  - {Include UI state, edge cases, disabled states etc.}
+Available values — choose ONLY from these lists:
+- types: %s
+- subsystems: %s
+- users (login → fullName): %s
+- sprints: %s
 
-General rules:
-- Expand abbreviations and terse notes into full professional sentences
-- If multiple areas are affected, list them explicitly in Expected Behavior
-- Do not include raw voice filler words ("okay", "like", "so", "yeah", "uh")
-- Keep it concise but complete — 3 to 8 bullet points under Expected Behavior
-
-════════════════════════════════════════════════════════
-FIELD SELECTION RULES:
-════════════════════════════════════════════════════════
-Available types: %s
-Available subsystems: %s
-Available users (login + fullName): %s
-Available sprints: %s
-
-- priority: one of [Show-stopper, Critical, Major, Normal, Minor]
-  - Show-stopper/Critical: app crash, data loss, security issue, completely broken feature
-  - Major: important feature broken, significant UX regression
-  - Normal: standard bug or feature request (default)
-  - Minor: cosmetic, nice-to-have
-- type_name: pick the single best match from available types (REQUIRED — never leave empty)
-- subsystem: pick the single best match from available subsystems based on what component/area the ticket is about (REQUIRED — never leave empty)
-- assignee_login: if a person's name is mentioned, match to the login field in the users list; else use empty string ""
-- sprint_id: use the id of the most recent non-completed sprint from the sprints list; if all completed use ""
-
-════════════════════════════════════════════════════════
-OUTPUT FORMAT — CRITICAL:
-════════════════════════════════════════════════════════
-Return ONLY valid JSON with exactly these keys. No markdown fences, no explanation, no extra text:
+Return ONLY this JSON object (no other text):
 {"summary":"","description":"","priority":"Normal","type_name":"","subsystem":"","assignee_login":"","sprint_id":""}`,
+		instructions,
 		strings.Join(req.Types, ", "),
 		strings.Join(req.Subsystems, ", "),
 		string(usersJSON),
@@ -1255,19 +1227,9 @@ Return ONLY valid JSON with exactly these keys. No markdown fences, no explanati
 		return
 	}
 
-	// Extract the JSON object from the AI response — handles markdown fences,
-	// bold wrappers (**{...}**), leading/trailing prose, etc.
-	cleaned := strings.TrimSpace(response)
-	jsonRe := regexp.MustCompile(`(?s)\{.*\}`)
-	if m := jsonRe.FindString(cleaned); m != "" {
-		cleaned = m
-	} else {
-		// fallback: strip common fences manually
-		cleaned = strings.TrimPrefix(cleaned, "```json")
-		cleaned = strings.TrimPrefix(cleaned, "```")
-		cleaned = strings.TrimSuffix(cleaned, "```")
-		cleaned = strings.TrimSpace(cleaned)
-	}
+	// Extract the first valid JSON object from the AI response.
+	// Handles markdown fences, bold wrappers, leading prose, nested braces in descriptions.
+	cleaned := extractFirstJSONObject(strings.TrimSpace(response))
 
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
@@ -1283,6 +1245,47 @@ Return ONLY valid JSON with exactly these keys. No markdown fences, no explanati
 }
 
 // DeleteIssue deletes an issue from YouTrack
+// extractFirstJSONObject finds the first complete, balanced JSON object in s.
+// Handles markdown fences, bold wrappers, leading prose, and nested braces inside string values.
+func extractFirstJSONObject(s string) string {
+	runes := []rune(s)
+	for i := 0; i < len(runes); i++ {
+		if runes[i] != '{' {
+			continue
+		}
+		depth := 0
+		inStr := false
+		escaped := false
+		for j := i; j < len(runes); j++ {
+			c := runes[j]
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' && inStr {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inStr = !inStr
+				continue
+			}
+			if inStr {
+				continue
+			}
+			if c == '{' {
+				depth++
+			} else if c == '}' {
+				depth--
+				if depth == 0 {
+					return string(runes[i : j+1])
+				}
+			}
+		}
+	}
+	return s
+}
+
 func (h *YouTrackHandler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 	if userID == "" {

@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   X, Bold, Italic, Strikethrough, Code, Link2, List, MoreHorizontal,
   ChevronDown, Loader2, Check, Eye, FileCode2, Paperclip, Type, Hash,
   Sparkles, AlertCircle,
 } from 'lucide-react'
+import { marked } from 'marked'
 import api from '../services/api'
 import type { YouTrackUser, YouTrackState } from '../services/api'
 import MicButton from './MicButton'
@@ -56,7 +57,7 @@ function parseEstimation(raw: string): number | undefined {
 
 export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModalProps) {
   const [form, setForm] = useState<CreateIssueFormData>({
-    summary: '', description: '', state: 'Backlog', priority: 'Normal',
+    summary: '', description: '', state: '', priority: 'Normal',
     type_name: '', assignee_login: '', assignee_name: '', assignee_avatar: '',
     subsystem: '', sprint_id: '', sprint_name: '', due_date: '', estimation: '',
   })
@@ -89,14 +90,19 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
       if (res.success && res.data) {
         const d = res.data
         setMeta(d)
-        // Default state to first state if available
-        if (d.states.length > 0 && !form.state) {
-          setForm(f => ({ ...f, state: d.states[0].name }))
+        // Default state: prefer "To Do", fall back to "Backlog", then first state
+        const todoState =
+          d.states.find(s => s.name.toLowerCase() === 'to do') ??
+          d.states.find(s => s.name.toLowerCase() === 'backlog') ??
+          d.states[0]
+        if (todoState) {
+          setForm(f => ({ ...f, state: todoState.name }))
         }
-        // Default sprint to the most recent non-completed one
-        const activeSprint = d.sprints.find(s => !s.isCompleted) ?? d.sprints[d.sprints.length - 1]
-        if (activeSprint) {
-          setForm(f => ({ ...f, sprint_id: activeSprint.id, sprint_name: activeSprint.name }))
+        // Default sprint: last non-completed sprint (highest index = most recent)
+        const activesprints = d.sprints.filter(s => !s.isCompleted)
+        const defaultSprint = activesprints[activesprints.length - 1] ?? d.sprints[d.sprints.length - 1]
+        if (defaultSprint) {
+          setForm(f => ({ ...f, sprint_id: defaultSprint.id, sprint_name: defaultSprint.name }))
         }
       }
     }).catch(() => {}).finally(() => setMetaLoading(false))
@@ -140,6 +146,10 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
     requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(s + prefix.length, s + prefix.length) })
   }, [])
 
+  const PRIORITY_CODE: Record<string, string> = {
+    'Show-stopper': 'P0', 'Critical': 'P1', 'Major': 'P2', 'Normal': 'P3', 'Minor': 'P4',
+  }
+
   const handleAiFill = async () => {
     const raw = form.description.trim()
     if (!raw || aiLoading) return
@@ -154,21 +164,41 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
       })
       if (res.success && res.data) {
         const d = res.data
+
+        // Validate subsystem against live list — reject AI hallucinations
+        const validSubsystem = meta.subsystems.find(s => s.name === d.subsystem)?.name ?? ''
+
+        // Build title: "P{n} {subsystem}: {title}" — priority prefix always prepended
+        const priority = d.priority || form.priority || 'Normal'
+        const pCode = PRIORITY_CODE[priority] ?? 'P3'
+        const baseTitle = d.summary || form.summary
+        const subsystemPrefix = validSubsystem || d.subsystem || ''
+        // Strip any existing "Px " or "{subsystem}: " prefix the AI may have added before prepending ours
+        const cleanTitle = baseTitle
+          .replace(/^P\d+\s+/, '')
+          .replace(new RegExp(`^${subsystemPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`), '')
+          .trim()
+        const fullSummary = subsystemPrefix
+          ? `${pCode} ${subsystemPrefix}: ${cleanTitle}`
+          : `${pCode} ${cleanTitle}`
+
         const matchedUser = meta.users.find(u => u.login === d.assignee_login)
         const matchedSprint = meta.sprints.find(s => s.id === d.sprint_id)
         setForm(f => ({
           ...f,
-          summary:        d.summary || f.summary,
-          description:    d.description || f.description,
-          priority:       d.priority || f.priority,
-          type_name:      d.type_name || f.type_name,
-          subsystem:      d.subsystem || f.subsystem,
-          assignee_login: matchedUser ? matchedUser.login : f.assignee_login,
-          assignee_name:  matchedUser ? (matchedUser.fullName || matchedUser.login) : f.assignee_name,
-          assignee_avatar:matchedUser ? (matchedUser.avatarUrl || '') : f.assignee_avatar,
-          sprint_id:      matchedSprint ? matchedSprint.id : f.sprint_id,
-          sprint_name:    matchedSprint ? matchedSprint.name : f.sprint_name,
+          summary:         fullSummary || f.summary,
+          description:     d.description || f.description,
+          priority,
+          type_name:       d.type_name || f.type_name,
+          subsystem:       validSubsystem || f.subsystem,
+          assignee_login:  matchedUser ? matchedUser.login : f.assignee_login,
+          assignee_name:   matchedUser ? (matchedUser.fullName || matchedUser.login) : f.assignee_name,
+          assignee_avatar: matchedUser ? (matchedUser.avatarUrl || '') : f.assignee_avatar,
+          sprint_id:       matchedSprint ? matchedSprint.id : f.sprint_id,
+          sprint_name:     matchedSprint ? matchedSprint.name : f.sprint_name,
         }))
+        // Switch to markdown mode so the AI-generated description renders correctly
+        setDescMode('markdown')
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'AI parsing failed')
@@ -302,11 +332,6 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
               <button className="ci-tb-btn" title="Link"          onClick={() => wrapText('[', '](url)')}><Link2 size={14} /></button>
               <button className="ci-tb-btn" title="List"          onClick={() => insertLine('- ')}><List size={14} /></button>
               <button className="ci-tb-btn" title="More"><MoreHorizontal size={14} /></button>
-              <div className="ci-tb-sep" />
-              <MicButton
-                className="ci-tb-mic"
-                onResult={t => set('description', form.description ? form.description + '\n' + t : t)}
-              />
             </div>
             <div className="ci-mode-tabs">
               <button className={`ci-mode-tab ${descMode === 'visual' ? 'active' : ''}`} onClick={() => setDescMode('visual')}><Eye size={12} /> Visual</button>
@@ -316,13 +341,13 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
 
           {/* Scrollable body: description + attach + validation */}
           <div className="ci-left-body">
-            {/* Description with AI button */}
+            {/* Description with overlaid mic (top-right) and AI Fill (bottom-right) */}
             <div className="ci-desc-wrap">
               {descMode === 'markdown' ? (
                 <textarea
                   ref={descRef}
                   className="ci-desc-input"
-                  placeholder="Describe the issue or paste raw text — AI button appears when you start typing"
+                  placeholder="Describe the issue or paste raw text…"
                   value={form.description}
                   onChange={e => set('description', e.target.value)}
                 />
@@ -332,17 +357,26 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
                   onClick={() => { setDescMode('markdown'); setTimeout(() => descRef.current?.focus(), 50) }}
                 >
                   {form.description
-                    ? <pre className="ci-desc-pre">{form.description}</pre>
-                    : <span className="ci-desc-placeholder">Describe the issue or paste raw text — AI button appears when you start typing</span>
+                    ? <div
+                        className="ci-desc-rendered"
+                        dangerouslySetInnerHTML={{ __html: marked.parse(form.description) as string }}
+                      />
+                    : <span className="ci-desc-placeholder">Describe the issue or paste raw text…</span>
                   }
                 </div>
               )}
+              {/* Mic — top-right corner of description box */}
+              <MicButton
+                className="ci-desc-mic"
+                onResult={t => set('description', form.description ? form.description + '\n' + t : t)}
+              />
+              {/* AI Fill — bottom-right, shown only when description has text */}
               {descHasText && (
                 <button
                   className={`ci-ai-btn${aiLoading ? ' ci-ai-btn--loading' : ''}`}
                   onClick={handleAiFill}
                   disabled={aiLoading}
-                  title="Fill form with AI"
+                  title="Fill all fields with AI"
                 >
                   {aiLoading
                     ? <Loader2 size={13} className="animate-spin" />
@@ -495,7 +529,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           <div className="ci-sidebar-field ci-dropdown-field" onClick={() => toggle('state')}>
             <span className="ci-sidebar-label">State</span>
             <div className="ci-sidebar-value ci-clickable">
-              <span className="ci-sidebar-val-text ci-state-val">{form.state || 'Backlog'}</span>
+              <span className="ci-sidebar-val-text ci-state-val">{form.state || 'To Do'}</span>
               <ChevronDown size={13} className={`ci-chevron ${openDropdown === 'state' ? 'open' : ''}`} />
             </div>
             {openDropdown === 'state' && (

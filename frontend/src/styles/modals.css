@@ -176,9 +176,6 @@
 .ci-tb-btn:hover { background: var(--bg-active); color: var(--text-primary); }
 .ci-tb-sep { width: 1px; height: 16px; background: var(--glass-border); margin: 0 0.2rem; }
 
-/* toolbar mic reuses shared mic-btn but slotted into toolbar */
-.ci-tb-mic.mic-btn { color: var(--text-muted); padding: 0.3rem 0.4rem; }
-.ci-tb-mic.mic-btn:hover { background: var(--bg-active); color: var(--text-primary); }
 
 .ci-mode-tabs {
   display: flex; gap: 0.15rem;
@@ -209,15 +206,50 @@
 .ci-desc-input::placeholder { color: var(--text-muted); }
 
 .ci-desc-preview { cursor: text; overflow-y: auto; }
-.ci-desc-pre {
-  margin: 0; white-space: pre-wrap; word-break: break-word;
-  font-family: inherit; font-size: 0.9rem; color: var(--text-secondary); line-height: 1.6;
+
+/* rendered markdown inside visual mode */
+.ci-desc-rendered {
+  font-size: 0.9rem; color: var(--text-secondary); line-height: 1.6;
+  word-break: break-word;
 }
+.ci-desc-rendered p { margin: 0 0 0.6rem; }
+.ci-desc-rendered p:last-child { margin-bottom: 0; }
+.ci-desc-rendered strong { color: var(--text-primary); font-weight: 600; }
+.ci-desc-rendered em { font-style: italic; }
+.ci-desc-rendered ul, .ci-desc-rendered ol { margin: 0.3rem 0 0.6rem 1.2rem; padding: 0; }
+.ci-desc-rendered li { margin-bottom: 0.2rem; }
+.ci-desc-rendered h1, .ci-desc-rendered h2, .ci-desc-rendered h3 {
+  color: var(--text-primary); font-weight: 600; margin: 0.8rem 0 0.3rem;
+  font-size: 1rem;
+}
+.ci-desc-rendered code {
+  background: rgba(139,92,246,0.12); color: var(--color-primary-light);
+  padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.85em; font-family: monospace;
+}
+.ci-desc-rendered pre {
+  background: rgba(0,0,0,0.2); border-radius: 6px;
+  padding: 0.6rem 0.8rem; overflow-x: auto; margin: 0.4rem 0;
+}
+.ci-desc-rendered pre code { background: none; padding: 0; }
+.ci-desc-rendered blockquote {
+  border-left: 3px solid rgba(139,92,246,0.4);
+  margin: 0.4rem 0; padding: 0.2rem 0.6rem; color: var(--text-muted);
+}
+[data-theme="light"] .ci-desc-rendered { color: #475569; }
+[data-theme="light"] .ci-desc-rendered strong { color: #1e293b; }
+[data-theme="light"] .ci-desc-rendered code { background: rgba(99,102,241,0.1); color: #4f46e5; }
+[data-theme="light"] .ci-desc-rendered pre { background: rgba(0,0,0,0.05); }
 .ci-desc-placeholder { color: var(--text-muted); font-size: 0.9rem; }
 
-/* AI fill button */
+/* Mic button inside description box — top-right corner */
+.ci-desc-mic {
+  position: absolute; top: 0.4rem; right: 0.4rem;
+  z-index: 2;
+}
+
+/* AI fill button — bottom-right corner */
 .ci-ai-btn {
-  position: absolute; top: 0.5rem; right: 0.5rem;
+  position: absolute; bottom: 0.5rem; right: 0.5rem;
   display: flex; align-items: center; gap: 0.35rem;
   padding: 0.3rem 0.75rem; border-radius: 6px; border: none;
   background: rgba(139,92,246,0.18);
