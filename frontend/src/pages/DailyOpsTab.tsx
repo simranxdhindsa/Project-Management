@@ -1,13 +1,15 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   RefreshCw, CheckCircle, Clock, AlertTriangle, TrendingDown, Users,
   GitBranch, ChevronDown, Check,
 } from 'lucide-react'
 import { api } from '../services/api'
-import type { SprintBoardColumn, SprintBoardIssue, YouTrackSprint } from '../services/api'
+import type { SprintBoardColumn, SprintBoardIssue, YouTrackSprint, YouTrackIssue } from '../services/api'
 import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
 import { getActiveSource } from '../services/pmDataService'
+import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '../components/HoverCard'
+import { IssueDetailPanel } from '../components/IssueDetailPanel'
 
 interface Props {
   onBlockersChange: (ids: Set<string>) => void
@@ -65,6 +67,40 @@ function resolveColRole(colName: string, roleMap: Map<string, string>): string {
   return ''  // backlog / todo / unknown — not counted as active workload
 }
 
+function fmtHoursCompact(h: number): string {
+  if (h <= 0) return '0h'
+  const d = Math.floor(h / 24)
+  const hrs = Math.floor(h % 24)
+  if (d > 0) return `${d}d ${hrs}h`
+  return `${hrs}h`
+}
+
+function ticketHoverContent(issue: SprintBoardIssue) {
+  const cycleLabel = issue.cycle_time_hours > 0 ? fmtHoursCompact(issue.cycle_time_hours) : null
+  const devLabel   = issue.total_active_hours > 0 ? fmtHoursCompact(issue.total_active_hours) : null
+  const stateLabel = issue.hours_in_state > 0 ? fmtHoursCompact(issue.hours_in_state) : null
+  const overdueAccent = issue.overdue_level === 'deadline' ? 'danger'
+    : (issue.overdue_level === 'sprint' || issue.is_delayed) ? 'warn' : undefined
+  return (
+    <div>
+      <div className="hc-title" style={{ marginBottom: 2 }}>
+        {issue.idReadable}
+        {issue.is_hotfix && <HCBadge label="HF" variant="warn" />}
+        {issue.issue_type && issue.issue_type.toLowerCase() !== 'task' && <HCBadge label={issue.issue_type} />}
+      </div>
+      <div className="hc-subtitle">{issue.summary}</div>
+      <HCDivider />
+      {stateLabel && <HCRow label="In state" value={stateLabel} accent={overdueAccent as any} />}
+      {cycleLabel && <HCRow label="Cycle time" value={cycleLabel} />}
+      {devLabel && <HCRow label="Dev time" value={devLabel} />}
+      {issue.bounce_count > 0 && (
+        <HCRow label="Bounces" value={`${issue.bounce_count}×`} accent="warn" />
+      )}
+      {issue.is_delayed && <HCRow label="Status" value="Overdue" accent={overdueAccent as any} />}
+    </div>
+  )
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 interface DevStat {
@@ -109,10 +145,38 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null)
+  const [ytBaseUrl, setYtBaseUrl] = useState('')
+  const [ytDetailIssue, setYtDetailIssue] = useState<YouTrackIssue | null>(null)
+  const [ytDetailLoading, setYtDetailLoading] = useState(false)
 
   // Stable ref so onBlockersChange doesn't force re-renders
   const onBlockersRef = useRef(onBlockersChange)
   useEffect(() => { onBlockersRef.current = onBlockersChange }, [onBlockersChange])
+
+  // Fetch YouTrack base URL from DB integration
+  useEffect(() => {
+    api.getYouTrackStatus().then(res => {
+      const url = (res as any).base_url || (res as any).data?.base_url || ''
+      setYtBaseUrl(url.replace(/\/$/, ''))
+    }).catch(() => {})
+  }, [])
+
+  const openInYouTrack = useCallback((idReadable: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!ytBaseUrl || !idReadable) return
+    window.open(`${ytBaseUrl}/issue/${idReadable}`, '_blank', 'noopener,noreferrer')
+  }, [ytBaseUrl])
+
+  const openYtIssue = useCallback(async (idReadable: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (ytDetailLoading || !idReadable) return
+    setYtDetailLoading(true)
+    try {
+      const res = await api.getYouTrackIssue(idReadable)
+      setYtDetailIssue((res as any).data as YouTrackIssue)
+    } catch { /* ignore */ }
+    finally { setYtDetailLoading(false) }
+  }, [ytDetailLoading])
 
   // column name → role (from workflow config + aliases)
   const columnRoleMap = useMemo(() => {
@@ -216,6 +280,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
   const totalOverdue = devStats.reduce((s, d) => s + d.overdueCount, 0)
 
   return (
+    <>
     <div className="do-scroll">
       <div className="do-block">
 
@@ -299,8 +364,8 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
           </div>
         )}
 
-        {/* Developer cards grid */}
-        <div className="do-dev-grid">
+        {/* Developer cards grid — only when not loading */}
+        {!loading && <div className="do-dev-grid">
           {devStats.map(dev => {
             // Overloaded = workload problem: too many in-progress tickets (> 5)
             // Overdue is a separate concern shown via its own chip
@@ -377,15 +442,25 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                 {dev.activeIssues.length > 0 && (
                   <div className="do-dev-issues">
                     {dev.activeIssues.slice(0, 4).map(iss => (
-                      <div key={iss.id} className={`do-dev-issue-row ${priorityClass(iss.priority)}`}>
-                        <span className={`do-prio-dot do-prio-dot--${priorityLabel(iss.priority).toLowerCase()}`} />
-                        <span className="do-issue-id">{iss.idReadable}</span>
-                        <span className="do-issue-summary">{iss.summary}</span>
-                        {iss.is_delayed && <span className="do-overdue-chip">Late</span>}
-                        {(iss.bounce_count || 0) > 0 && (
-                          <span className="dl-bounce-dot" title={`Bounced ${iss.bounce_count}×`}>↩{iss.bounce_count}</span>
-                        )}
-                      </div>
+                      <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
+                        <div className={`do-dev-issue-row ${priorityClass(iss.priority)}`}>
+                          <span className={`do-prio-dot do-prio-dot--${priorityLabel(iss.priority).toLowerCase()}`} />
+                          <span
+                            className="do-issue-id do-issue-id--link"
+                            title={`Open ${iss.idReadable} in YouTrack`}
+                            onClick={(e) => openInYouTrack(iss.idReadable, e)}
+                          >{iss.idReadable}</span>
+                          <span
+                            className="do-issue-summary do-issue-summary--clickable"
+                            title={`View ${iss.idReadable} details`}
+                            onClick={(e) => openYtIssue(iss.idReadable, e)}
+                          >{iss.summary}</span>
+                          {iss.is_delayed && <span className="do-overdue-chip">Late</span>}
+                          {(iss.bounce_count || 0) > 0 && (
+                            <span className="dl-bounce-dot" title={`Bounced ${iss.bounce_count}×`}>↩{iss.bounce_count}</span>
+                          )}
+                        </div>
+                      </HoverCard>
                     ))}
                     {dev.activeIssues.length > 4 && (
                       <div className="do-dev-more">+{dev.activeIssues.length - 4} more in progress</div>
@@ -397,22 +472,42 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                 {dev.blockedIssues.length > 0 && (
                   <div className="do-dev-issues do-dev-issues--blocked">
                     {dev.blockedIssues.map(iss => (
-                      <div key={iss.id} className="do-dev-issue-row do-priority-p0">
-                        <span className="do-prio-dot do-prio-dot--p0" />
-                        <span className="do-issue-id">{iss.idReadable}</span>
-                        <span className="do-issue-summary">{iss.summary}</span>
-                        <span className="do-blocker-badge">Blocked</span>
-                      </div>
+                      <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
+                        <div className="do-dev-issue-row do-priority-p0">
+                          <span className="do-prio-dot do-prio-dot--p0" />
+                          <span
+                            className="do-issue-id do-issue-id--link"
+                            title={`Open ${iss.idReadable} in YouTrack`}
+                            onClick={(e) => openInYouTrack(iss.idReadable, e)}
+                          >{iss.idReadable}</span>
+                          <span
+                            className="do-issue-summary do-issue-summary--clickable"
+                            title={`View ${iss.idReadable} details`}
+                            onClick={(e) => openYtIssue(iss.idReadable, e)}
+                          >{iss.summary}</span>
+                          <span className="do-blocker-badge">Blocked</span>
+                        </div>
+                      </HoverCard>
                     ))}
                   </div>
                 )}
               </div>
             )
           })}
-        </div>
+        </div>}
 
       </div>
     </div>
+
+    {/* YouTrack issue detail panel */}
+    {ytDetailIssue && (
+      <IssueDetailPanel
+        issue={ytDetailIssue}
+        onClose={() => setYtDetailIssue(null)}
+        ytBaseUrl={ytBaseUrl}
+      />
+    )}
+    </>
   )
 }
 
