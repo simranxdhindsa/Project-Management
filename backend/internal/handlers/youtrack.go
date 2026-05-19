@@ -851,9 +851,9 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Subsystem != "" {
 		fields = append(fields, youtrack.CustomField{
-			Type:  "MultiOwnedIssueCustomField",
+			Type:  "SingleOwnedIssueCustomField",
 			Name:  "Subsystem",
-			Value: []map[string]string{{"name": req.Subsystem}},
+			Value: map[string]interface{}{"$type": "OwnedBundleElement", "name": req.Subsystem},
 		})
 	}
 	if req.DueDate != nil {
@@ -909,9 +909,16 @@ func (h *YouTrackHandler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := vars["issue_id"]
 
 	var req struct {
-		Summary     string `json:"summary,omitempty"`
-		Description string `json:"description,omitempty"`
-		State       string `json:"state,omitempty"`
+		Summary           string `json:"summary,omitempty"`
+		Description       string `json:"description,omitempty"`
+		State             string `json:"state,omitempty"`
+		Priority          string `json:"priority,omitempty"`
+		TypeName          string `json:"type_name,omitempty"`
+		AssigneeLogin     string `json:"assignee_login,omitempty"`
+		Subsystem         string `json:"subsystem,omitempty"`
+		SprintID          string `json:"sprint_id,omitempty"`
+		DueDate           *int64 `json:"due_date,omitempty"`
+		EstimationMinutes *int   `json:"estimation_minutes,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -929,13 +936,58 @@ func (h *YouTrackHandler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		Description: req.Description,
 	}
 
+	var fields []youtrack.CustomField
 	if req.State != "" {
-		updateReq.CustomFields = []youtrack.CustomField{
-			{
-				Name:  "State",
-				Value: map[string]string{"name": req.State},
-			},
-		}
+		fields = append(fields, youtrack.CustomField{
+			Type:  "StateIssueCustomField",
+			Name:  "State",
+			Value: map[string]string{"name": req.State},
+		})
+	}
+	if req.Priority != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "SingleEnumIssueCustomField",
+			Name:  "Priority",
+			Value: map[string]string{"name": req.Priority},
+		})
+	}
+	if req.TypeName != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "SingleEnumIssueCustomField",
+			Name:  "Type",
+			Value: map[string]string{"name": req.TypeName},
+		})
+	}
+	if req.AssigneeLogin != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "SingleUserIssueCustomField",
+			Name:  "Assignee",
+			Value: map[string]string{"login": req.AssigneeLogin},
+		})
+	}
+	if req.Subsystem != "" {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "SingleOwnedIssueCustomField",
+			Name:  "Subsystem",
+			Value: map[string]interface{}{"$type": "OwnedBundleElement", "name": req.Subsystem},
+		})
+	}
+	if req.DueDate != nil {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "DateIssueCustomField",
+			Name:  "Due Date",
+			Value: *req.DueDate,
+		})
+	}
+	if req.EstimationMinutes != nil {
+		fields = append(fields, youtrack.CustomField{
+			Type:  "PeriodIssueCustomField",
+			Name:  "Estimation",
+			Value: map[string]interface{}{"minutes": *req.EstimationMinutes},
+		})
+	}
+	if len(fields) > 0 {
+		updateReq.CustomFields = fields
 	}
 
 	issue, err := client.UpdateIssue(r.Context(), issueID, updateReq)
@@ -1173,6 +1225,7 @@ func (h *YouTrackHandler) AIParseTicket(w http.ResponseWriter, r *http.Request) 
 		Users      []map[string]string      `json:"users"`      // [{login, fullName}]
 		Types      []string                 `json:"types"`      // ["Bug","Feature",...]
 		Subsystems []string                 `json:"subsystems"` // ["FE UI","BE API",...]
+		Priorities []string                 `json:"priorities"` // ["Show-stopper","Critical",...]
 		Sprints    []map[string]interface{} `json:"sprints"`    // [{id, name}]
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1198,9 +1251,9 @@ Title rules: "{subsystem}: {concise action-oriented description}" — max 80 cha
 
 Description rules: 1-2 sentence overview of what is broken or missing, then "\n\n**Expected Behavior**\n- bullet\n- bullet". Remove filler words (okay, like, so, yeah, uh). For bugs: what is broken + what should happen. For features: what is missing + what should happen.
 
-Priority: Show-stopper=crash/data-loss/security, Critical=completely broken feature, Major=significant regression or important feature broken, Normal=standard bug or feature request, Minor=cosmetic.
+Priority: pick the closest match from the available priorities list — show-stopper/crash/data-loss → first option; completely broken → second; significant regression → third; standard bug → middle option; cosmetic → last. MUST be an exact string from the list.
 
-CRITICAL: subsystem MUST exactly match one of the available subsystems — never invent one. type_name must exactly match one of the available types. Both are REQUIRED.
+CRITICAL: subsystem and type_name MUST exactly match values from the available lists — never invent or abbreviate. Both are REQUIRED.
 assignee_login: match login from users list only if a person's name is mentioned, else "".
 sprint_id: id of the most recent non-completed sprint from the sprints list, else "".`
 
@@ -1219,15 +1272,17 @@ sprint_id: id of the most recent non-completed sprint from the sprints list, els
 	// because they come live from YouTrack.
 	systemPrompt := fmt.Sprintf(`%s
 
-Available values — choose ONLY from these lists:
+Available values — choose ONLY from these lists (return exact strings, no variations):
+- priorities: %s
 - types: %s
 - subsystems: %s
 - users (login → fullName): %s
 - sprints: %s
 
 Return ONLY this JSON object (no other text):
-{"summary":"","description":"","priority":"Normal","type_name":"","subsystem":"","assignee_login":"","sprint_id":""}`,
+{"summary":"","description":"","priority":"","type_name":"","subsystem":"","assignee_login":"","sprint_id":""}`,
 		instructions,
+		strings.Join(req.Priorities, ", "),
 		strings.Join(req.Types, ", "),
 		strings.Join(req.Subsystems, ", "),
 		string(usersJSON),

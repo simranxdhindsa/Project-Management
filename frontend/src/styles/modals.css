@@ -338,6 +338,35 @@
 }
 .ci-close-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+.ci-pencil-btn {
+  position: absolute; top: 0.85rem; right: 2.6rem;
+  background: rgba(139,92,246,0.12); border: 1px solid rgba(139,92,246,0.25);
+  color: rgba(139,92,246,0.8); cursor: pointer;
+  padding: 0.35rem 0.5rem; border-radius: 5px;
+  display: flex; align-items: center; gap: 0.35rem;
+  font-size: 0.75rem; font-weight: 600;
+  z-index: 10; transition: all 0.12s;
+}
+.ci-pencil-btn:hover { background: rgba(139,92,246,0.22); color: #a78bfa; }
+
+.ci-ticket-id {
+  position: absolute; top: 0.95rem; right: 5.2rem;
+  font-size: 0.72rem; font-weight: 600; color: var(--text-muted);
+  background: var(--bg-hover); border: 1px solid var(--glass-border);
+  border-radius: 4px; padding: 0.2rem 0.45rem;
+  z-index: 10; letter-spacing: 0.03em;
+}
+
+.ci-summary-input--view {
+  cursor: pointer; user-select: none;
+  background: transparent;
+}
+.ci-summary-input--view:hover { border-bottom-color: rgba(139,92,246,0.3); }
+
+[data-theme="light"] .ci-pencil-btn { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.2); color: #6366f1; }
+[data-theme="light"] .ci-pencil-btn:hover { background: rgba(99,102,241,0.15); }
+[data-theme="light"] .ci-ticket-id { color: #64748b; }
+
 .ci-sidebar-field {
   padding: 0.6rem 0; border-bottom: 1px solid var(--glass-border); position: relative;
 }

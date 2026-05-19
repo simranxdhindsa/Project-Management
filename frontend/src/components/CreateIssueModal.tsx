@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   X, Bold, Italic, Strikethrough, Code, Link2, List, MoreHorizontal,
   ChevronDown, Loader2, Check, Eye, FileCode2, Paperclip, Type, Hash,
-  Sparkles, AlertCircle,
+  Sparkles, AlertCircle, Pencil,
 } from 'lucide-react'
 import { marked } from 'marked'
 import api from '../services/api'
@@ -73,6 +73,9 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
   const [aiLoading, setAiLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [created, setCreated] = useState(false)
+  const [createdIssueId, setCreatedIssueId] = useState<string | null>(null)
+  const [createdReadableId, setCreatedReadableId] = useState('')
+  const [isViewMode, setIsViewMode] = useState(false)
   const [openDropdown, setOpenDropdown] = useState<
     'state' | 'priority' | 'type' | 'assignee' | 'subsystem' | 'sprint' | 'textformat' | null
   >(null)
@@ -161,6 +164,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
         users: meta.users.map(u => ({ login: u.login, fullName: u.fullName || u.login })),
         types: meta.types.map(t => t.name),
         subsystems: meta.subsystems.map(s => s.name),
+        priorities: meta.priorities.map(p => p.name),
         sprints: meta.sprints.map(s => ({ id: s.id, name: s.name })),
       })
       if (res.success && res.data) {
@@ -169,18 +173,23 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
         // Validate subsystem against live list — reject AI hallucinations
         const validSubsystem = meta.subsystems.find(s => s.name === d.subsystem)?.name ?? ''
 
-        // Build title: "P{n} {subsystem}: {title}" — priority prefix always prepended
-        const priority = d.priority || form.priority || 'Normal'
-        const pCode = PRIORITY_CODE[priority] ?? 'P3'
+        // Only apply priority if the raw text contains an explicit priority signal
+        const hasPriorityHint = /\bp[0-4]\b|show[\s-]?stopper|critical|major|blocker|urgent|high[\s-]priority/i.test(raw)
+        const validPriority = hasPriorityHint
+          ? (meta.priorities.find(p => p.name === d.priority)?.name ?? form.priority)
+          : form.priority
+
+        // Build title: "P{n} {subsystem}: {title}" — priority prefix only when there's a hint
+        const pCode = PRIORITY_CODE[validPriority ?? 'Normal'] ?? 'P3'
         const baseTitle = d.summary || form.summary
-        const subsystemPrefix = validSubsystem || d.subsystem || ''
+        const subsystemPrefix = validSubsystem  // never use AI's abbreviation fallback
         const cleanTitle = baseTitle
           .replace(/^P\d+\s+/, '')
           .replace(new RegExp(`^${subsystemPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`), '')
           .trim()
         const fullSummary = subsystemPrefix
-          ? `${pCode} ${subsystemPrefix}: ${cleanTitle}`
-          : `${pCode} ${cleanTitle}`
+          ? hasPriorityHint ? `${pCode} ${subsystemPrefix}: ${cleanTitle}` : `${subsystemPrefix}: ${cleanTitle}`
+          : hasPriorityHint ? `${pCode} ${cleanTitle}` : cleanTitle
 
         // Smart assignee: use developer-subsystem config if available for this subsystem.
         // Priority: (1) AI matched someone configured for this subsystem → keep
@@ -200,7 +209,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           ...f,
           summary:         fullSummary || f.summary,
           description:     d.description || f.description,
-          priority,
+          priority:        validPriority ?? form.priority,
           type_name:       d.type_name || f.type_name,
           subsystem:       validSubsystem || f.subsystem,
           assignee_login:  matchedUser ? matchedUser.login : f.assignee_login,
@@ -241,13 +250,18 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
       })
 
       if (res.success && res.data) {
-        const issueId = (res.data as any).id || (res.data as any).idReadable
+        const id = (res.data as any).id || ''
+        const readable = (res.data as any).idReadable || id
         // Upload staged attachments after creation
-        if (stagedFiles.length > 0 && issueId) {
-          await Promise.allSettled(stagedFiles.map(f => api.uploadYouTrackAttachment(issueId, f)))
+        if (stagedFiles.length > 0 && id) {
+          await Promise.allSettled(stagedFiles.map(f => api.uploadYouTrackAttachment(id, f)))
         }
         setCreated(true)
-        setTimeout(() => { onCreated(); onClose() }, 700)
+        setCreatedIssueId(id)
+        setCreatedReadableId(readable)
+        setIsViewMode(true)
+        setDescMode('visual')
+        onCreated()
       } else {
         setError('Failed to create issue')
       }
@@ -257,6 +271,47 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
       setCreating(false)
     }
   }
+
+  const handleUpdate = async () => {
+    if (!createdIssueId) return
+    setCreating(true)
+    setError(null)
+    try {
+      const dueDateMs      = form.due_date ? new Date(form.due_date).getTime() : undefined
+      const estimationMins = parseEstimation(form.estimation)
+      const res = await api.updateYouTrackIssue(createdIssueId, {
+        summary:            form.summary.trim(),
+        description:        form.description || undefined,
+        state:              form.state || undefined,
+        priority:           form.priority || undefined,
+        type_name:          form.type_name || undefined,
+        assignee_login:     form.assignee_login || undefined,
+        subsystem:          form.subsystem || undefined,
+        sprint_id:          form.sprint_id || undefined,
+        due_date:           dueDateMs,
+        estimation_minutes: estimationMins,
+      })
+      if (res.success) {
+        setIsViewMode(true)
+        setDescMode('visual')
+      } else {
+        setError('Failed to update issue')
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update issue')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleDescPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(e.clipboardData?.items ?? [])
+    const files = items.filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean) as File[]
+    if (files.length > 0) {
+      e.preventDefault()
+      setStagedFiles(prev => [...prev, ...files])
+    }
+  }, [])
 
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault()
@@ -282,7 +337,8 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
   const toggle = (name: typeof openDropdown) =>
     setOpenDropdown(o => o === name ? null : name)
 
-  const canCreate = form.summary.trim().length > 0 && !creating && !created
+  const canCreate = form.summary.trim().length > 0 && !creating && !created && !createdIssueId
+  const enterEdit = () => { setIsViewMode(false); setDescMode('markdown') }
 
   const descHasText = form.description.trim().length > 0
 
@@ -294,6 +350,12 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
   return (
     <div className="ci-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="ci-modal" ref={modalRef}>
+        {isViewMode && (
+          <button className="ci-pencil-btn" onClick={enterEdit} title="Edit ticket">
+            <Pencil size={14} />
+          </button>
+        )}
+        {createdReadableId && <span className="ci-ticket-id">{createdReadableId}</span>}
         <button className="ci-close-btn" onClick={onClose} title="Close"><X size={15} /></button>
 
         {/* ══ LEFT PANEL ═══════════════════════════════════════════════ */}
@@ -303,10 +365,12 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           <div className="ci-summary-row">
             <input
               ref={summaryRef}
-              className={`ci-summary-input${missing(form.summary.trim()) ? ' ci-field--error' : ''}`}
+              className={`ci-summary-input${missing(form.summary.trim()) ? ' ci-field--error' : ''}${isViewMode ? ' ci-summary-input--view' : ''}`}
               placeholder="Summary*"
               value={form.summary}
-              onChange={e => set('summary', e.target.value)}
+              readOnly={isViewMode}
+              onClick={() => isViewMode && enterEdit()}
+              onChange={e => !isViewMode && set('summary', e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); setDescMode('markdown'); setTimeout(() => descRef.current?.focus(), 50) } }}
             />
             <MicButton
@@ -362,11 +426,15 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
                   placeholder="Describe the issue or paste raw text…"
                   value={form.description}
                   onChange={e => set('description', e.target.value)}
+                  onPaste={handleDescPaste}
                 />
               ) : (
                 <div
                   className="ci-desc-input ci-desc-preview"
-                  onClick={() => { setDescMode('markdown'); setTimeout(() => descRef.current?.focus(), 50) }}
+                  onClick={() => {
+                    if (!isViewMode) { setDescMode('markdown'); setTimeout(() => descRef.current?.focus(), 50) }
+                  }}
+                  style={{ cursor: isViewMode ? 'default' : 'text' }}
                 >
                   {form.description
                     ? <div
@@ -443,18 +511,31 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
 
           {/* Footer actions — always pinned to bottom */}
           <div className="ci-actions">
-            <button className="ci-btn-create" onClick={handleCreate} disabled={!canCreate}>
-              {created ? <><Check size={14} /> Created</>
-               : creating ? <><Loader2 size={14} className="animate-spin" /> Creating…</>
-               : 'Create'}
-            </button>
-            <button className="ci-btn-cancel" onClick={onClose}>Cancel</button>
+            {isViewMode ? (
+              <>
+                <button className="ci-btn-create" onClick={enterEdit}><Pencil size={13} /> Edit</button>
+                <button className="ci-btn-cancel" onClick={onClose}>Done</button>
+              </>
+            ) : createdIssueId ? (
+              <>
+                <button className="ci-btn-create" onClick={handleUpdate} disabled={creating}>
+                  {creating ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><Check size={13} /> Save</>}
+                </button>
+                <button className="ci-btn-cancel" onClick={() => { setIsViewMode(true); setDescMode('visual') }}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <button className="ci-btn-create" onClick={handleCreate} disabled={!canCreate}>
+                  {created ? <><Check size={14} /> Created</>
+                   : creating ? <><Loader2 size={14} className="animate-spin" /> Creating…</>
+                   : 'Create'}
+                </button>
+                <button className="ci-btn-cancel" onClick={onClose}>Cancel</button>
+              </>
+            )}
             <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
               <button className="ci-tb-btn" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', gap: '4px' }}>
                 <Eye size={13} /> Visible to issue readers
-              </button>
-              <button className="ci-tb-btn" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', gap: '4px' }}>
-                ↗ View in full page
               </button>
             </span>
           </div>
@@ -475,7 +556,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           {/* Type — MANDATORY */}
           <div
             className={`ci-sidebar-field ci-dropdown-field${missing(form.type_name) ? ' ci-field--error' : ''}`}
-            onClick={() => toggle('type')}
+            onClick={() => isViewMode ? enterEdit() : toggle('type')}
           >
             <span className="ci-sidebar-label">
               Type <span className="ci-required-star">*</span>
@@ -508,7 +589,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           </div>
 
           {/* Priority */}
-          <div className="ci-sidebar-field ci-dropdown-field" onClick={() => toggle('priority')}>
+          <div className="ci-sidebar-field ci-dropdown-field" onClick={() => isViewMode ? enterEdit() : toggle('priority')}>
             <span className="ci-sidebar-label">Priority</span>
             <div className="ci-sidebar-value ci-clickable">
               <span
@@ -538,7 +619,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           </div>
 
           {/* State */}
-          <div className="ci-sidebar-field ci-dropdown-field" onClick={() => toggle('state')}>
+          <div className="ci-sidebar-field ci-dropdown-field" onClick={() => isViewMode ? enterEdit() : toggle('state')}>
             <span className="ci-sidebar-label">State</span>
             <div className="ci-sidebar-value ci-clickable">
               <span className="ci-sidebar-val-text ci-state-val">{form.state || 'To Do'}</span>
@@ -561,7 +642,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           </div>
 
           {/* Assignee */}
-          <div className="ci-sidebar-field ci-dropdown-field" onClick={() => { toggle('assignee'); setAssigneeSearch('') }}>
+          <div className="ci-sidebar-field ci-dropdown-field" onClick={() => isViewMode ? enterEdit() : (toggle('assignee'), setAssigneeSearch(''))}>
             <span className="ci-sidebar-label">Assignee</span>
             <div className="ci-sidebar-value ci-clickable">
               {form.assignee_login ? (
@@ -619,7 +700,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           {/* Subsystem — MANDATORY */}
           <div
             className={`ci-sidebar-field ci-dropdown-field${missing(form.subsystem) ? ' ci-field--error' : ''}`}
-            onClick={() => toggle('subsystem')}
+            onClick={() => isViewMode ? enterEdit() : toggle('subsystem')}
           >
             <span className="ci-sidebar-label">
               Subsystem <span className="ci-required-star">*</span>
@@ -656,7 +737,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           </div>
 
           {/* Sprint / Board */}
-          <div className="ci-sidebar-field ci-dropdown-field" onClick={() => toggle('sprint')}>
+          <div className="ci-sidebar-field ci-dropdown-field" onClick={() => isViewMode ? enterEdit() : toggle('sprint')}>
             <span className="ci-sidebar-label">Boards</span>
             <div className="ci-sidebar-value ci-clickable">
               {form.sprint_name
@@ -703,13 +784,14 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           </div>
 
           {/* Due Date */}
-          <div className="ci-sidebar-field">
+          <div className="ci-sidebar-field" onClick={() => isViewMode && enterEdit()}>
             <span className="ci-sidebar-label">Due Date</span>
             <input
               type="date"
               className="ci-sidebar-input ci-date-input"
               value={form.due_date}
-              onChange={e => set('due_date', e.target.value)}
+              readOnly={isViewMode}
+              onChange={e => !isViewMode && set('due_date', e.target.value)}
               onClick={e => { e.stopPropagation(); setOpenDropdown(null) }}
             />
           </div>

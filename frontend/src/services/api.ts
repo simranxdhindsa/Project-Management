@@ -409,6 +409,7 @@ class ApiService {
     users: { login: string; fullName: string }[]
     types: string[]
     subsystems: string[]
+    priorities: string[]
     sprints: { id: string; name: string }[]
   }) {
     return this.request<{
@@ -425,10 +426,14 @@ class ApiService {
     })
   }
 
-  async updateYouTrackIssue(issueId: string, summary?: string, description?: string, state?: string) {
+  async updateYouTrackIssue(issueId: string, payload: {
+    summary?: string; description?: string; state?: string; priority?: string
+    type_name?: string; assignee_login?: string; subsystem?: string; sprint_id?: string
+    due_date?: number; estimation_minutes?: number
+  }) {
     return this.request<YouTrackIssue>(`/youtrack/issues/${issueId}`, {
       method: 'PUT',
-      body: JSON.stringify({ summary, description, state }),
+      body: JSON.stringify(payload),
     })
   }
 
