@@ -205,7 +205,17 @@
 .ci-desc-input:focus { border-color: rgba(139,92,246,0.4); }
 .ci-desc-input::placeholder { color: var(--text-muted); }
 
-.ci-desc-preview { cursor: text; overflow-y: auto; }
+.ci-desc-preview { cursor: default; overflow-y: auto; }
+
+.ci-desc-visual-edit {
+  outline: none; overflow-y: auto; cursor: text;
+  white-space: pre-wrap; word-break: break-word;
+}
+.ci-desc-visual-edit:focus { border-color: rgba(139,92,246,0.4); }
+.ci-desc-visual-edit:empty::before {
+  content: 'Describe the issue or paste raw text…';
+  color: var(--text-muted); pointer-events: none;
+}
 
 /* rendered markdown inside visual mode */
 .ci-desc-rendered {

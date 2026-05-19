@@ -83,9 +83,10 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
   const [descMode, setDescMode] = useState<'visual' | 'markdown'>('visual')
   const [submitAttempted, setSubmitAttempted] = useState(false)
 
-  const summaryRef = useRef<HTMLInputElement>(null)
-  const descRef    = useRef<HTMLTextAreaElement>(null)
-  const modalRef   = useRef<HTMLDivElement>(null)
+  const summaryRef  = useRef<HTMLInputElement>(null)
+  const descRef     = useRef<HTMLTextAreaElement>(null)
+  const visualRef   = useRef<HTMLDivElement>(null)
+  const modalRef    = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Fetch all form meta in one call on mount
@@ -113,6 +114,21 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
   }, [])
 
   useEffect(() => { summaryRef.current?.focus() }, [])
+
+  // Populate contenteditable when switching to visual mode (not on every keystroke)
+  useEffect(() => {
+    if (descMode === 'visual' && !isViewMode && visualRef.current) {
+      visualRef.current.innerHTML = marked.parse(form.description) as string
+      // Move cursor to end
+      const range = document.createRange()
+      const sel = window.getSelection()
+      range.selectNodeContents(visualRef.current)
+      range.collapse(false)
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [descMode])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); onClose() } }
@@ -170,8 +186,12 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
       if (res.success && res.data) {
         const d = res.data
 
-        // Validate subsystem against live list — reject AI hallucinations
-        const validSubsystem = meta.subsystems.find(s => s.name === d.subsystem)?.name ?? ''
+        // Validate subsystem against live list — trim + case-insensitive to handle minor AI variations
+        const rawSub = (d.subsystem ?? '').trim()
+        const validSubsystem =
+          meta.subsystems.find(s => s.name === rawSub)?.name
+          ?? meta.subsystems.find(s => s.name.toLowerCase() === rawSub.toLowerCase())?.name
+          ?? ''
 
         // Only apply priority if the raw text contains an explicit priority signal
         const hasPriorityHint = /\bp[0-4]\b|show[\s-]?stopper|critical|major|blocker|urgent|high[\s-]priority/i.test(raw)
@@ -419,7 +439,30 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
           <div className="ci-left-body">
             {/* Description with overlaid mic (top-right) and AI Fill (bottom-right) */}
             <div className="ci-desc-wrap">
-              {descMode === 'markdown' ? (
+              {isViewMode ? (
+                /* Read-only rendered preview after ticket creation */
+                <div className="ci-desc-input ci-desc-preview">
+                  {form.description
+                    ? <div className="ci-desc-rendered" dangerouslySetInnerHTML={{ __html: marked.parse(form.description) as string }} />
+                    : <span className="ci-desc-placeholder">No description</span>
+                  }
+                </div>
+              ) : descMode === 'visual' ? (
+                /* Visual mode: contenteditable — shows rendered formatting, fully editable */
+                <div
+                  ref={visualRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  className="ci-desc-input ci-desc-visual-edit"
+                  onInput={e => set('description', (e.currentTarget as HTMLDivElement).innerText)}
+                  onPaste={e => {
+                    const items = Array.from(e.clipboardData?.items ?? [])
+                    const files = items.filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean) as File[]
+                    if (files.length > 0) { e.preventDefault(); setStagedFiles(prev => [...prev, ...files]) }
+                  }}
+                />
+              ) : (
+                /* Markdown mode: plain textarea with raw markdown syntax */
                 <textarea
                   ref={descRef}
                   className="ci-desc-input"
@@ -428,22 +471,6 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
                   onChange={e => set('description', e.target.value)}
                   onPaste={handleDescPaste}
                 />
-              ) : (
-                <div
-                  className="ci-desc-input ci-desc-preview"
-                  onClick={() => {
-                    if (!isViewMode) { setDescMode('markdown'); setTimeout(() => descRef.current?.focus(), 50) }
-                  }}
-                  style={{ cursor: isViewMode ? 'default' : 'text' }}
-                >
-                  {form.description
-                    ? <div
-                        className="ci-desc-rendered"
-                        dangerouslySetInnerHTML={{ __html: marked.parse(form.description) as string }}
-                      />
-                    : <span className="ci-desc-placeholder">Describe the issue or paste raw text…</span>
-                  }
-                </div>
               )}
               {/* Mic — top-right corner of description box */}
               <MicButton
