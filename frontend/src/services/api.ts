@@ -996,6 +996,23 @@ class ApiService {
     })
   }
 
+  async getDeniedEmails() {
+    return this.request<DeniedEmail[]>('/settings/access/denied')
+  }
+
+  async addDeniedEmail(email: string, reason?: string) {
+    return this.request<DeniedEmail>('/settings/access/denied', {
+      method: 'POST',
+      body: JSON.stringify({ email, reason: reason ?? '' }),
+    })
+  }
+
+  async removeDeniedEmail(email: string) {
+    return this.request(`/settings/access/denied/${encodeURIComponent(email)}`, {
+      method: 'DELETE',
+    })
+  }
+
   // Daily Task List endpoints
   async getDailyTaskList(date: string, projectId?: string) {
     const params = new URLSearchParams()
@@ -2005,10 +2022,18 @@ export interface AllowedDomain {
   added_at?: string
 }
 
+export interface DeniedEmail {
+  email: string
+  reason?: string
+  added_by?: string
+  created_at?: string
+}
+
 export interface AccessSettings {
   default_admin_email: string
   allowed_emails: AllowedEmail[]
   allowed_domains: AllowedDomain[]
+  denied_emails: DeniedEmail[]
 }
 
 export interface AsanaSettings {

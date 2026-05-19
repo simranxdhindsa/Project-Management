@@ -3,10 +3,10 @@ import { createPortal } from 'react-dom'
 import {
   Download, Loader2, ChevronDown, Shield, Briefcase,
   User as UserIcon, Eye, Mail, Globe, Info,
-  Trash2, CheckCircle2, XCircle, Users, Lock, Search,
+  Trash2, CheckCircle2, XCircle, Users, Lock, Search, Ban,
 } from 'lucide-react'
 import api from '../services/api'
-import type { AllowedEmail, AllowedDomain, AccessSettings, YouTrackUser } from '../services/api'
+import type { AllowedEmail, AllowedDomain, AccessSettings, YouTrackUser, DeniedEmail } from '../services/api'
 import { ConfirmModal } from '../components/ConfirmModal'
 
 type UserRole = 'admin' | 'project_manager' | 'member' | 'viewer'
@@ -150,6 +150,11 @@ export function SettingsPage() {
   const [newDomainRole, setNewDomainRole] = useState<UserRole>('member')
   const [addingDomain, setAddingDomain]   = useState(false)
 
+  const [newBlockedEmail, setNewBlockedEmail]   = useState('')
+  const [newBlockedReason, setNewBlockedReason] = useState('')
+  const [addingBlocked, setAddingBlocked]       = useState(false)
+  const [deniedEmails, setDeniedEmails]         = useState<DeniedEmail[]>([])
+
   const [updatingRole, setUpdatingRole] = useState<string | null>(null)
 
   const [confirmAction, setConfirmAction] = useState<{
@@ -168,7 +173,10 @@ export function SettingsPage() {
     try {
       setLoading(true); setError(null)
       const res = await api.getAccessSettings()
-      if (res.success && res.data) setSettings(res.data)
+      if (res.success && res.data) {
+        setSettings(res.data)
+        setDeniedEmails(res.data.denied_emails ?? [])
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings')
     } finally { setLoading(false) }
@@ -245,6 +253,38 @@ export function SettingsPage() {
         setConfirmAction(null)
         try { await api.removeAllowedDomain(domain); flash('Domain removed'); fetchSettings() }
         catch (err) { setError(err instanceof Error ? err.message : 'Failed to remove domain') }
+      },
+    })
+  }
+
+  // ── Blocked emails ─────────────────────────────────────────────────────
+  const handleBlockEmail = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newBlockedEmail.trim()) return
+    try {
+      setAddingBlocked(true); setError(null)
+      await api.addDeniedEmail(newBlockedEmail.trim(), newBlockedReason.trim())
+      flash('Email blocked')
+      setNewBlockedEmail(''); setNewBlockedReason('')
+      fetchSettings()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to block email')
+    } finally { setAddingBlocked(false) }
+  }
+
+  const handleUnblockEmail = (email: string) => {
+    setConfirmAction({
+      title: 'Unblock Email',
+      message: `Remove ${email} from the blocked list and restore access?`,
+      onConfirm: async () => {
+        setConfirmAction(null)
+        try {
+          await api.removeDeniedEmail(email)
+          flash('Email unblocked')
+          fetchSettings()
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Failed to unblock email')
+        }
       },
     })
   }
@@ -544,6 +584,80 @@ export function SettingsPage() {
               <Globe size={28} />
               <span>No domains configured yet</span>
               <p>Add a domain to let everyone from that organisation sign in automatically.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Blocked Emails ───────────────────────────────────── */}
+      <div className="ac-section glass-card">
+        <div className="ac-section-head">
+          <div className="ac-section-title-wrap">
+            <div className="ac-section-icon ac-section-icon-blocked">
+              <Ban size={15} />
+            </div>
+            <div>
+              <h2 className="ac-section-title">Blocked Emails</h2>
+              <p className="ac-section-desc">These users are denied access even if their domain is allowed</p>
+            </div>
+          </div>
+          {deniedEmails.length > 0 && (
+            <span className="ac-chip ac-chip-blocked">
+              <Ban size={11} />{deniedEmails.length} blocked
+            </span>
+          )}
+        </div>
+
+        <form className="ac-add-form ac-block-form" onSubmit={handleBlockEmail}>
+          <input
+            type="email"
+            className="ac-input"
+            placeholder="user@example.com"
+            value={newBlockedEmail}
+            onChange={e => setNewBlockedEmail(e.target.value)}
+            required
+          />
+          <input
+            type="text"
+            className="ac-input ac-reason-input"
+            placeholder="Reason (optional)"
+            value={newBlockedReason}
+            onChange={e => setNewBlockedReason(e.target.value)}
+            maxLength={120}
+          />
+          <button type="submit" className="btn ac-block-btn" disabled={addingBlocked || !newBlockedEmail.trim()}>
+            {addingBlocked ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />}
+            {addingBlocked ? 'Blocking…' : 'Block'}
+          </button>
+        </form>
+
+        <div className="ac-list">
+          {deniedEmails.length > 0 ? (
+            deniedEmails.map(item => (
+              <div key={item.email} className="ac-item ac-item-blocked">
+                <div className="ac-item-avatar ac-item-avatar-blocked">
+                  {getInitial(item.email)}
+                </div>
+                <div className="ac-item-info">
+                  <span className="ac-item-name">{item.email}</span>
+                  {item.reason && <span className="ac-blocked-reason">{item.reason}</span>}
+                </div>
+                <span className="ac-blocked-badge">Blocked</span>
+                <button
+                  className="ac-remove-btn"
+                  onClick={() => handleUnblockEmail(item.email)}
+                  title="Unblock"
+                  aria-label={`Unblock ${item.email}`}
+                >
+                  <XCircle size={14} />
+                </button>
+              </div>
+            ))
+          ) : (
+            <div className="ac-empty">
+              <Ban size={28} />
+              <span>No blocked emails</span>
+              <p>Add emails here to explicitly deny access regardless of any other rules.</p>
             </div>
           )}
         </div>

@@ -437,6 +437,9 @@ func main() {
 	whitelistRoutes.HandleFunc("/domains", whitelistHandler.GetAllowedDomainsHandler).Methods("GET")
 	whitelistRoutes.HandleFunc("/domains", whitelistHandler.AddAllowedDomainHandler).Methods("POST")
 	whitelistRoutes.HandleFunc("/domains/{domain}", whitelistHandler.RemoveAllowedDomainHandler).Methods("DELETE")
+	whitelistRoutes.HandleFunc("/denied", whitelistHandler.GetDeniedEmailsHandler).Methods("GET")
+	whitelistRoutes.HandleFunc("/denied", whitelistHandler.AddDeniedEmailHandler).Methods("POST")
+	whitelistRoutes.HandleFunc("/denied/{email}", whitelistHandler.RemoveDeniedEmailHandler).Methods("DELETE")
 
 	// Integration Settings routes
 	settingsHandler := handlers.NewSettingsHandler()

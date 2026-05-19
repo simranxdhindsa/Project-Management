@@ -891,7 +891,113 @@
   border-top: 1px solid var(--glass-border);
 }
 
+/* ── Blocked emails section ──────────────────────────────── */
+.ac-section-icon-blocked {
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.2);
+  color: #f87171;
+}
+
+.ac-chip-blocked {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.2);
+  color: #f87171;
+}
+
+.ac-block-form { align-items: center; }
+
+.ac-reason-input { max-width: 200px; flex: unset; }
+
+.ac-block-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 0.65rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid rgba(239,68,68,0.3);
+  background: rgba(239,68,68,0.1);
+  color: #f87171;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.ac-block-btn:hover:not(:disabled) {
+  background: rgba(239,68,68,0.18);
+  border-color: rgba(239,68,68,0.45);
+}
+
+.ac-block-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ac-item-blocked {
+  border-color: rgba(239,68,68,0.08);
+}
+
+.ac-item-blocked:hover {
+  border-color: rgba(239,68,68,0.15);
+  background: rgba(239,68,68,0.04);
+}
+
+.ac-item-avatar-blocked {
+  background: rgba(239,68,68,0.15);
+  color: #f87171;
+}
+
+.ac-blocked-badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.55rem;
+  background: rgba(239,68,68,0.12);
+  color: #f87171;
+  border-radius: var(--radius-full);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ac-blocked-reason {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* ── Light mode overrides ────────────────────────────────── */
+[data-theme="light"] .ac-section-icon-blocked {
+  background: rgba(239,68,68,0.07);
+  border-color: rgba(239,68,68,0.15);
+  color: #dc2626;
+}
+[data-theme="light"] .ac-chip-blocked {
+  background: rgba(239,68,68,0.07);
+  border-color: rgba(239,68,68,0.15);
+  color: #dc2626;
+}
+[data-theme="light"] .ac-block-btn {
+  background: rgba(239,68,68,0.07);
+  border-color: rgba(239,68,68,0.2);
+  color: #dc2626;
+}
+[data-theme="light"] .ac-block-btn:hover:not(:disabled) {
+  background: rgba(239,68,68,0.13);
+  border-color: rgba(239,68,68,0.35);
+}
+[data-theme="light"] .ac-item-blocked:hover {
+  background: rgba(254,242,242,0.7);
+  border-color: rgba(239,68,68,0.12);
+}
+[data-theme="light"] .ac-blocked-badge {
+  background: rgba(239,68,68,0.08);
+  color: #dc2626;
+}
+[data-theme="light"] .ac-blocked-reason { color: #94a3b8; }
+
 [data-theme="light"] .ac-domain-hint { color: #64748b; }
 [data-theme="light"] .ac-role-updating { color: #64748b; }
 [data-theme="light"] .ac-role-stat-label { color: #64748b; }
