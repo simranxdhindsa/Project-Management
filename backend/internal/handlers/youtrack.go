@@ -2311,9 +2311,9 @@ ANSWERING RULES:
 4. For type/count queries: use the "Ticket Types" line from Sprint Summary for total counts
 5. For "who tested X": look at transition INTO DEV/Stage/Done — "by {person}" = tester
 6. For cycle time: sum the hours from In-Progress transitions in ticket history
-7. If context header says "complete list" — that IS all tickets of that type. Do not imply more exist.
-8. Only reference names/IDs present in the data. NEVER fabricate data.
-9. If data is missing: say so and ask user to be more specific or select a sprint
+7. If context header says "COMPLETE list" or "EXACTLY N tickets" — that IS the full set. Never imply more exist or add imaginary tickets.
+8. STRICT: ONLY use ticket IDs that appear in the DATA below. Never invent IDs like ARD-1234, names like "John/Dave/Alice", or timestamps you don't see in the data. If you can't find the answer in the data, say "I don't have that information in the current sprint data."
+9. If data is missing for a specific ticket: say "I don't have data for [ID] in this sprint" — do NOT guess or fabricate.
 10. Multi-turn: build on conversation history, never re-introduce yourself`
 
 // pmStateOrder is used to detect moved-back (regression) transitions.
