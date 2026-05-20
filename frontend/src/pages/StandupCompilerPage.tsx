@@ -23,8 +23,8 @@ export function StandupCompilerPage() {
     source_channels: [],
     dest_channel_id: '',
     dest_channel_name: '',
-    time_window_start: '18:00',
-    time_window_end: '19:30',
+    time_window_start: '14:00',
+    time_window_end: '23:59',
   })
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
@@ -44,6 +44,7 @@ export function StandupCompilerPage() {
   const [compileDate, setCompileDate] = useState(today)
   const [compiling, setCompiling] = useState(false)
   const [compileError, setCompileError] = useState('')
+  const [channelWarnings, setChannelWarnings] = useState<string[]>([])
   const [updates, setUpdates] = useState<PersonUpdate[]>([])
 
   // Post
@@ -106,10 +107,18 @@ export function StandupCompilerPage() {
   }
 
   async function compile() {
-    setCompiling(true); setCompileError(''); setUpdates([]); setPostMsg('')
+    setCompiling(true); setCompileError(''); setUpdates([]); setPostMsg(''); setChannelWarnings([])
     try {
       const res = await standupApi.compile(compileDate !== today ? compileDate : undefined)
-      if (res.success) setUpdates(res.updates)
+      if (res.success) {
+        setUpdates(res.updates)
+        if (res.debug?.channels) {
+          const warns = (res.debug.channels as {id: string; name: string; messages_found: number; error?: string}[])
+            .filter(ch => ch.error)
+            .map(ch => `#${ch.name || ch.id}: ${ch.error}`)
+          setChannelWarnings(warns)
+        }
+      }
     } catch (e: unknown) {
       setCompileError(e instanceof Error ? e.message : 'Compile failed')
     } finally { setCompiling(false) }
@@ -315,6 +324,15 @@ export function StandupCompilerPage() {
       </div>
 
       {compileError && <div className="sc-error">{compileError}</div>}
+
+      {channelWarnings.length > 0 && (
+        <div className="sc-channel-warnings">
+          <strong>Channel access issues</strong> — invite the Slack bot to these channels:
+          <ul>
+            {channelWarnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        </div>
+      )}
 
       {/* Loading */}
       {compiling && (
