@@ -639,6 +639,7 @@ func (h *YouTrackHandler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"data": map[string]interface{}{
 			"id":          issue.ID,
+			"idReadable":  issue.IDReadable,
 			"summary":     issue.Summary,
 			"description": issue.Description,
 			"status":      youtrack.GetStatus(*issue),

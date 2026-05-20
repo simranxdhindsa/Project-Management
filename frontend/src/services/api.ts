@@ -1754,6 +1754,7 @@ export interface DeveloperSubsystemConfig {
 
 export interface YouTrackIssue {
   id: string
+  idReadable?: string
   summary: string
   description: string
   status: string
