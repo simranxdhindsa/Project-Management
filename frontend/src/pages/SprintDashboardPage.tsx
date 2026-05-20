@@ -594,6 +594,8 @@ interface DesignProps {
 
 function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, onKpiClick }: DesignProps) {
   const [expandedDev, setExpandedDev] = useState<string | null>(null)
+  const [showAllAtRisk, setShowAllAtRisk] = useState(false)
+  const [showAllDelay, setShowAllDelay] = useState(false)
 
   const developers = useMemo<DevStat[]>(() => {
     const map = new Map<string, DevStat>()
@@ -617,14 +619,12 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
     columns.flatMap(c => c.issues)
       .filter(i => urgencyScore(i) > 0)
       .sort((a, b) => urgencyScore(b) - urgencyScore(a))
-      .slice(0, 5)
   , [columns])
 
   const delayRows = useMemo(() =>
     columns.filter(c => isProgressCol(c.name))
       .flatMap(c => c.issues)
       .sort((a, b) => b.cycle_time_hours - a.cycle_time_hours)
-      .slice(0, 5)
   , [columns])
 
   const barW = 220
@@ -702,7 +702,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
             At Risk
             {atRisk.length > 0 && <span className="db-mc-section-count">{atRisk.length}</span>}
           </div>
-          {atRisk.map(iss => (
+          {atRisk.slice(0, showAllAtRisk ? atRisk.length : 5).map(iss => (
             <HoverCard key={iss.idReadable} content={issueHoverContent(iss)} maxWidth={270} delay={300}>
             <div className={`db-mc-focus-card ${urgencyClass(iss)}`}>
               <div className="db-mc-focus-top">
@@ -734,6 +734,16 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
             </div>
             </HoverCard>
           ))}
+          {!showAllAtRisk && atRisk.length > 5 && (
+            <button className="db-view-more-btn" onClick={() => setShowAllAtRisk(true)}>
+              ↓ View {atRisk.length - 5} more
+            </button>
+          )}
+          {showAllAtRisk && atRisk.length > 5 && (
+            <button className="db-view-more-btn" onClick={() => setShowAllAtRisk(false)}>
+              ↑ Show less
+            </button>
+          )}
           {atRisk.length === 0 && (
             <div style={{ fontSize: '0.72rem', color: 'var(--color-success)', padding: '8px 0' }}>
               ✓ No at-risk tickets
@@ -749,7 +759,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
               <span className="db-mc-legend-item db-mc-legend-bounce">Bounce</span>
               <span className="db-mc-legend-item db-mc-legend-idle">Idle</span>
             </div>
-            {delayRows.map(iss => {
+            {delayRows.slice(0, showAllDelay ? delayRows.length : 5).map(iss => {
               const { workPx, bouncePx, idlePx } = barSegs(iss)
               return (
                 <div key={iss.idReadable} className="db-mc-delay-row">
@@ -772,6 +782,16 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
                 </div>
               )
             })}
+            {!showAllDelay && delayRows.length > 5 && (
+              <button className="db-view-more-btn" onClick={() => setShowAllDelay(true)}>
+                ↓ View {delayRows.length - 5} more
+              </button>
+            )}
+            {showAllDelay && delayRows.length > 5 && (
+              <button className="db-view-more-btn" onClick={() => setShowAllDelay(false)}>
+                ↑ Show less
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -835,9 +855,11 @@ function SprintDonut({ pct, size = 110 }: { pct: number; size?: number }) {
 function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
   const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
   const pct = toPct(summary.completion_pct)
+  const [showAllCritical, setShowAllCritical] = useState(false)
+  const [showAllIssues, setShowAllIssues] = useState(false)
 
   const criticalIssues = useMemo(() =>
-    [...allIssues].sort((a, b) => urgencyScore(b) - urgencyScore(a)).slice(0, 4)
+    [...allIssues].sort((a, b) => urgencyScore(b) - urgencyScore(a))
   , [allIssues])
 
   const developers = useMemo(() => {
@@ -920,7 +942,7 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
             {criticalIssues.length === 0 && (
               <div style={{ fontSize: '0.72rem', color: 'var(--color-success)', padding: '4px 0' }}>✓ No critical issues</div>
             )}
-            {criticalIssues.map(iss => (
+            {criticalIssues.slice(0, showAllCritical ? criticalIssues.length : 5).map(iss => (
               <div key={iss.idReadable} className={`db-bg-critical-row ${urgencyClass(iss)}`}>
                 <div className="db-bg-cr-top">
                   <PriPill priority={iss.priority} />
@@ -950,6 +972,16 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
                 </div>
               </div>
             ))}
+            {!showAllCritical && criticalIssues.length > 5 && (
+              <button className="db-view-more-btn" onClick={() => setShowAllCritical(true)}>
+                ↓ View {criticalIssues.length - 5} more
+              </button>
+            )}
+            {showAllCritical && criticalIssues.length > 5 && (
+              <button className="db-view-more-btn" onClick={() => setShowAllCritical(false)}>
+                ↑ Show less
+              </button>
+            )}
           </div>
         </div>
 
@@ -993,34 +1025,49 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
             <span>ID</span><span>Pri</span><span>Title</span><span>State</span>
             <span>Assignee</span><span>Cycle</span><span>In State</span><span>Verified</span>
           </div>
-          {[...allIssues]
-            .sort((a, b) => urgencyScore(b) - urgencyScore(a))
-            .slice(0, 12)
-            .map(iss => (
-              <div key={iss.idReadable} className={`db-bg-table-row ${urgencyClass(iss)}`}>
-                <span
-                  className="db-ticket-id db-ticket-id--link"
-                  onClick={(e) => onIdClick(iss.idReadable, e)}
-                  title={`Open ${iss.idReadable} in YouTrack`}
-                >{iss.idReadable}</span>
-                <span><PriPill priority={iss.priority} /></span>
-                <span
-                  className="db-bg-table-title db-ticket-title--link"
-                  title={iss.summary}
-                  onClick={(e) => onTitleClick(iss.idReadable, e)}
-                >{iss.summary}</span>
-                <span className="db-bg-table-assignee">{iss.current_state}</span>
-                <span className="db-bg-table-assignee">{iss.assignee?.split(' ')[0] || '—'}</span>
-                <span className="db-bg-table-num">{fmtHours(iss.cycle_time_hours)}</span>
-                <span
-                  className="db-bg-table-num"
-                  style={{ color: iss.overdue_level ? 'var(--color-danger)' : undefined }}
-                >
-                  {fmtHours(iss.hours_in_state)}
-                </span>
-                <span><VerifBadges dev={iss.verified_on_dev} stg={iss.verified_on_stage} prd={iss.verified_on_prod} /></span>
-              </div>
-            ))}
+          {(() => {
+            const sorted = [...allIssues].sort((a, b) => urgencyScore(b) - urgencyScore(a))
+            const visible = sorted.slice(0, showAllIssues ? sorted.length : 5)
+            return (
+              <>
+                {visible.map(iss => (
+                  <div key={iss.idReadable} className={`db-bg-table-row ${urgencyClass(iss)}`}>
+                    <span
+                      className="db-ticket-id db-ticket-id--link"
+                      onClick={(e) => onIdClick(iss.idReadable, e)}
+                      title={`Open ${iss.idReadable} in YouTrack`}
+                    >{iss.idReadable}</span>
+                    <span><PriPill priority={iss.priority} /></span>
+                    <span
+                      className="db-bg-table-title db-ticket-title--link"
+                      title={iss.summary}
+                      onClick={(e) => onTitleClick(iss.idReadable, e)}
+                    >{iss.summary}</span>
+                    <span className="db-bg-table-assignee">{iss.current_state}</span>
+                    <span className="db-bg-table-assignee">{iss.assignee?.split(' ')[0] || '—'}</span>
+                    <span className="db-bg-table-num">{fmtHours(iss.cycle_time_hours)}</span>
+                    <span
+                      className="db-bg-table-num"
+                      style={{ color: iss.overdue_level ? 'var(--color-danger)' : undefined }}
+                    >
+                      {fmtHours(iss.hours_in_state)}
+                    </span>
+                    <span><VerifBadges dev={iss.verified_on_dev} stg={iss.verified_on_stage} prd={iss.verified_on_prod} /></span>
+                  </div>
+                ))}
+                {!showAllIssues && sorted.length > 5 && (
+                  <button className="db-view-more-btn" onClick={() => setShowAllIssues(true)}>
+                    ↓ View {sorted.length - 5} more
+                  </button>
+                )}
+                {showAllIssues && sorted.length > 5 && (
+                  <button className="db-view-more-btn" onClick={() => setShowAllIssues(false)}>
+                    ↑ Show less
+                  </button>
+                )}
+              </>
+            )
+          })()}
         </div>
       </div>
     </div>
@@ -1046,6 +1093,9 @@ function Design3({
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
 }) {
+  const [showAllBlocked, setShowAllBlocked] = useState(false)
+  const [showAllAtRisk, setShowAllAtRisk] = useState(false)
+  const [showAllInProgress, setShowAllInProgress] = useState(false)
   const pct = toPct(summary.completion_pct)
   const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
 
@@ -1186,25 +1236,55 @@ function Design3({
           {blockedIssues.length > 0 && (
             <>
               <FeedDivider label={`BLOCKED (${blockedIssues.length})`} color="var(--color-danger)" />
-              {blockedIssues.map(iss => <FeedRow key={iss.idReadable} iss={iss} />)}
+              {blockedIssues.slice(0, showAllBlocked ? blockedIssues.length : 5).map(iss => <FeedRow key={iss.idReadable} iss={iss} />)}
+              {!showAllBlocked && blockedIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllBlocked(true)}>
+                  ↓ View {blockedIssues.length - 5} more
+                </button>
+              )}
+              {showAllBlocked && blockedIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllBlocked(false)}>
+                  ↑ Show less
+                </button>
+              )}
             </>
           )}
 
           {atRiskIssues.length > 0 && (
             <>
               <FeedDivider label={`OVERDUE (${atRiskIssues.length})`} color="var(--color-warning)" />
-              {atRiskIssues.map(iss => (
+              {atRiskIssues.slice(0, showAllAtRisk ? atRiskIssues.length : 5).map(iss => (
                 <FeedRow key={iss.idReadable} iss={iss} leftBarCls="db-oc-feed-left-bar--warn" />
               ))}
+              {!showAllAtRisk && atRiskIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllAtRisk(true)}>
+                  ↓ View {atRiskIssues.length - 5} more
+                </button>
+              )}
+              {showAllAtRisk && atRiskIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllAtRisk(false)}>
+                  ↑ Show less
+                </button>
+              )}
             </>
           )}
 
           {inProgressIssues.length > 0 && (
             <>
               <FeedDivider label={`IN PROGRESS (${inProgressIssues.length})`} color="var(--color-primary-light)" />
-              {inProgressIssues.map(iss => (
+              {inProgressIssues.slice(0, showAllInProgress ? inProgressIssues.length : 5).map(iss => (
                 <FeedRow key={iss.idReadable} iss={iss} leftBarCls="db-oc-feed-left-bar--primary" />
               ))}
+              {!showAllInProgress && inProgressIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllInProgress(true)}>
+                  ↓ View {inProgressIssues.length - 5} more
+                </button>
+              )}
+              {showAllInProgress && inProgressIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllInProgress(false)}>
+                  ↑ Show less
+                </button>
+              )}
             </>
           )}
 

@@ -441,6 +441,38 @@
 }
 .db-kpi-chip--clickable { cursor: pointer; }
 .db-kpi-chip--clickable:hover { background: var(--glass-bg-hover); border-color: rgba(99,102,241,0.3); }
+
+/* ── View More button ─────────────────────────────────────── */
+.db-view-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 6px 0;
+  margin-top: 4px;
+  background: none;
+  border: 1px dashed rgba(255,255,255,0.12);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 150ms, border-color 150ms, background 150ms;
+}
+.db-view-more-btn:hover {
+  color: var(--color-primary-light);
+  border-color: rgba(99,102,241,0.4);
+  background: rgba(99,102,241,0.05);
+}
+[data-theme="light"] .db-view-more-btn {
+  border-color: rgba(99,102,241,0.18);
+  color: #64748b;
+}
+[data-theme="light"] .db-view-more-btn:hover {
+  color: #4f46e5;
+  border-color: rgba(99,102,241,0.35);
+  background: rgba(99,102,241,0.06);
+}
 .db-kpi-chip-label {
   font-size: 0.58rem;
   font-weight: 600;
