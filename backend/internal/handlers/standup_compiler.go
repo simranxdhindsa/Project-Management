@@ -339,8 +339,10 @@ func standupGetOwnerSlackID(ctx context.Context, userID, email string, client *s
 
 const standupGroqSystem = `You are a structured parser for developer standup updates.
 Given a developer's raw Slack message, extract the content into labelled sections.
-Common section labels: "Done", "In Progress", "Moved to Dev Today", "QA Findings", "Tickets Created", "Tickets Tested", "Tickets Verified", "Blocked", "Testing", "Research".
-Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done", "items": ["ARD-1234 FE: Fix login bug"]}, ...]}.
+IMPORTANT: Preserve the exact section label wording from the original message — do NOT rename or normalise them.
+For example if the message says "Done - Features / Enhancements", use that exact label, not just "Done".
+Common labels you may encounter: "Done", "Done - Features / Enhancements", "Done - Bugs Fixed", "In Progress", "Moved to Dev Today", "QA Findings", "Tickets Created", "Tickets Tested", "Tickets Verified", "Blocked", "Testing", "Research", "Note".
+Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done - Features / Enhancements", "items": ["ARD-1234 FE: Fix login bug"]}, ...]}.
 Preserve ticket IDs exactly (e.g. ARD-1234). Do not invent items. Keep each item to one line. If the message is unclear, return {"sections": []}.`
 
 const standupOwnerGroqSystem = `You are a structured parser for a PM's daily standup update.
@@ -467,14 +469,19 @@ func standupFormatMrkdwn(updates []PersonUpdate) string {
 	var sb strings.Builder
 	for i, u := range updates {
 		if i > 0 {
-			sb.WriteString("\n")
+			sb.WriteString("\n\n") // blank line between people
 		}
 		sb.WriteString(fmt.Sprintf("*%s*\n", u.DisplayName))
 		for _, sec := range u.Sections {
 			if len(sec.Items) == 0 {
 				continue
 			}
-			sb.WriteString(sec.Label + ":\n")
+			// Don't double-up the colon if label already ends with one
+			label := sec.Label
+			if !strings.HasSuffix(label, ":") {
+				label += ":"
+			}
+			sb.WriteString(label + "\n")
 			for _, item := range sec.Items {
 				sb.WriteString("• " + item + "\n")
 			}
