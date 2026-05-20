@@ -554,6 +554,11 @@ func BuildPMQueryContext(
 		return sb.String(), intent
 	}
 
+	// Anti-hallucination guardrail — emitted before every issue list
+	sb.WriteString("⚠ DATA INTEGRITY RULE: You MUST ONLY reference ticket IDs that appear in the list below.\n")
+	sb.WriteString("Any ID not in this list does NOT exist. Do NOT invent ticket IDs, names, timestamps, or statuses.\n")
+	sb.WriteString("If the answer is not in the data below, say: \"I don't have that information in the current sprint data.\"\n\n")
+
 	// Header describing what was retrieved — include total count from KPIs for type queries
 	switch intent.kind {
 	case intentTypeFilter:
@@ -562,21 +567,68 @@ func BuildPMQueryContext(
 			total = len(relevant)
 		}
 		if len(relevant) < total {
-			sb.WriteString(fmt.Sprintf("## %s tickets in sprint: %d total (showing first %d — use Sprint Summary Ticket Types for the exact count)\n", intent.typeFilter, total, len(relevant)))
+			sb.WriteString(fmt.Sprintf("## %s tickets in sprint: %d total (showing first %d of %d)\n", intent.typeFilter, total, len(relevant), total))
 		} else {
-			sb.WriteString(fmt.Sprintf("## All %s tickets in sprint (%d total — complete list)\n", intent.typeFilter, total))
+			sb.WriteString(fmt.Sprintf("## All %s tickets in sprint — EXACTLY %d tickets, COMPLETE list\n", intent.typeFilter, total))
+		}
+		// Pre-compute status breakdown so LLM doesn't need to count
+		statusBuckets := map[string]int{}
+		for _, iss := range relevant {
+			st := strings.ToLower(youtrack.GetStatus(iss))
+			switch {
+			case strings.Contains(st, "block"):
+				statusBuckets["Blocked"]++
+			case strings.Contains(st, "done") || strings.Contains(st, "clos") || strings.Contains(st, "verif") || strings.Contains(st, "deploy"):
+				statusBuckets["Done"]++
+			case strings.Contains(st, "stage") || strings.Contains(st, "prod"):
+				statusBuckets["Done (post-dev)"]++
+			case strings.Contains(st, "dev"):
+				statusBuckets["Dev"]++
+			case strings.Contains(st, "progress"):
+				statusBuckets["In Progress"]++
+			default:
+				statusBuckets["Other/Backlog"]++
+			}
+		}
+		bucketParts := []string{}
+		for _, label := range []string{"Done", "Done (post-dev)", "Dev", "In Progress", "Blocked", "Other/Backlog"} {
+			if n := statusBuckets[label]; n > 0 {
+				bucketParts = append(bucketParts, fmt.Sprintf("%s: %d", label, n))
+			}
+		}
+		if len(bucketParts) > 0 {
+			sb.WriteString("## Pre-computed status breakdown: " + strings.Join(bucketParts, " | ") + "\n")
 		}
 	case intentPriorityFilter:
-		sb.WriteString(fmt.Sprintf("## %s tickets in sprint (%d shown)\n", intent.priorityFilter, len(relevant)))
+		sb.WriteString(fmt.Sprintf("## %s tickets in sprint — EXACTLY %d tickets listed below\n", intent.priorityFilter, len(relevant)))
 	case intentAssignee:
-		sb.WriteString(fmt.Sprintf("## All tickets for %s in sprint (%d shown)\n", intent.assigneeName, len(relevant)))
+		if len(relevant) == 0 {
+			sb.WriteString(fmt.Sprintf("## %s has ZERO tickets in this sprint.\n", intent.assigneeName))
+		} else {
+			doneN, activeN, blockedN, otherN := 0, 0, 0, 0
+			for _, iss := range relevant {
+				st := strings.ToLower(youtrack.GetStatus(iss))
+				switch {
+				case strings.Contains(st, "block"):
+					blockedN++
+				case strings.Contains(st, "done") || strings.Contains(st, "clos") || strings.Contains(st, "verif") ||
+					strings.Contains(st, "deploy") || strings.Contains(st, "stage") || strings.Contains(st, "prod") || strings.Contains(st, "dev"):
+					doneN++
+				case strings.Contains(st, "progress"):
+					activeN++
+				default:
+					otherN++
+				}
+			}
+			sb.WriteString(fmt.Sprintf("## %s has EXACTLY %d ticket(s) in this sprint — COMPLETE list, no others exist\n", intent.assigneeName, len(relevant)))
+			sb.WriteString(fmt.Sprintf("## Breakdown: Done/Post-dev: %d | In Progress: %d | Blocked: %d | Backlog/Other: %d\n", doneN, activeN, blockedN, otherN))
+		}
 	case intentStatusFilter:
-		sb.WriteString(fmt.Sprintf("## Tickets matching status filter (%d retrieved)\n", len(relevant)))
+		sb.WriteString(fmt.Sprintf("## Tickets matching status filter — %d tickets listed below\n", len(relevant)))
 	default:
 		sb.WriteString(fmt.Sprintf("## Relevant Sprint Issues (%d retrieved for this query)\n", len(relevant)))
 	}
-	sb.WriteString("Format: ID | Priority | Type | Summary | Status | Assignee | Subsystem | Bounces | Flags\n")
-	sb.WriteString("IMPORTANT: Only reference people and tickets listed below. Do not mention anyone not in this data.\n\n")
+	sb.WriteString("Format: ID | Priority | Type | Summary | Status | Assignee | Subsystem | Bounces | Flags\n\n")
 
 	for _, iss := range relevant {
 		status := youtrack.GetStatus(iss)

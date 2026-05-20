@@ -70,8 +70,8 @@ func (h *StandupCompilerHandler) GetConfig(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		cfg = &standupConfigRow{
 			SourceChannels:  []StandupChannelRef{},
-			TimeWindowStart: "18:00",
-			TimeWindowEnd:   "19:30",
+			TimeWindowStart: "14:00",
+			TimeWindowEnd:   "23:59",
 		}
 	}
 
@@ -168,29 +168,60 @@ func (h *StandupCompilerHandler) Compile(w http.ResponseWriter, r *http.Request)
 	}
 	slackClient := slacksvc.NewClient(integration.BotToken)
 
-	oldest, latest, err := standupTimeWindowToUnix(today, cfg.TimeWindowStart, cfg.TimeWindowEnd)
+	// Fetch from 14:00 today to now — anything before 2 PM is yesterday's carryover.
+	// If the user configured an earlier start time (e.g. 13:00) we respect that,
+	// otherwise we always floor at 14:00 so yesterday's messages are excluded.
+	windowStart := cfg.TimeWindowStart
+	if windowStart == "" {
+		windowStart = "14:00"
+	}
+	// Floor at 14:00 even if config is earlier
+	if floorHour, _ := time.ParseInLocation("2006-01-02 15:04", today+" 14:00", time.Local); true {
+		configured, parseErr := time.ParseInLocation("2006-01-02 15:04", today+" "+windowStart, time.Local)
+		if parseErr != nil || configured.Before(floorHour) {
+			windowStart = "14:00"
+		}
+	}
+	windowEnd := cfg.TimeWindowEnd
+	if windowEnd == "" {
+		windowEnd = "23:59"
+	}
+
+	oldest, latest, err := standupTimeWindowToUnix(today, windowStart, windowEnd)
 	if err != nil {
 		http.Error(w, "invalid time window: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Collect messages from all source channels, grouped by Slack user ID
+	type channelDebug struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Messages int    `json:"messages_found"`
+		Error    string `json:"error,omitempty"`
+	}
+	var channelLog []channelDebug
+
 	userMessages := map[string]string{}
 	for _, ch := range cfg.SourceChannels {
 		msgs, fetchErr := slackClient.GetChannelHistory(r.Context(), ch.ID, oldest, latest, 500)
 		if fetchErr != nil {
+			channelLog = append(channelLog, channelDebug{ID: ch.ID, Name: ch.Name, Error: fetchErr.Error()})
 			continue
 		}
+		count := 0
 		for _, m := range msgs {
 			if m.User == "" || strings.TrimSpace(m.Text) == "" {
 				continue
 			}
+			count++
 			if existing := userMessages[m.User]; existing != "" {
 				userMessages[m.User] = existing + "\n" + m.Text
 			} else {
 				userMessages[m.User] = m.Text
 			}
 		}
+		channelLog = append(channelLog, channelDebug{ID: ch.ID, Name: ch.Name, Messages: count})
 	}
 
 	// Resolve the logged-in user's own Slack ID (stored alongside the integration)
@@ -249,10 +280,36 @@ func (h *StandupCompilerHandler) Compile(w http.ResponseWriter, r *http.Request)
 	ownerUpdate.SlackUserID = ownerSlackID
 	ownerUpdate.IsOwner = true
 
+	// Strip empty sections across all updates
+	stripEmpty := func(p *PersonUpdate) {
+		out := p.Sections[:0]
+		for _, sec := range p.Sections {
+			if len(sec.Items) > 0 {
+				out = append(out, sec)
+			}
+		}
+		p.Sections = out
+	}
+	stripEmpty(&ownerUpdate)
+	for i := range updates {
+		stripEmpty(&updates[i])
+	}
+
 	result := append([]PersonUpdate{ownerUpdate}, updates...)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "updates": result})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"updates": result,
+		"debug": map[string]interface{}{
+			"window_start":  windowStart,
+			"window_end":    windowEnd,
+			"oldest_unix":   oldest,
+			"latest_unix":   latest,
+			"channels":      channelLog,
+			"owner_slack_id": ownerSlackID,
+		},
+	})
 }
 
 // Post formats the preview as Slack mrkdwn and posts it to the destination channel.
@@ -339,8 +396,10 @@ func standupGetOwnerSlackID(ctx context.Context, userID, email string, client *s
 
 const standupGroqSystem = `You are a structured parser for developer standup updates.
 Given a developer's raw Slack message, extract the content into labelled sections.
-Common section labels: "Done", "In Progress", "Moved to Dev Today", "QA Findings", "Tickets Created", "Tickets Tested", "Tickets Verified", "Blocked", "Testing", "Research".
-Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done", "items": ["ARD-1234 FE: Fix login bug"]}, ...]}.
+IMPORTANT: Preserve the exact section label wording from the original message — do NOT rename or normalise them.
+For example if the message says "Done - Features / Enhancements", use that exact label, not just "Done".
+Common labels you may encounter: "Done", "Done - Features / Enhancements", "Done - Bugs Fixed", "In Progress", "Moved to Dev Today", "QA Findings", "Tickets Created", "Tickets Tested", "Tickets Verified", "Blocked", "Testing", "Research", "Note".
+Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done - Features / Enhancements", "items": ["ARD-1234 FE: Fix login bug"]}, ...]}.
 Preserve ticket IDs exactly (e.g. ARD-1234). Do not invent items. Keep each item to one line. If the message is unclear, return {"sections": []}.`
 
 const standupOwnerGroqSystem = `You are a structured parser for a PM's daily standup update.
@@ -467,14 +526,19 @@ func standupFormatMrkdwn(updates []PersonUpdate) string {
 	var sb strings.Builder
 	for i, u := range updates {
 		if i > 0 {
-			sb.WriteString("\n")
+			sb.WriteString("\n\n") // blank line between people
 		}
 		sb.WriteString(fmt.Sprintf("*%s*\n", u.DisplayName))
 		for _, sec := range u.Sections {
 			if len(sec.Items) == 0 {
 				continue
 			}
-			sb.WriteString(sec.Label + ":\n")
+			// Don't double-up the colon if label already ends with one
+			label := sec.Label
+			if !strings.HasSuffix(label, ":") {
+				label += ":"
+			}
+			sb.WriteString(label + "\n")
 			for _, item := range sec.Items {
 				sb.WriteString("• " + item + "\n")
 			}

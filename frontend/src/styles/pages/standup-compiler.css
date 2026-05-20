@@ -294,6 +294,30 @@
   color: var(--color-danger-light);
 }
 
+/* ── Channel warnings ────────────────────────────────────────────────────── */
+
+.sc-channel-warnings {
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.9rem;
+  font-size: 0.82rem;
+  color: var(--color-warning, #d97706);
+  line-height: 1.5;
+}
+
+.sc-channel-warnings strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.sc-channel-warnings ul {
+  margin: 0.25rem 0 0 1rem;
+  padding: 0;
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+
 /* ── Loading ─────────────────────────────────────────────────────────────── */
 
 .sc-loading {

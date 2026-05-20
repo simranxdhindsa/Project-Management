@@ -2311,9 +2311,9 @@ ANSWERING RULES:
 4. For type/count queries: use the "Ticket Types" line from Sprint Summary for total counts
 5. For "who tested X": look at transition INTO DEV/Stage/Done — "by {person}" = tester
 6. For cycle time: sum the hours from In-Progress transitions in ticket history
-7. If context header says "complete list" — that IS all tickets of that type. Do not imply more exist.
-8. Only reference names/IDs present in the data. NEVER fabricate data.
-9. If data is missing: say so and ask user to be more specific or select a sprint
+7. If context header says "COMPLETE list" or "EXACTLY N tickets" — that IS the full set. Never imply more exist or add imaginary tickets.
+8. STRICT: ONLY use ticket IDs that appear in the DATA below. Never invent IDs like ARD-1234, names like "John/Dave/Alice", or timestamps you don't see in the data. If you can't find the answer in the data, say "I don't have that information in the current sprint data."
+9. If data is missing for a specific ticket: say "I don't have data for [ID] in this sprint" — do NOT guess or fabricate.
 10. Multi-turn: build on conversation history, never re-introduce yourself`
 
 // pmStateOrder is used to detect moved-back (regression) transitions.
@@ -2429,9 +2429,21 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	// ── 5. Build sprint KPIs — Overdue + Bounced computed from tracking logs ────
+	// ── 5. Load workflow config for role-based KPI classification ──────────────
+	var wfHierarchy []models.ColumnState
+	if h.configRepo != nil {
+		if wfCfg, err2 := h.configRepo.GetEffective(r.Context(), userID, "youtrack"); err2 == nil && wfCfg != nil {
+			wfHierarchy = wfCfg.ColumnHierarchy
+		}
+	}
+	wfDoneRoles := map[string]bool{"dev_done": true, "verified": true, "deployed": true, "closed": true}
+
+	// ── 6. Build sprint KPIs — Overdue + Bounced from tracking logs ─────────────
 	overdueSet := map[string]bool{}
 	bouncedSet := map[string]bool{}
+	// Track most recent entry time into an active state (null duration = still there)
+	activeEntryTime := map[string]time.Time{}
+	issuePriority := map[string]string{}
 	for _, row := range trackingLogs {
 		if pmIsMovedBack(row.FromState, row.ToState) {
 			bouncedSet[row.IssueID] = true
@@ -2440,6 +2452,24 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 			if *row.DurationInPrevStateHours > pmOverdueThreshold(row.Priority) {
 				overdueSet[row.IssueID] = true
 			}
+		}
+		// Capture when this issue last entered an active state with no exit yet
+		role := getStateRole(row.ToState, wfHierarchy)
+		if role == "" && strings.Contains(strings.ToLower(row.ToState), "progress") {
+			role = "active"
+		}
+		if role == "active" && row.DurationInPrevStateHours == nil {
+			if ex, ok := activeEntryTime[row.IssueID]; !ok || row.TransitionedAt.After(ex) {
+				activeEntryTime[row.IssueID] = row.TransitionedAt
+				issuePriority[row.IssueID] = row.Priority
+			}
+		}
+	}
+	// Mark currently active issues overdue if they've exceeded their SLA
+	now := time.Now()
+	for issID, entryTime := range activeEntryTime {
+		if now.Sub(entryTime).Hours() > pmOverdueThreshold(issuePriority[issID]) {
+			overdueSet[issID] = true
 		}
 	}
 
@@ -2451,26 +2481,57 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	kpis := SprintKPIs{
 		SprintName: req.SprintName,
 		SprintEnds: sprintEnds,
-		Overdue:    len(overdueSet),
 		Bounced:    len(bouncedSet),
 		TypeCounts: map[string]int{},
 	}
 	for _, iss := range sprintIssues {
 		kpis.Total++
-		status := strings.ToLower(youtrack.GetStatus(iss))
+		status := youtrack.GetStatus(iss)
+		role := getStateRole(status, wfHierarchy)
+		if role == "" {
+			// Fallback keyword heuristics when state is not in workflow config
+			lower := strings.ToLower(status)
+			switch {
+			case strings.Contains(lower, "block"):
+				role = "blocked"
+			case strings.Contains(lower, "progress"):
+				role = "active"
+			case strings.Contains(lower, "done") || strings.Contains(lower, "clos") ||
+				strings.Contains(lower, "deploy") || strings.Contains(lower, "verif") ||
+				strings.Contains(lower, "stage") || strings.Contains(lower, "prod"):
+				role = "closed"
+			}
+		}
 		switch {
-		case strings.Contains(status, "block"):
+		case role == "blocked":
 			kpis.Blocked++
-		case strings.Contains(status, "done") || strings.Contains(status, "clos") ||
-			strings.Contains(status, "deploy") || strings.Contains(status, "verif"):
+		case wfDoneRoles[role]:
 			kpis.Done++
-		case strings.Contains(status, "progress"):
+		case role == "active":
 			kpis.InProgress++
+		}
+		// Overdue: active issues that exceeded SLA (cross-ref overdueSet which now includes live check)
+		if role == "active" || role == "blocked" {
+			if overdueSet[iss.ID] {
+				// Already counted below
+			}
 		}
 		if t := youtrack.GetCustomFieldValue(iss, "Type"); t != "" {
 			kpis.TypeCounts[t]++
 		}
 	}
+	// Count overdue only among non-done issues present in the sprint
+	sprintIssueSet := map[string]bool{}
+	for _, iss := range sprintIssues {
+		sprintIssueSet[iss.ID] = true
+	}
+	overdueFinal := 0
+	for id := range overdueSet {
+		if sprintIssueSet[id] {
+			overdueFinal++
+		}
+	}
+	kpis.Overdue = overdueFinal
 
 	// ── 6. RAG: retrieve only the issues relevant to this query ───────────────
 	ragContext, ragIntent := BuildPMQueryContext(req.Query, sprintIssues, trackingLogs, blockerReasons, kpis)
