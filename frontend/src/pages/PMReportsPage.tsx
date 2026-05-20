@@ -37,8 +37,10 @@ import {
   getActiveSource,
 } from '../services/pmDataService'
 import DailyOpsTab from './DailyOpsTab'
+import { StandupCompilerPage } from './StandupCompilerPage'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
+import { useAuth } from '../contexts/AuthContext'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -135,6 +137,7 @@ const TABS = [
   { id: 'assignees',   label: 'Assignee Stats',     icon: Users     },
   { id: 'dailyops',    label: 'Daily Ops',          icon: Zap       },
   { id: 'deployment',  label: 'Deployment Report',  icon: Rocket    },
+  { id: 'standup',     label: 'Compiler',           icon: Send      },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -292,6 +295,7 @@ const THINKING_PHRASES: { text: string; Icon: React.ElementType; key: string }[]
 ]
 
 export function PMAssistantTab() {
+  const { user } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -550,7 +554,11 @@ export function PMAssistantTab() {
         {messages.map(msg => (
           <div key={msg.id} className={`pm-chat-message pm-chat-${msg.role}`}>
             <div className="pm-chat-avatar">
-              {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+              {msg.role === 'user'
+                ? user?.picture
+                  ? <img src={user.picture} alt={user.name ?? 'You'} className="pm-chat-avatar-img" />
+                  : <User size={16} />
+                : <Bot size={16} />}
             </div>
             <div className="pm-chat-bubble">
               {msg.role === 'assistant' ? (
@@ -5043,6 +5051,7 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
           {activeTab === 'tracking'   && <TrackingTab blockerIssueIds={blockerIssueIds} sprintId={activeSprint?.id} sprintFinishMs={activeSprint?.finish} />}
           {activeTab === 'dailyops'   && <DailyOpsTab onBlockersChange={setBlockerIssueIds} sprintId={activeSprint?.id} />}
           {activeTab === 'deployment' && <DeploymentReportTab activeSprint={activeSprint} />}
+          {activeTab === 'standup'    && <StandupCompilerPage />}
         </div>
       </div>
     </div>
