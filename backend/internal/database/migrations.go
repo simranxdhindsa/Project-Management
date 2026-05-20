@@ -756,6 +756,29 @@ func RunMigrations() error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_slack_reply_templates_user ON slack_reply_templates(user_id, sort_order)`,
+
+		// Denied emails — explicit block list; takes priority over allowed_emails/allowed_domains
+		`CREATE TABLE IF NOT EXISTS denied_emails (
+			id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			email      TEXT NOT NULL UNIQUE,
+			reason     TEXT,
+			added_by   TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+
+		// ── Daily Standup Compiler ───────────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS standup_config (
+			id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id            VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			source_channels    JSONB NOT NULL DEFAULT '[]',
+			dest_channel_id    TEXT NOT NULL DEFAULT '',
+			dest_channel_name  TEXT NOT NULL DEFAULT '',
+			time_window_start  TEXT NOT NULL DEFAULT '18:00',
+			time_window_end    TEXT NOT NULL DEFAULT '19:30',
+			created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			UNIQUE(user_id)
+		)`,
 	}
 
 	for i, migration := range migrations {

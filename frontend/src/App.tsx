@@ -1,11 +1,13 @@
 import { BrowserRouter, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
+import { VelocityDataProvider } from '@/contexts/VelocityDataContext'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
 import ThemePreviewPage from '@/pages/ThemePreviewPage'
+import NoAccessPage from '@/pages/NoAccessPage'
 
 function AppContent() {
-  const { isAuthenticated, isLoading } = useAuth()
+  const { isAuthenticated, isLoading, accessDenied, accessDeniedMessage, clearAccessDenied } = useAuth()
   const location = useLocation()
 
   if (location.pathname === '/theme-preview') return <ThemePreviewPage />
@@ -21,7 +23,15 @@ function AppContent() {
     )
   }
 
-  return isAuthenticated ? <Dashboard /> : <Login />
+  if (accessDenied) {
+    return <NoAccessPage message={accessDeniedMessage} onReset={clearAccessDenied} />
+  }
+
+  return isAuthenticated ? (
+    <VelocityDataProvider>
+      <Dashboard />
+    </VelocityDataProvider>
+  ) : <Login />
 }
 
 function App() {

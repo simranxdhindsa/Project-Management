@@ -836,6 +836,8 @@
 .do-prio-dot--p3 { background: #3b82f6; }
 
 .do-issue-id { font-size: 0.68rem; font-weight: 600; color: #a78bfa; white-space: nowrap; flex-shrink: 0; }
+.do-issue-id--link { cursor: pointer; }
+.do-issue-id--link:hover { color: #c4b5fd; text-decoration: underline; }
 .do-issue-summary {
   font-size: 0.72rem;
   color: rgba(255,255,255,0.72);
@@ -845,6 +847,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.do-issue-summary--clickable { cursor: pointer; }
+.do-issue-summary--clickable:hover { color: rgba(255,255,255,0.95); text-decoration: underline; }
 .do-assignee-chip {
   font-size: 0.62rem;
   background: rgba(139,92,246,0.12);
@@ -1219,7 +1223,9 @@
 [data-theme="light"] .do-issue-row:hover { background: rgba(99,102,241,0.04); }
 [data-theme="light"] .do-issue-row--no-movement { background: rgba(239,68,68,0.04); }
 [data-theme="light"] .do-issue-summary { color: #1e293b !important; }
+[data-theme="light"] .do-issue-summary--clickable:hover { color: #0f172a; }
 [data-theme="light"] .do-issue-id { color: #4f46e5; }
+[data-theme="light"] .do-issue-id--link:hover { color: #3730a3; }
 [data-theme="light"] .do-assignee-name,
 [data-theme="light"] .do-issue-meta,
 [data-theme="light"] .do-issue-assignee { color: #64748b !important; }

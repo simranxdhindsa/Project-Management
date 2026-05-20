@@ -11,6 +11,7 @@ import type {
 } from '@/services/api'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '@/components/HoverCard'
+import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import '../styles/pages/dashboard.css'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -71,11 +72,13 @@ function urgencyClass(iss: SprintBoardIssue): string {
 }
 
 function urgencyScore(iss: SprintBoardIssue): number {
-  if (iss.overdue_level === 'deadline') return 4
-  if (iss.overdue_level === 'sprint')   return 3
-  if (iss.overdue_level === 'sla')      return 2
-  if (iss.is_delayed)                   return 1.5
-  if (iss.bounce_count > 0)             return 1
+  if (iss.bounce_count >= 3)            return 5
+  if (iss.bounce_count >= 2)            return 4
+  if (iss.bounce_count >= 1)            return 3
+  if (iss.overdue_level === 'deadline') return 2.5
+  if (iss.overdue_level === 'sprint')   return 2
+  if (iss.overdue_level === 'sla')      return 1.5
+  if (iss.is_delayed)                   return 1
   return 0
 }
 
@@ -89,6 +92,46 @@ function isDoneCol(name: string): boolean {
   const n = (name || '').toLowerCase()
   return n.includes('done') || n.includes('clos') || n.includes('deploy') ||
          n.includes('verif') || n.includes('prod') || n.includes('stage')
+}
+
+// ─── Role-aware column classification ────────────────────────────────────────
+// Uses workflow config roles when available, falls back to keyword matching.
+
+const DONE_ROLES = new Set(['dev_done', 'verified', 'deployed', 'closed'])
+
+function resolveRole(stateName: string, roleMap: Map<string, string>): string {
+  const mapped = roleMap.get((stateName || '').toLowerCase())
+  if (mapped) return mapped
+  if (isDoneCol(stateName))    return 'dev_done'
+  if (isBlockedCol(stateName)) return 'blocked'
+  if (isProgressCol(stateName)) return 'active'
+  return 'backlog'
+}
+
+function isIssueDone(i: SprintBoardIssue, roleMap: Map<string, string>): boolean {
+  return DONE_ROLES.has(resolveRole(i.current_state, roleMap))
+}
+
+function isIssueBlocked(i: SprintBoardIssue, roleMap: Map<string, string>): boolean {
+  return resolveRole(i.current_state, roleMap) === 'blocked'
+}
+
+function isIssueActive(i: SprintBoardIssue, roleMap: Map<string, string>): boolean {
+  return resolveRole(i.current_state, roleMap) === 'active'
+}
+
+// ─── Issue type categorization ───────────────────────────────────────────────
+
+type IssueCategory = 'feature' | 'bug' | 'task' | 'other'
+
+function categorizeIssue(issueType: string): IssueCategory {
+  const t = (issueType || '').toLowerCase().trim()
+  if (!t) return 'other'
+  if (t.includes('feature') || t.includes('story') || t.includes('epic')) return 'feature'
+  if (t.includes('bug') || t.includes('defect') || t.includes('hotfix')) return 'bug'
+  if (t.includes('task') || t.includes('enhancement') || t.includes('improvement') ||
+      t.includes('chore') || t.includes('tech debt') || t.includes('techdebt')) return 'task'
+  return 'other'
 }
 
 // ─── Shared Sub-components ────────────────────────────────────────────────────
@@ -130,9 +173,9 @@ function VerifBadges({ dev, stg, prd }: { dev?: string; stg?: string; prd?: stri
   )
 }
 
-function KpiChip({ label, value, cls }: { label: string; value: number | string; cls?: string }) {
+function KpiChip({ label, value, cls, onClick }: { label: string; value: number | string; cls?: string; onClick?: () => void }) {
   return (
-    <div className={`db-kpi-chip${cls ? ` ${cls}` : ''}`}>
+    <div className={`db-kpi-chip${cls ? ` ${cls}` : ''}${onClick ? ' db-kpi-chip--clickable' : ''}`} onClick={onClick}>
       <span className="db-kpi-chip-val">{value}</span>
       <span className="db-kpi-chip-label">{label}</span>
     </div>
@@ -156,6 +199,114 @@ function Countdown({ finishMs }: { finishMs: number }) {
     <span className={`db-countdown${overdue ? ' db-countdown--overdue' : urgent ? ' db-countdown--urgent' : ''}`}>
       {overdue ? '⚠ ' : '⏱ '}{label}
     </span>
+  )
+}
+
+// Shows the YouTrack issue type (Feature / Bug / Task / etc.) as a compact pill
+function IssueTypePill({ issueType }: { issueType?: string }) {
+  if (!issueType) return null
+  const cat = categorizeIssue(issueType)
+  const label = issueType.length > 12 ? issueType.slice(0, 12) + '…' : issueType
+  return <span className={`db-type-pill db-type-pill--${cat}`} title={issueType}>{label}</span>
+}
+
+// Sprint composition breakdown (features / bugs / tasks) with at-risk feature alert.
+// Returns null when no issues have issue_type populated (graceful degradation).
+function TypeDeliveryPanel({
+  columns,
+  summary,
+  columnRoleMap,
+}: {
+  columns: SprintBoardColumn[]
+  summary: SprintSummary
+  columnRoleMap: Map<string, string>
+}) {
+  const CATS: IssueCategory[] = ['feature', 'bug', 'task', 'other']
+  const CAT_LABELS: Record<IssueCategory, string> = { feature: 'Features', bug: 'Bugs', task: 'Tasks', other: 'Other' }
+
+  const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
+  const hasTypes  = useMemo(() => allIssues.some(i => !!i.issue_type), [allIssues])
+
+  const daysLeft = summary.sprint_finish_ms > 0
+    ? Math.ceil((summary.sprint_finish_ms - Date.now()) / 86400000)
+    : null
+
+  // All hooks must run before any conditional return
+  const stats = useMemo(() => {
+    if (!hasTypes) return []
+    const acc: Record<IssueCategory, { total: number; done: number; active: number; notStarted: number }> = {
+      feature: { total: 0, done: 0, active: 0, notStarted: 0 },
+      bug:     { total: 0, done: 0, active: 0, notStarted: 0 },
+      task:    { total: 0, done: 0, active: 0, notStarted: 0 },
+      other:   { total: 0, done: 0, active: 0, notStarted: 0 },
+    }
+    allIssues.forEach(iss => {
+      const cat  = categorizeIssue(iss.issue_type)
+      const role = resolveRole(iss.current_state, columnRoleMap)
+      acc[cat].total++
+      if (DONE_ROLES.has(role))   acc[cat].done++
+      else if (role === 'active') acc[cat].active++
+      else                        acc[cat].notStarted++
+    })
+    return CATS.map(cat => ({ cat, label: CAT_LABELS[cat], ...acc[cat] })).filter(s => s.total > 0)
+  }, [allIssues, columnRoleMap, hasTypes])
+
+  // Features that haven't started (not done, not active) with sprint ending in ≤ 4 days
+  const atRiskFeatures = useMemo(() => {
+    if (!hasTypes || daysLeft === null || daysLeft > 4) return []
+    return allIssues.filter(iss => {
+      if (categorizeIssue(iss.issue_type) !== 'feature') return false
+      const role = resolveRole(iss.current_state, columnRoleMap)
+      return !DONE_ROLES.has(role) && role !== 'active'
+    })
+  }, [allIssues, columnRoleMap, daysLeft, hasTypes])
+
+  // Now safe to conditionally render
+  if (!hasTypes) return null
+
+  return (
+    <div className="db-type-panel">
+      <div className="db-mc-section-label" style={{ marginBottom: 8, marginTop: 0 }}>Sprint Composition</div>
+      {stats.map(st => {
+        const pct  = st.total > 0 ? Math.round((st.done / st.total) * 100) : 0
+        const warn = st.cat === 'feature' && st.notStarted > 0 && daysLeft !== null && daysLeft <= 4
+        return (
+          <div key={st.cat} className="db-type-stat-row">
+            <span className={`db-type-stat-label db-type-stat-label--${st.cat}`}>{st.label}</span>
+            <div className="db-type-stat-bar-wrap">
+              <div className="db-type-stat-bar">
+                <div className="db-type-stat-fill" style={{ width: `${pct}%`, background: `var(--db-type-${st.cat})` }} />
+              </div>
+            </div>
+            <span className="db-type-stat-nums">
+              {st.done}<span className="db-type-stat-total">/{st.total}</span>
+            </span>
+            {warn && (
+              <span className="db-type-stat-warn" title={`${st.notStarted} not started, sprint ends in ${daysLeft}d`}>
+                ⚠{st.notStarted}
+              </span>
+            )}
+          </div>
+        )
+      })}
+
+      {atRiskFeatures.length > 0 && (
+        <div className="db-type-risk-banner">
+          <div className="db-type-risk-header">
+            ⚠ {atRiskFeatures.length} feature{atRiskFeatures.length !== 1 ? 's' : ''} not started — sprint ends in {daysLeft}d
+          </div>
+          {atRiskFeatures.slice(0, 3).map(iss => (
+            <div key={iss.idReadable} className="db-type-risk-row">
+              <span className="db-ticket-id">{iss.idReadable}</span>
+              <span className="db-type-risk-title" title={iss.summary}>{iss.summary}</span>
+            </div>
+          ))}
+          {atRiskFeatures.length > 3 && (
+            <div className="db-type-risk-more">+{atRiskFeatures.length - 3} more</div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -589,10 +740,25 @@ interface DesignProps {
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
   ytDetailLoading?: boolean
+  onKpiClick?: (drawer: DbKpiDrawer) => void
 }
 
-function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }: DesignProps) {
+function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, onKpiClick }: DesignProps) {
   const [expandedDev, setExpandedDev] = useState<string | null>(null)
+  const [showAllAtRisk, setShowAllAtRisk] = useState(false)
+  const [showAllDelay, setShowAllDelay] = useState(false)
+
+  const { config: wfConfig } = useWorkflowConfig()
+  const columnRoleMap = useMemo(() => {
+    const m = new Map<string, string>()
+    if (wfConfig) {
+      wfConfig.column_hierarchy.forEach((col: any) => {
+        m.set(col.state.toLowerCase(), col.role)
+        ;(col.aliases ?? []).forEach((a: string) => m.set(a.toLowerCase(), col.role))
+      })
+    }
+    return m
+  }, [wfConfig])
 
   const developers = useMemo<DevStat[]>(() => {
     const map = new Map<string, DevStat>()
@@ -614,16 +780,29 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
 
   const atRisk = useMemo(() =>
     columns.flatMap(c => c.issues)
-      .filter(i => urgencyScore(i) > 0)
-      .sort((a, b) => urgencyScore(b) - urgencyScore(a))
-      .slice(0, 5)
-  , [columns])
+      .filter(i => !isIssueDone(i, columnRoleMap) && (urgencyScore(i) > 0 || isIssueBlocked(i, columnRoleMap)))
+      .sort((a, b) => {
+        const s = (x: SprintBoardIssue) => {
+          let score = 0
+          if      (x.bounce_count >= 3) score += 30
+          else if (x.bounce_count >= 2) score += 22
+          else if (x.bounce_count >= 1) score += 14
+          if (isIssueActive(x, columnRoleMap))     score += 10
+          if (x.overdue_level === 'deadline')       score += 7
+          else if (x.overdue_level === 'sprint')    score += 5
+          else if (x.overdue_level === 'sla')       score += 3
+          if (x.is_hotfix)                          score += 2
+          if (isIssueBlocked(x, columnRoleMap))     score += 1
+          return score
+        }
+        return s(b) - s(a)
+      })
+  , [columns, columnRoleMap])
 
   const delayRows = useMemo(() =>
     columns.filter(c => isProgressCol(c.name))
       .flatMap(c => c.issues)
       .sort((a, b) => b.cycle_time_hours - a.cycle_time_hours)
-      .slice(0, 5)
   , [columns])
 
   const barW = 220
@@ -701,11 +880,12 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
             At Risk
             {atRisk.length > 0 && <span className="db-mc-section-count">{atRisk.length}</span>}
           </div>
-          {atRisk.slice(0, 4).map(iss => (
+          {atRisk.slice(0, showAllAtRisk ? atRisk.length : 5).map(iss => (
             <HoverCard key={iss.idReadable} content={issueHoverContent(iss)} maxWidth={270} delay={300}>
             <div className={`db-mc-focus-card ${urgencyClass(iss)}`}>
               <div className="db-mc-focus-top">
                 <PriPill priority={iss.priority} />
+                <IssueTypePill issueType={iss.issue_type} />
                 <span
                   className="db-ticket-id db-ticket-id--link"
                   onClick={(e) => onIdClick(iss.idReadable, e)}
@@ -733,6 +913,16 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
             </div>
             </HoverCard>
           ))}
+          {!showAllAtRisk && atRisk.length > 5 && (
+            <button className="db-view-more-btn" onClick={() => setShowAllAtRisk(true)}>
+              ↓ View {atRisk.length - 5} more
+            </button>
+          )}
+          {showAllAtRisk && atRisk.length > 5 && (
+            <button className="db-view-more-btn" onClick={() => setShowAllAtRisk(false)}>
+              ↑ Show less
+            </button>
+          )}
           {atRisk.length === 0 && (
             <div style={{ fontSize: '0.72rem', color: 'var(--color-success)', padding: '8px 0' }}>
               ✓ No at-risk tickets
@@ -748,7 +938,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
               <span className="db-mc-legend-item db-mc-legend-bounce">Bounce</span>
               <span className="db-mc-legend-item db-mc-legend-idle">Idle</span>
             </div>
-            {delayRows.map(iss => {
+            {delayRows.slice(0, showAllDelay ? delayRows.length : 5).map(iss => {
               const { workPx, bouncePx, idlePx } = barSegs(iss)
               return (
                 <div key={iss.idReadable} className="db-mc-delay-row">
@@ -771,6 +961,16 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
                 </div>
               )
             })}
+            {!showAllDelay && delayRows.length > 5 && (
+              <button className="db-view-more-btn" onClick={() => setShowAllDelay(true)}>
+                ↓ View {delayRows.length - 5} more
+              </button>
+            )}
+            {showAllDelay && delayRows.length > 5 && (
+              <button className="db-view-more-btn" onClick={() => setShowAllDelay(false)}>
+                ↑ Show less
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -780,9 +980,9 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
         <div className="db-mc-section-label">Sprint Health</div>
         <div className="db-mc-kpi-grid">
           <KpiChip label="Done"     value={`${summary.done_issues}/${summary.total_issues}`} cls="db-kpi-chip--success" />
-          <KpiChip label="Blocked"  value={summary.blocked_count}  cls="db-kpi-chip--danger" />
-          <KpiChip label="Bounced"  value={summary.bounced_count}  cls="db-kpi-chip--warn" />
-          <KpiChip label="Overdue"  value={summary.overdue_count}  cls="db-kpi-chip--danger" />
+          <KpiChip label="Blocked"  value={summary.blocked_count}  cls="db-kpi-chip--danger" onClick={() => onKpiClick?.('blocked')} />
+          <KpiChip label="Bounced"  value={summary.bounced_count}  cls="db-kpi-chip--warn"   onClick={() => onKpiClick?.('bounced')} />
+          <KpiChip label="Overdue"  value={summary.overdue_count}  cls="db-kpi-chip--danger" onClick={() => onKpiClick?.('overdue')} />
         </div>
         <SprintTrack pct={toPct(summary.completion_pct)} />
         {summary.sprint_finish_ms > 0 && <Countdown finishMs={summary.sprint_finish_ms} />}
@@ -806,6 +1006,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
             <span className="db-mc-col-cnt">{col.total}</span>
           </div>
         ))}
+        <TypeDeliveryPanel columns={columns} summary={summary} columnRoleMap={columnRoleMap} />
       </div>
     </div>
   )
@@ -834,10 +1035,48 @@ function SprintDonut({ pct, size = 110 }: { pct: number; size?: number }) {
 function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
   const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
   const pct = toPct(summary.completion_pct)
+  const [showAllNeeds, setShowAllNeeds]   = useState(false)
+  const [showAllIssues, setShowAllIssues] = useState(false)
 
-  const criticalIssues = useMemo(() =>
-    [...allIssues].sort((a, b) => urgencyScore(b) - urgencyScore(a)).slice(0, 4)
-  , [allIssues])
+  const { config: wfConfig } = useWorkflowConfig()
+  const columnRoleMap = useMemo(() => {
+    const m = new Map<string, string>()
+    if (wfConfig) {
+      wfConfig.column_hierarchy.forEach((col: any) => {
+        m.set(col.state.toLowerCase(), col.role)
+        ;(col.aliases ?? []).forEach((a: string) => m.set(a.toLowerCase(), col.role))
+      })
+    }
+    return m
+  }, [wfConfig])
+
+  // Issues that genuinely need PM attention: not done AND (blocked | overdue | bounced≥2 | hotfix)
+  const needsAttention = useMemo(() =>
+    allIssues
+      .filter(i => !isIssueDone(i, columnRoleMap))
+      .filter(i =>
+        isIssueBlocked(i, columnRoleMap) ||
+        !!i.overdue_level ||
+        i.bounce_count >= 2 ||
+        i.is_hotfix
+      )
+      .sort((a, b) => {
+        const s = (x: SprintBoardIssue) => {
+          let score = 0
+          if      (x.bounce_count >= 3) score += 30
+          else if (x.bounce_count >= 2) score += 22
+          else if (x.bounce_count >= 1) score += 14
+          if (isIssueActive(x, columnRoleMap))     score += 10
+          if (x.overdue_level === 'deadline')       score += 7
+          else if (x.overdue_level === 'sprint')    score += 5
+          else if (x.overdue_level === 'sla')       score += 3
+          if (x.is_hotfix)                          score += 2
+          if (isIssueBlocked(x, columnRoleMap))     score += 1
+          return score
+        }
+        return s(b) - s(a)
+      })
+  , [allIssues, columnRoleMap])
 
   const developers = useMemo(() => {
     const map = new Map<string, { name: string; url: string; active: number; blocked: number; done: number; hours: number }>()
@@ -846,12 +1085,13 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
       if (!map.has(key)) map.set(key, { name: key, url: iss.avatarUrl, active: 0, blocked: 0, done: 0, hours: 0 })
       const d = map.get(key)!
       d.hours += iss.total_active_hours
-      if (isBlockedCol(col.name))       d.blocked++
-      else if (isDoneCol(col.name))     d.done++
-      else                              d.active++
+      const role = resolveRole(col.name, columnRoleMap)
+      if (role === 'blocked')          d.blocked++
+      else if (DONE_ROLES.has(role))  d.done++
+      else                            d.active++
     }))
     return Array.from(map.values())
-  }, [columns])
+  }, [columns, columnRoleMap])
 
   return (
     <div className="db-bg-layout">
@@ -879,6 +1119,7 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
               </div>
             </div>
           </div>
+          <TypeDeliveryPanel columns={columns} summary={summary} columnRoleMap={columnRoleMap} />
         </div>
 
         <div className="db-bg-card">
@@ -907,28 +1148,30 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
         </div>
       </div>
 
-      {/* Row 2: Critical Issues (1/2) + Developer Load (1/2) */}
+      {/* Row 2: Needs Attention (1/2) + Developer Load (1/2) */}
       <div className="db-bg-row db-bg-row--r2">
         <div className="db-bg-card">
           <div className="db-bg-topline db-bg-topline--danger" />
           <div className="db-bg-card-label">
-            Critical Issues
-            {criticalIssues.length > 0 && <span className="db-bg-card-count">{criticalIssues.length}</span>}
+            Needs Attention
+            {needsAttention.length > 0 && <span className="db-bg-card-count">{needsAttention.length}</span>}
           </div>
           <div className="db-bg-critical-list">
-            {criticalIssues.length === 0 && (
-              <div style={{ fontSize: '0.72rem', color: 'var(--color-success)', padding: '4px 0' }}>✓ No critical issues</div>
+            {needsAttention.length === 0 && (
+              <div style={{ fontSize: '0.72rem', color: 'var(--color-success)', padding: '4px 0' }}>✓ No issues need attention</div>
             )}
-            {criticalIssues.map(iss => (
+            {needsAttention.slice(0, showAllNeeds ? needsAttention.length : 5).map(iss => (
               <div key={iss.idReadable} className={`db-bg-critical-row ${urgencyClass(iss)}`}>
                 <div className="db-bg-cr-top">
                   <PriPill priority={iss.priority} />
+                  <IssueTypePill issueType={iss.issue_type} />
                   <span
                     className="db-ticket-id db-ticket-id--link"
                     onClick={(e) => onIdClick(iss.idReadable, e)}
                     title={`Open ${iss.idReadable} in YouTrack`}
                   >{iss.idReadable}</span>
                   {iss.is_hotfix && <span className="db-hotfix-chip">HF</span>}
+                  {isIssueBlocked(iss, columnRoleMap) && <span className="db-bounce-chip" style={{ background: 'rgba(239,68,68,0.2)', color: '#fca5a5' }}>BLK</span>}
                   {iss.bounce_count > 0 && <span className="db-bounce-chip">↩{iss.bounce_count}</span>}
                   <span className="db-ticket-state" style={{ marginLeft: 'auto' }}>{iss.current_state}</span>
                 </div>
@@ -949,6 +1192,16 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
                 </div>
               </div>
             ))}
+            {!showAllNeeds && needsAttention.length > 5 && (
+              <button className="db-view-more-btn" onClick={() => setShowAllNeeds(true)}>
+                ↓ View {needsAttention.length - 5} more
+              </button>
+            )}
+            {showAllNeeds && needsAttention.length > 5 && (
+              <button className="db-view-more-btn" onClick={() => setShowAllNeeds(false)}>
+                ↑ Show less
+              </button>
+            )}
           </div>
         </div>
 
@@ -992,34 +1245,49 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
             <span>ID</span><span>Pri</span><span>Title</span><span>State</span>
             <span>Assignee</span><span>Cycle</span><span>In State</span><span>Verified</span>
           </div>
-          {[...allIssues]
-            .sort((a, b) => urgencyScore(b) - urgencyScore(a))
-            .slice(0, 12)
-            .map(iss => (
-              <div key={iss.idReadable} className={`db-bg-table-row ${urgencyClass(iss)}`}>
-                <span
-                  className="db-ticket-id db-ticket-id--link"
-                  onClick={(e) => onIdClick(iss.idReadable, e)}
-                  title={`Open ${iss.idReadable} in YouTrack`}
-                >{iss.idReadable}</span>
-                <span><PriPill priority={iss.priority} /></span>
-                <span
-                  className="db-bg-table-title db-ticket-title--link"
-                  title={iss.summary}
-                  onClick={(e) => onTitleClick(iss.idReadable, e)}
-                >{iss.summary}</span>
-                <span className="db-bg-table-assignee">{iss.current_state}</span>
-                <span className="db-bg-table-assignee">{iss.assignee?.split(' ')[0] || '—'}</span>
-                <span className="db-bg-table-num">{fmtHours(iss.cycle_time_hours)}</span>
-                <span
-                  className="db-bg-table-num"
-                  style={{ color: iss.overdue_level ? 'var(--color-danger)' : undefined }}
-                >
-                  {fmtHours(iss.hours_in_state)}
-                </span>
-                <span><VerifBadges dev={iss.verified_on_dev} stg={iss.verified_on_stage} prd={iss.verified_on_prod} /></span>
-              </div>
-            ))}
+          {(() => {
+            const sorted = [...allIssues].sort((a, b) => urgencyScore(b) - urgencyScore(a))
+            const visible = sorted.slice(0, showAllIssues ? sorted.length : 5)
+            return (
+              <>
+                {visible.map(iss => (
+                  <div key={iss.idReadable} className={`db-bg-table-row ${urgencyClass(iss)}`}>
+                    <span
+                      className="db-ticket-id db-ticket-id--link"
+                      onClick={(e) => onIdClick(iss.idReadable, e)}
+                      title={`Open ${iss.idReadable} in YouTrack`}
+                    >{iss.idReadable}</span>
+                    <span><PriPill priority={iss.priority} /></span>
+                    <span
+                      className="db-bg-table-title db-ticket-title--link"
+                      title={iss.summary}
+                      onClick={(e) => onTitleClick(iss.idReadable, e)}
+                    >{iss.summary}</span>
+                    <span className="db-bg-table-assignee">{iss.current_state}</span>
+                    <span className="db-bg-table-assignee">{iss.assignee?.split(' ')[0] || '—'}</span>
+                    <span className="db-bg-table-num">{fmtHours(iss.cycle_time_hours)}</span>
+                    <span
+                      className="db-bg-table-num"
+                      style={{ color: iss.overdue_level ? 'var(--color-danger)' : undefined }}
+                    >
+                      {fmtHours(iss.hours_in_state)}
+                    </span>
+                    <span><VerifBadges dev={iss.verified_on_dev} stg={iss.verified_on_stage} prd={iss.verified_on_prod} /></span>
+                  </div>
+                ))}
+                {!showAllIssues && sorted.length > 5 && (
+                  <button className="db-view-more-btn" onClick={() => setShowAllIssues(true)}>
+                    ↓ View {sorted.length - 5} more
+                  </button>
+                )}
+                {showAllIssues && sorted.length > 5 && (
+                  <button className="db-view-more-btn" onClick={() => setShowAllIssues(false)}>
+                    ↑ Show less
+                  </button>
+                )}
+              </>
+            )
+          })()}
         </div>
       </div>
     </div>
@@ -1045,37 +1313,81 @@ function Design3({
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
 }) {
+  const [showAllBounced, setShowAllBounced]     = useState(false)
+  const [showAllInProgress, setShowAllInProgress] = useState(false)
+  const [showAllAtRisk, setShowAllAtRisk]       = useState(false)
+  const [showAllBlocked, setShowAllBlocked]     = useState(false)
   const pct = toPct(summary.completion_pct)
   const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
 
+  const { config: wfConfig } = useWorkflowConfig()
+  const columnRoleMap = useMemo(() => {
+    const m = new Map<string, string>()
+    if (wfConfig) {
+      wfConfig.column_hierarchy.forEach((col: any) => {
+        m.set(col.state.toLowerCase(), col.role)
+        ;(col.aliases ?? []).forEach((a: string) => m.set(a.toLowerCase(), col.role))
+      })
+    }
+    return m
+  }, [wfConfig])
+
+  // Use role-aware blocked detection for accuracy
+  const blockedIssues = useMemo(() =>
+    columns.filter(c => resolveRole(c.name, columnRoleMap) === 'blocked').flatMap(c => c.issues)
+  , [columns, columnRoleMap])
+
   const blockedIds = useMemo(() => {
     const ids = new Set<string>()
-    columns.filter(c => isBlockedCol(c.name)).flatMap(c => c.issues).forEach(i => ids.add(i.idReadable))
+    blockedIssues.forEach(i => ids.add(i.idReadable))
     return ids
-  }, [columns])
-
-  const blockedIssues = useMemo(() =>
-    columns.filter(c => isBlockedCol(c.name)).flatMap(c => c.issues)
-  , [columns])
+  }, [blockedIssues])
 
   const sorted = useMemo(() =>
     [...allIssues].sort((a, b) => urgencyScore(b) - urgencyScore(a))
   , [allIssues])
 
-  const atRiskIssues = useMemo(() =>
-    sorted.filter(i => (i.overdue_level === 'deadline' || i.overdue_level === 'sprint') && !blockedIds.has(i.idReadable))
-  , [sorted, blockedIds])
+  const bouncedIssues = useMemo(() =>
+    sorted.filter(i =>
+      i.bounce_count >= 1 &&
+      !isIssueDone(i, columnRoleMap) &&
+      !blockedIds.has(i.idReadable)
+    )
+  , [sorted, blockedIds, columnRoleMap])
+
+  const bouncedIds = useMemo(() => {
+    const ids = new Set<string>()
+    bouncedIssues.forEach(i => ids.add(i.idReadable))
+    return ids
+  }, [bouncedIssues])
 
   const inProgressIssues = useMemo(() =>
-    sorted.filter(i => isProgressCol(i.current_state) && !i.overdue_level && !blockedIds.has(i.idReadable))
-  , [sorted, blockedIds])
+    sorted.filter(i =>
+      isIssueActive(i, columnRoleMap) &&
+      !i.overdue_level &&
+      !blockedIds.has(i.idReadable) &&
+      !bouncedIds.has(i.idReadable)
+    )
+  , [sorted, blockedIds, bouncedIds, columnRoleMap])
+
+  const atRiskIssues = useMemo(() =>
+    sorted.filter(i =>
+      (i.overdue_level === 'deadline' || i.overdue_level === 'sprint') &&
+      !blockedIds.has(i.idReadable) &&
+      !bouncedIds.has(i.idReadable) &&
+      !isIssueDone(i, columnRoleMap)
+    )
+  , [sorted, blockedIds, bouncedIds, columnRoleMap])
 
   const otherIssues = useMemo(() =>
     sorted.filter(i =>
-      !isProgressCol(i.current_state) && !blockedIds.has(i.idReadable) && !i.overdue_level &&
-      !isDoneCol(i.current_state)
+      !isIssueActive(i, columnRoleMap) &&
+      !blockedIds.has(i.idReadable) &&
+      !bouncedIds.has(i.idReadable) &&
+      !i.overdue_level &&
+      !isIssueDone(i, columnRoleMap)
     ).slice(0, 10)
-  , [sorted, blockedIds])
+  , [sorted, blockedIds, bouncedIds, columnRoleMap])
 
   const developers = useMemo(() => {
     const map = new Map<string, { name: string; url: string; active: number; blocked: number; total: number }>()
@@ -1084,11 +1396,12 @@ function Design3({
       if (!map.has(key)) map.set(key, { name: key, url: iss.avatarUrl, active: 0, blocked: 0, total: 0 })
       const d = map.get(key)!
       d.total++
-      if (isProgressCol(col.name)) d.active++
-      if (isBlockedCol(col.name))  d.blocked++
+      const role = resolveRole(col.name, columnRoleMap)
+      if (role === 'active')   d.active++
+      if (role === 'blocked')  d.blocked++
     }))
     return Array.from(map.values()).sort((a, b) => b.active - a.active)
-  }, [columns])
+  }, [columns, columnRoleMap])
 
   function FeedRow({ iss, leftBarCls }: { iss: SprintBoardIssue; leftBarCls?: string }) {
     return (
@@ -1097,6 +1410,7 @@ function Design3({
         <div className="db-oc-feed-content">
           <div className="db-oc-feed-top">
             <PriPill priority={iss.priority} />
+            <IssueTypePill issueType={iss.issue_type} />
             <span
               className="db-ticket-id db-ticket-id--link"
               onClick={(e) => onIdClick(iss.idReadable, e)}
@@ -1177,33 +1491,86 @@ function Design3({
             </div>
           ))}
         </div>
+
+        <div className="db-oc-panel-section">
+          <TypeDeliveryPanel columns={columns} summary={summary} columnRoleMap={columnRoleMap} />
+        </div>
       </div>
 
       {/* ── Right Feed ── */}
       <div className="db-oc-right">
         <div className="db-oc-feed">
-          {blockedIssues.length > 0 && (
+          {bouncedIssues.length > 0 && (
             <>
-              <FeedDivider label={`BLOCKED (${blockedIssues.length})`} color="var(--color-danger)" />
-              {blockedIssues.map(iss => <FeedRow key={iss.idReadable} iss={iss} />)}
-            </>
-          )}
-
-          {atRiskIssues.length > 0 && (
-            <>
-              <FeedDivider label={`OVERDUE (${atRiskIssues.length})`} color="var(--color-warning)" />
-              {atRiskIssues.map(iss => (
-                <FeedRow key={iss.idReadable} iss={iss} leftBarCls="db-oc-feed-left-bar--warn" />
+              <FeedDivider label={`BOUNCED (${bouncedIssues.length})`} color="#fb923c" />
+              {bouncedIssues.slice(0, showAllBounced ? bouncedIssues.length : 5).map(iss => (
+                <FeedRow key={iss.idReadable} iss={iss} leftBarCls="db-oc-feed-left-bar--bounce" />
               ))}
+              {!showAllBounced && bouncedIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllBounced(true)}>
+                  ↓ View {bouncedIssues.length - 5} more
+                </button>
+              )}
+              {showAllBounced && bouncedIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllBounced(false)}>
+                  ↑ Show less
+                </button>
+              )}
             </>
           )}
 
           {inProgressIssues.length > 0 && (
             <>
               <FeedDivider label={`IN PROGRESS (${inProgressIssues.length})`} color="var(--color-primary-light)" />
-              {inProgressIssues.map(iss => (
+              {inProgressIssues.slice(0, showAllInProgress ? inProgressIssues.length : 5).map(iss => (
                 <FeedRow key={iss.idReadable} iss={iss} leftBarCls="db-oc-feed-left-bar--primary" />
               ))}
+              {!showAllInProgress && inProgressIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllInProgress(true)}>
+                  ↓ View {inProgressIssues.length - 5} more
+                </button>
+              )}
+              {showAllInProgress && inProgressIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllInProgress(false)}>
+                  ↑ Show less
+                </button>
+              )}
+            </>
+          )}
+
+          {atRiskIssues.length > 0 && (
+            <>
+              <FeedDivider label={`OVERDUE (${atRiskIssues.length})`} color="var(--color-warning)" />
+              {atRiskIssues.slice(0, showAllAtRisk ? atRiskIssues.length : 5).map(iss => (
+                <FeedRow key={iss.idReadable} iss={iss} leftBarCls="db-oc-feed-left-bar--warn" />
+              ))}
+              {!showAllAtRisk && atRiskIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllAtRisk(true)}>
+                  ↓ View {atRiskIssues.length - 5} more
+                </button>
+              )}
+              {showAllAtRisk && atRiskIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllAtRisk(false)}>
+                  ↑ Show less
+                </button>
+              )}
+            </>
+          )}
+
+          {blockedIssues.length > 0 && (
+            <>
+              <FeedDivider label={`BLOCKED (${blockedIssues.length})`} color="var(--color-danger)" />
+              {blockedIssues.slice(0, showAllBlocked ? blockedIssues.length : 5).map(iss => <FeedRow key={iss.idReadable} iss={iss} />)}
+              {!showAllBlocked && blockedIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllBlocked(true)}>
+                  ↓ View {blockedIssues.length - 5} more
+                </button>
+              )}
+              {showAllBlocked && blockedIssues.length > 5 && (
+                <button className="db-view-more-btn" onClick={() => setShowAllBlocked(false)}>
+                  ↑ Show less
+                </button>
+              )}
             </>
           )}
 
@@ -1621,6 +1988,7 @@ export function SprintDashboardPage() {
               onTitleClick={openIssueDetail}
               onIdClick={openInYt}
               ytDetailLoading={ytDetailLoading}
+              onKpiClick={setKpiDrawer}
             />
           )}
           {designMode === 'bento' && (

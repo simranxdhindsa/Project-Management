@@ -267,6 +267,9 @@
 
 .main-content-collapsed { margin-left: var(--sidebar-collapsed); }
 
+/* Keep-alive: tab is mounted but not active — hide completely without unmounting */
+.dash-tab-hidden { display: none !important; }
+
 /* Legacy alias */
 .page-content {
   flex: 1;

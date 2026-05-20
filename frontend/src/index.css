@@ -37,6 +37,7 @@
 @import "./styles/pages/activity.css";
 @import "./styles/pages/reminders.css";
 @import "./styles/pages/settings.css";
+@import "./styles/pages/no-access.css";
 @import "./styles/pages/admin.css";
 @import "./styles/pages/reports.css";
 @import "./styles/pages/bot-config.css";

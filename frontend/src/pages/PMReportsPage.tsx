@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { usePersistedState, PERSIST } from '@/hooks/usePersistedState'
 import HoverCard, { HCRow, HCBar, HCDivider, HCBadge } from '../components/HoverCard'
 import DeploymentProjectBrowser from '../components/deployment/DeploymentProjectBrowser'
 import DeploymentTicketInput from '../components/deployment/DeploymentTicketInput'
@@ -12,7 +13,7 @@ import { extractPriority, detectPlatform, stripPrefix } from '../components/depl
 import type { DeploymentBotConfig, DeploymentSectionConfig } from '../services/api'
 import { createPortal } from 'react-dom'
 import {
-  MessageSquare, Send, User, Bot, Loader2,
+  MessageSquare, Send, Bot, Loader2,
   FileText, Users, Clock, Copy, Check,
   RefreshCw, ChevronDown, AlertTriangle, TrendingUp,
   Calendar, Pin, PinOff, ChevronLeft, ChevronRight,
@@ -36,8 +37,10 @@ import {
   getActiveSource,
 } from '../services/pmDataService'
 import DailyOpsTab from './DailyOpsTab'
+import { StandupCompilerPage } from './StandupCompilerPage'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
+import { useAuth } from '../contexts/AuthContext'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -134,6 +137,7 @@ const TABS = [
   { id: 'assignees',   label: 'Assignee Stats',     icon: Users     },
   { id: 'dailyops',    label: 'Daily Ops',          icon: Zap       },
   { id: 'deployment',  label: 'Deployment Report',  icon: Rocket    },
+  { id: 'standup',     label: 'Compiler',           icon: Send      },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -291,6 +295,7 @@ const THINKING_PHRASES: { text: string; Icon: React.ElementType; key: string }[]
 ]
 
 export function PMAssistantTab() {
+  const { user } = useAuth()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -549,7 +554,11 @@ export function PMAssistantTab() {
         {messages.map(msg => (
           <div key={msg.id} className={`pm-chat-message pm-chat-${msg.role}`}>
             <div className="pm-chat-avatar">
-              {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+              {msg.role === 'user'
+                ? user?.picture
+                  ? <img src={user.picture} alt={user.name ?? 'You'} className="pm-chat-avatar-img" />
+                  : <span style={{ fontSize: '0.7rem', fontWeight: 700, lineHeight: 1 }}>{user?.name?.charAt(0).toUpperCase() ?? 'U'}</span>
+                : <Bot size={16} />}
             </div>
             <div className="pm-chat-bubble">
               {msg.role === 'assistant' ? (
@@ -1995,7 +2004,9 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
   const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-  const [viewMode, setViewMode] = useState<'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline'>('column')
+  const [viewMode, setViewMode] = usePersistedState(PERSIST.TRACKING_VIEW, 'column' as 'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline', {
+    validate: ['column', 'assignee', 'swimlane', 'sidebar', 'heatmap', 'delay-bars', 'alert-first', 'split-pane', 'focus', 'qa-pipeline'],
+  })
   const [qaFilterMode, setQaFilterMode] = useState<'all' | 'needs-qa'>('all')
   const [viewModeOpen, setViewModeOpen] = useState(false)
   const [sidebarPerson, setSidebarPerson] = useState<string>('')
@@ -2289,6 +2300,34 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     }).flatMap(c => c.issues),
   [filteredColumns])
 
+  // ── Feature delivery alert (alert-first view) ────────────────────────────
+  const featureAlertData = useMemo(() => {
+    if (!sprintFinishMs) return null
+    const daysLeft = Math.ceil((sprintFinishMs - Date.now()) / 86400000)
+    if (daysLeft > 4 || daysLeft < 0) return null
+
+    const allIssues = filteredColumns.flatMap(c => c.issues)
+    const hasTypes  = allIssues.some(i => !!i.issue_type)
+    if (!hasTypes) return null
+
+    const isTypeFeat = (t: string) => {
+      const s = (t || '').toLowerCase()
+      return s.includes('feature') || s.includes('story') || s.includes('epic')
+    }
+    const isDone = (state: string) => {
+      const s = (state || '').toLowerCase()
+      return s.includes('done') || s.includes('clos') || s.includes('deploy') ||
+             s.includes('verif') || s.includes('prod') || s.includes('stage')
+    }
+    const isActive = (state: string) => (state || '').toLowerCase().includes('progress')
+
+    const notStarted = allIssues.filter(i =>
+      isTypeFeat(i.issue_type) && !isDone(i.current_state) && !isActive(i.current_state)
+    )
+    if (notStarted.length === 0) return null
+    return { daysLeft, notStarted }
+  }, [filteredColumns, sprintFinishMs])
+
   // ── QA Pipeline: all issues sorted for the QA view ──────────────────────
   const qaAllIssues = useMemo(() => {
     const qaScore = (i: SprintBoardIssue) => {
@@ -2369,7 +2408,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                 <Zap size={9} /> HF
               </span>
             )}
-            {issue.issue_type && issue.issue_type.toLowerCase() !== 'task' && issue.issue_type.toLowerCase() !== 'bug' && (
+            {issue.issue_type && (
               <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase().replace(/\s+/g, '-')}`}>
                 {issue.issue_type}
               </span>
@@ -3322,6 +3361,34 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
       {/* ── Alert-first view (Design 07) ── */}
       {!loading && viewMode === 'alert-first' && (
         <div className="pm-tracking-alert-layout">
+
+          {/* Feature delivery alert — shows when features haven't started and sprint ends soon */}
+          {featureAlertData && (
+            <div className="pm-tracking-feature-alert">
+              <div className="pm-tracking-feature-alert-header">
+                ⚠ {featureAlertData.notStarted.length} feature{featureAlertData.notStarted.length !== 1 ? 's' : ''} not started — sprint ends in {featureAlertData.daysLeft}d
+              </div>
+              <div className="pm-tracking-feature-alert-list">
+                {featureAlertData.notStarted.slice(0, 4).map(iss => (
+                  <div key={iss.idReadable} className="pm-tracking-feature-alert-row">
+                    <span
+                      className="pm-tracking-issue-id--link"
+                      onClick={(e) => openInYouTrack(iss.idReadable, e)}
+                      style={{ cursor: 'pointer', flexShrink: 0 }}
+                    >{iss.idReadable}</span>
+                    <span className="pm-tracking-feature-alert-title" title={iss.summary}>{iss.summary}</span>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-faint)', flexShrink: 0 }}>{iss.assignee?.split(' ')[0] || '—'}</span>
+                  </div>
+                ))}
+                {featureAlertData.notStarted.length > 4 && (
+                  <div style={{ fontSize: '0.65rem', color: 'var(--text-faint)', marginTop: 4 }}>
+                    +{featureAlertData.notStarted.length - 4} more
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="pm-tracking-alert-banner">
             <div className="pm-tracking-alert-banner-header">
               <span className="pm-tracking-alert-count">{allBlockedIssues.length}</span>
@@ -3347,6 +3414,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                             title={`Open ${issue.idReadable} in YouTrack`}
                             style={{ cursor: 'pointer' }}
                           >{issue.idReadable}</span>
+                          {issue.issue_type && (
+                            <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase().replace(/\s+/g, '-')}`} style={{ marginLeft: 4 }}>
+                              {issue.issue_type}
+                            </span>
+                          )}
                           {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge" style={{ marginLeft: 4 }}>↩{issue.bounce_count}</span>}
                         </div>
                         <div
@@ -4979,6 +5051,7 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
           {activeTab === 'tracking'   && <TrackingTab blockerIssueIds={blockerIssueIds} sprintId={activeSprint?.id} sprintFinishMs={activeSprint?.finish} />}
           {activeTab === 'dailyops'   && <DailyOpsTab onBlockersChange={setBlockerIssueIds} sprintId={activeSprint?.id} />}
           {activeTab === 'deployment' && <DeploymentReportTab activeSprint={activeSprint} />}
+          {activeTab === 'standup'    && <StandupCompilerPage />}
         </div>
       </div>
     </div>

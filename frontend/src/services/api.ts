@@ -409,6 +409,7 @@ class ApiService {
     users: { login: string; fullName: string }[]
     types: string[]
     subsystems: string[]
+    priorities: string[]
     sprints: { id: string; name: string }[]
   }) {
     return this.request<{
@@ -425,10 +426,14 @@ class ApiService {
     })
   }
 
-  async updateYouTrackIssue(issueId: string, summary?: string, description?: string, state?: string) {
+  async updateYouTrackIssue(issueId: string, payload: {
+    summary?: string; description?: string; state?: string; priority?: string
+    type_name?: string; assignee_login?: string; subsystem?: string; sprint_id?: string
+    due_date?: number; estimation_minutes?: number
+  }) {
     return this.request<YouTrackIssue>(`/youtrack/issues/${issueId}`, {
       method: 'PUT',
-      body: JSON.stringify({ summary, description, state }),
+      body: JSON.stringify(payload),
     })
   }
 
@@ -987,6 +992,23 @@ class ApiService {
 
   async removeAllowedDomain(domain: string) {
     return this.request(`/settings/access/domains/${encodeURIComponent(domain)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async getDeniedEmails() {
+    return this.request<DeniedEmail[]>('/settings/access/denied')
+  }
+
+  async addDeniedEmail(email: string, reason?: string) {
+    return this.request<DeniedEmail>('/settings/access/denied', {
+      method: 'POST',
+      body: JSON.stringify({ email, reason: reason ?? '' }),
+    })
+  }
+
+  async removeDeniedEmail(email: string) {
+    return this.request(`/settings/access/denied/${encodeURIComponent(email)}`, {
       method: 'DELETE',
     })
   }
@@ -1732,6 +1754,7 @@ export interface DeveloperSubsystemConfig {
 
 export interface YouTrackIssue {
   id: string
+  idReadable?: string
   summary: string
   description: string
   status: string
@@ -2000,10 +2023,18 @@ export interface AllowedDomain {
   added_at?: string
 }
 
+export interface DeniedEmail {
+  email: string
+  reason?: string
+  added_by?: string
+  created_at?: string
+}
+
 export interface AccessSettings {
   default_admin_email: string
   allowed_emails: AllowedEmail[]
   allowed_domains: AllowedDomain[]
+  denied_emails: DeniedEmail[]
 }
 
 export interface AsanaSettings {
@@ -2529,4 +2560,55 @@ export interface CarryoverData {
   today: CarryoverItem[]
   yesterday_date: string
   today_date: string
+}
+
+// ── Standup Compiler ──────────────────────────────────────────────────────────
+
+export interface StandupChannelRef {
+  id: string
+  name: string
+}
+
+export interface StandupConfig {
+  source_channels: StandupChannelRef[]
+  dest_channel_id: string
+  dest_channel_name: string
+  time_window_start: string // HH:MM
+  time_window_end: string
+}
+
+export interface UpdateSection {
+  label: string
+  items: string[]
+}
+
+export interface PersonUpdate {
+  slack_user_id: string
+  display_name: string
+  raw_text: string
+  sections: UpdateSection[]
+  is_owner: boolean
+}
+
+export const standupApi = {
+  getConfig: (): Promise<{ success: boolean; config: StandupConfig }> =>
+    dtFetch(`${API_URL}/standup/config`),
+
+  saveConfig: (cfg: Partial<StandupConfig>): Promise<{ success: boolean }> =>
+    dtFetch(`${API_URL}/standup/config`, {
+      method: 'PUT',
+      body: JSON.stringify(cfg),
+    }),
+
+  compile: (date?: string): Promise<{ success: boolean; updates: PersonUpdate[] }> =>
+    dtFetch(`${API_URL}/standup/compile`, {
+      method: 'POST',
+      body: JSON.stringify({ date }),
+    }),
+
+  post: (updates: PersonUpdate[], channelId: string): Promise<{ success: boolean }> =>
+    dtFetch(`${API_URL}/standup/post`, {
+      method: 'POST',
+      body: JSON.stringify({ updates, channel_id: channelId }),
+    }),
 }

@@ -15,6 +15,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"regexp"
 	"sort"
@@ -29,18 +30,23 @@ import (
 type pmQueryIntentType string
 
 const (
-	intentGreeting     pmQueryIntentType = "greeting"
-	intentIssueID      pmQueryIntentType = "issue_id"
-	intentAssignee     pmQueryIntentType = "assignee"
-	intentStatusFilter pmQueryIntentType = "status_filter"
-	intentGeneral      pmQueryIntentType = "general"
+	intentGreeting        pmQueryIntentType = "greeting"
+	intentSprintOverview  pmQueryIntentType = "sprint_overview" // detailed sprint summary — returns active+blocked issues
+	intentIssueID         pmQueryIntentType = "issue_id"
+	intentAssignee        pmQueryIntentType = "assignee"
+	intentStatusFilter    pmQueryIntentType = "status_filter"
+	intentTypeFilter      pmQueryIntentType = "type_filter"
+	intentPriorityFilter  pmQueryIntentType = "priority_filter"
+	intentGeneral         pmQueryIntentType = "general"
 )
 
 type pmQueryIntent struct {
-	kind         pmQueryIntentType
-	issueID      string // for intentIssueID
-	assigneeName string // for intentAssignee
-	statusFilter string // for intentStatusFilter: "blocked"|"delayed"|"done"|"in_progress"
+	kind           pmQueryIntentType
+	issueID        string // for intentIssueID
+	assigneeName   string // for intentAssignee
+	statusFilter   string // for intentStatusFilter: "blocked"|"delayed"|"done"|"in_progress"
+	typeFilter     string // for intentTypeFilter: "Feature"|"Bug"|"Task"|"Hotfix"|"Regression"
+	priorityFilter string // for intentPriorityFilter: "P0"|"P1"|"P2"|"Critical"
 }
 
 var (
@@ -48,11 +54,44 @@ var (
 
 	greetingPhrases = []string{"hi", "hello", "hey", "howdy", "sup", "morning", "afternoon"}
 	summaryPhrases  = []string{"summary", "overview", "status", "how are we", "how is the sprint", "sprint health"}
+	// detailPhrases trigger a full active-issues dump rather than stats-only
+	detailPhrases = []string{"breakdown", "detailed", "full", "everyone", "all assignees", "overloaded", "velocity", "workload all", "complete picture", "full breakdown"}
 	blockedKW       = []string{"block", "blocked", "blocker", "stuck", "waiting", "wait"}
 	delayedKW       = []string{"delay", "delayed", "overdue", "behind", "late", "slow", "risk"}
 	doneKW          = []string{"done", "finished", "completed", "closed", "deployed", "verified", "shipped"}
 	inProgKW        = []string{"in progress", "working on", "active", "current", "in-progress"}
-	stopwords       = map[string]bool{
+
+	// typeKWOrder maps query keywords → canonical YouTrack Type value.
+	// Ordered: multi-word phrases first, then longer single words, to avoid partial matches.
+	typeKWOrder = []struct{ kw, canonical string }{
+		{"hot fix", "Hotfix"},
+		{"hotfixes", "Hotfix"},
+		{"hotfix", "Hotfix"},
+		{"regressions", "Regression"},
+		{"regression", "Regression"},
+		{"features", "Feature"},
+		{"feature", "Feature"},
+		{"defects", "Bug"},
+		{"defect", "Bug"},
+		{"bugs", "Bug"},
+		{"bug", "Bug"},
+		{"tasks", "Task"},
+		{"task", "Task"},
+		{"chore", "Task"},
+	}
+
+	// priorityKWOrder maps query keywords → canonical priority value.
+	priorityKWOrder = []struct{ kw, canonical string }{
+		{"critical", "Critical"},
+		{"p0", "P0"},
+		{"p1", "P1"},
+		{"p2", "P2"},
+		{"p3", "P3"},
+		{"low priority", "P3"},
+		{"high priority", "P1"},
+	}
+
+	stopwords = map[string]bool{
 		"the": true, "a": true, "an": true, "is": true, "in": true,
 		"of": true, "to": true, "and": true, "for": true, "on": true,
 		"what": true, "who": true, "are": true, "show": true, "me": true,
@@ -75,10 +114,21 @@ func classifyPMQueryIntent(query string, issues []youtrack.Issue) pmQueryIntent 
 		}
 	}
 
-	// Summary / overview check
+	// Summary / overview check — if also asking for detail, return real issues
 	for _, p := range summaryPhrases {
 		if strings.Contains(q, p) {
-			return pmQueryIntent{kind: intentGreeting} // same handler: stats only
+			for _, d := range detailPhrases {
+				if strings.Contains(q, d) {
+					return pmQueryIntent{kind: intentSprintOverview}
+				}
+			}
+			return pmQueryIntent{kind: intentGreeting} // stats only
+		}
+	}
+	// Standalone detail/workload requests without a summary keyword
+	for _, d := range detailPhrases {
+		if strings.Contains(q, d) {
+			return pmQueryIntent{kind: intentSprintOverview}
 		}
 	}
 
@@ -92,6 +142,20 @@ func classifyPMQueryIntent(query string, issues []youtrack.Issue) pmQueryIntent 
 	for lc, full := range assigneeIndex {
 		if strings.Contains(q, lc) {
 			return pmQueryIntent{kind: intentAssignee, assigneeName: full}
+		}
+	}
+
+	// Type filter — ordered slice ensures multi-word phrases checked first
+	for _, entry := range typeKWOrder {
+		if strings.Contains(q, entry.kw) {
+			return pmQueryIntent{kind: intentTypeFilter, typeFilter: entry.canonical}
+		}
+	}
+
+	// Priority filter
+	for _, entry := range priorityKWOrder {
+		if strings.Contains(q, entry.kw) {
+			return pmQueryIntent{kind: intentPriorityFilter, priorityFilter: entry.canonical}
 		}
 	}
 
@@ -117,7 +181,80 @@ func classifyPMQueryIntent(query string, issues []youtrack.Issue) pmQueryIntent 
 		}
 	}
 
+	// Dynamic state-name detection: match against actual state names present in the sprint
+	// (e.g. "DEV", "Ready for Stage", "Stage", "Ready for Prod")
+	if matched := findStateNameInQuery(q, issues); matched != "" {
+		return pmQueryIntent{kind: intentStatusFilter, statusFilter: "state:" + matched}
+	}
+
 	return pmQueryIntent{kind: intentGeneral}
+}
+
+// findStateNameInQuery checks whether the query contains any actual state name from the sprint.
+// Returns the canonical state name (original case) if found, else "".
+func findStateNameInQuery(q string, issues []youtrack.Issue) string {
+	seen := map[string]string{} // lowercase → original
+	for _, iss := range issues {
+		s := youtrack.GetStatus(iss)
+		if s != "" {
+			seen[strings.ToLower(s)] = s
+		}
+	}
+	// Check multi-word states first, then single-word
+	for lc, orig := range seen {
+		if strings.Contains(strings.ToLower(q), lc) {
+			return orig
+		}
+	}
+	return ""
+}
+
+// countStatusKeywords counts how many distinct status categories are mentioned in the query.
+// Used to detect analysis queries ("done vs blocked") vs filter queries ("features on stage").
+func countStatusKeywords(q string) int {
+	q = strings.ToLower(q)
+	count := 0
+	for _, kw := range blockedKW {
+		if strings.Contains(q, kw) {
+			count++
+			break
+		}
+	}
+	for _, kw := range doneKW {
+		if strings.Contains(q, kw) {
+			count++
+			break
+		}
+	}
+	for _, kw := range inProgKW {
+		if strings.Contains(q, kw) {
+			count++
+			break
+		}
+	}
+	return count
+}
+
+// detectStatusKeyword returns a status filter string if the query contains status keywords,
+// without creating an intent (used for compound filtering).
+func detectStatusKeyword(q string) string {
+	q = strings.ToLower(q)
+	for _, kw := range blockedKW {
+		if strings.Contains(q, kw) {
+			return "blocked"
+		}
+	}
+	for _, kw := range doneKW {
+		if strings.Contains(q, kw) {
+			return "done"
+		}
+	}
+	for _, kw := range inProgKW {
+		if strings.Contains(q, kw) {
+			return "in_progress"
+		}
+	}
+	return ""
 }
 
 // buildAssigneeIndex returns a map of lowercase-name/firstname → full name for all assignees in the sprint.
@@ -139,7 +276,10 @@ func buildAssigneeIndex(issues []youtrack.Issue) map[string]string {
 
 // ─── Retrieval ────────────────────────────────────────────────────────────────
 
-const maxContextIssues = 20
+const (
+	maxContextIssues     = 20 // BM25 general ranking cap
+	maxBulkFilterIssues  = 30 // cap for type/priority/status/assignee filters
+)
 
 // retrieveRelevantIssues returns the issues relevant to the query using the classified intent.
 // Returns nil for intentGreeting (caller should emit stats-only context).
@@ -147,6 +287,23 @@ func retrieveRelevantIssues(intent pmQueryIntent, query string, issues []youtrac
 	switch intent.kind {
 	case intentGreeting:
 		return nil
+
+	case intentSprintOverview:
+		// Return active/blocked/in-progress issues (skip pure backlog) up to 40
+		var result []youtrack.Issue
+		for _, iss := range issues {
+			s := strings.ToLower(youtrack.GetStatus(iss))
+			if strings.Contains(s, "progress") || strings.Contains(s, "block") ||
+				strings.Contains(s, "wait") || strings.Contains(s, "dev") ||
+				strings.Contains(s, "stage") || strings.Contains(s, "done") ||
+				strings.Contains(s, "verif") || strings.Contains(s, "deploy") {
+				result = append(result, iss)
+				if len(result) >= 40 {
+					break
+				}
+			}
+		}
+		return result
 
 	case intentIssueID:
 		for _, iss := range issues {
@@ -162,12 +319,33 @@ func retrieveRelevantIssues(intent pmQueryIntent, query string, issues []youtrac
 			a := youtrack.GetAssignee(iss)
 			if a != nil && strings.EqualFold(a.FullName, intent.assigneeName) {
 				result = append(result, iss)
+				if len(result) >= maxBulkFilterIssues {
+					break
+				}
 			}
 		}
 		return result
 
 	case intentStatusFilter:
-		return filterByStatus(issues, intent.statusFilter)
+		all := filterByStatus(issues, intent.statusFilter)
+		if len(all) > maxBulkFilterIssues {
+			return all[:maxBulkFilterIssues]
+		}
+		return all
+
+	case intentTypeFilter:
+		all := filterByType(issues, intent.typeFilter)
+		if len(all) > maxBulkFilterIssues {
+			return all[:maxBulkFilterIssues]
+		}
+		return all
+
+	case intentPriorityFilter:
+		all := filterByPriority(issues, intent.priorityFilter)
+		if len(all) > maxBulkFilterIssues {
+			return all[:maxBulkFilterIssues]
+		}
+		return all
 
 	default: // intentGeneral — BM25 ranking
 		return rankByBM25(query, issues, maxContextIssues)
@@ -175,6 +353,18 @@ func retrieveRelevantIssues(intent pmQueryIntent, query string, issues []youtrac
 }
 
 func filterByStatus(issues []youtrack.Issue, filter string) []youtrack.Issue {
+	// "state:XYZ" = exact dynamic state name match (from findStateNameInQuery)
+	if strings.HasPrefix(filter, "state:") {
+		stateName := strings.ToLower(strings.TrimPrefix(filter, "state:"))
+		var result []youtrack.Issue
+		for _, iss := range issues {
+			if strings.ToLower(youtrack.GetStatus(iss)) == stateName {
+				result = append(result, iss)
+			}
+		}
+		return result
+	}
+
 	var result []youtrack.Issue
 	for _, iss := range issues {
 		status := strings.ToLower(youtrack.GetStatus(iss))
@@ -191,6 +381,28 @@ func filterByStatus(issues []youtrack.Issue, filter string) []youtrack.Issue {
 			match = strings.Contains(status, "progress") || strings.Contains(status, "working")
 		}
 		if match {
+			result = append(result, iss)
+		}
+	}
+	return result
+}
+
+func filterByPriority(issues []youtrack.Issue, priorityFilter string) []youtrack.Issue {
+	var result []youtrack.Issue
+	for _, iss := range issues {
+		p := youtrack.GetPriority(iss)
+		if strings.EqualFold(p, priorityFilter) {
+			result = append(result, iss)
+		}
+	}
+	return result
+}
+
+func filterByType(issues []youtrack.Issue, typeFilter string) []youtrack.Issue {
+	var result []youtrack.Issue
+	for _, iss := range issues {
+		issType := youtrack.GetCustomFieldValue(iss, "Type")
+		if strings.EqualFold(issType, typeFilter) {
 			result = append(result, iss)
 		}
 	}
@@ -222,7 +434,9 @@ func issueToDoc(iss youtrack.Issue) string {
 	if a := youtrack.GetAssignee(iss); a != nil {
 		assignee = a.FullName
 	}
-	return iss.ID + " " + iss.Summary + " " + youtrack.GetStatus(iss) + " " + assignee
+	issType := youtrack.GetCustomFieldValue(iss, "Type")
+	subsystem := youtrack.GetSubsystem(iss)
+	return iss.ID + " " + iss.Summary + " " + youtrack.GetStatus(iss) + " " + assignee + " " + issType + " " + subsystem
 }
 
 func bm25Score(queryTokens, docTokens []string) float64 {
@@ -280,6 +494,7 @@ type SprintKPIs struct {
 	Blocked    int
 	Overdue    int
 	Bounced    int
+	TypeCounts map[string]int // e.g. "Feature"→15, "Bug"→8, "Task"→12
 }
 
 // BuildPMQueryContext is the entry point: classifies the query, retrieves relevant
@@ -294,6 +509,24 @@ func BuildPMQueryContext(
 ) (string, pmQueryIntent) {
 	intent := classifyPMQueryIntent(query, issues)
 	relevant := retrieveRelevantIssues(intent, query, issues)
+	log.Printf("[RAG-DEBUG] intent=%s relevant_before_compound=%d total_issues=%d typeFilter=%q",
+		intent.kind, len(relevant), len(issues), intent.typeFilter)
+
+	// Compound filter: apply status filter only when query asks for ONE specific status
+	// (e.g. "features on stage", "done bugs by harpinder") but NOT when asking for
+	// a breakdown across multiple statuses (e.g. "done vs in progress vs blocked").
+	if relevant != nil {
+		switch intent.kind {
+		case intentTypeFilter, intentPriorityFilter, intentAssignee:
+			if statusKW := detectStatusKeyword(query); statusKW != "" && countStatusKeywords(query) == 1 {
+				relevant = filterByStatus(relevant, statusKW)
+			} else if statusKW == "" {
+				if matched := findStateNameInQuery(strings.ToLower(query), issues); matched != "" {
+					relevant = filterByStatus(relevant, "state:"+matched)
+				}
+			}
+		}
+	}
 
 	// Build tracking index: issueID → rows
 	trackIdx := map[string][]database.IssueStateLog{}
@@ -321,9 +554,29 @@ func BuildPMQueryContext(
 		return sb.String(), intent
 	}
 
-	// Header describing what was retrieved
-	sb.WriteString(fmt.Sprintf("## Relevant Sprint Issues (%d retrieved for this query)\n", len(relevant)))
-	sb.WriteString("Format: ID | Priority | Summary | Status | Assignee | Bounces | Flags\n\n")
+	// Header describing what was retrieved — include total count from KPIs for type queries
+	switch intent.kind {
+	case intentTypeFilter:
+		total := kpis.TypeCounts[intent.typeFilter]
+		if total == 0 {
+			total = len(relevant)
+		}
+		if len(relevant) < total {
+			sb.WriteString(fmt.Sprintf("## %s tickets in sprint: %d total (showing first %d — use Sprint Summary Ticket Types for the exact count)\n", intent.typeFilter, total, len(relevant)))
+		} else {
+			sb.WriteString(fmt.Sprintf("## All %s tickets in sprint (%d total — complete list)\n", intent.typeFilter, total))
+		}
+	case intentPriorityFilter:
+		sb.WriteString(fmt.Sprintf("## %s tickets in sprint (%d shown)\n", intent.priorityFilter, len(relevant)))
+	case intentAssignee:
+		sb.WriteString(fmt.Sprintf("## All tickets for %s in sprint (%d shown)\n", intent.assigneeName, len(relevant)))
+	case intentStatusFilter:
+		sb.WriteString(fmt.Sprintf("## Tickets matching status filter (%d retrieved)\n", len(relevant)))
+	default:
+		sb.WriteString(fmt.Sprintf("## Relevant Sprint Issues (%d retrieved for this query)\n", len(relevant)))
+	}
+	sb.WriteString("Format: ID | Priority | Type | Summary | Status | Assignee | Subsystem | Bounces | Flags\n")
+	sb.WriteString("IMPORTANT: Only reference people and tickets listed below. Do not mention anyone not in this data.\n\n")
 
 	for _, iss := range relevant {
 		status := youtrack.GetStatus(iss)
@@ -335,13 +588,20 @@ func BuildPMQueryContext(
 		if a := youtrack.GetAssignee(iss); a != nil && a.FullName != "" {
 			assignee = a.FullName
 		}
+		issueType := youtrack.GetCustomFieldValue(iss, "Type")
+		if issueType == "" {
+			issueType = "?"
+		}
+		subsystem := youtrack.GetSubsystem(iss)
+		if subsystem == "" {
+			subsystem = "-"
+		}
 		bounces := bounceCounts[iss.ID]
 
 		flags := ""
 		if overdueFlags[iss.ID] {
 			flags += " OVERDUE"
 		}
-		issueType := youtrack.GetCustomFieldValue(iss, "Type")
 		if strings.EqualFold(issueType, "Hotfix") {
 			flags += " HOTFIX"
 		} else if strings.EqualFold(issueType, "Regression") {
@@ -351,25 +611,42 @@ func BuildPMQueryContext(
 			flags += " BLOCKED"
 		}
 
-		sb.WriteString(fmt.Sprintf("- %s | %s | %s | %s | %s | bounces:%d%s\n",
-			iss.ID, priority, iss.Summary, status, assignee, bounces, flags))
+		sb.WriteString(fmt.Sprintf("- %s | %s | %s | %s | %s | %s | %s | bounces:%d%s\n",
+			iss.ID, priority, issueType, iss.Summary, status, assignee, subsystem, bounces, flags))
 
-		// Inline tracking transitions for this issue (most recent 3)
-		rows := trackIdx[iss.ID]
-		if len(rows) > 3 {
-			rows = rows[len(rows)-3:]
-		}
-		for _, row := range rows {
-			hours := 0.0
-			if row.DurationInPrevStateHours != nil {
-				hours = *row.DurationInPrevStateHours
+		// Include tracking transitions only for intents where history matters:
+		// issue-specific, assignee workload, sprint overview, and general BM25.
+		// Skip for bulk type/priority/status filters to stay within token limits.
+		showTransitions := intent.kind == intentIssueID ||
+			intent.kind == intentAssignee ||
+			intent.kind == intentSprintOverview ||
+			intent.kind == intentGeneral
+		if showTransitions {
+			rows := trackIdx[iss.ID]
+			maxRows := 3
+			if intent.kind == intentIssueID {
+				maxRows = 10 // full history for single ticket queries
 			}
-			sb.WriteString(fmt.Sprintf("  → %s→%s (%.1fh, by %s)\n", row.FromState, row.ToState, hours, row.MovedBy))
+			if len(rows) > maxRows {
+				rows = rows[len(rows)-maxRows:]
+			}
+			for _, row := range rows {
+				hours := 0.0
+				if row.DurationInPrevStateHours != nil {
+					hours = *row.DurationInPrevStateHours
+				}
+				sb.WriteString(fmt.Sprintf("  → %s→%s (%.1fh, by %s)\n", row.FromState, row.ToState, hours, row.MovedBy))
+			}
 		}
 
-		// Blocker reason if present
+		// Blocker reason — emit reason if available, or note it's missing for blocked tickets
 		if reason, ok := blockerReasons[iss.ID]; ok {
 			sb.WriteString(fmt.Sprintf("  BLOCKER: %s\n", reason))
+		} else {
+			st := strings.ToLower(youtrack.GetStatus(iss))
+			if strings.Contains(st, "block") || strings.Contains(st, "wait") {
+				sb.WriteString("  BLOCKER: No reason recorded in the system\n")
+			}
 		}
 	}
 
@@ -385,8 +662,21 @@ func buildKPIContext(kpis SprintKPIs) string {
 	if kpis.SprintEnds != "" {
 		ends = " | Ends: " + kpis.SprintEnds
 	}
-	return fmt.Sprintf(
+	base := fmt.Sprintf(
 		"## Sprint Summary: %s%s\nTotal: %d | Done: %d | InProgress: %d | Blocked: %d | Overdue: %d | Bounced: %d\n",
 		kpis.SprintName, ends, kpis.Total, kpis.Done, kpis.InProgress, kpis.Blocked, kpis.Overdue, kpis.Bounced,
 	)
+	if len(kpis.TypeCounts) > 0 {
+		types := make([]string, 0, len(kpis.TypeCounts))
+		for t := range kpis.TypeCounts {
+			types = append(types, t)
+		}
+		sort.Strings(types)
+		parts := make([]string, 0, len(types))
+		for _, t := range types {
+			parts = append(parts, fmt.Sprintf("%s: %d", t, kpis.TypeCounts[t]))
+		}
+		base += "Ticket Types: " + strings.Join(parts, " | ") + "\n"
+	}
+	return base
 }
