@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ExternalLink, X, Send, MessageSquare, Paperclip, Clock, User, FileText,
   Film, Music, FileCode, File, FileSpreadsheet, Tag, GitBranch, Activity,
@@ -332,7 +333,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
   const priStyle = priorityBadgeStyle(localPriority)
   const dueDateMs = localDueDate ? new Date(localDueDate).getTime() : undefined
 
-  return (
+  return createPortal(
     <>
     <div className="modal-overlay" onClick={onClose}>
       <div className="idp-modal" onClick={e => e.stopPropagation()}>
@@ -735,6 +736,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
         onClose={() => setViewerIndex(null)}
       />
     )}
-    </>
+    </>,
+    document.body
   )
 }

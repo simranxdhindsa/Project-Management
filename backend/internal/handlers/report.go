@@ -1755,6 +1755,13 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 	sprintName, _ := url.QueryUnescape(r.URL.Query().Get("sprint_name"))
 	sprintFinishMs, _ := strconv.ParseInt(r.URL.Query().Get("sprint_finish_ms"), 10, 64)
 
+	// Serve from cache if available (TTL = 3 min; invalidated by YouTrack webhook)
+	boardCacheKey := fmt.Sprintf("board:%s:%s", user.ID, sprintID)
+	if cached, ok := apiCache.Get(boardCacheKey); ok {
+		sendJSON(w, http.StatusOK, Response{Success: true, Data: cached})
+		return
+	}
+
 	// Load workflow config for SLA thresholds and priority mappings
 	wfCfg := h.loadWorkflowConfig(r.Context(), user.ID, "youtrack")
 
@@ -2269,13 +2276,12 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		summary.CompletionPct = float64(summary.DoneIssues) / float64(summary.TotalIssues) * 100
 	}
 
-	sendJSON(w, http.StatusOK, Response{
-		Success: true,
-		Data: map[string]interface{}{
-			"summary": summary,
-			"columns": resultColumns,
-		},
-	})
+	responseData := map[string]interface{}{
+		"summary": summary,
+		"columns": resultColumns,
+	}
+	apiCache.Set(boardCacheKey, responseData, 3*time.Minute)
+	sendJSON(w, http.StatusOK, Response{Success: true, Data: responseData})
 }
 
 // GetIssueTransitions returns the full state-transition history for a single issue.

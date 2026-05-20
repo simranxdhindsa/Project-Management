@@ -10,6 +10,7 @@ import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
 import { getActiveSource } from '../services/pmDataService'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '../components/HoverCard'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
+import { useSprintsCache } from '@/contexts/VelocityDataContext'
 
 interface Props {
   onBlockersChange: (ids: Set<string>) => void
@@ -523,27 +524,25 @@ function fmtSprintDate(ms: number) {
 export function DailyOpsPage() {
   const isYouTrack = getActiveSource() === 'youtrack'
 
-  const [sprints, setSprints]               = useState<YouTrackSprint[]>([])
-  const [activeSprint, setActiveSprint]     = useState<YouTrackSprint | null>(null)
+  // Sprints from shared cache — no duplicate network call when Board tab already loaded them
+  const { data: cachedSprints } = useSprintsCache()
+  const sprints: YouTrackSprint[] = isYouTrack ? ((cachedSprints as YouTrackSprint[] | null) ?? []) : []
+  const [activeSprint, setActiveSprint]     = useState<YouTrackSprint | null | undefined>(undefined)
   const [dropdownOpen, setDropdownOpen]     = useState(false)
   const triggerRef = useRef<HTMLDivElement>(null)
   const menuRef    = useRef<HTMLDivElement>(null)
 
-  // Load sprints and auto-select the current active one
+  // Auto-select active sprint once sprints are available
   useEffect(() => {
-    if (!isYouTrack) return
-    api.getYouTrackSprints().then(res => {
-      const list = ((res as any).data as YouTrackSprint[]) ?? []
-      setSprints(list)
-      const now    = Date.now()
-      const active = list
-        .filter(s => !s.isCompleted && s.finish > now)
-        .sort((a, b) => a.finish - b.finish)[0] ?? null
-      setActiveSprint(active)
-      localStorage.setItem(DO_SPRINT_ID_KEY, active?.id ?? '')
-      localStorage.setItem(DO_SPRINT_NAME_KEY, active?.name ?? '')
-    }).catch(() => {})
-  }, [isYouTrack])
+    if (!isYouTrack || activeSprint !== undefined || sprints.length === 0) return
+    const now    = Date.now()
+    const active = sprints
+      .filter(s => !s.isCompleted && s.finish > now)
+      .sort((a, b) => a.finish - b.finish)[0] ?? null
+    setActiveSprint(active)
+    localStorage.setItem(DO_SPRINT_ID_KEY, active?.id ?? '')
+    localStorage.setItem(DO_SPRINT_NAME_KEY, active?.name ?? '')
+  }, [isYouTrack, sprints, activeSprint])
 
   // Outside-click closes the dropdown
   useEffect(() => {

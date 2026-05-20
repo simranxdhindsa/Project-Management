@@ -1,5 +1,6 @@
 import { BrowserRouter, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
+import { VelocityDataProvider } from '@/contexts/VelocityDataContext'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
 import ThemePreviewPage from '@/pages/ThemePreviewPage'
@@ -26,7 +27,11 @@ function AppContent() {
     return <NoAccessPage message={accessDeniedMessage} onReset={clearAccessDenied} />
   }
 
-  return isAuthenticated ? <Dashboard /> : <Login />
+  return isAuthenticated ? (
+    <VelocityDataProvider>
+      <Dashboard />
+    </VelocityDataProvider>
+  ) : <Login />
 }
 
 function App() {

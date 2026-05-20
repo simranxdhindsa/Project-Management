@@ -22,7 +22,7 @@ The backend loads `backend/.env` automatically on startup via `godotenv`.
 
 ## Architecture Overview
 
-This is Velocity, a React + Go project management tool. Frontend (port 5173) talks to a Go REST API (port 8080) at `http://localhost:8080/api`. All protected routes require `Authorization: Bearer <JWT>`.
+Velocity is a React + Go project management tool. Frontend (port 5173) talks to a Go REST API (port 8080) at `http://localhost:8080/api`. All protected routes require `Authorization: Bearer <JWT>`.
 
 ### Backend Structure
 
@@ -41,7 +41,13 @@ backend/
 
 **Key pattern**: Handlers call repositories directly — no service layer for most features. Repositories use a global pgxpool (`database.GetPool()`).
 
-**Auto-migrations**: `internal/database/migrations.go` runs all DDL on startup. Add new tables there.
+**Auto-migrations**: `internal/database/migrations.go` runs all DDL on startup. Add new tables there — use `CREATE TABLE IF NOT EXISTS`.
+
+**Background jobs** (started in `main.go`): mid-day/evening blocker detection, daily cleanup (deletes notifications + activity logs older than 30 days), reminder polling.
+
+**Real-time**: SSE hub in `handlers/sse_hub.go` broadcasts events to connected clients.
+
+**AI**: Groq, OpenAI, or Gemini — selected via `AI_PROVIDER` env var. Bot prompts editable at runtime via `bot_configs` table.
 
 ### Frontend Structure
 
@@ -59,41 +65,27 @@ All API calls go through `api.ts`, which injects the JWT from localStorage autom
 ### Authentication Flow
 
 1. Google Sign-In → `POST /api/auth/google` with credential (ID token)
-2. Backend validates with Google, checks email whitelist, creates/fetches user in DB
+2. Backend validates with Google, checks denylist then whitelist, creates/fetches user in DB
 3. Returns JWT (24h default, 30d if `remember_me: true`)
 4. Middleware on every request: validates JWT → looks up user by **email** in DB → puts DB user in context
 
-The middleware resolves by email (not JWT user_id) to handle cases where a token was issued when DB was unavailable (in-memory UUID mismatch). If user doesn't exist in DB yet, middleware auto-creates them.
+The middleware resolves by email (not JWT user_id) to handle in-memory UUID mismatches. If the user doesn't exist in DB yet, middleware auto-creates them.
 
-**Dev mode**: Any token starting with `dev-mode-token-` bypasses JWT validation and uses a hardcoded admin user (`simranjot@apyhub.com`, ID `08938fa6-27b4-446f-a9aa-b8fe5c7b97c4`). This ID must exist in the `users` table.
+**Dev mode**: Any token starting with `dev-mode-token-` bypasses JWT validation and uses hardcoded admin (`simranjot@apyhub.com`, ID `08938fa6-27b4-446f-a9aa-b8fe5c7b97c4`). This ID must exist in the `users` table.
 
-**Whitelist**: `simranjot@apyhub.com` is always admin. Domain `@apyhub.com` grants `member` role. Configurable via DB `whitelist` table.
+**Access control**: `simranjot@apyhub.com` is always admin. Domain `@apyhub.com` grants `member` role. Configurable via `whitelist` table. Blocked emails in `denied_emails` table are rejected before the whitelist check — blocked users get a specific error message, non-whitelisted get "not authorised". The `AuthContext` catches 403 errors and sets `accessDenied` state; `App.tsx` renders `NoAccessPage` when that's true.
 
 ### PM Data Sources (Dual-Tracker Design) — RULE #1
 
 **The active PM source controls EVERYTHING.** When the user sets their active source in Integrations → Active PM Data Source:
 
-- **All data is fetched from that source only**: boards, list views, kanban, PM reports, tracking tab, assignee stats, daily brief, EOD summary, developer load, blocker reasons, carryover, stage report, PM assistant AI, activity feed, calendar, time tracking, issue timelines — everything.
-- **All configuration comes from that source**: workflow config (priority tags, column hierarchy, hotfix rules, report defaults), open/blocked states, priority filters, done role — all source-specific.
-- **Switching source immediately changes all of the above** — no mixing of YouTrack data with Asana config or vice versa.
+- All data is fetched from that source only — boards, kanban, PM reports, tracking, daily ops, activity feed, calendar, etc.
+- All configuration comes from that source — workflow config, priority tags, column hierarchy, open/blocked states, done role.
+- Switching source immediately changes all of the above — no mixing of YouTrack data with Asana config.
 
-The active source is stored in `user_data_source` table (backend) and `localStorage` key `pm_active_source` (frontend). The frontend service layer (`pmDataService.ts`) routes every call to the correct API based on `getActiveSource()`. Before building or modifying any PM feature, verify it reads the active source and calls the correct API accordingly.
+Active source is stored in `user_data_source` table (backend) and `localStorage` key `pm_active_source` (frontend). The service layer (`pmDataService.ts`) routes every call to the correct API via `getActiveSource()`. **Before building or modifying any PM feature, verify it reads the active source.**
 
-Users can switch between **YouTrack** and **Asana** as their primary tracker. Preference stored in `user_data_source` table. Both integrations are separate route namespaces (`/api/youtrack/*`, `/api/asana/pm/*`) with parallel handler sets.
-
-### Real-Time Updates
-
-Server-Sent Events hub in `handlers/sse_hub.go`. YouTrack/notification handlers push events to the SSE hub, which broadcasts to connected frontend clients.
-
-### Background Jobs (started in `main.go`)
-
-- Mid-day and evening scheduled checks (blocker detection, stale task alerts)
-- Daily cleanup goroutine (deletes notifications and activity logs older than 30 days)
-- Reminder polling
-
-### AI Integration
-
-Multiple providers supported: Groq, OpenAI, Gemini. Provider selected via `AI_PROVIDER` env var. Bot prompts are editable at runtime via `bot_configs` table (allows PM to customize assistant behavior with live YouTrack data injected into prompts).
+Users can switch between **YouTrack** and **Asana**. Both use separate route namespaces: `/api/youtrack/*` and `/api/asana/pm/*`.
 
 ## Environment Variables
 
@@ -125,7 +117,7 @@ VITE_GOOGLE_CLIENT_ID=    # must match backend GOOGLE_CLIENT_ID
 
 - PostgreSQL via pgx/pgxpool. Connection pool: max 10, min 2, 1h max lifetime.
 - If `DATABASE_URL` is unset, app runs with in-memory maps (limited persistence).
-- The `go.mod` toolchain version must match an **actually released** Go version. `go 1.25.x` does not exist — use `go 1.24.0` or lower.
+- The `go.mod` toolchain version must match an **actually released** Go version — `go 1.25.x` does not exist, use `go 1.24.0` or lower.
 - Windows: Windows Defender may corrupt module cache downloads. Add `C:\Users\<user>\go\pkg\mod` to Defender exclusions if you see `unexpected NUL in input` errors.
 
 ---
@@ -134,33 +126,31 @@ VITE_GOOGLE_CLIENT_ID=    # must match backend GOOGLE_CLIENT_ID
 
 ### 1 — Always follow the Workflow Config
 
-Every PM feature must derive its column classification, roles, and thresholds from the live workflow config, **never hardcode column or state names**.
+Every PM feature must derive its column classification, roles, and thresholds from the live workflow config — **never hardcode column or state names**.
 
 - Load with `useWorkflowConfig()` hook (`frontend/src/hooks/useWorkflowConfig.ts`)
-- Column role lookup pattern: build a `Map<string, string>` from `wfConfig.column_hierarchy` (state + all aliases, lowercased) then fall back to keyword heuristics only when the map is empty
-- Role semantics used throughout the app:
+- Column role lookup: build a `Map<string, string>` from `wfConfig.column_hierarchy` (state + all aliases, lowercased); fall back to keyword heuristics only when the map is empty
 
-| Role string | Meaning |
+| Role | Meaning |
 |---|---|
-| `active` | In Progress — developer is working on it |
-| `blocked` | Blocked — external dependency, dev can't act |
-| `dev_done` | Done / DEV — moved out of active development |
-| `verified` | Verified / Ready for Stage or Prod |
-| `deployed` | Deployed to Stage or Prod |
-| `closed` | Fully resolved / closed |
-| `backlog` / `''` | To Do / Queued — not yet started |
+| `active` | In Progress |
+| `blocked` | Blocked — dev can't act |
+| `dev_done` | Done / DEV |
+| `verified` | Ready for Stage or Prod |
+| `deployed` | Deployed |
+| `closed` | Fully resolved |
+| `backlog` / `''` | To Do / Queued |
 
-- Overdue / delay logic must check `isDoneNow` (role in dev_done/verified/deployed/closed) first — done tickets must **never** show overdue regardless of hours_in_state
-- Blocked tickets must **never** count as overdue — the developer can't act on them
-- Only `active` and `backlog/todo` (open) tickets count toward a developer's overdue metric
+- Done tickets (`dev_done`, `verified`, `deployed`, `closed`) must **never** show overdue
+- Blocked tickets must **never** count as overdue
+- Only `active` and `backlog` tickets count toward a developer's overdue metric
 
 ### 2 — Use the Established Dropdown and Calendar Components
 
-Do not build new dropdown or calendar implementations. Use the two existing patterns:
+Do not build new dropdown or calendar implementations.
 
-**`pm-custom-dropdown` pattern** — used everywhere in `PMReportsPage.tsx`, `BoardPage.tsx`, `DayTrackPage.tsx`, etc.
+**`pm-custom-dropdown` pattern** — used in `PMReportsPage.tsx`, `BoardPage.tsx`, `DayTrackPage.tsx`, etc.
 ```tsx
-// Standard inline dropdown (outside-click handled via useRef + mousedown listener)
 <div className="pm-custom-dropdown" ref={myRef}>
   <button className="pm-custom-dropdown-trigger" onClick={() => setOpen(o => !o)}>
     {label} <ChevronDown size={12} />
@@ -177,28 +167,62 @@ Do not build new dropdown or calendar implementations. Use the two existing patt
 </div>
 ```
 
-**`WcSelectDropdown` component** — defined in `IntegrationsPage.tsx` (line 71). Used for role/config selects in the Integrations page. It renders a portal-based dropdown with `wc-sel-dropdown` class on the portal div (critical — ensures the outside-click handler doesn't close it prematurely). Use this pattern for compact select inputs inside settings/config tables.
+**`WcSelectDropdown` component** — defined in `IntegrationsPage.tsx`. Portal-based; the portal div **must** have `wc-sel-dropdown` in its className — without it, the global mousedown outside-click handler closes the menu before the option's `onClick` fires.
 
-**`CalendarView` component** — `frontend/src/components/calendar/CalendarView.tsx`. Use this for any date-range or calendar display — do not roll a new one.
+**`CalendarView` component** — `frontend/src/components/calendar/CalendarView.tsx`. Use this for any date-range or calendar display.
 
-Portal bug note: any portal-rendered dropdown menu **must** include `wc-sel-dropdown` in its className, otherwise the global mousedown outside-click handler will close it before the option's `onClick` fires.
+### 3 — Persisted UI State
 
-### 3 — Light Mode and Dark Mode
+Any UI state that should survive a page refresh or new browser tab **must** use `usePersistedState` from `frontend/src/hooks/usePersistedState.ts`. Never call `localStorage.setItem/getItem` directly in a component.
 
-**RULE: Every frontend component must be fully theme-aware.** All colors, backgrounds, borders, shadows, and text used in any component or CSS class MUST be controlled by CSS variables or `[data-theme="light"]` overrides — never hardcoded hex/rgba values that only work in one theme. This applies without exception to: new pages, modals, dropdowns, cards, badges, charts, skeletons, toggles, scrollbars, and any third-party component wrappers. Before marking any UI task complete, verify the component is visually correct in **both** dark and light mode.
+**Adding a new persisted value — two steps:**
 
-Every new component and CSS class must have both dark (default) and light mode styles. The app ships both themes and both must be visually correct.
+1. Add the key to the `PERSIST` constant in `usePersistedState.ts`:
+   ```ts
+   export const PERSIST = {
+     LAST_PAGE:     'velocity_last_page',  // main tab
+     TRACKING_VIEW: 'pm_tracking_view',    // PM Reports 10-view selector
+     SPRINT_ID:     'pm_active_sprint_id',
+     ...
+     MY_NEW_KEY:    'my_feature_key',      // ← add here
+   }
+   ```
+
+2. Replace `useState` with `usePersistedState`:
+   ```ts
+   // Before
+   const [mode, setMode] = useState<Mode>('default')
+
+   // After
+   const [mode, setMode] = usePersistedState(PERSIST.MY_NEW_KEY, 'default', {
+     validate: ['default', 'other'],  // optional — rejects unknown stored values
+   })
+   ```
+
+**Currently persisted:**
+| Key | What it stores | Used in |
+|-----|---------------|---------|
+| `velocity_last_page` | Last main Dashboard tab visited | `Dashboard.tsx` |
+| `pm_tracking_view` | Last of 10 tracking views selected | `PMReportsPage.tsx` |
+| `pm_active_sprint_id` | Active sprint ID | `PMReportsPage`, `DailyOpsTab` |
+| `pm_active_sprint_name` | Active sprint name | same |
+| `theme` | Dark/light mode | `Dashboard.tsx` |
+
+**Tab keep-alive (related):** Tabs are kept mounted via `.dash-tab-hidden` CSS in `Dashboard.tsx`. This preserves local component state within a session. `usePersistedState` handles cross-session persistence. Together they ensure no stale UI on tab switch or refresh.
+
+### 4 — Light Mode and Dark Mode
+
+**Every frontend component must be fully theme-aware.** All colors, backgrounds, borders, shadows, and text MUST use CSS variables or `[data-theme="light"]` overrides — never hardcoded hex/rgba that only works in one theme. Verify both themes before marking any UI task complete.
 
 **Pattern:**
 ```css
-/* Dark mode (default — no selector needed) */
+/* Dark mode (default) */
 .my-class {
   background: rgba(255,255,255,0.06);
   color: rgba(255,255,255,0.8);
   border: 1px solid rgba(255,255,255,0.1);
 }
 
-/* Light mode override */
 [data-theme="light"] .my-class {
   background: rgba(241,245,249,0.9);
   color: #1e293b;
@@ -206,268 +230,55 @@ Every new component and CSS class must have both dark (default) and light mode s
 }
 ```
 
-Key light-mode color values to use consistently:
-- Surface bg: `rgba(241,245,249,0.9)` or `#ffffff`
+Light-mode values to use consistently:
+- Surface: `rgba(241,245,249,0.9)` / `#ffffff`
 - Primary text: `#1e293b` / `#0f172a`
 - Secondary text: `#475569` / `#64748b`
-- Muted text: `#94a3b8`
-- Border: `rgba(99,102,241,0.12)` to `rgba(99,102,241,0.2)`
-- Primary accent: `#4f46e5` / `#6366f1`
+- Muted: `#94a3b8`
+- Border: `rgba(99,102,241,0.12)–rgba(99,102,241,0.2)`
+- Accent: `#4f46e5` / `#6366f1`
 - Danger: `#dc2626` / `#ef4444`
-- Warning: `#d97706`
-- Success: `#16a34a`
+- Warning: `#d97706` · Success: `#16a34a`
 
-**No inline `style={{}}`** in components (except truly dynamic values like widths derived from data — e.g. a progress bar `width: ${pct}%`). All colours, spacing, and layout must be in the CSS files.
+**No inline `style={{}}`** except truly dynamic values (e.g. `width: ${pct}%`). All colours and layout go in CSS files.
 
-CSS files per page/feature:
-- `frontend/src/styles/pages/pm-reports.css` — PMReports, Tracking, QA Pipeline
-- `frontend/src/styles/pages/daily-ops.css` — Daily Ops tab
-- `frontend/src/styles/pages/integrations.css` — Integrations page
-- `frontend/src/index.css` — global shared classes
+CSS files per feature:
+- `styles/pages/pm-reports.css` — PMReports, Tracking, QA Pipeline
+- `styles/pages/daily-ops.css` — Daily Ops tab
+- `styles/pages/integrations.css` — Integrations page
+- `index.css` — global shared classes
 
 ---
 
-## Features Built
+## Features Overview
 
 ### Tracking Tab (`PMReportsPage.tsx` — `TrackingTab`)
-
-9 view modes accessible from the view-mode dropdown:
-
-| Mode | Description |
-|---|---|
-| **By Column** | Default — issues grouped by board column (sprint-scoped) |
-| **By Assignee** | Issues grouped by developer; QA verified subsection per person |
-| **Swimlane** | Each person = full-width row with urgency-coloured ticket chips + load bar |
-| **Sidebar** | Left 240px avatar list; click person → their tickets fill the right panel |
-| **Heatmap** | Assignee × column matrix — cell colour shows overdue/at-risk/ok count |
-| **Delay Bars** | Horizontal time bar per ticket: working (blue) / bounce (orange) / review (purple); SLA marker line |
-| **Alert First** | Giant blocked banner at top + 2-col in-progress cards below |
-| **Split Pane** | Left health panel (donut, load bars, sprint countdown) + right flat ticket list |
-| **Focus Mode** | Top 3 most-delayed tickets shown large; "Show N more" expands the rest |
-| **QA Pipeline** | Verification matrix per ticket: DEV / STAGE / PROD cells with who tested + pending indicators |
-
-**Sprint KPI bar** (top of Tracking tab):
-- Completion % (done / total)
-- Blocked count
-- Bounced tickets count
-- Sprint deadline countdown (amber when <24h)
-
-**Per-ticket row enhancements:**
-- Cycle time (first active → first done)
-- Verification badges: `DEV✓` / `STG✓` / `PRD✓` with tooltip showing tester name
-- Hotfix badge (orange `HF`)
-- Bounce badge (`↩N`) — backward move count
-- Stint count (`×N`) — separate In Progress sessions
-- `overdue_level` colouring: `deadline` (red) / `sprint` (amber) / `sla` (yellow)
-- Inline row expand → full state transition timeline (`IssueTransitionInline`)
-
-**Overdue logic (backend `report.go`):**
-1. If `isDoneNow` (role in dev_done/verified/deployed/closed) → `is_delayed = false`, `overdue_level = ""`
-2. Else if ticket-level YouTrack due date passed → `overdue_level = "deadline"`
-3. Else if sprint finish ms passed and ticket is active → `overdue_level = "sprint"`
-4. Else if `hours_in_state > priority SLA threshold` → `overdue_level = "sla"`
-
-### QA Pipeline View
-
-Dedicated verification matrix showing per-ticket QA coverage across three stages. Key concepts:
-- `verified_on_dev` / `verified_on_stage` / `verified_on_prod` — name of person who moved ticket to each verified-role column
-- `isPendingDev` = no dev verif + ticket has been worked on (`total_active_hours > 0 || bounce_count > 0`)
-- `isPendingStg` = has dev verif but not stage verif
-- `isPendingPrd` = has stage verif but not prod verif
-- QA Load cards at top show per-QA person how many tickets they've verified at each stage
-- Filter toggle: "All" vs "Needs QA" (hides fully-verified tickets)
-
-### Integrations — Column Hierarchy
-
-- Card-based layout with left colour stripe per role (`ROLE_COLORS` constant)
-- Auto-fetches YouTrack board columns on tab open (`useEffect` on `[wcSection, wcSource]`) — no manual button
-- `WcSelectDropdown` portal fix: portal div must have `wc-sel-dropdown` class so outside-click handler doesn't fire on it
-- Aliases column always visible (fixed width `120px` on role dropdown so aliases input isn't squeezed out)
+View modes: By Column, By Assignee, Swimlane, Sidebar, Heatmap, Delay Bars, Alert First, Split Pane, Focus Mode, QA Pipeline.
 
 ### Daily Ops Tab
+Single Developer Load view — per-developer cards with sprint progress, stat chips (done/active/blocked/bounced/overdue/hours), active and blocked issue lists.
 
-Simplified to a single **Developer Load** view (Morning Brief and Report Preview tabs removed).
+### PM Assistant
+AI chat over sprint data using BM25 RAG (`pm_query_rag.go`). Supports action execution (e.g. sprint switching) via structured JSON responses. Entry point: `BuildPMQueryContext()`.
 
-Data sourced from `api.getSprintBoardStatus(sprintId)` — uses the same sprint board endpoint as the Tracking tab, so counts are always accurate and never depend on YouTrack webhooks.
+### Board & List Views
+Kanban board (`BoardPage.tsx`) and flat list (`ListViewPage.tsx`) — both driven by the active PM source.
 
-Per-developer card shows:
-- Real avatar image (from sprint board data) with initials fallback
-- Sprint progress bar (`done / (done + active + blocked)`)
-- Stat chips: done in sprint / active / blocked / bounced / overdue / hours worked
-- Active issue list (first 4, `+N more`)
-- Blocked issue list (separate section)
-
-Overloaded badge rule: `activeIssues.length > 5` — purely a workload metric (in-progress tickets only).
-Overdue count rule: only open tickets (`isActive || isQueued`) where `is_delayed = true`. Blocked and done tickets never count as overdue.
-
-### Backend: Sprint Board Status (`GET /api/reports/sprint-board-status`)
-
-Returns `SprintBoardStatusResponse { summary: SprintSummary, columns: SprintBoardColumn[] }`.
-
-`SprintBoardIssue` fields added over time:
-- `bounce_count`, `total_active_hours` — from state log scan
-- `cycle_time_hours` — first active → first done
-- `verified_on_dev/stage/prod` — who moved to each verified-role column
-- `is_hotfix`, `stint_count`, `stints[]`
-- `overdue_level` (`"deadline"` | `"sprint"` | `"sla"` | `""`)
-- `move_type` (`"qa_rejected"` | `"dev_stalled"` | `""`)
-- `issue_type` — from YouTrack custom field (e.g. Hotfix, Regression)
-
-`SprintSummary` fields: `total_issues`, `done_issues`, `in_progress_count`, `blocked_count`, `bounced_count`, `hotfix_count`, `overdue_count`, `sprint_finish_ms`, `completion_pct`.
-
-### PM Assistant RAG (`backend/internal/handlers/pm_query_rag.go`)
-
-The PM assistant uses **zero-cost BM25 sparse retrieval** to keep every prompt under ~3,000 tokens regardless of sprint size.
-
-**Do NOT dump all sprint issues into the prompt.** Always route through `BuildPMQueryContext()`.
-
-#### Intent classification (classify before retrieving)
-
-| Intent | Trigger | Retrieved context |
-|--------|---------|-------------------|
-| `greeting` / `general summary` | "hi", "overview", "sprint status" | Sprint KPI stats only (~150 tokens) |
-| `issue_id` | Regex `[A-Z]{2,10}-\d+` in query | That one issue only |
-| `assignee` | Name matched against live sprint data | That person's issues only |
-| `status_filter` | "blocked", "delayed", "done", "in progress" keywords | Filtered subset |
-| `general` | None of the above | BM25 top-20 issues |
-
-#### Issue context line format (per issue in retrieval)
-
-```
-- {ID} | {Priority} | {Summary} | {Status} | {Assignee} | bounces:{N} [OVERDUE] [HOTFIX] [BLOCKED]
-  → {FromState}→{ToState} ({Xh}, by {Person})   ← last 3 transitions
-  BLOCKER: {reason}                               ← if blocked
-```
-
-#### KPI context (always appended, ~50 tokens)
-
-```
-## Sprint Summary: {name} | Ends: {date}
-Total: N | Done: N | InProgress: N | Blocked: N | Overdue: N | Bounced: N
-```
-
-#### Entry point
-
-```go
-context, intent := BuildPMQueryContext(query, issues, trackingLogs, blockerReasons, kpis)
-```
-
-Called from `PMAssistantQuery` in `youtrack.go`. The handler:
-1. Fetches sprint issues from YouTrack (`ytClient.GetAllSprintIssues`)
-2. Fetches time-tracking logs **sprint-scoped** (`SprintIssueIDs` param — never empty)
-3. Computes KPI counts (Overdue + Bounced) from tracking logs using `pmIsMovedBack` + `pmOverdueThreshold`
-4. Calls `BuildPMQueryContext` → prepends returned context to system prompt
-5. Sends to AI via `ai.QueryWithHistory` (model: `llama-3.1-8b-instant`, 131K TPM free tier)
-
-**When adding new PM assistant features**: extend the intent classifier in `pm_query_rag.go`, not the handler in `youtrack.go`. Keep context output compact — every token costs latency and risks hitting the 131K TPM limit.
-
-### PM Assistant Action Pattern (keyword: **"AI action"**)
-
-This pattern lets the PM assistant **execute app actions** (not just answer questions) based on natural language input. Sprint switching is the reference implementation. Use the same pattern for all future assistant-driven actions.
-
-**How it works end-to-end:**
-
-1. **Backend injects available options** into the system prompt (e.g. sprint list, project list, assignee list — whatever options the action needs).
-2. **Backend instructs the AI** to return pure JSON when an action is detected (no markdown, no extra text):
-   ```json
-   { "answer": "<confirmation message>", "action": "<action_id>", "payload": { ...params } }
-   ```
-3. **Backend parses the AI response** (`json.Unmarshal`). If `action != ""`, it extracts `answer`, `action`, `payload` and returns them as top-level fields in `data` alongside `response`.
-4. **Frontend reads `response.data.action`**. If it matches a known action, it executes the corresponding function (e.g. `handleSprintSelect`) and shows a green `.pm-assistant-action-notif` banner.
-5. The AI's `answer` text is displayed in the chat bubble normally.
-
-**Implemented actions:**
-
-| Action ID | Trigger phrases | What it does |
-|-----------|----------------|--------------|
-| `select_sprint` | "select sprint X", "switch to sprint X", "use sprint X" | Sets the assistant sprint selector to the matching sprint |
-
-**Adding a new AI action — checklist:**
-
-- [ ] **`youtrack.go` `PMAssistantQuery`**: Fetch available options, append to `customInstructions` with the JSON instruction block listing them.
-- [ ] **`api.ts`**: Add new payload fields to `pmAssistantQuery` response type.
-- [ ] **`PMReportsPage.tsx` `PMAssistantTab`**: Add `else if (data.action === 'new_id')` → call the corresponding frontend function.
-- [ ] **CSS**: Reuse `.pm-assistant-action-notif` — already styled.
-
-**Planned future actions (not yet implemented):**
-
-| Action ID | Trigger | What it will do |
-|-----------|---------|----------------|
-| `create_ticket` | "create a ticket for X", "add issue: Y" | AI fills all ticket fields from description; shows confirmation card before creating |
-| `assign_ticket` | "assign ARD-123 to Alice" | Updates assignee via YouTrack API |
-| `move_ticket` | "move ARD-123 to In Progress" | Changes ticket state via YouTrack API |
-| `set_priority` | "set ARD-123 to P1" | Updates priority field |
-
-**`create_ticket` design (implement when user says "add AI ticket creation"):**
-- User describes the issue in chat. AI returns `{ action: "create_ticket", payload: { summary, priority, assignee, type, description } }`.
-- Frontend shows a **confirmation card** with all filled fields — user reviews and clicks "Create" or edits fields.
-- On confirm: call `api.createYouTrackIssue(payload)`. **Never auto-create without user review.**
+### Other Tabs
+Calendar, Activity Feed, Reminders, Day Track, Integrations (column hierarchy + workflow config), Settings (access control + denylist), Admin, Reports, Bot Config, AI Analysis, Slack.
 
 ---
 
-### RAG in PM Assistant (`pm_query_rag.go`)
-
-The PM assistant uses **zero-cost BM25 sparse retrieval** to keep every prompt under ~3,000 tokens regardless of sprint size. The RAG layer sits between the handler and the AI call.
-
-**When to extend RAG vs the handler:**
-- New **query intents** (e.g. "who hasn't committed today", "show me by priority") → add to `classifyPMQueryIntent()` and `retrieveRelevantIssues()` in `pm_query_rag.go`.
-- New **context data** to inject (e.g. sprint velocity, PR status) → add to `BuildPMQueryContext()` in `pm_query_rag.go`.
-- New **AI actions** (option lists, JSON instructions) → add to `PMAssistantQuery` in `youtrack.go` **before** `BuildPMQueryContext` is called, so they go into `customInstructions` not `ragContext`.
-
-**Intent → retrieval mapping:**
-
-| Intent | Trigger | Issues retrieved |
-|--------|---------|-----------------|
-| `greeting` / summary | "hi", "overview", "sprint status" | None — KPI stats only |
-| `issue_id` | Regex `[A-Z]{2,10}-\d+` in query | That one issue |
-| `assignee` | Name matched against sprint data | That person's issues only |
-| `status_filter` | "blocked", "delayed", "done", "in progress" | Filtered subset |
-| `general` | Everything else | BM25 top-20 issues |
-
-**Token budget rule:** Every new context block added to `BuildPMQueryContext` must be justified against the 131K TPM free-tier limit. Keep total context under 3,000 tokens per query. Use counts/summaries, not full field dumps.
-
-<!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
 
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
-
-### When to use graph tools FIRST
-
-- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
-- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
-- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
-- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview` + `list_communities`
-
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
-
-### Key Tools
+**IMPORTANT: ALWAYS use code-review-graph MCP tools BEFORE Grep/Glob/Read to explore the codebase.** The graph is faster, cheaper, and gives structural context (callers, dependents, test coverage) that file scanning cannot.
 
 | Tool | Use when |
 |------|----------|
-| `detect_changes` | Reviewing code changes � gives risk-scored analysis |
-| `get_review_context` | Need source snippets for review � token-efficient |
+| `semantic_search_nodes` / `query_graph` | Exploring code instead of Grep |
 | `get_impact_radius` | Understanding blast radius of a change |
-| `get_affected_flows` | Finding which execution paths are impacted |
-| `query_graph` | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes` | Finding functions/classes by name or keyword |
-| `get_architecture_overview` | Understanding high-level codebase structure |
-| `refactor_tool` | Planning renames, finding dead code |
+| `detect_changes` + `get_review_context` | Code review |
+| `get_affected_flows` | Finding impacted execution paths |
+| `get_architecture_overview` + `list_communities` | Architecture questions |
 
-### Workflow
-
-1. The graph auto-updates on every file change via the PostToolUse hook — no manual action needed.
-2. After adding a **new feature or significant refactor**, run a full rebuild: `code-review-graph build`
-3. Use `detect_changes` for code review before committing.
-4. Use `get_affected_flows` to understand impact of a change.
-5. Use `query_graph` pattern="tests_for" to check coverage.
-
-### Rebuild triggers
-Run `code-review-graph build` manually when:
-- A new feature is added (new files/modules)
-- A major refactor moves or renames files
-- The graph feels stale (`code-review-graph status` shows low coverage)
+The graph auto-updates on every file change via PostToolUse hook. Run `code-review-graph build` manually after adding a new feature or major refactor.

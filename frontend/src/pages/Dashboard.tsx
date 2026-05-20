@@ -12,6 +12,7 @@ import {
 } from '@dnd-kit/core'
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/contexts/AuthContext'
+import { PERSIST } from '@/hooks/usePersistedState'
 import api from '@/services/api'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import CreateIssueModal from '@/components/CreateIssueModal'
@@ -193,10 +194,36 @@ export default function Dashboard() {
     ? (subTab as IntegrationsTab)
     : 'youtrack'
 
-  // Navigate wrapper — updates URL and syncs page state
+  // Navigate wrapper — updates URL and persists last page
   const setCurrentPage = (page: Page) => {
+    if (page !== 'dashboard') localStorage.setItem(PERSIST.LAST_PAGE, page)
     navigate(`/${page}`)
   }
+
+  // On fresh load at root (/), restore the last visited page
+  useEffect(() => {
+    const path = location.pathname
+    if (path === '/' || path === '') {
+      const last = localStorage.getItem(PERSIST.LAST_PAGE) as Page | null
+      const valid: Page[] = ['board', 'list', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'daily-analysis', 'integrations', 'settings', 'bots', 'theme']
+      if (last && valid.includes(last)) {
+        navigate(`/${last}`, { replace: true })
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Keep-alive: track which tabs have ever been visited so we can keep them
+  // mounted (hidden via CSS) instead of unmounting on tab switch.
+  const [mountedTabs, setMountedTabs] = useState<Set<Page>>(() => new Set([currentPage]))
+  useEffect(() => {
+    setMountedTabs(prev => {
+      if (prev.has(currentPage)) return prev
+      const next = new Set(prev)
+      next.add(currentPage)
+      return next
+    })
+  }, [currentPage])
 
   const [showNotifications, setShowNotifications] = useState(false)
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -265,6 +292,7 @@ export default function Dashboard() {
   const [ytLoading, setYtLoading] = useState(true)
   const [ytConnected, setYtConnected] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const sseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [activeIssue, setActiveIssue] = useState<YTIssue | null>(null)
   const [dashboardView, setDashboardView] = useState<'board' | 'assignees'>('board')
 
@@ -439,14 +467,19 @@ export default function Dashboard() {
     }
   }
 
-  // SSE: auto-refresh when YouTrack changes arrive via webhook
+  // SSE: auto-refresh when YouTrack changes arrive via webhook.
+  // Debounced 3s to avoid a full re-fetch on every rapid field change.
   useYouTrackEvents(useCallback((event) => {
-    fetchYouTrackIssues()
     setToast({
       message: `YouTrack: ${event.issue_id} ${event.field} → ${event.new_value}`,
       type: 'info',
     })
     setTimeout(() => setToast(null), 4000)
+
+    if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current)
+    sseDebounceRef.current = setTimeout(() => {
+      fetchYouTrackIssues()
+    }, 3000)
   }, []))
 
   const handleSync = async () => {
@@ -785,49 +818,87 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="main-content">
-        {/* Render page based on currentPage */}
-        {currentPage === 'integrations' && (
-          <IntegrationsPage
-            initialTab={integrationsTab}
-            onTabChange={(tab) => navigate(`/integrations/${tab}`)}
-          />
+        {/* Keep-alive tabs: mount on first visit, hide (not unmount) when inactive */}
+        {mountedTabs.has('dashboard') && (
+          <div className={currentPage !== 'dashboard' ? 'dash-tab-hidden' : undefined}>
+            <SprintDashboardPage />
+          </div>
         )}
-        {currentPage === 'settings' && <SettingsPage />}
-        {currentPage === 'theme' && <ThemeSettingsPage />}
-        {currentPage === 'activity' && <ActivityPage />}
-        {currentPage === 'slack' && (
-          <SlackIntelligencePage
-            initialTab={slackTab}
-            onTabChange={(tab) => navigate(`/slack/${tab}`)}
-            onOpenPMAssistant={() => setChatOpen(true)}
-          />
+        {mountedTabs.has('board') && (
+          <div className={currentPage !== 'board' ? 'dash-tab-hidden' : undefined}>
+            <BoardPage />
+          </div>
         )}
-
-        {/* Dashboard Content */}
-        {currentPage === 'dashboard' && <SprintDashboardPage />}
-
-        {/* DayTrack */}
-        {currentPage === 'daytrack' && <DayTrackPage />}
-
-        {/* Board View */}
-        {currentPage === 'board' && <BoardPage />}
-
-        {/* Daily Ops */}
-        {currentPage === 'daily-ops' && <DailyOpsPage />}
-
-        {/* Bot Configuration */}
-        {currentPage === 'bots' && <BotConfigPage />}
-
-        {/* AI Analysis */}
-        {currentPage === 'ai-analysis' && (
-          <AIAnalysisPage onNavigateToDailyAnalysis={() => setCurrentPage('daily-analysis')} />
+        {mountedTabs.has('list') && (
+          <div className={currentPage !== 'list' ? 'dash-tab-hidden' : undefined}>
+            <ListViewPage />
+          </div>
         )}
-
-        {/* Daily Analysis View */}
-        {currentPage === 'daily-analysis' && <DailyAnalysisViewPage />}
-
-        {/* List View */}
-        {currentPage === 'list' && <ListViewPage />}
+        {mountedTabs.has('daily-ops') && (
+          <div className={currentPage !== 'daily-ops' ? 'dash-tab-hidden' : undefined}>
+            <DailyOpsPage />
+          </div>
+        )}
+        {mountedTabs.has('daytrack') && (
+          <div className={currentPage !== 'daytrack' ? 'dash-tab-hidden' : undefined}>
+            <DayTrackPage />
+          </div>
+        )}
+        {mountedTabs.has('activity') && (
+          <div className={currentPage !== 'activity' ? 'dash-tab-hidden' : undefined}>
+            <ActivityPage />
+          </div>
+        )}
+        {mountedTabs.has('pm-reports') && (
+          <div className={currentPage !== 'pm-reports' ? 'dash-tab-hidden' : undefined}>
+            <PMReportsPage
+              initialTab={pmReportsTab}
+              onTabChange={(tab) => navigate(`/pm-reports/${tab}`)}
+            />
+          </div>
+        )}
+        {mountedTabs.has('slack') && (
+          <div className={currentPage !== 'slack' ? 'dash-tab-hidden' : undefined}>
+            <SlackIntelligencePage
+              initialTab={slackTab}
+              onTabChange={(tab) => navigate(`/slack/${tab}`)}
+              onOpenPMAssistant={() => setChatOpen(true)}
+            />
+          </div>
+        )}
+        {mountedTabs.has('ai-analysis') && (
+          <div className={currentPage !== 'ai-analysis' ? 'dash-tab-hidden' : undefined}>
+            <AIAnalysisPage onNavigateToDailyAnalysis={() => setCurrentPage('daily-analysis')} />
+          </div>
+        )}
+        {mountedTabs.has('daily-analysis') && (
+          <div className={currentPage !== 'daily-analysis' ? 'dash-tab-hidden' : undefined}>
+            <DailyAnalysisViewPage />
+          </div>
+        )}
+        {mountedTabs.has('integrations') && (
+          <div className={currentPage !== 'integrations' ? 'dash-tab-hidden' : undefined}>
+            <IntegrationsPage
+              initialTab={integrationsTab}
+              onTabChange={(tab) => navigate(`/integrations/${tab}`)}
+            />
+          </div>
+        )}
+        {mountedTabs.has('settings') && (
+          <div className={currentPage !== 'settings' ? 'dash-tab-hidden' : undefined}>
+            <SettingsPage />
+          </div>
+        )}
+        {mountedTabs.has('bots') && (
+          <div className={currentPage !== 'bots' ? 'dash-tab-hidden' : undefined}>
+            <BotConfigPage />
+          </div>
+        )}
+        {mountedTabs.has('theme') && (
+          <div className={currentPage !== 'theme' ? 'dash-tab-hidden' : undefined}>
+            <ThemeSettingsPage />
+          </div>
+        )}
 
         {/* Calendar Placeholder */}
         {currentPage === 'calendar' && (
@@ -881,15 +952,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* PM Reports */}
-        {currentPage === 'pm-reports' && (
-          <PMReportsPage
-            initialTab={pmReportsTab}
-            onTabChange={(tab) => navigate(`/pm-reports/${tab}`)}
-          />
-        )}
-
-        {/* Team Placeholder */}
+        {/* Lightweight placeholder pages — no data fetching, no keep-alive needed */}
         {currentPage === 'team' && (
           <div className="coming-soon">
             <Users size={48} />

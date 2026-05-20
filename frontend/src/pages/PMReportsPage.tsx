@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { usePersistedState, PERSIST } from '@/hooks/usePersistedState'
 import HoverCard, { HCRow, HCBar, HCDivider, HCBadge } from '../components/HoverCard'
 import DeploymentProjectBrowser from '../components/deployment/DeploymentProjectBrowser'
 import DeploymentTicketInput from '../components/deployment/DeploymentTicketInput'
@@ -1995,7 +1996,9 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
   const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-  const [viewMode, setViewMode] = useState<'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline'>('column')
+  const [viewMode, setViewMode] = usePersistedState(PERSIST.TRACKING_VIEW, 'column' as 'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline', {
+    validate: ['column', 'assignee', 'swimlane', 'sidebar', 'heatmap', 'delay-bars', 'alert-first', 'split-pane', 'focus', 'qa-pipeline'],
+  })
   const [qaFilterMode, setQaFilterMode] = useState<'all' | 'needs-qa'>('all')
   const [viewModeOpen, setViewModeOpen] = useState(false)
   const [sidebarPerson, setSidebarPerson] = useState<string>('')

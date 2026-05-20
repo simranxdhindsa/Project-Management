@@ -264,6 +264,13 @@ func (h *YouTrackHandler) GetSprints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sprintsCacheKey := "sprints:" + userID
+	if cached, ok := apiCache.Get(sprintsCacheKey); ok {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "data": cached})
+		return
+	}
+
 	client, err := h.getYouTrackClient(r.Context())
 	if err != nil || client == nil {
 		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
@@ -276,6 +283,7 @@ func (h *YouTrackHandler) GetSprints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	apiCache.Set(sprintsCacheKey, sprints, 10*time.Minute)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -2715,6 +2723,10 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 					},
 				})
 			}
+
+			// Invalidate sprint board cache for all users so the next request
+			// returns fresh data reflecting this YouTrack change.
+			apiCache.InvalidatePrefix("board:")
 
 			// Only process State changes for task sync + time tracking
 			// Use case-insensitive match — YouTrack may send "state" or "State"
