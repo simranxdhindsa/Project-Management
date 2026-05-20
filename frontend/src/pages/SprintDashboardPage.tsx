@@ -130,9 +130,9 @@ function VerifBadges({ dev, stg, prd }: { dev?: string; stg?: string; prd?: stri
   )
 }
 
-function KpiChip({ label, value, cls }: { label: string; value: number | string; cls?: string }) {
+function KpiChip({ label, value, cls, onClick }: { label: string; value: number | string; cls?: string; onClick?: () => void }) {
   return (
-    <div className={`db-kpi-chip${cls ? ` ${cls}` : ''}`}>
+    <div className={`db-kpi-chip${cls ? ` ${cls}` : ''}${onClick ? ' db-kpi-chip--clickable' : ''}`} onClick={onClick}>
       <span className="db-kpi-chip-val">{value}</span>
       <span className="db-kpi-chip-label">{label}</span>
     </div>
@@ -589,9 +589,10 @@ interface DesignProps {
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
   ytDetailLoading?: boolean
+  onKpiClick?: (drawer: DbKpiDrawer) => void
 }
 
-function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }: DesignProps) {
+function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, onKpiClick }: DesignProps) {
   const [expandedDev, setExpandedDev] = useState<string | null>(null)
 
   const developers = useMemo<DevStat[]>(() => {
@@ -701,7 +702,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
             At Risk
             {atRisk.length > 0 && <span className="db-mc-section-count">{atRisk.length}</span>}
           </div>
-          {atRisk.slice(0, 4).map(iss => (
+          {atRisk.map(iss => (
             <HoverCard key={iss.idReadable} content={issueHoverContent(iss)} maxWidth={270} delay={300}>
             <div className={`db-mc-focus-card ${urgencyClass(iss)}`}>
               <div className="db-mc-focus-top">
@@ -780,9 +781,9 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading }:
         <div className="db-mc-section-label">Sprint Health</div>
         <div className="db-mc-kpi-grid">
           <KpiChip label="Done"     value={`${summary.done_issues}/${summary.total_issues}`} cls="db-kpi-chip--success" />
-          <KpiChip label="Blocked"  value={summary.blocked_count}  cls="db-kpi-chip--danger" />
-          <KpiChip label="Bounced"  value={summary.bounced_count}  cls="db-kpi-chip--warn" />
-          <KpiChip label="Overdue"  value={summary.overdue_count}  cls="db-kpi-chip--danger" />
+          <KpiChip label="Blocked"  value={summary.blocked_count}  cls="db-kpi-chip--danger" onClick={() => onKpiClick?.('blocked')} />
+          <KpiChip label="Bounced"  value={summary.bounced_count}  cls="db-kpi-chip--warn"   onClick={() => onKpiClick?.('bounced')} />
+          <KpiChip label="Overdue"  value={summary.overdue_count}  cls="db-kpi-chip--danger" onClick={() => onKpiClick?.('overdue')} />
         </div>
         <SprintTrack pct={toPct(summary.completion_pct)} />
         {summary.sprint_finish_ms > 0 && <Countdown finishMs={summary.sprint_finish_ms} />}
@@ -1621,6 +1622,7 @@ export function SprintDashboardPage() {
               onTitleClick={openIssueDetail}
               onIdClick={openInYt}
               ytDetailLoading={ytDetailLoading}
+              onKpiClick={setKpiDrawer}
             />
           )}
           {designMode === 'bento' && (

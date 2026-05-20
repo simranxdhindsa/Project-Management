@@ -439,6 +439,8 @@
   line-height: 1;
   color: var(--text-primary);
 }
+.db-kpi-chip--clickable { cursor: pointer; }
+.db-kpi-chip--clickable:hover { background: var(--glass-bg-hover); border-color: rgba(99,102,241,0.3); }
 .db-kpi-chip-label {
   font-size: 0.58rem;
   font-weight: 600;
@@ -650,6 +652,7 @@
   cursor: pointer;
   flex-shrink: 0;
   transition: background var(--transition-fast);
+  margin-bottom: 6px;
 }
 .db-mc-focus-card:hover { background: var(--glass-bg-hover); }
 
