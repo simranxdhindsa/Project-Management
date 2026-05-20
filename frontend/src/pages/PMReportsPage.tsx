@@ -2292,6 +2292,34 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
     }).flatMap(c => c.issues),
   [filteredColumns])
 
+  // ── Feature delivery alert (alert-first view) ────────────────────────────
+  const featureAlertData = useMemo(() => {
+    if (!sprintFinishMs) return null
+    const daysLeft = Math.ceil((sprintFinishMs - Date.now()) / 86400000)
+    if (daysLeft > 4 || daysLeft < 0) return null
+
+    const allIssues = filteredColumns.flatMap(c => c.issues)
+    const hasTypes  = allIssues.some(i => !!i.issue_type)
+    if (!hasTypes) return null
+
+    const isTypeFeat = (t: string) => {
+      const s = (t || '').toLowerCase()
+      return s.includes('feature') || s.includes('story') || s.includes('epic')
+    }
+    const isDone = (state: string) => {
+      const s = (state || '').toLowerCase()
+      return s.includes('done') || s.includes('clos') || s.includes('deploy') ||
+             s.includes('verif') || s.includes('prod') || s.includes('stage')
+    }
+    const isActive = (state: string) => (state || '').toLowerCase().includes('progress')
+
+    const notStarted = allIssues.filter(i =>
+      isTypeFeat(i.issue_type) && !isDone(i.current_state) && !isActive(i.current_state)
+    )
+    if (notStarted.length === 0) return null
+    return { daysLeft, notStarted }
+  }, [filteredColumns, sprintFinishMs])
+
   // ── QA Pipeline: all issues sorted for the QA view ──────────────────────
   const qaAllIssues = useMemo(() => {
     const qaScore = (i: SprintBoardIssue) => {
@@ -2372,7 +2400,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                 <Zap size={9} /> HF
               </span>
             )}
-            {issue.issue_type && issue.issue_type.toLowerCase() !== 'task' && issue.issue_type.toLowerCase() !== 'bug' && (
+            {issue.issue_type && (
               <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase().replace(/\s+/g, '-')}`}>
                 {issue.issue_type}
               </span>
@@ -3325,6 +3353,34 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
       {/* ── Alert-first view (Design 07) ── */}
       {!loading && viewMode === 'alert-first' && (
         <div className="pm-tracking-alert-layout">
+
+          {/* Feature delivery alert — shows when features haven't started and sprint ends soon */}
+          {featureAlertData && (
+            <div className="pm-tracking-feature-alert">
+              <div className="pm-tracking-feature-alert-header">
+                ⚠ {featureAlertData.notStarted.length} feature{featureAlertData.notStarted.length !== 1 ? 's' : ''} not started — sprint ends in {featureAlertData.daysLeft}d
+              </div>
+              <div className="pm-tracking-feature-alert-list">
+                {featureAlertData.notStarted.slice(0, 4).map(iss => (
+                  <div key={iss.idReadable} className="pm-tracking-feature-alert-row">
+                    <span
+                      className="pm-tracking-issue-id--link"
+                      onClick={(e) => openInYouTrack(iss.idReadable, e)}
+                      style={{ cursor: 'pointer', flexShrink: 0 }}
+                    >{iss.idReadable}</span>
+                    <span className="pm-tracking-feature-alert-title" title={iss.summary}>{iss.summary}</span>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-faint)', flexShrink: 0 }}>{iss.assignee?.split(' ')[0] || '—'}</span>
+                  </div>
+                ))}
+                {featureAlertData.notStarted.length > 4 && (
+                  <div style={{ fontSize: '0.65rem', color: 'var(--text-faint)', marginTop: 4 }}>
+                    +{featureAlertData.notStarted.length - 4} more
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="pm-tracking-alert-banner">
             <div className="pm-tracking-alert-banner-header">
               <span className="pm-tracking-alert-count">{allBlockedIssues.length}</span>
@@ -3350,6 +3406,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
                             title={`Open ${issue.idReadable} in YouTrack`}
                             style={{ cursor: 'pointer' }}
                           >{issue.idReadable}</span>
+                          {issue.issue_type && (
+                            <span className={`pm-tracking-type-badge pm-tracking-type-badge--${issue.issue_type.toLowerCase().replace(/\s+/g, '-')}`} style={{ marginLeft: 4 }}>
+                              {issue.issue_type}
+                            </span>
+                          )}
                           {issue.bounce_count > 0 && <span className="pm-tracking-bounce-badge" style={{ marginLeft: 4 }}>↩{issue.bounce_count}</span>}
                         </div>
                         <div
