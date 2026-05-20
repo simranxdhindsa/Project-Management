@@ -239,6 +239,16 @@ func main() {
 	activityRoutes.Use(middleware.AuthMiddleware)
 	activityRoutes.HandleFunc("", activityHandler.GetActivity).Methods("GET")
 
+	// Standup Compiler routes (admin-only)
+	standupHandler := handlers.NewStandupCompilerHandler()
+	standupRoutes := api.PathPrefix("/standup").Subrouter()
+	standupRoutes.Use(middleware.AuthMiddleware)
+	standupRoutes.Use(middleware.AdminOnly)
+	standupRoutes.HandleFunc("/config", standupHandler.GetConfig).Methods("GET")
+	standupRoutes.HandleFunc("/config", standupHandler.SaveConfig).Methods("PUT")
+	standupRoutes.HandleFunc("/compile", standupHandler.Compile).Methods("POST")
+	standupRoutes.HandleFunc("/post", standupHandler.Post).Methods("POST")
+
 	// Slack routes (protected)
 	slackHandler := handlers.NewSlackHandler(notifHandler)
 	slackRoutes := api.PathPrefix("/slack").Subrouter()

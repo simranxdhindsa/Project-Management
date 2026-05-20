@@ -2561,3 +2561,54 @@ export interface CarryoverData {
   yesterday_date: string
   today_date: string
 }
+
+// ── Standup Compiler ──────────────────────────────────────────────────────────
+
+export interface StandupChannelRef {
+  id: string
+  name: string
+}
+
+export interface StandupConfig {
+  source_channels: StandupChannelRef[]
+  dest_channel_id: string
+  dest_channel_name: string
+  time_window_start: string // HH:MM
+  time_window_end: string
+}
+
+export interface UpdateSection {
+  label: string
+  items: string[]
+}
+
+export interface PersonUpdate {
+  slack_user_id: string
+  display_name: string
+  raw_text: string
+  sections: UpdateSection[]
+  is_owner: boolean
+}
+
+export const standupApi = {
+  getConfig: (): Promise<{ success: boolean; config: StandupConfig }> =>
+    dtFetch(`${API_URL}/standup/config`),
+
+  saveConfig: (cfg: Partial<StandupConfig>): Promise<{ success: boolean }> =>
+    dtFetch(`${API_URL}/standup/config`, {
+      method: 'PUT',
+      body: JSON.stringify(cfg),
+    }),
+
+  compile: (date?: string): Promise<{ success: boolean; updates: PersonUpdate[] }> =>
+    dtFetch(`${API_URL}/standup/compile`, {
+      method: 'POST',
+      body: JSON.stringify({ date }),
+    }),
+
+  post: (updates: PersonUpdate[], channelId: string): Promise<{ success: boolean }> =>
+    dtFetch(`${API_URL}/standup/post`, {
+      method: 'POST',
+      body: JSON.stringify({ updates, channel_id: channelId }),
+    }),
+}

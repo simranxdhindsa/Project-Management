@@ -621,6 +621,7 @@ export default function Dashboard() {
               <Clock size={20} />
               <span>DayTrack</span>
             </button>
+
             <button
               className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
               onClick={() => setCurrentPage('activity')}
