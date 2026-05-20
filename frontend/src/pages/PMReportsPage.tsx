@@ -13,7 +13,7 @@ import { extractPriority, detectPlatform, stripPrefix } from '../components/depl
 import type { DeploymentBotConfig, DeploymentSectionConfig } from '../services/api'
 import { createPortal } from 'react-dom'
 import {
-  MessageSquare, Send, User, Bot, Loader2,
+  MessageSquare, Send, Bot, Loader2,
   FileText, Users, Clock, Copy, Check,
   RefreshCw, ChevronDown, AlertTriangle, TrendingUp,
   Calendar, Pin, PinOff, ChevronLeft, ChevronRight,
@@ -557,7 +557,7 @@ export function PMAssistantTab() {
               {msg.role === 'user'
                 ? user?.picture
                   ? <img src={user.picture} alt={user.name ?? 'You'} className="pm-chat-avatar-img" />
-                  : <User size={16} />
+                  : <span style={{ fontSize: '0.7rem', fontWeight: 700, lineHeight: 1 }}>{user?.name?.charAt(0).toUpperCase() ?? 'U'}</span>
                 : <Bot size={16} />}
             </div>
             <div className="pm-chat-bubble">

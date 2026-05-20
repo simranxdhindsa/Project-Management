@@ -20,6 +20,10 @@ npm run lint       # ESLint
 
 The backend loads `backend/.env` automatically on startup via `godotenv`.
 
+## Workflow Rule
+
+After every task, output a short commit message (don't run git commit). Keep it plain — no prefixes required, just describe what changed clearly in one line.
+
 ## Architecture Overview
 
 Velocity is a React + Go project management tool. Frontend (port 5173) talks to a Go REST API (port 8080) at `http://localhost:8080/api`. All protected routes require `Authorization: Bearer <JWT>`.
