@@ -584,16 +584,16 @@ function PersonCard({ person, personIdx, onUpdateItem }: PersonCardProps) {
         {person.is_owner && <span className="sc-daytrack-badge">DayTrack</span>}
       </div>
 
-      {person.sections.length === 0
+      {(person.sections ?? []).length === 0
         ? <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>No update parsed</span>
         : (
           <div className="sc-sections">
-            {person.sections.map((sec, si) =>
-              sec.items.length > 0 && (
+            {(person.sections ?? []).map((sec, si) =>
+              (sec.items ?? []).length > 0 && (
                 <div key={si}>
                   <div className="sc-section-label">{sec.label}</div>
                   <div className="sc-items">
-                    {sec.items.map((item, ii) => (
+                    {(sec.items ?? []).map((item, ii) => (
                       <div key={ii} className="sc-item">
                         <span className="sc-item-bullet">•</span>
                         <textarea
