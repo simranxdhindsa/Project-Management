@@ -1157,6 +1157,22 @@
   letter-spacing: 0.04em;
 }
 
+.idp-issue-id--link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 150ms, opacity 150ms;
+}
+
+.idp-issue-id--link:hover {
+  color: #a5b4fc;
+  opacity: 0.85;
+  text-decoration: underline;
+}
+
+[data-theme="light"] .idp-issue-id--link:hover {
+  color: #4338ca;
+}
+
 .idp-topbar-actions {
   display: flex;
   align-items: center;

@@ -550,6 +550,7 @@ func (h *YouTrackHandler) GetIssues(w http.ResponseWriter, r *http.Request) {
 			}
 			transformed = append(transformed, map[string]interface{}{
 				"id":          issue.ID,
+				"idReadable":  issue.IDReadable,
 				"summary":     issue.Summary,
 				"description": issue.Description,
 				"status":      youtrack.GetStatus(issue),

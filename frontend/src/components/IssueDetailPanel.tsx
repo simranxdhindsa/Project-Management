@@ -45,17 +45,31 @@ function formatCommentTime(ms: number): string {
   return fmtDate(ms)
 }
 
-// Renders YouTrack comment markdown, handling the {width=X%} image attribute extension
-function renderCommentText(text: string): string {
+// Renders YouTrack comment markdown, handling the {width=X%} image attribute extension.
+// Relative image URLs (e.g. "image.png") are resolved against the YouTrack base URL.
+function renderCommentText(text: string, ytBaseUrl?: string): string {
   if (!text) return ''
+
+  const resolveUrl = (url: string) => {
+    if (!url || url.startsWith('http') || url.startsWith('data:')) return url
+    const base = (ytBaseUrl || '').replace(/\/$/, '')
+    return base ? `${base}/${url.replace(/^\//, '')}` : url
+  }
+
   // Convert YouTrack's ![alt](url){width=70%} / {width=100} → proper <img> tags
-  const processed = text.replace(
+  let processed = text.replace(
     /!\[([^\]]*)\]\(([^)]+)\)\{width=(\d+%?)\}/g,
     (_, alt, url, width) => {
       const style = width.includes('%') ? `width:${width}` : `width:${width}px`
-      return `<img src="${url}" alt="${alt}" style="${style};max-width:100%;border-radius:4px;" />`
+      return `<img src="${resolveUrl(url)}" alt="${alt}" style="${style};max-width:100%;border-radius:4px;" />`
     }
   )
+  // Also resolve plain markdown images without width attribute: ![alt](url)
+  processed = processed.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)/g,
+    (_, alt, url) => `<img src="${resolveUrl(url)}" alt="${alt}" style="max-width:100%;border-radius:4px;" />`
+  )
+
   const html = marked.parse(processed) as string
   return DOMPurify.sanitize(html, {
     ADD_TAGS: ['img'],
@@ -359,7 +373,13 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
         {/* ── Top bar ── */}
         <div className="idp-topbar">
           <div className="idp-topbar-left">
-            <span className="idp-issue-id">{displayId}</span>
+            <a
+              className="idp-issue-id idp-issue-id--link"
+              href={issueUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open in YouTrack"
+            >{displayId}</a>
             {issue.type && <span className="idp-type-chip">{issue.type}</span>}
           </div>
           <div className="idp-topbar-actions">
@@ -506,7 +526,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                             <span className="idp-comment-author">{c.author.fullName || c.author.login}</span>
                             <span className="idp-comment-time">{formatCommentTime(c.created)}</span>
                           </div>
-                          <div className="idp-comment-text" dangerouslySetInnerHTML={{ __html: renderCommentText(c.text) }} />
+                          <div className="idp-comment-text" dangerouslySetInnerHTML={{ __html: renderCommentText(c.text, ytBaseUrl) }} />
                         </div>
                       </div>
                     ))}

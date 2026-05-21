@@ -22,7 +22,7 @@ const PRIORITY_ORDER: Record<string, number> = {
 
 function getIssueUrl(issue: YouTrackIssue): string {
   if (getActiveSource() === 'asana' && issue.permalink) return issue.permalink
-  return `${YT_BASE}${issue.id}`
+  return `${YT_BASE}${issue.idReadable || issue.id}`
 }
 
 function getPriorityClass(p: string) {
