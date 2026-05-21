@@ -528,6 +528,187 @@ func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, gr
 	return PersonUpdate{DisplayName: displayName, Sections: sections}
 }
 
+// ── Weekly Report ─────────────────────────────────────────────────────────────
+
+const weeklyGroqSystem = `You are a release notes compiler for a software team.
+You will receive a full week of developer Slack standup messages (Monday–Friday).
+Your job:
+1. Collect ONLY items listed under "Done", "Done:", "DONE", "DONE:" sections.
+2. Exclude everything under "In Progress", "In Progress:", "IN PROGRESS" sections.
+3. Exclude entries that are purely testing/verification with NO feature value:
+   - "verified tickets on stage", "verified tickets on prod", "prod testing", "stage testing"
+   - "started working on X", "working on X", "begin X", "began X"
+   - "Playwright tests", "scout app is online", "working on onboarding tests"
+   - Any line that is only a person's name or @mention
+4. Deduplicate: if the same ticket ID (e.g. ARD-1234) appears on multiple days, include it ONCE using the most descriptive line.
+5. Keep non-ticket done items if they describe real work (refactors, bugfixes, feature work, infrastructure changes).
+6. Do NOT include developer names.
+7. Clean up language: fix obvious typos, normalise capitalisation of ticket descriptions.
+8. Return ONLY valid JSON (no markdown fences): {"items": ["ARD-1234 FE: description", "Some non-ticket work done", ...]}`
+
+// Weekly handles POST /api/standup/weekly
+// Body: { week_start: "2026-05-19" }  (Monday of the target week; omit for current week)
+func (h *StandupCompilerHandler) Weekly(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var body struct {
+		WeekStart string `json:"week_start"` // YYYY-MM-DD of Monday
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	// Resolve target Monday
+	var monday time.Time
+	if body.WeekStart != "" {
+		t, err := time.ParseInLocation("2006-01-02", body.WeekStart, time.Local)
+		if err != nil {
+			http.Error(w, "invalid week_start", http.StatusBadRequest)
+			return
+		}
+		monday = t
+	} else {
+		now := time.Now()
+		// Walk back to Monday
+		wd := int(now.Weekday())
+		if wd == 0 {
+			wd = 7
+		}
+		monday = time.Date(now.Year(), now.Month(), now.Day()-wd+1, 0, 0, 0, 0, time.Local)
+	}
+	friday := monday.AddDate(0, 0, 4)
+
+	oldest := monday.Unix()
+	latest := time.Date(friday.Year(), friday.Month(), friday.Day(), 23, 59, 59, 0, time.Local).Unix()
+
+	cfg, err := loadStandupConfig(r.Context(), user.ID)
+	if err != nil || len(cfg.SourceChannels) == 0 {
+		http.Error(w, "no source channels configured", http.StatusBadRequest)
+		return
+	}
+
+	integration, err := h.integrationRepo.GetSlackIntegration(r.Context(), user.ID)
+	if err != nil || !integration.Connected {
+		http.Error(w, "Slack not connected", http.StatusBadRequest)
+		return
+	}
+	slackClient := slacksvc.NewClient(integration.BotToken)
+
+	// Collect all messages Mon–Fri across all channels
+	var allRaw strings.Builder
+	type chanDebug struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Messages int    `json:"messages_found"`
+		Error    string `json:"error,omitempty"`
+	}
+	var channelLog []chanDebug
+
+	for _, ch := range cfg.SourceChannels {
+		msgs, fetchErr := slackClient.GetChannelHistory(r.Context(), ch.ID, oldest, latest, 1000)
+		if fetchErr != nil {
+			channelLog = append(channelLog, chanDebug{ID: ch.ID, Name: ch.Name, Error: "slack API error: " + fetchErr.Error()})
+			continue
+		}
+		count := 0
+		for _, m := range msgs {
+			if m.User == "" || strings.TrimSpace(m.Text) == "" {
+				continue
+			}
+			allRaw.WriteString(m.Text + "\n\n")
+			count++
+		}
+		channelLog = append(channelLog, chanDebug{ID: ch.ID, Name: ch.Name, Messages: count})
+	}
+
+	groqKey := os.Getenv("GROQ_API_KEY")
+	var items []string
+
+	if allRaw.Len() == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"items":   []string{},
+			"week_start": monday.Format("2006-01-02"),
+			"week_end":   friday.Format("2006-01-02"),
+			"debug":      map[string]interface{}{"channels": channelLog},
+		})
+		return
+	}
+
+	// Groq call — potentially large, so chunk if needed (max ~8k tokens of input)
+	rawText := allRaw.String()
+	const maxChunk = 12000 // chars
+	if len(rawText) > maxChunk {
+		// Split into chunks, collect items from each, deduplicate at end
+		seen := map[string]bool{}
+		for start := 0; start < len(rawText); start += maxChunk {
+			end := start + maxChunk
+			if end > len(rawText) {
+				end = len(rawText)
+			}
+			chunk := rawText[start:end]
+			chunkItems := weeklyGroqCall(groqKey, chunk)
+			for _, it := range chunkItems {
+				key := strings.ToLower(strings.TrimSpace(it))
+				if !seen[key] {
+					seen[key] = true
+					items = append(items, it)
+				}
+			}
+		}
+	} else {
+		items = weeklyGroqCall(groqKey, rawText)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"items":      items,
+		"week_start": monday.Format("2006-01-02"),
+		"week_end":   friday.Format("2006-01-02"),
+		"debug":      map[string]interface{}{"channels": channelLog},
+	})
+}
+
+func weeklyGroqCall(groqKey, rawText string) []string {
+	if groqKey == "" {
+		return nil
+	}
+	const maxRetries = 4
+	backoff := 2 * time.Second
+	var result string
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		var err error
+		result, err = callGroqChat(ctx, groqKey, "llama-3.3-70b-versatile", weeklyGroqSystem,
+			"Week standup messages:\n\n"+rawText)
+		cancel()
+		if err == nil && strings.TrimSpace(result) != "" {
+			break
+		}
+		if err != nil {
+			lower := strings.ToLower(err.Error())
+			isRate := strings.Contains(lower, "rate limit") || strings.Contains(lower, "429") || strings.Contains(lower, "too many")
+			if isRate && attempt < maxRetries-1 {
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
+		}
+		break
+	}
+	var parsed struct {
+		Items []string `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(result)), &parsed); err != nil {
+		return nil
+	}
+	return parsed.Items
+}
+
 func standupFormatMrkdwn(updates []PersonUpdate) string {
 	var sb strings.Builder
 	for i, u := range updates {

@@ -482,6 +482,153 @@
   color: var(--text-primary);
 }
 
+/* ── Mode toggle ─────────────────────────────────────────────────────────── */
+
+.sc-mode-toggle {
+  display: flex;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  padding: 2px;
+  gap: 2px;
+}
+
+.sc-mode-btn {
+  padding: 0.2rem 0.75rem;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-family: inherit;
+  border: none;
+  cursor: pointer;
+  background: none;
+  color: var(--text-muted);
+  transition: all var(--transition-fast);
+}
+
+.sc-mode-btn.active {
+  background: rgba(var(--color-primary-rgb), 0.15);
+  color: var(--color-primary-light);
+}
+
+.sc-mode-btn:hover:not(.active) {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.05);
+}
+
+/* ── Week navigator ──────────────────────────────────────────────────────── */
+
+.sc-week-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.sc-week-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.03);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.sc-week-nav-btn:hover {
+  background: rgba(var(--color-primary-rgb), 0.08);
+  border-color: rgba(var(--color-primary-rgb), 0.3);
+  color: var(--text-primary);
+}
+
+.sc-week-label-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sc-week-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.sc-week-cal .dr-cal-trigger {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  border-style: dashed;
+}
+
+/* ── Weekly preview card ─────────────────────────────────────────────────── */
+
+.sc-weekly-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sc-weekly-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sc-weekly-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.sc-weekly-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.sc-weekly-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.sc-weekly-item:hover {
+  background: var(--bg-hover);
+}
+
+.sc-weekly-remove {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: transparent;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-top: 3px;
+  transition: color var(--transition-fast);
+}
+
+.sc-weekly-item:hover .sc-weekly-remove {
+  color: var(--text-muted);
+}
+
+.sc-weekly-remove:hover {
+  color: var(--color-danger) !important;
+}
+
 /* ── Empty state ─────────────────────────────────────────────────────────── */
 
 .sc-empty {
