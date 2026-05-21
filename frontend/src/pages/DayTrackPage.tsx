@@ -1084,12 +1084,19 @@ export function DayTrackPage() {
       const res = await dayTrackApi.scanYouTrackTickets()
       if (res.added > 0) {
         toast(`Synced ${res.added} YouTrack ticket${res.added !== 1 ? 's' : ''} to DayTrack`, 'success')
-        await loadAll()
       } else {
         toast('No new tickets found for today', 'info')
       }
     } catch { toast('YouTrack sync failed', 'warn') }
     finally { setYtScanning(false) }
+
+    // Also reset + trigger Slack scan so fresh messages are picked up
+    try {
+      await dayTrackApi.resetSlackScanWindow()
+      await dayTrackApi.triggerSlackScan()
+    } catch { /* Slack not configured — silently skip */ }
+
+    await loadAll()
   }
 
   async function resolveSlackUser() {

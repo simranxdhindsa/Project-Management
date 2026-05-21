@@ -403,10 +403,10 @@ Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done - 
 Preserve ticket IDs exactly (e.g. ARD-1234). Do not invent items. Keep each item to one line. If the message is unclear, return {"sections": []}.`
 
 const standupOwnerGroqSystem = `You are a structured parser for a PM's daily standup update.
-Given a list of DayTrack work entries (with categories like Testing, PM, Research, Development, Meetings), group them into labelled sections.
+Given a list of DayTrack work entries (categories: Testing, PM, Research, Development), group them into labelled sections.
 Use labels: "Done Today", "Testing", "PM", "Research", "In Progress", "Tickets Created", "Tickets Tested", "Tickets Verified".
 Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done Today", "items": ["tested X", ...]}, ...]}.
-Keep each item concise. Preserve any ticket IDs (e.g. ARD-1234). Do not invent items.`
+Keep each item concise. Preserve any ticket IDs (e.g. ARD-1234). Do not invent items. Only include sections that have items.`
 
 func standupGroqParse(groqKey, rawText string) []UpdateSection {
 	if groqKey == "" {
@@ -455,10 +455,17 @@ func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, gr
 		return PersonUpdate{DisplayName: displayName, Sections: []UpdateSection{}}
 	}
 
+	skipCat := map[string]bool{
+		"sign in": true, "sign off": true, "signing in": true, "signing off": true,
+		"time on": true, "time off": true, "time on/off": true,
+		"break": true, "breaks": true,
+		"meeting": true, "meetings": true,
+	}
+
 	var sb strings.Builder
 	for _, e := range entries {
 		cat := strings.ToLower(e.Category)
-		if cat == "sign in" || cat == "sign off" || cat == "break" || cat == "breaks" {
+		if skipCat[cat] {
 			continue
 		}
 		sb.WriteString(fmt.Sprintf("- [%s] %s", e.Category, e.Name))
@@ -488,14 +495,13 @@ func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, gr
 	catToSection := map[string]string{
 		"development": "Done Today",
 		"testing":     "Testing",
-		"meetings":    "Done Today",
 		"review":      "Done Today",
 		"research":    "Research",
 		"pm":          "PM",
 	}
 	for _, e := range entries {
 		cat := strings.ToLower(e.Category)
-		if cat == "sign in" || cat == "sign off" || cat == "break" || cat == "breaks" {
+		if skipCat[cat] {
 			continue
 		}
 		sec := catToSection[cat]

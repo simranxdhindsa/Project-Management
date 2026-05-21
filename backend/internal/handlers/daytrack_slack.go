@@ -352,21 +352,14 @@ func scanUserChannel(ctx context.Context, repo *database.DayTrackRepository, cfg
 		oldestUnix = startOfDay.Unix()
 	}
 
-	log.Printf("DayTrack scan: user=%s channel=%s oldest=%d lastScannedTS=%q configuredSlackUID=%q",
-		cfg.UserID, cfg.ChannelID, oldestUnix, cfg.LastScannedTS, cfg.SlackUserID)
-
 	msgs, err := client.GetChannelHistory(ctx, cfg.ChannelID, oldestUnix, 0, 200)
 	if err != nil {
 		log.Printf("DayTrack Slack scanner: channel history error user=%s: %v", cfg.UserID, err)
 		return
 	}
 
-	log.Printf("DayTrack scan: fetched %d messages from channel %s", len(msgs), cfg.ChannelID)
-
 	var latestTS string
 	for _, msg := range msgs {
-		log.Printf("DayTrack scan: msg ts=%s user=%q text=%q | wantUser=%q match=%v",
-			msg.TS, msg.User, msg.Text, cfg.SlackUserID, msg.User == cfg.SlackUserID)
 		// Only process messages from this user
 		if msg.User != cfg.SlackUserID {
 			continue
