@@ -65,7 +65,7 @@ deploy-to-dev-hetzner:
   script:
     - echo "$HETZ_DEV_SSH_PRIVATE_KEY" > private_key.pem
     - chmod 600 private_key.pem
-    - ssh apyuser@$K8s_PROXY_IP "/home/apyuser/bin/update-service.sh \"$REPO\" \"${PREFIX}-${CI_PIPELINE_ID}\" \"dev-velocity\""
+    - ssh apyuser@$K8s_PROXY_IP "/home/apyuser/bin/update-service.sh \"$REPO\" \"${PREFIX}-${CI_PIPELINE_ID}\" \"apytool-dev-velocity\""
     - echo "deployment successful in hetzner"
   tags:
     - hetzner-docker 
