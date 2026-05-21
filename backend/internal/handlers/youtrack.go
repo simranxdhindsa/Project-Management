@@ -550,6 +550,7 @@ func (h *YouTrackHandler) GetIssues(w http.ResponseWriter, r *http.Request) {
 			}
 			transformed = append(transformed, map[string]interface{}{
 				"id":          issue.ID,
+				"idReadable":  issue.IDReadable,
 				"summary":     issue.Summary,
 				"description": issue.Description,
 				"status":      youtrack.GetStatus(issue),
@@ -2824,6 +2825,15 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 					}
 					_ = h.notifHandler.CreateAndBroadcast(ctx, notif)
 				}
+
+				// --- DayTrack: log QA rejection for the mover ---
+				if h.dayTrackRepo != nil {
+					mover := movedBy
+					if mover == "" {
+						mover = assignee
+					}
+					h.logYouTrackRejectedToDayTrack(ctx, issueID, summary, mover, oldValue, newValue)
+				}
 			}
 
 			// Update the matching local task if it exists
@@ -2919,6 +2929,40 @@ func (h *YouTrackHandler) logYouTrackTestedToDayTrack(ctx context.Context, issue
 	}
 }
 
+// logYouTrackRejectedToDayTrack logs a "QA Rejected" DayTrack entry for the person who moved a ticket backward.
+func (h *YouTrackHandler) logYouTrackRejectedToDayTrack(ctx context.Context, issueID, summary, moverName, fromState, toState string) {
+	if moverName == "" {
+		return
+	}
+	pool := database.GetPool()
+	var userID string
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE LOWER(name) = LOWER($1) LIMIT 1`, moverName,
+	).Scan(&userID); err != nil {
+		log.Printf("[YouTrack Webhook] DayTrack rejected log: no user found for mover %q: %v", moverName, err)
+		return
+	}
+	now := time.Now()
+	entryName := fmt.Sprintf("%s: QA Rejected — %s → %s", issueID, fromState, toState)
+	if summary != "" {
+		full := fmt.Sprintf("%s: %s – QA Rejected (%s → %s)", issueID, summary, fromState, toState)
+		if len(full) <= 120 {
+			entryName = full
+		}
+	}
+	// Dedup key includes fromState so re-fires of the same transition don't double-log.
+	extRef := "yt-rejected-" + issueID + "-" + strings.ToLower(strings.ReplaceAll(fromState, " ", "-"))
+	_, err := h.dayTrackRepo.CreateEntrySourced(ctx, userID, now.Format("2006-01-02"),
+		entryName, "Testing",
+		now.Format("3:04 PM"), now.Format("3:04 PM"), nil, "", "done", nil,
+		"youtrack", extRef)
+	if err != nil {
+		log.Printf("[YouTrack Webhook] DayTrack rejected log failed for %s: %v", issueID, err)
+	} else {
+		log.Printf("[YouTrack Webhook] DayTrack rejected entry: %s moved back from %s to %s by %s", issueID, fromState, toState, moverName)
+	}
+}
+
 // logYouTrackCreationToDayTrack finds the system user matching the creator and logs a DayTrack entry.
 func (h *YouTrackHandler) logYouTrackCreationToDayTrack(ctx context.Context, issueID, summary, creatorName string) {
 	pool := database.GetPool()
@@ -2969,8 +3013,6 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Could not identify YouTrack user", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("[ScanYTTickets] YouTrack identity: id=%s login=%s fullName=%s", ytMe.ID, ytMe.Login, ytMe.FullName)
-
 	today := time.Now().Format("2006-01-02")
 	issues, err := ytClient.GetIssuesCreatedToday(ctx, today, "")
 	if err != nil {
@@ -2978,8 +3020,6 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		http.Error(w, "YouTrack query failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	log.Printf("[ScanYTTickets] fetched %d issues created today, matching against YT user id=%s login=%s", len(issues), ytMe.ID, ytMe.Login)
 
 	added := 0
 	skipped := 0
@@ -2991,14 +3031,10 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 
 		reporterID := ""
 		reporterLogin := ""
-		reporterName := ""
 		if issue.Reporter != nil {
 			reporterID = issue.Reporter.ID
 			reporterLogin = issue.Reporter.Login
-			reporterName = issue.Reporter.FullName
 		}
-		log.Printf("[ScanYTTickets] issue=%s reporter_id=%q login=%q name=%q", issueID, reporterID, reporterLogin, reporterName)
-
 		// Match by YT user ID (most reliable), then login as fallback
 		idMatch := reporterID != "" && reporterID == ytMe.ID
 		loginMatch := reporterLogin != "" && strings.EqualFold(reporterLogin, ytMe.Login)
@@ -3089,12 +3125,11 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 				log.Printf("[ScanYTTickets] tested entry failed for %s: %v", issueID, createErr)
 			} else {
 				testedAdded++
-				log.Printf("[ScanYTTickets] tested entry logged: %s on %s", issueID, env)
+
 			}
 		}
 	}
 
-	log.Printf("[ScanYTTickets] done: created=%d skipped=%d tested=%d", added, skipped, testedAdded)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "added": added, "skipped": skipped, "tested": testedAdded})
 }

@@ -2611,4 +2611,16 @@ export const standupApi = {
       method: 'POST',
       body: JSON.stringify({ updates, channel_id: channelId }),
     }),
+
+  weekly: (weekStart?: string): Promise<{
+    success: boolean
+    items: string[]
+    week_start: string
+    week_end: string
+    debug?: { channels: { id: string; name: string; messages_found: number; error?: string }[] }
+  }> =>
+    dtFetch(`${API_URL}/standup/weekly`, {
+      method: 'POST',
+      body: JSON.stringify({ week_start: weekStart }),
+    }),
 }

@@ -52,7 +52,7 @@ export function TaskCard({ issue, avatarMap, isDragging, onClick }: TaskCardProp
 
       {/* Issue ID */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-        <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{issue.id}</span>
+        <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{issue.idReadable || issue.id}</span>
       </div>
 
       {/* Title */}

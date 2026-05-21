@@ -248,6 +248,7 @@ func main() {
 	standupRoutes.HandleFunc("/config", standupHandler.SaveConfig).Methods("PUT")
 	standupRoutes.HandleFunc("/compile", standupHandler.Compile).Methods("POST")
 	standupRoutes.HandleFunc("/post", standupHandler.Post).Methods("POST")
+	standupRoutes.HandleFunc("/weekly", standupHandler.Weekly).Methods("POST")
 
 	// Slack routes (protected)
 	slackHandler := handlers.NewSlackHandler(notifHandler)
@@ -622,11 +623,23 @@ func updateUserRoleHandler(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Role models.Role `json:"role"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Role == "" {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "role is required"})
+		return
+	}
+
+	userID := vars["id"]
+	if database.GetPool() != nil {
+		repo := database.NewUserRepository()
+		if err := repo.UpdateRole(r.Context(), userID, body.Role); err != nil {
+			sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "failed to update role: " + err.Error()})
+			return
+		}
+	}
 
 	sendJSON(w, http.StatusOK, Response{
 		Success: true,
-		Message: "User " + vars["id"] + " role updated to " + string(body.Role),
+		Message: "User " + userID + " role updated to " + string(body.Role),
 	})
 }
 

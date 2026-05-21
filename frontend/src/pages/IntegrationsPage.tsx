@@ -59,6 +59,7 @@ type MainTab = 'youtrack' | 'asana' | 'slack' | 'workflow' | 'developers'
 interface IntegrationsPageProps {
   initialTab?: MainTab
   onTabChange?: (tab: MainTab) => void
+  userRole?: string
 }
 
 // Reusable compact custom dropdown for string option lists
@@ -249,7 +250,9 @@ function ColumnDndList({ editColumns, setEditColumns, updateColumn, removeColumn
   )
 }
 
-export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: IntegrationsPageProps = {}) {
+export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRole }: IntegrationsPageProps = {}) {
+  const isMember = userRole === 'member' || userRole === 'viewer'
+  const isFullAccess = userRole === 'admin' || userRole === 'project_manager'
   const [mainTab, setMainTab] = useState<MainTab>(initialTab)
 
   useEffect(() => {
@@ -259,23 +262,6 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTab])
   const [loading, setLoading] = useState(true)
-
-  // ── Data source preference ───────────────────────────────────────────────────
-  const [activeSource, setActiveSrc] = useState<DataSource>(getActiveSource())
-  const [sourceMsg, setSourceMsg] = useState<string | null>(null)
-
-  const handleSourceChange = async (src: DataSource) => {
-    if (src === activeSource) return
-    try {
-      await setActiveSource(src)
-      setActiveSrc(src)
-      setSourceMsg(`Switched to ${src === 'asana' ? 'Asana' : 'YouTrack'}. All views now use ${src === 'asana' ? 'Asana' : 'YouTrack'} data.`)
-      setTimeout(() => setSourceMsg(null), 4000)
-    } catch {
-      setSourceMsg('Failed to update data source')
-      setTimeout(() => setSourceMsg(null), 3000)
-    }
-  }
 
   // ── YouTrack ────────────────────────────────────────────────────────────────
   const [ytStatus, setYtStatus] = useState<YouTrackStatus | null>(null)
@@ -351,40 +337,12 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   const [editReport, setEditReport] = useState<ReportConfig>({
     done_role: 'dev_done', blocked_states: [], open_states: [], priority_filters: [], sections: [], tracked_column_roles: []
   })
-  const [wcSource, setWcSource] = useState<'youtrack' | 'asana'>(() => getActiveSource() as 'youtrack' | 'asana')
-  // Real Asana section names fetched directly from the project — always up to date
-  const [asanaSectionNames, setAsanaSectionNames] = useState<string[]>([])
-
-  // Fetch real Asana sections whenever wcSource=asana and a project is connected.
-  // Using a useEffect (not inline in fetchWorkflowConfig) means this fires correctly even
-  // if asanaSelectedProject is set AFTER the initial fetchWorkflowConfig runs (race condition fix).
-  useEffect(() => {
-    if (wcSource !== 'asana' || !asanaSelectedProject) return
-    api.getAsanaProjectSections(asanaSelectedProject).then(res => {
-      // Backend returns a raw array (not {success,data} wrapped)
-      const sections: Array<{ name: string }> = Array.isArray(res)
-        ? res as unknown as Array<{ name: string }>
-        : ((res as any)?.data ?? [])
-      if (sections.length > 0) {
-        const names: string[] = sections.map(s => s.name).filter(Boolean)
-        setAsanaSectionNames(names)
-        // Update editColumns: merge real section names with stored role/rank mappings
-        setEditColumns(prev => {
-          const storedMap = new Map(prev.map(c => [c.state.toLowerCase(), c]))
-          return names.map((name, i) => {
-            const stored = storedMap.get(name.toLowerCase())
-            return stored
-              ? { ...stored, state: name }
-              : { state: name, rank: i, aliases: [], role: 'active', is_lateral: false }
-          })
-        })
-      }
-    }).catch(() => {})
-  }, [wcSource, asanaSelectedProject]) // eslint-disable-line react-hooks/exhaustive-deps
+  const wcSource = 'youtrack' as const
+  const setWcSource = (_src: 'youtrack' | 'asana') => {} // no-op: Asana removed
 
   // Auto-load columns from YouTrack board when Column Hierarchy tab opens (Issue 3)
   useEffect(() => {
-    if (wcSection !== 'columns' || wcSource !== 'youtrack') return
+    if (wcSection !== 'columns') return
     setColumnsLoadingFromYT(true)
     api.getYouTrackDefaultBoardColumns().then(res => {
       const boardCols = (res as any).data as import('../services/api').YouTrackColumn[] ?? []
@@ -407,14 +365,10 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
   }, [wcSection, wcSource]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // For Report Defaults Open/Blocked States: use real Asana sections in Asana mode,
-  // fall back to YouTrack states in YouTrack mode.
-  const reportAvailableStates = wcSource === 'asana' && asanaSectionNames.length > 0
-    ? asanaSectionNames
-    : ytStates
+  const reportAvailableStates = ytStates
 
   useEffect(() => {
-    loadActiveSourceFromDB().then(setActiveSrc).catch(() => {})
-    Promise.all([fetchYtIntegration(), fetchAsanaStatus(), fetchSlackStatus(), fetchWorkflowConfig()])
+    Promise.all([fetchYtIntegration(), fetchSlackStatus(), fetchWorkflowConfig()])
       .finally(() => setLoading(false))
   }, [])
 
@@ -872,28 +826,6 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
         <p className="int-subtitle">Connected tools and workflow configuration</p>
       </div>
 
-      {/* Data source switcher */}
-      <div className="ds-switcher">
-        <div className="ds-switcher__label">Active PM Data Source</div>
-        <div className="ds-switcher__options">
-          <button
-            className={`ds-switcher__option ${activeSource === 'youtrack' ? 'ds-switcher__option--active' : ''}`}
-            onClick={() => handleSourceChange('youtrack')}
-          >
-            <span className="ds-switcher__badge">YouTrack</span>
-            {ytStatus?.connected && <span className="ds-switcher__dot ds-switcher__dot--green" />}
-          </button>
-          <button
-            className={`ds-switcher__option ${activeSource === 'asana' ? 'ds-switcher__option--active' : ''}`}
-            onClick={() => handleSourceChange('asana')}
-          >
-            <span className="ds-switcher__badge">Asana</span>
-            {asanaConnected && <span className="ds-switcher__dot ds-switcher__dot--green" />}
-          </button>
-        </div>
-        {sourceMsg && <p className="ds-switcher__msg">{sourceMsg}</p>}
-      </div>
-
       {/* Tab bar */}
       <div className="int-tabs">
         <button className={`int-tab ${mainTab === 'youtrack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('youtrack'); onTabChange?.('youtrack') }}>
@@ -904,28 +836,25 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
           YouTrack
           {ytStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
         </button>
-        <button className={`int-tab ${mainTab === 'asana' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('asana'); onTabChange?.('asana') }}>
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none">
-            <circle cx="12" cy="7" r="3.5" fill="currentColor"/>
-            <circle cx="6" cy="16" r="3.5" fill="currentColor"/>
-            <circle cx="18" cy="16" r="3.5" fill="currentColor"/>
-          </svg>
-          Asana
-          {asanaConnected && <span className="int-tab-dot int-tab-dot-green" />}
-        </button>
-        <button className={`int-tab ${mainTab === 'slack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('slack'); onTabChange?.('slack') }}>
-          <MessageSquare size={14} />
-          Slack
-          {slackStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
-        </button>
-        <button className={`int-tab ${mainTab === 'workflow' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('workflow'); onTabChange?.('workflow') }}>
-          <Sliders size={14} />
-          Workflow
-        </button>
-        <button className={`int-tab ${mainTab === 'developers' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('developers'); onTabChange?.('developers') }}>
-          <User size={14} />
-          Developers
-        </button>
+        {!isMember && (
+          <button className={`int-tab ${mainTab === 'slack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('slack'); onTabChange?.('slack') }}>
+            <MessageSquare size={14} />
+            Slack
+            {slackStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
+          </button>
+        )}
+        {!isMember && (
+          <button className={`int-tab ${mainTab === 'workflow' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('workflow'); onTabChange?.('workflow') }}>
+            <Sliders size={14} />
+            Workflow
+          </button>
+        )}
+        {isFullAccess && (
+          <button className={`int-tab ${mainTab === 'developers' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('developers'); onTabChange?.('developers') }}>
+            <User size={14} />
+            Developers
+          </button>
+        )}
       </div>
 
       {/* ══════════════ YOUTRACK ══════════════ */}
@@ -1047,20 +976,13 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
         </div>
       )}
 
-      {/* ══════════════ ASANA ══════════════ */}
-      {mainTab === 'asana' && (
+      {/* Asana tab removed — YouTrack is the only PM data source */}
+      {false && mainTab === 'asana' && (
         <div className="int-content">
           <div className="int-service-header">
-            <div className="int-service-logo int-asana-logo">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="white">
-                <circle cx="12" cy="7" r="3.5"/>
-                <circle cx="6" cy="16" r="3.5"/>
-                <circle cx="18" cy="16" r="3.5"/>
-              </svg>
-            </div>
+            <div className="int-service-logo int-asana-logo"></div>
             <div className="int-service-info">
               <h2>Asana</h2>
-              <p>Alternative PM data source — boards, reports, PM assistant</p>
             </div>
             <div>
               {asanaConnected
@@ -1392,19 +1314,6 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
                 <div className="int-alert int-alert-success"><CheckCircle size={14} /><span>{wcSuccess}</span></div>
               )}
 
-              {/* Source toggle */}
-              <div className="wc-source-toggle">
-                {(['youtrack', 'asana'] as const).map(src => (
-                  <button
-                    key={src}
-                    className={`wc-source-btn${wcSource === src ? ' wc-source-btn-active' : ''}`}
-                    onClick={() => { setWcSource(src); fetchWorkflowConfig(src) }}
-                  >
-                    {src === 'youtrack' ? 'YouTrack Config' : 'Asana Config'}
-                  </button>
-                ))}
-              </div>
-
               {/* Workflow sub-tabs */}
               <div className="wc-tabs">
                 {(['priorities', 'columns', 'hotfix', 'report'] as const).map(t => (
@@ -1417,23 +1326,19 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange }: Integ
               {/* Priority Tags */}
               {wcSection === 'priorities' && (
                 <div className="wc-section">
-                  <p className="int-help-text">
-                    {wcSource === 'asana'
-                      ? 'Define tags like P0, P1 with custom colors. SLA thresholds are not used for Asana — overdue is determined by task due dates.'
-                      : 'Define tags like P0, B1, A0 with custom colors and SLA thresholds.'}
-                  </p>
+                  <p className="int-help-text">Define tags like P0, B1, A0 with custom colors and SLA thresholds.</p>
                   <div className="wc-tag-list">
                     <div className="wc-tag-header">
                       <span>Color</span><span>Label</span>
-                      <span style={{ visibility: wcSource === 'asana' ? 'hidden' : undefined }}>SLA</span>
-                      <span style={{ visibility: wcSource === 'asana' ? 'hidden' : undefined }}>Unit</span>
+                      <span>SLA</span>
+                      <span>Unit</span>
                       <span>Prefixes</span><span>YT Mappings</span><span></span>
                     </div>
                     {editTags.map((tag, i) => (
                       <div key={i} className="wc-tag-row">
                         <input type="color" value={tag.color} onChange={e => updateTag(i, 'color', e.target.value)} className="wc-color-input" />
                         <input type="text" value={tag.label} onChange={e => updateTag(i, 'label', e.target.value)} placeholder="P0" className="wc-input wc-input-label" />
-                        <div className="wc-sla-cell" style={{ visibility: wcSource === 'asana' ? 'hidden' : undefined }}>
+                        <div className="wc-sla-cell">
                           <input
                             type="number"
                             value={fromHours(tag.sla_hours).val}

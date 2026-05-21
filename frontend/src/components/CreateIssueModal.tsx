@@ -6,8 +6,10 @@ import {
 } from 'lucide-react'
 import { marked } from 'marked'
 import api from '../services/api'
-import type { YouTrackUser, YouTrackState, DeveloperSubsystemConfig } from '../services/api'
+import type { YouTrackUser, YouTrackState, DeveloperSubsystemConfig, YouTrackIssue } from '../services/api'
 import MicButton from './MicButton'
+import { IssueDetailPanel } from './IssueDetailPanel'
+import { useYouTrackBaseUrl } from '../hooks/useYouTrackBaseUrl'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +59,11 @@ function parseEstimation(raw: string): number | undefined {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModalProps) {
+  const ytBaseUrl = useYouTrackBaseUrl()
+
+  // After creation, store the full issue and switch to IssueDetailPanel view
+  const [createdFullIssue, setCreatedFullIssue] = useState<YouTrackIssue | null>(null)
+
   const [form, setForm] = useState<CreateIssueFormData>({
     summary: '', description: '', state: '', priority: 'Normal',
     type_name: '', assignee_login: '', assignee_name: '', assignee_avatar: '',
@@ -115,10 +122,14 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
 
   useEffect(() => { summaryRef.current?.focus() }, [])
 
+  // Always-current ref so the useEffect reads the latest description without a stale closure
+  const latestDesc = useRef(form.description)
+  latestDesc.current = form.description
+
   // Populate contenteditable when switching to visual mode (not on every keystroke)
   useEffect(() => {
     if (descMode === 'visual' && !isViewMode && visualRef.current) {
-      visualRef.current.innerHTML = marked.parse(form.description) as string
+      visualRef.current.innerHTML = marked.parse(latestDesc.current) as string
       // Move cursor to end
       const range = document.createRange()
       const sel = window.getSelection()
@@ -127,8 +138,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
       sel?.removeAllRanges()
       sel?.addRange(range)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [descMode])
+  }, [descMode, isViewMode])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); onClose() } }
@@ -279,9 +289,17 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
         setCreated(true)
         setCreatedIssueId(id)
         setCreatedReadableId(readable)
-        setIsViewMode(true)
-        setDescMode('visual')
         onCreated()
+        // Fetch full issue to switch to unified IssueDetailPanel view
+        try {
+          const fullRes = await api.getYouTrackIssue(readable || id)
+          const fullIssue = (fullRes as any).data ?? fullRes
+          if (fullIssue?.id) setCreatedFullIssue(fullIssue as YouTrackIssue)
+          else { setIsViewMode(true); setDescMode('visual') }
+        } catch {
+          setIsViewMode(true)
+          setDescMode('visual')
+        }
       } else {
         setError('Failed to create issue')
       }
@@ -366,6 +384,11 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
 
   // Priority display
   const priorityDisplay = meta.priorities.find(p => p.name === form.priority) ?? null
+
+  // After successful creation, delegate entirely to IssueDetailPanel (single source of truth)
+  if (createdFullIssue) {
+    return <IssueDetailPanel issue={createdFullIssue} onClose={onClose} ytBaseUrl={ytBaseUrl} />
+  }
 
   return (
     <div className="ci-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -475,7 +498,20 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
               {/* Mic — top-right corner of description box */}
               <MicButton
                 className="ci-desc-mic"
-                onResult={t => set('description', form.description ? form.description + '\n' + t : t)}
+                onResult={t => {
+                  const newDesc = latestDesc.current ? latestDesc.current + '\n' + t : t
+                  set('description', newDesc)
+                  // In visual mode update the contenteditable DOM directly so the text is visible immediately
+                  if (descMode === 'visual' && visualRef.current) {
+                    visualRef.current.innerHTML = marked.parse(newDesc) as string
+                    const range = document.createRange()
+                    const sel = window.getSelection()
+                    range.selectNodeContents(visualRef.current)
+                    range.collapse(false)
+                    sel?.removeAllRanges()
+                    sel?.addRange(range)
+                  }
+                }}
               />
               {/* AI Fill — bottom-right, shown only when description has text */}
               {descHasText && (

@@ -73,7 +73,7 @@ import type { LocalNotification } from '../components/notifications/RightPanel'
 type Page = 'dashboard' | 'board' | 'list' | 'daily-ops' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'daily-analysis', 'pm-reports', 'daytrack']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'daily-analysis', 'pm-reports', 'daytrack', 'integrations']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -166,7 +166,7 @@ type PMReportsTab = typeof PM_REPORTS_TABS[number]
 const SLACK_TABS = ['inbox', 'threads', 'reminders', 'settings'] as const
 type SlackTab = typeof SLACK_TABS[number]
 
-const INTEGRATIONS_TABS = ['youtrack', 'slack', 'workflow'] as const
+const INTEGRATIONS_TABS = ['youtrack', 'slack', 'workflow', 'developers'] as const
 type IntegrationsTab = typeof INTEGRATIONS_TABS[number]
 
 export default function Dashboard() {
@@ -693,23 +693,21 @@ export default function Dashboard() {
               </button>
             )}
             {isFullAccess && (
-              <>
-                <button
-                  className={`sidebar-nav-item ${currentPage === 'bots' ? 'active' : ''}`}
-                  onClick={() => setCurrentPage('bots')}
-                >
-                  <Bot size={20} />
-                  <span>Bot Config</span>
-                </button>
-                <button
-                  className={`sidebar-nav-item ${currentPage === 'integrations' ? 'active' : ''}`}
-                  onClick={() => setCurrentPage('integrations')}
-                >
-                  <Link2 size={20} />
-                  <span>Integrations</span>
-                </button>
-              </>
+              <button
+                className={`sidebar-nav-item ${currentPage === 'bots' ? 'active' : ''}`}
+                onClick={() => setCurrentPage('bots')}
+              >
+                <Bot size={20} />
+                <span>Bot Config</span>
+              </button>
             )}
+            <button
+              className={`sidebar-nav-item ${currentPage === 'integrations' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('integrations')}
+            >
+              <Link2 size={20} />
+              <span>Integrations</span>
+            </button>
             {user?.role === 'admin' && (
               <button
                 className={`sidebar-nav-item ${currentPage === 'settings' ? 'active' : ''}`}
@@ -882,6 +880,7 @@ export default function Dashboard() {
             <IntegrationsPage
               initialTab={integrationsTab}
               onTabChange={(tab) => navigate(`/integrations/${tab}`)}
+              userRole={user?.role}
             />
           </div>
         )}
@@ -967,7 +966,7 @@ export default function Dashboard() {
       {showNewTask && (
         <CreateIssueModal
           onClose={() => setShowNewTask(false)}
-          onCreated={() => setShowNewTask(false)}
+          onCreated={() => {}}
         />
       )}
 

@@ -11,6 +11,7 @@ import api from '@/services/api'
 import type { YouTrackIssue, YouTrackComment, IssueStateLogEntry, YouTrackUser } from '@/services/api'
 import { getActiveSource } from '@/services/pmDataService'
 import { AttachmentViewer } from '@/components/AttachmentViewer'
+import { useYouTrackBaseUrl } from '@/hooks/useYouTrackBaseUrl'
 
 interface IssueDetailPanelProps {
   issue: YouTrackIssue
@@ -43,6 +44,38 @@ function formatCommentTime(ms: number): string {
   if (hours < 24) return `${hours}h ago`
   if (days < 7) return `${days}d ago`
   return fmtDate(ms)
+}
+
+// Renders YouTrack comment markdown, handling the {width=X%} image attribute extension.
+// Relative image URLs (e.g. "image.png") are resolved against the YouTrack base URL.
+function renderCommentText(text: string, ytBaseUrl?: string): string {
+  if (!text) return ''
+
+  const resolveUrl = (url: string) => {
+    if (!url || url.startsWith('http') || url.startsWith('data:')) return url
+    const base = (ytBaseUrl || '').replace(/\/$/, '')
+    return base ? `${base}/${url.replace(/^\//, '')}` : url
+  }
+
+  // Convert YouTrack's ![alt](url){width=70%} / {width=100} → proper <img> tags
+  let processed = text.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)\{width=(\d+%?)\}/g,
+    (_, alt, url, width) => {
+      const style = width.includes('%') ? `width:${width}` : `width:${width}px`
+      return `<img src="${resolveUrl(url)}" alt="${alt}" style="${style};max-width:100%;border-radius:4px;" />`
+    }
+  )
+  // Also resolve plain markdown images without width attribute: ![alt](url)
+  processed = processed.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)/g,
+    (_, alt, url) => `<img src="${resolveUrl(url)}" alt="${alt}" style="max-width:100%;border-radius:4px;" />`
+  )
+
+  const html = marked.parse(processed) as string
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ['img'],
+    ADD_ATTR: ['style', 'src', 'alt', 'width', 'height'],
+  })
 }
 
 function formatTransitionTime(iso: string): string {
@@ -159,8 +192,10 @@ function InlineSelect({
   )
 }
 
-export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanelProps) {
+export function IssueDetailPanel({ issue, onClose, ytBaseUrl: ytBaseUrlProp }: IssueDetailPanelProps) {
   const isYouTrack = getActiveSource() === 'youtrack'
+  const fetchedBaseUrl = useYouTrackBaseUrl()
+  const ytBaseUrl = ytBaseUrlProp || fetchedBaseUrl
 
   // Local editable state (mirrors issue props, updated optimistically)
   const [localStatus,   setLocalStatus]   = useState(issue.status || '')
@@ -201,7 +236,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
   // Display ID — prefer readable (ARD-1767) over internal (3-3797)
   const displayId = issue.idReadable || issue.id
   const issueUrl  = isYouTrack
-    ? `${ytBaseUrl || 'https://youtrack.jetbrains.com'}/issue/${displayId}`
+    ? `${ytBaseUrl}/issue/${displayId}`
     : (issue.permalink || '#')
 
   // ── Load options on mount ────────────────────────────────────────────────
@@ -341,7 +376,13 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
         {/* ── Top bar ── */}
         <div className="idp-topbar">
           <div className="idp-topbar-left">
-            <span className="idp-issue-id">{displayId}</span>
+            <a
+              className="idp-issue-id idp-issue-id--link"
+              href={issueUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open in YouTrack"
+            >{displayId}</a>
             {issue.type && <span className="idp-type-chip">{issue.type}</span>}
           </div>
           <div className="idp-topbar-actions">
@@ -488,7 +529,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                             <span className="idp-comment-author">{c.author.fullName || c.author.login}</span>
                             <span className="idp-comment-time">{formatCommentTime(c.created)}</span>
                           </div>
-                          <p className="idp-comment-text">{c.text}</p>
+                          <div className="idp-comment-text" dangerouslySetInnerHTML={{ __html: renderCommentText(c.text, ytBaseUrl) }} />
                         </div>
                       </div>
                     ))}
