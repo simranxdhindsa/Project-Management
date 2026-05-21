@@ -2825,6 +2825,15 @@ func (h *YouTrackHandler) processWebhookEvents(events []youtrack.WebhookEvent) {
 					}
 					_ = h.notifHandler.CreateAndBroadcast(ctx, notif)
 				}
+
+				// --- DayTrack: log QA rejection for the mover ---
+				if h.dayTrackRepo != nil {
+					mover := movedBy
+					if mover == "" {
+						mover = assignee
+					}
+					h.logYouTrackRejectedToDayTrack(ctx, issueID, summary, mover, oldValue, newValue)
+				}
 			}
 
 			// Update the matching local task if it exists
@@ -2917,6 +2926,40 @@ func (h *YouTrackHandler) logYouTrackTestedToDayTrack(ctx context.Context, issue
 		log.Printf("[YouTrack Webhook] DayTrack tested log failed for %s on %s: %v", issueID, env, err)
 	} else {
 		log.Printf("[YouTrack Webhook] DayTrack tested entry: %s verified on %s by %s", issueID, env, moverName)
+	}
+}
+
+// logYouTrackRejectedToDayTrack logs a "QA Rejected" DayTrack entry for the person who moved a ticket backward.
+func (h *YouTrackHandler) logYouTrackRejectedToDayTrack(ctx context.Context, issueID, summary, moverName, fromState, toState string) {
+	if moverName == "" {
+		return
+	}
+	pool := database.GetPool()
+	var userID string
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM users WHERE LOWER(name) = LOWER($1) LIMIT 1`, moverName,
+	).Scan(&userID); err != nil {
+		log.Printf("[YouTrack Webhook] DayTrack rejected log: no user found for mover %q: %v", moverName, err)
+		return
+	}
+	now := time.Now()
+	entryName := fmt.Sprintf("%s: QA Rejected — %s → %s", issueID, fromState, toState)
+	if summary != "" {
+		full := fmt.Sprintf("%s: %s – QA Rejected (%s → %s)", issueID, summary, fromState, toState)
+		if len(full) <= 120 {
+			entryName = full
+		}
+	}
+	// Dedup key includes fromState so re-fires of the same transition don't double-log.
+	extRef := "yt-rejected-" + issueID + "-" + strings.ToLower(strings.ReplaceAll(fromState, " ", "-"))
+	_, err := h.dayTrackRepo.CreateEntrySourced(ctx, userID, now.Format("2006-01-02"),
+		entryName, "Testing",
+		now.Format("3:04 PM"), now.Format("3:04 PM"), nil, "", "done", nil,
+		"youtrack", extRef)
+	if err != nil {
+		log.Printf("[YouTrack Webhook] DayTrack rejected log failed for %s: %v", issueID, err)
+	} else {
+		log.Printf("[YouTrack Webhook] DayTrack rejected entry: %s moved back from %s to %s by %s", issueID, fromState, toState, moverName)
 	}
 }
 
