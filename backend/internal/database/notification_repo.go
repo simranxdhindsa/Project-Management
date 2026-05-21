@@ -23,10 +23,10 @@ func (r *NotificationRepository) Create(ctx context.Context, notif *models.Notif
 
 	err := pool.QueryRow(ctx, `
 		INSERT INTO notifications (user_id, type, title, message, task_id, read)
-		SELECT $1, $2, $3, $4, $5, false
+		SELECT $1::uuid, $2::text, $3::text, $4::text, $5::text, false
 		WHERE NOT EXISTS (
 			SELECT 1 FROM notifications
-			WHERE user_id = $1 AND type = $2 AND title = $3
+			WHERE user_id = $1::uuid AND type = $2::text AND title = $3::text
 			  AND created_at > NOW() - INTERVAL '24 hours'
 		)
 		RETURNING id, created_at

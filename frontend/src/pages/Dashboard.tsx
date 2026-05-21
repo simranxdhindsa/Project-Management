@@ -967,7 +967,7 @@ export default function Dashboard() {
       {showNewTask && (
         <CreateIssueModal
           onClose={() => setShowNewTask(false)}
-          onCreated={() => setShowNewTask(false)}
+          onCreated={() => {}}
         />
       )}
 
