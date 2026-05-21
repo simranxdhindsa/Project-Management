@@ -45,6 +45,24 @@ function formatCommentTime(ms: number): string {
   return fmtDate(ms)
 }
 
+// Renders YouTrack comment markdown, handling the {width=X%} image attribute extension
+function renderCommentText(text: string): string {
+  if (!text) return ''
+  // Convert YouTrack's ![alt](url){width=70%} / {width=100} → proper <img> tags
+  const processed = text.replace(
+    /!\[([^\]]*)\]\(([^)]+)\)\{width=(\d+%?)\}/g,
+    (_, alt, url, width) => {
+      const style = width.includes('%') ? `width:${width}` : `width:${width}px`
+      return `<img src="${url}" alt="${alt}" style="${style};max-width:100%;border-radius:4px;" />`
+    }
+  )
+  const html = marked.parse(processed) as string
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ['img'],
+    ADD_ATTR: ['style', 'src', 'alt', 'width', 'height'],
+  })
+}
+
 function formatTransitionTime(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' +
@@ -488,7 +506,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
                             <span className="idp-comment-author">{c.author.fullName || c.author.login}</span>
                             <span className="idp-comment-time">{formatCommentTime(c.created)}</span>
                           </div>
-                          <p className="idp-comment-text">{c.text}</p>
+                          <div className="idp-comment-text" dangerouslySetInnerHTML={{ __html: renderCommentText(c.text) }} />
                         </div>
                       </div>
                     ))}
