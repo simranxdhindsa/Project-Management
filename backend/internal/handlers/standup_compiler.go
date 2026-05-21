@@ -4,16 +4,128 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
 	slacksvc "github.com/dhindsa/project-management/internal/services/slack"
 )
+
+var (
+	reStandupMention = regexp.MustCompile(`<@[A-Z0-9]+>`)
+	reStandupLink    = regexp.MustCompile(`<https?://[^|>]*\|([^>]*)>`)
+	reStandupURL     = regexp.MustCompile(`<https?://[^>]*>`)
+	reStandupEmoji   = regexp.MustCompile(`:[a-z0-9_+\-]+:`)
+	reStandupEdited  = regexp.MustCompile(`\s*\(edited\)\s*$`)
+)
+
+// cleanForGroq strips Slack mrkdwn noise before sending to Groq.
+// Preserves original casing so ticket IDs (ARD-1234) stay uppercase.
+// extractBalancedJSON finds the first `{` and returns the minimal well-formed JSON
+// object using brace-depth tracking. Ignores preamble and trailing commentary Groq
+// appends. Returns s[start:] (possibly truncated) when no balanced close found.
+func extractBalancedJSON(s string) string {
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return s
+	}
+	depth := 0
+	inStr := false
+	escaped := false
+	for i, r := range s[start:] {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && inStr {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			inStr = !inStr
+			continue
+		}
+		if inStr {
+			continue
+		}
+		if r == '{' {
+			depth++
+		} else if r == '}' {
+			depth--
+			if depth == 0 {
+				return s[start : start+i+1]
+			}
+		}
+	}
+	return s[start:]
+}
+
+// repairJSON attempts to complete a truncated JSON string by closing any unclosed
+// strings, arrays, and objects it finds via stack tracking.
+func repairJSON(s string) string {
+	var stack []byte
+	inStr := false
+	escaped := false
+	for _, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && inStr {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			inStr = !inStr
+			continue
+		}
+		if inStr {
+			continue
+		}
+		switch r {
+		case '{':
+			stack = append(stack, '}')
+		case '[':
+			stack = append(stack, ']')
+		case '}', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if len(stack) == 0 && !inStr {
+		return s // already structurally complete
+	}
+	var suffix strings.Builder
+	if inStr {
+		suffix.WriteByte('"')
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		suffix.WriteByte(stack[i])
+	}
+	return s + suffix.String()
+}
+
+func cleanForGroq(text string) string {
+	text = reStandupEdited.ReplaceAllString(text, "")
+	text = reStandupMention.ReplaceAllString(text, "")        // remove <@UXXX>
+	text = reStandupLink.ReplaceAllString(text, "$1")         // keep display text of links
+	text = reStandupURL.ReplaceAllString(text, "")            // strip bare URLs
+	text = reStandupEmoji.ReplaceAllString(text, "")          // strip :emoji:
+	// Strip mrkdwn formatting chars but keep bullets and structure
+	var b strings.Builder
+	for _, r := range text {
+		if r != '*' && r != '_' && r != '`' {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
 
 // StandupCompilerHandler handles the daily update compiler feature.
 type StandupCompilerHandler struct {
@@ -206,7 +318,11 @@ func (h *StandupCompilerHandler) Compile(w http.ResponseWriter, r *http.Request)
 	for _, ch := range cfg.SourceChannels {
 		msgs, fetchErr := slackClient.GetChannelHistory(r.Context(), ch.ID, oldest, latest, 500)
 		if fetchErr != nil {
-			channelLog = append(channelLog, channelDebug{ID: ch.ID, Name: ch.Name, Error: fetchErr.Error()})
+			errMsg := fetchErr.Error()
+			if strings.Contains(errMsg, "channel_not_found") {
+				errMsg = "channel_not_found — bot has no access. If this is a group DM, Slack does not allow bot tokens to read group DMs. Use a private channel instead and invite the bot with /invite."
+			}
+			channelLog = append(channelLog, channelDebug{ID: ch.ID, Name: ch.Name, Error: errMsg})
 			continue
 		}
 		count := 0
@@ -214,11 +330,15 @@ func (h *StandupCompilerHandler) Compile(w http.ResponseWriter, r *http.Request)
 			if m.User == "" || strings.TrimSpace(m.Text) == "" {
 				continue
 			}
+			cleaned := cleanForGroq(m.Text)
+			if cleaned == "" {
+				continue
+			}
 			count++
 			if existing := userMessages[m.User]; existing != "" {
-				userMessages[m.User] = existing + "\n" + m.Text
+				userMessages[m.User] = existing + "\n" + cleaned
 			} else {
-				userMessages[m.User] = m.Text
+				userMessages[m.User] = cleaned
 			}
 		}
 		channelLog = append(channelLog, channelDebug{ID: ch.ID, Name: ch.Name, Messages: count})
@@ -254,26 +374,21 @@ func (h *StandupCompilerHandler) Compile(w http.ResponseWriter, r *http.Request)
 		workers = append(workers, personWork{uid, text})
 	}
 
+	// Process one developer at a time to avoid Groq token/rate limits
+	// (same pattern as deployment report — sequential, not concurrent)
 	updates := make([]PersonUpdate, len(workers))
-	sem := make(chan struct{}, 3) // respect Groq free-tier limit
-	var wg sync.WaitGroup
-
 	for i, pw := range workers {
-		wg.Add(1)
-		go func(idx int, uid, rawText string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			sections := standupGroqParse(groqKey, rawText)
-			updates[idx] = PersonUpdate{
-				SlackUserID: uid,
-				DisplayName: displayNames[uid],
-				RawText:     rawText,
-				Sections:    sections,
-			}
-		}(i, pw.uid, pw.rawText)
+		sections := standupGroqParse(groqKey, pw.rawText)
+		updates[i] = PersonUpdate{
+			SlackUserID: pw.uid,
+			DisplayName: displayNames[pw.uid],
+			RawText:     pw.rawText,
+			Sections:    sections,
+		}
+		if i < len(workers)-1 {
+			time.Sleep(300 * time.Millisecond) // small pause between calls
+		}
 	}
-	wg.Wait()
 
 	// Owner section from DayTrack
 	ownerUpdate := standupBuildOwnerSection(r.Context(), user.ID, user.Name, today, groqKey)
@@ -395,12 +510,14 @@ func standupGetOwnerSlackID(ctx context.Context, userID, email string, client *s
 }
 
 const standupGroqSystem = `You are a structured parser for developer standup updates.
-Given a developer's raw Slack message, extract the content into labelled sections.
-IMPORTANT: Preserve the exact section label wording from the original message — do NOT rename or normalise them.
-For example if the message says "Done - Features / Enhancements", use that exact label, not just "Done".
-Common labels you may encounter: "Done", "Done - Features / Enhancements", "Done - Bugs Fixed", "In Progress", "Moved to Dev Today", "QA Findings", "Tickets Created", "Tickets Tested", "Tickets Verified", "Blocked", "Testing", "Research", "Note".
-Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done - Features / Enhancements", "items": ["ARD-1234 FE: Fix login bug"]}, ...]}.
-Preserve ticket IDs exactly (e.g. ARD-1234). Do not invent items. Keep each item to one line. If the message is unclear, return {"sections": []}.`
+Given a developer's raw Slack message, extract ONLY the completed ("Done") items into labelled sections.
+Rules:
+- INCLUDE sections whose label contains "Done", "Enhancements", "Bug Fix", "Bugs Fixed", "Moved to Dev Today", "QA Findings", "Tickets Created", "Tickets Tested", "Tickets Verified".
+- EXCLUDE entirely any section whose label contains "In Progress", "In Progess", "In-Progress", "WIP", "Blocked", "Note", "Notes".
+- IMPORTANT: Preserve the exact section label wording from the original message — do NOT rename or normalise them.
+- Preserve ticket IDs exactly (e.g. ARD-1234). Do not invent items. Keep each item to one line.
+Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done", "items": ["ARD-1234 FE: Fix login bug"]}, ...]}.
+If there are no done items, return {"sections": []}.`
 
 const standupOwnerGroqSystem = `You are a structured parser for a PM's daily standup update.
 Given a list of DayTrack work entries (categories: Testing, PM, Research, Development), group them into labelled sections.
@@ -421,7 +538,7 @@ func standupGroqParse(groqKey, rawText string) []UpdateSection {
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		var err error
-		result, err = callGroqChat(ctx, groqKey, "llama-3.3-70b-versatile", standupGroqSystem, userMsg)
+		result, err = callGroqChat(ctx, groqKey, "llama-3.3-70b-versatile", standupGroqSystem, userMsg, 2048)
 		cancel()
 		if err == nil && strings.TrimSpace(result) != "" {
 			break
@@ -439,13 +556,31 @@ func standupGroqParse(groqKey, rawText string) []UpdateSection {
 		break
 	}
 
+	// 1. Extract the first balanced JSON object (strips pre/post commentary)
+	clean := extractBalancedJSON(strings.TrimSpace(result))
+
 	var parsed struct {
 		Sections []UpdateSection `json:"sections"`
 	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(result)), &parsed); err != nil || len(parsed.Sections) == 0 {
-		return []UpdateSection{{Label: "Update", Items: []string{rawText}}}
+	if err := json.Unmarshal([]byte(clean), &parsed); err != nil {
+		// 2. Attempt to repair truncated JSON (missing closing brackets/strings)
+		repaired := repairJSON(clean)
+		if err2 := json.Unmarshal([]byte(repaired), &parsed); err2 != nil {
+			log.Printf("[StandupCompiler] Groq JSON parse failed (raw+repair): %v | raw: %.300s", err2, clean)
+			return []UpdateSection{}
+		}
 	}
-	return parsed.Sections
+	// Safety net: drop any section Groq still included that looks like In Progress or Blocked
+	var filtered []UpdateSection
+	for _, sec := range parsed.Sections {
+		lower := strings.ToLower(sec.Label)
+		if strings.Contains(lower, "in progress") || strings.Contains(lower, "in progess") ||
+			strings.Contains(lower, "wip") || strings.Contains(lower, "blocked") {
+			continue
+		}
+		filtered = append(filtered, sec)
+	}
+	return filtered
 }
 
 func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, groqKey string) PersonUpdate {
@@ -477,7 +612,7 @@ func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, gr
 
 	if groqKey != "" && sb.Len() > 0 {
 		groqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		raw, groqErr := callGroqChat(groqCtx, groqKey, "llama-3.3-70b-versatile", standupOwnerGroqSystem, "Work entries:\n"+sb.String())
+		raw, groqErr := callGroqChat(groqCtx, groqKey, "llama-3.3-70b-versatile", standupOwnerGroqSystem, "Work entries:\n"+sb.String(), 2048)
 		cancel()
 		if groqErr == nil {
 			var parsed struct {
@@ -617,7 +752,11 @@ func (h *StandupCompilerHandler) Weekly(w http.ResponseWriter, r *http.Request) 
 			if m.User == "" || strings.TrimSpace(m.Text) == "" {
 				continue
 			}
-			allRaw.WriteString(m.Text + "\n\n")
+			cleaned := cleanForGroq(m.Text)
+			if cleaned == "" {
+				continue
+			}
+			allRaw.WriteString(cleaned + "\n\n")
 			count++
 		}
 		channelLog = append(channelLog, chanDebug{ID: ch.ID, Name: ch.Name, Messages: count})
@@ -684,7 +823,7 @@ func weeklyGroqCall(groqKey, rawText string) []string {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		var err error
 		result, err = callGroqChat(ctx, groqKey, "llama-3.3-70b-versatile", weeklyGroqSystem,
-			"Week standup messages:\n\n"+rawText)
+			"Week standup messages:\n\n"+rawText, 2048)
 		cancel()
 		if err == nil && strings.TrimSpace(result) != "" {
 			break

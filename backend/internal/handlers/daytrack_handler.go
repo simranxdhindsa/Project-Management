@@ -323,7 +323,11 @@ Output only the bullets — nothing else.`
 	dtJSON(w, map[string]string{"summary": body})
 }
 
-func callGroqChat(ctx context.Context, apiKey, model, system, user string) (string, error) {
+func callGroqChat(ctx context.Context, apiKey, model, system, user string, maxTokens ...int) (string, error) {
+	tokens := 1024
+	if len(maxTokens) > 0 && maxTokens[0] > 0 {
+		tokens = maxTokens[0]
+	}
 	payload := map[string]interface{}{
 		"model": model,
 		"messages": []map[string]string{
@@ -332,6 +336,7 @@ func callGroqChat(ctx context.Context, apiKey, model, system, user string) (stri
 		},
 		"stream":      false,
 		"temperature": 0,
+		"max_tokens":  tokens,
 	}
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(b))
