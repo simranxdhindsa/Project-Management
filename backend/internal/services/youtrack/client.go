@@ -6,8 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-	"mime/multipart"
+"mime/multipart"
 	"net/http"
 	"net/url"
 	"sort"
@@ -1043,7 +1042,6 @@ func (c *Client) GetCurrentUser(ctx context.Context) (*User, error) {
 	if err := json.Unmarshal(body, &u); err != nil {
 		return nil, fmt.Errorf("GetCurrentUser unmarshal: %w", err)
 	}
-	log.Printf("[YT GetCurrentUser] id=%s login=%s fullName=%s", u.ID, u.Login, u.FullName)
 	return &u, nil
 }
 
@@ -1056,19 +1054,16 @@ func (c *Client) GetIssuesCreatedToday(ctx context.Context, date, reporterLogin 
 	if reporterLogin != "" {
 		queryStr += fmt.Sprintf(" reporter: %s", reporterLogin)
 	}
-	log.Printf("[YT GetIssuesCreatedToday] query=%q", queryStr)
 	fields := "id,idReadable,summary,created,reporter(id,fullName,login),customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id))"
 	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=100", fields, url.QueryEscape(queryStr))
 	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("GetIssuesCreatedToday: %w", err)
 	}
-	log.Printf("[YT GetIssuesCreatedToday] raw response: %s", string(body))
 	var issues []Issue
 	if err := json.Unmarshal(body, &issues); err != nil {
 		return nil, fmt.Errorf("GetIssuesCreatedToday unmarshal: %w", err)
 	}
-	log.Printf("[YT GetIssuesCreatedToday] found %d issues", len(issues))
 	return issues, nil
 }
 

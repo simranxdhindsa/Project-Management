@@ -231,8 +231,6 @@ func ProcessSlackDaytrackMessage(
 		return
 	}
 
-	log.Printf("DayTrack process: ts=%s clean=%q rules=%d", ts, cleanMsg, len(rules))
-
 	msgTime := slackTSToTime(ts)
 	timeStr := formatTimeAMPM(msgTime)
 	dateStr := msgTime.Format("2006-01-02")
@@ -241,8 +239,6 @@ func ProcessSlackDaytrackMessage(
 		if !matchKeywords(cleanMsg, rule.Keywords) {
 			continue
 		}
-		log.Printf("DayTrack process: matched rule type=%s category=%s", rule.RuleType, rule.Category)
-
 		switch rule.RuleType {
 		case "sign_in":
 			_, err := repo.CreateEntrySourced(ctx, userID, dateStr,

@@ -2969,8 +2969,6 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Could not identify YouTrack user", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("[ScanYTTickets] YouTrack identity: id=%s login=%s fullName=%s", ytMe.ID, ytMe.Login, ytMe.FullName)
-
 	today := time.Now().Format("2006-01-02")
 	issues, err := ytClient.GetIssuesCreatedToday(ctx, today, "")
 	if err != nil {
@@ -2978,8 +2976,6 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		http.Error(w, "YouTrack query failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	log.Printf("[ScanYTTickets] fetched %d issues created today, matching against YT user id=%s login=%s", len(issues), ytMe.ID, ytMe.Login)
 
 	added := 0
 	skipped := 0
@@ -2991,14 +2987,10 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 
 		reporterID := ""
 		reporterLogin := ""
-		reporterName := ""
 		if issue.Reporter != nil {
 			reporterID = issue.Reporter.ID
 			reporterLogin = issue.Reporter.Login
-			reporterName = issue.Reporter.FullName
 		}
-		log.Printf("[ScanYTTickets] issue=%s reporter_id=%q login=%q name=%q", issueID, reporterID, reporterLogin, reporterName)
-
 		// Match by YT user ID (most reliable), then login as fallback
 		idMatch := reporterID != "" && reporterID == ytMe.ID
 		loginMatch := reporterLogin != "" && strings.EqualFold(reporterLogin, ytMe.Login)
@@ -3089,12 +3081,11 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 				log.Printf("[ScanYTTickets] tested entry failed for %s: %v", issueID, createErr)
 			} else {
 				testedAdded++
-				log.Printf("[ScanYTTickets] tested entry logged: %s on %s", issueID, env)
+
 			}
 		}
 	}
 
-	log.Printf("[ScanYTTickets] done: created=%d skipped=%d tested=%d", added, skipped, testedAdded)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "added": added, "skipped": skipped, "tested": testedAdded})
 }
