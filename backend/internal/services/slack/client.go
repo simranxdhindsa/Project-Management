@@ -33,12 +33,14 @@ func NewClient(botToken string) *Client {
 
 // Message represents a Slack message
 type Message struct {
-	TS        string `json:"ts"`
-	User      string `json:"user"`
-	Text      string `json:"text"`
-	Type      string `json:"type"`
-	ThreadTS  string `json:"thread_ts,omitempty"`
-	ReplyCount int   `json:"reply_count,omitempty"`
+	TS         string `json:"ts"`
+	User       string `json:"user"`
+	Text       string `json:"text"`
+	Type       string `json:"type"`
+	Subtype    string `json:"subtype,omitempty"`
+	BotID      string `json:"bot_id,omitempty"`
+	ThreadTS   string `json:"thread_ts,omitempty"`
+	ReplyCount int    `json:"reply_count,omitempty"`
 }
 
 // Channel represents a Slack channel

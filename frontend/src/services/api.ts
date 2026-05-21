@@ -2606,6 +2606,18 @@ export const standupApi = {
       body: JSON.stringify({ date }),
     }),
 
+  parseOne: (rawText: string): Promise<{
+    success: boolean
+    sections?: UpdateSection[]
+    rate_limited?: boolean
+    retry_after?: number
+    error?: string
+  }> =>
+    dtFetch(`${API_URL}/standup/parse-one`, {
+      method: 'POST',
+      body: JSON.stringify({ raw_text: rawText }),
+    }),
+
   post: (updates: PersonUpdate[], channelId: string): Promise<{ success: boolean }> =>
     dtFetch(`${API_URL}/standup/post`, {
       method: 'POST',

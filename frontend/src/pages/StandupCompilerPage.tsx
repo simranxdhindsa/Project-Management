@@ -83,6 +83,8 @@ export function StandupCompilerPage() {
   const [compileError, setCompileError] = useState('')
   const [channelWarnings, setChannelWarnings] = useState<string[]>([])
   const [updates, setUpdates] = useState<PersonUpdate[]>([])
+  const [parseProgress, setParseProgress] = useState<{ current: number; total: number; name: string; countdown: number } | null>(null)
+  const parseAbortRef = useRef(false)
 
   // Post
   const [posting, setPosting] = useState(false)
@@ -155,21 +157,61 @@ export function StandupCompilerPage() {
   }
 
   async function compile() {
-    setCompiling(true); setCompileError(''); setUpdates([]); setPostMsg(''); setChannelWarnings([])
+    parseAbortRef.current = false
+    setCompiling(true); setCompileError(''); setUpdates([]); setPostMsg('')
+    setChannelWarnings([]); setParseProgress(null)
     try {
+      // Step 1: fetch Slack messages (fast — no Groq)
       const res = await standupApi.compile(compileDate !== today ? compileDate : undefined)
-      if (res.success) {
-        setUpdates(res.updates)
-        if (res.debug?.channels) {
-          const warns = (res.debug.channels as {id: string; name: string; messages_found: number; error?: string}[])
-            .filter(ch => ch.error)
-            .map(ch => `#${ch.name || ch.id}: ${ch.error}`)
-          setChannelWarnings(warns)
-        }
+      if (!res.success) { setCompileError('Compile failed'); return }
+
+      if (res.debug?.channels) {
+        const warns = (res.debug.channels as {id: string; name: string; messages_found: number; error?: string}[])
+          .filter(ch => ch.error)
+          .map(ch => `#${ch.name || ch.id}: ${ch.error}`)
+        setChannelWarnings(warns)
       }
+
+      // Show raw updates immediately so the user sees the list
+      setUpdates(res.updates)
+
+      // Step 2: parse each non-owner dev one at a time via /parse-one
+      const toProcess = res.updates
+        .map((u, i) => ({ ...u, _idx: i }))
+        .filter(u => !u.is_owner && u.raw_text?.trim())
+
+      for (let i = 0; i < toProcess.length; i++) {
+        if (parseAbortRef.current) break
+        const person = toProcess[i]
+        setParseProgress({ current: i + 1, total: toProcess.length, name: person.display_name, countdown: 0 })
+
+        let sections: UpdateSection[] = []
+        while (true) {
+          const pr = await standupApi.parseOne(person.raw_text)
+          if (pr.rate_limited) {
+            const secs = pr.retry_after ?? 30
+            for (let s = secs; s > 0; s--) {
+              if (parseAbortRef.current) break
+              setParseProgress(p => p ? { ...p, countdown: s } : p)
+              await new Promise(r => setTimeout(r, 1000))
+            }
+            setParseProgress(p => p ? { ...p, countdown: 0 } : p)
+            continue // retry same person
+          }
+          sections = pr.sections ?? []
+          break
+        }
+
+        setUpdates(prev => prev.map((u, i2) => i2 === person._idx ? { ...u, sections } : u))
+      }
+
+      setParseProgress(null)
     } catch (e: unknown) {
       setCompileError(e instanceof Error ? e.message : 'Compile failed')
-    } finally { setCompiling(false) }
+    } finally {
+      setCompiling(false)
+      setParseProgress(null)
+    }
   }
 
   async function postToSlack() {
@@ -459,14 +501,28 @@ export function StandupCompilerPage() {
             </div>
           )}
 
-          {compiling && (
+          {compiling && updates.length === 0 && (
             <div className="sc-loading">
               <div className="sc-spinner" />
-              Fetching from {cfg.source_channels.length} channel{cfg.source_channels.length !== 1 ? 's' : ''} and running AI…
+              Fetching messages from {cfg.source_channels.length} channel{cfg.source_channels.length !== 1 ? 's' : ''}…
             </div>
           )}
 
-          {!compiling && updates.length > 0 && (
+          {parseProgress && (
+            <div className="sc-parse-progress">
+              <div className="sc-parse-bar-wrap">
+                <div className="sc-parse-bar-fill" style={{ width: `${Math.round((parseProgress.current / parseProgress.total) * 100)}%` }} />
+              </div>
+              <span className="sc-parse-label">
+                {parseProgress.countdown > 0
+                  ? <><RefreshCw size={12} /> Rate limit — resuming in {parseProgress.countdown}s</>
+                  : <>{parseProgress.current} / {parseProgress.total} — parsing {parseProgress.name}…</>
+                }
+              </span>
+            </div>
+          )}
+
+          {updates.length > 0 && (
             <div className="sc-preview">
               <div className="sc-preview-header">
                 <h3 className="sc-preview-title">Preview — {updates.length} developer{updates.length !== 1 ? 's' : ''}</h3>
@@ -477,7 +533,7 @@ export function StandupCompilerPage() {
             </div>
           )}
 
-          {!compiling && updates.length === 0 && !compileError && (
+          {!compiling && !parseProgress && updates.length === 0 && !compileError && (
             <div className="sc-empty">Configure channels above and click "Compile Updates" to get started.</div>
           )}
         </>

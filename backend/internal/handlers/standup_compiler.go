@@ -22,6 +22,8 @@ var (
 	reStandupURL     = regexp.MustCompile(`<https?://[^>]*>`)
 	reStandupEmoji   = regexp.MustCompile(`:[a-z0-9_+\-]+:`)
 	reStandupEdited  = regexp.MustCompile(`\s*\(edited\)\s*$`)
+	// Matches stray " Groq inserts between sections array close ] and root object close }
+	reStrayEndQuote  = regexp.MustCompile(`\](\s*)"\s*}`)
 )
 
 // cleanForGroq strips Slack mrkdwn noise before sending to Groq.
@@ -327,6 +329,10 @@ func (h *StandupCompilerHandler) Compile(w http.ResponseWriter, r *http.Request)
 		}
 		count := 0
 		for _, m := range msgs {
+			// Skip bot messages and app posts
+			if m.BotID != "" || m.Subtype == "bot_message" || m.Subtype == "app_mention" {
+				continue
+			}
 			if m.User == "" || strings.TrimSpace(m.Text) == "" {
 				continue
 			}
@@ -364,51 +370,34 @@ func (h *StandupCompilerHandler) Compile(w http.ResponseWriter, r *http.Request)
 
 	groqKey := os.Getenv("GROQ_API_KEY")
 
-	// Build worker list — exclude owner (their section comes from DayTrack)
-	type personWork struct{ uid, rawText string }
-	var workers []personWork
+	// Build raw updates — no Groq here. The frontend calls /parse-one per person
+	// sequentially (same pattern as deployment report) with a progress bar.
+	var updates []PersonUpdate
 	for uid, text := range userMessages {
 		if uid == ownerSlackID {
 			continue
 		}
-		workers = append(workers, personWork{uid, text})
+		updates = append(updates, PersonUpdate{
+			SlackUserID: uid,
+			DisplayName: displayNames[uid],
+			RawText:     text,
+			Sections:    []UpdateSection{},
+		})
 	}
 
-	// Process one developer at a time to avoid Groq token/rate limits
-	// (same pattern as deployment report — sequential, not concurrent)
-	updates := make([]PersonUpdate, len(workers))
-	for i, pw := range workers {
-		sections := standupGroqParse(groqKey, pw.rawText)
-		updates[i] = PersonUpdate{
-			SlackUserID: pw.uid,
-			DisplayName: displayNames[pw.uid],
-			RawText:     pw.rawText,
-			Sections:    sections,
-		}
-		if i < len(workers)-1 {
-			time.Sleep(300 * time.Millisecond) // small pause between calls
-		}
-	}
-
-	// Owner section from DayTrack
+	// Owner section from DayTrack (still processed server-side — uses DB, not Groq rate limit)
 	ownerUpdate := standupBuildOwnerSection(r.Context(), user.ID, user.Name, today, groqKey)
 	ownerUpdate.SlackUserID = ownerSlackID
 	ownerUpdate.IsOwner = true
 
-	// Strip empty sections across all updates
-	stripEmpty := func(p *PersonUpdate) {
-		out := p.Sections[:0]
-		for _, sec := range p.Sections {
-			if len(sec.Items) > 0 {
-				out = append(out, sec)
-			}
+	// Strip empty items from owner sections
+	out := ownerUpdate.Sections[:0]
+	for _, sec := range ownerUpdate.Sections {
+		if len(sec.Items) > 0 {
+			out = append(out, sec)
 		}
-		p.Sections = out
 	}
-	stripEmpty(&ownerUpdate)
-	for i := range updates {
-		stripEmpty(&updates[i])
-	}
+	ownerUpdate.Sections = out
 
 	result := append([]PersonUpdate{ownerUpdate}, updates...)
 
@@ -453,6 +442,120 @@ func (h *StandupCompilerHandler) Post(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// ParseOne runs Groq on a single developer's raw Slack text and returns their
+// structured sections. Returns a rate-limited response (with retry_after) when
+// Groq throttles, so the frontend can countdown and retry — same as generate-ticket.
+// POST /api/standup/parse-one
+func (h *StandupCompilerHandler) ParseOne(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		RawText string `json:"raw_text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	groqKey := os.Getenv("GROQ_API_KEY")
+	if groqKey == "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":  true,
+			"sections": []UpdateSection{},
+		})
+		return
+	}
+
+	userMsg := "Developer update:\n" + req.RawText
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := callGroqChat(ctx, groqKey, "llama-3.3-70b-versatile", standupGroqSystem, userMsg, 2048)
+	if err != nil {
+		lower := strings.ToLower(err.Error())
+		isRate := strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
+			strings.Contains(lower, "429") || strings.Contains(lower, "too many") ||
+			strings.Contains(lower, "tokens per minute") || strings.Contains(lower, "try again in")
+		if isRate {
+			retryAfter := standupParseRetryAfter(err.Error())
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":     false,
+				"rate_limited": true,
+				"retry_after": retryAfter,
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":  false,
+			"sections": []UpdateSection{},
+			"error":    err.Error(),
+		})
+		return
+	}
+
+	// Parse + repair JSON
+	raw := reStrayEndQuote.ReplaceAllString(strings.TrimSpace(result), `]$1}`)
+	clean := extractBalancedJSON(raw)
+	var parsed struct {
+		Sections []UpdateSection `json:"sections"`
+	}
+	if err2 := json.Unmarshal([]byte(clean), &parsed); err2 != nil {
+		repaired := repairJSON(clean)
+		if err3 := json.Unmarshal([]byte(repaired), &parsed); err3 != nil {
+			log.Printf("[StandupCompiler/ParseOne] parse failed: %v | raw: %.200s", err3, clean)
+		}
+	}
+
+	// Filter out In Progress / Blocked / WIP sections and empty items
+	var sections []UpdateSection
+	for _, sec := range parsed.Sections {
+		lower := strings.ToLower(sec.Label)
+		if strings.Contains(lower, "in progress") || strings.Contains(lower, "in progess") ||
+			strings.Contains(lower, "wip") || strings.Contains(lower, "blocked") {
+			continue
+		}
+		var items []string
+		for _, it := range sec.Items {
+			if strings.TrimSpace(it) != "" {
+				items = append(items, it)
+			}
+		}
+		if len(items) > 0 {
+			sections = append(sections, UpdateSection{Label: sec.Label, Items: items})
+		}
+	}
+	if sections == nil {
+		sections = []UpdateSection{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":  true,
+		"sections": sections,
+	})
+}
+
+// standupParseRetryAfter extracts the wait seconds from a Groq rate-limit error.
+func standupParseRetryAfter(msg string) int {
+	// Try to find "try again in Xs" pattern
+	re := regexp.MustCompile(`(?i)try again in (\d+)`)
+	if m := re.FindStringSubmatch(msg); len(m) > 1 {
+		var n int
+		fmt.Sscanf(m[1], "%d", &n)
+		if n > 0 {
+			return n
+		}
+	}
+	return 30 // sensible default
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────
@@ -556,8 +659,13 @@ func standupGroqParse(groqKey, rawText string) []UpdateSection {
 		break
 	}
 
+	// Pre-clean: Groq sometimes inserts a stray " between the sections array ] and
+	// the root object }, producing ...]"} which breaks all parsers. Strip it first.
+	raw := strings.TrimSpace(result)
+	raw = reStrayEndQuote.ReplaceAllString(raw, `]$1}`)
+
 	// 1. Extract the first balanced JSON object (strips pre/post commentary)
-	clean := extractBalancedJSON(strings.TrimSpace(result))
+	clean := extractBalancedJSON(raw)
 
 	var parsed struct {
 		Sections []UpdateSection `json:"sections"`
@@ -749,6 +857,10 @@ func (h *StandupCompilerHandler) Weekly(w http.ResponseWriter, r *http.Request) 
 		}
 		count := 0
 		for _, m := range msgs {
+			// Skip bot messages and app posts
+			if m.BotID != "" || m.Subtype == "bot_message" || m.Subtype == "app_mention" {
+				continue
+			}
 			if m.User == "" || strings.TrimSpace(m.Text) == "" {
 				continue
 			}

@@ -597,7 +597,7 @@ func QueryWithHistory(ctx context.Context, systemPrompt string, history []ConvMe
 	default:
 		apiURL = "https://api.groq.com/openai/v1/chat/completions"
 		apiKey = os.Getenv("GROQ_API_KEY")
-		model = "llama-3.1-8b-instant"
+		model = "llama-3.3-70b-versatile"
 	}
 
 	if apiKey == "" {

@@ -247,6 +247,7 @@ func main() {
 	standupRoutes.HandleFunc("/config", standupHandler.GetConfig).Methods("GET")
 	standupRoutes.HandleFunc("/config", standupHandler.SaveConfig).Methods("PUT")
 	standupRoutes.HandleFunc("/compile", standupHandler.Compile).Methods("POST")
+	standupRoutes.HandleFunc("/parse-one", standupHandler.ParseOne).Methods("POST")
 	standupRoutes.HandleFunc("/post", standupHandler.Post).Methods("POST")
 	standupRoutes.HandleFunc("/weekly", standupHandler.Weekly).Methods("POST")
 
