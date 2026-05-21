@@ -6,8 +6,10 @@ import {
 } from 'lucide-react'
 import { marked } from 'marked'
 import api from '../services/api'
-import type { YouTrackUser, YouTrackState, DeveloperSubsystemConfig } from '../services/api'
+import type { YouTrackUser, YouTrackState, DeveloperSubsystemConfig, YouTrackIssue } from '../services/api'
 import MicButton from './MicButton'
+import { IssueDetailPanel } from './IssueDetailPanel'
+import { useYouTrackBaseUrl } from '../hooks/useYouTrackBaseUrl'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +59,11 @@ function parseEstimation(raw: string): number | undefined {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModalProps) {
+  const ytBaseUrl = useYouTrackBaseUrl()
+
+  // After creation, store the full issue and switch to IssueDetailPanel view
+  const [createdFullIssue, setCreatedFullIssue] = useState<YouTrackIssue | null>(null)
+
   const [form, setForm] = useState<CreateIssueFormData>({
     summary: '', description: '', state: '', priority: 'Normal',
     type_name: '', assignee_login: '', assignee_name: '', assignee_avatar: '',
@@ -282,9 +289,17 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
         setCreated(true)
         setCreatedIssueId(id)
         setCreatedReadableId(readable)
-        setIsViewMode(true)
-        setDescMode('visual')
         onCreated()
+        // Fetch full issue to switch to unified IssueDetailPanel view
+        try {
+          const fullRes = await api.getYouTrackIssue(readable || id)
+          const fullIssue = (fullRes as any).data ?? fullRes
+          if (fullIssue?.id) setCreatedFullIssue(fullIssue as YouTrackIssue)
+          else { setIsViewMode(true); setDescMode('visual') }
+        } catch {
+          setIsViewMode(true)
+          setDescMode('visual')
+        }
       } else {
         setError('Failed to create issue')
       }
@@ -369,6 +384,11 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
 
   // Priority display
   const priorityDisplay = meta.priorities.find(p => p.name === form.priority) ?? null
+
+  // After successful creation, delegate entirely to IssueDetailPanel (single source of truth)
+  if (createdFullIssue) {
+    return <IssueDetailPanel issue={createdFullIssue} onClose={onClose} ytBaseUrl={ytBaseUrl} />
+  }
 
   return (
     <div className="ci-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>

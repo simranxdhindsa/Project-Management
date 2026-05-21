@@ -11,6 +11,7 @@ import api from '@/services/api'
 import type { YouTrackIssue, YouTrackComment, IssueStateLogEntry, YouTrackUser } from '@/services/api'
 import { getActiveSource } from '@/services/pmDataService'
 import { AttachmentViewer } from '@/components/AttachmentViewer'
+import { useYouTrackBaseUrl } from '@/hooks/useYouTrackBaseUrl'
 
 interface IssueDetailPanelProps {
   issue: YouTrackIssue
@@ -191,8 +192,10 @@ function InlineSelect({
   )
 }
 
-export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanelProps) {
+export function IssueDetailPanel({ issue, onClose, ytBaseUrl: ytBaseUrlProp }: IssueDetailPanelProps) {
   const isYouTrack = getActiveSource() === 'youtrack'
+  const fetchedBaseUrl = useYouTrackBaseUrl()
+  const ytBaseUrl = ytBaseUrlProp || fetchedBaseUrl
 
   // Local editable state (mirrors issue props, updated optimistically)
   const [localStatus,   setLocalStatus]   = useState(issue.status || '')
@@ -233,7 +236,7 @@ export function IssueDetailPanel({ issue, onClose, ytBaseUrl }: IssueDetailPanel
   // Display ID — prefer readable (ARD-1767) over internal (3-3797)
   const displayId = issue.idReadable || issue.id
   const issueUrl  = isYouTrack
-    ? `${ytBaseUrl || 'https://youtrack.jetbrains.com'}/issue/${displayId}`
+    ? `${ytBaseUrl}/issue/${displayId}`
     : (issue.permalink || '#')
 
   // ── Load options on mount ────────────────────────────────────────────────

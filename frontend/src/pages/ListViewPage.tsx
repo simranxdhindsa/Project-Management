@@ -10,19 +10,18 @@ import { getPMIssues, getPMStates, getActiveSource } from '@/services/pmDataServ
 import api, { type YouTrackSprint, getYouTrackAvatarMap } from '@/services/api'
 import { CalendarDays } from 'lucide-react'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
+import { useYouTrackBaseUrl } from '@/hooks/useYouTrackBaseUrl'
 
 type SortField = 'summary' | 'priority' | 'assignee' | 'updated' | 'created' | 'due_date'
 type SortDir   = 'asc' | 'desc'
-
-const YT_BASE = 'https://simran.youtrack.cloud/issue/'
 
 const PRIORITY_ORDER: Record<string, number> = {
   'show-stopper': 0, critical: 1, major: 2, normal: 3, minor: 4, cosmetic: 5,
 }
 
-function getIssueUrl(issue: YouTrackIssue): string {
+function getIssueUrl(issue: YouTrackIssue, ytBaseUrl: string): string {
   if (getActiveSource() === 'asana' && issue.permalink) return issue.permalink
-  return `${YT_BASE}${issue.idReadable || issue.id}`
+  return `${ytBaseUrl}/issue/${issue.idReadable || issue.id}`
 }
 
 function getPriorityClass(p: string) {
@@ -212,6 +211,7 @@ function SectionGroup({
 // ── Main Component ────────────────────────────────────────────────────────────
 export function ListViewPage() {
   const { user } = useAuth()
+  const ytBaseUrl = useYouTrackBaseUrl()
   const [issues, setIssues]           = useState<YouTrackIssue[]>([])
   const [sectionOrder, setSectionOrder] = useState<string[]>([])
   const [loading, setLoading]         = useState(true)
@@ -362,9 +362,9 @@ export function ListViewPage() {
   const selectedIssues = useMemo(() => flatList.filter(i => selectedIds.has(i.id)), [flatList, selectedIds])
 
   const copySelected = async () => {
-    const plain = selectedIssues.map(i => `${i.summary} — ${getIssueUrl(i)}`).join('\n')
+    const plain = selectedIssues.map(i => `${i.summary} — ${getIssueUrl(i, ytBaseUrl)}`).join('\n')
     const html  = selectedIssues.map(i =>
-      `<a href="${getIssueUrl(i)}">${i.summary.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</a>`
+      `<a href="${getIssueUrl(i, ytBaseUrl)}">${i.summary.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</a>`
     ).join('<br>')
     try {
       await navigator.clipboard.write([new ClipboardItem({
@@ -585,7 +585,7 @@ export function ListViewPage() {
         <IssueDetailPanel
           issue={selectedIssue}
           onClose={() => setSelectedIssue(null)}
-          ytBaseUrl="https://simran.youtrack.cloud/issue"
+          ytBaseUrl={ytBaseUrl}
         />
       )}
     </div>

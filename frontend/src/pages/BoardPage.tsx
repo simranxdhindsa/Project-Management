@@ -10,6 +10,7 @@ import type { YouTrackIssue, YouTrackSprint } from '../services/api'
 import { getPMIssues, updatePMIssueState, getPMStates, getActiveSource } from '../services/pmDataService'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import { useSprintsCache } from '@/contexts/VelocityDataContext'
+import { useYouTrackBaseUrl } from '@/hooks/useYouTrackBaseUrl'
 
 const PAGE_SIZE = 20
 
@@ -60,11 +61,10 @@ function isOverdue(issue: YouTrackIssue): boolean {
 
 type SortKey = 'newest' | 'priority' | 'alpha'
 
-const YT_BASE_URL = 'https://simran.youtrack.cloud/issue/'
-
 // ── Main Page ────────────────────────────────────────────────────────────────
 
 export function BoardPage() {
+  const ytBaseUrl = useYouTrackBaseUrl()
   const [issues, setIssues] = useState<YouTrackIssue[]>([])
   const [columns, setColumns] = useState<string[]>([])
   const [colPagination, setColPagination] = useState<Record<string, ColPaginationState>>({})
@@ -582,7 +582,7 @@ export function BoardPage() {
         <IssueDetailPanel
           issue={selectedIssue}
           onClose={() => setSelectedIssue(null)}
-          ytBaseUrl={YT_BASE_URL.replace('/issue/', '/issue')}
+          ytBaseUrl={ytBaseUrl}
         />
       )}
     </div>
