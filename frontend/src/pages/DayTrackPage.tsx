@@ -860,15 +860,15 @@ export function DayTrackPage() {
     const dur = calcDuration(eStart, eEnd)
     const newStatus = (eStart && eEnd) ? 'done' : editEntry.status
     try {
-      await dayTrackApi.updateEntry(editEntry.id, {
+      const updated = await dayTrackApi.updateEntry(editEntry.id, {
         name: eName || editEntry.name,
         category: eCat,
         start_time: eStart, end_time: eEnd,
         duration_mins: dur, notes: eNotes,
         status: newStatus,
       })
+      setEntries(prev => prev.map(e => e.id === updated.id ? updated : e))
       setEditEntry(null)
-      await loadAll()
       toast('Entry updated')
     } catch { toast('Failed to update', 'warn') }
   }
