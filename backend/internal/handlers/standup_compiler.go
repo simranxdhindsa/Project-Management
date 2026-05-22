@@ -24,8 +24,9 @@ var (
 	reStandupEdited   = regexp.MustCompile(`\s*\(edited\)\s*$`)
 	// Matches stray " Groq inserts between sections array close ] and root object close }
 	reStrayEndQuote   = regexp.MustCompile(`\](\s*)"\s*}`)
-	// Extracts ticket ID from YouTrack URLs (plain text, not Slack mrkdwn)
-	// e.g. https://loop.youtrack.cloud/...?...&issue=ARD-1850 → ARD-1850
+	// Extracts ticket ID from Slack-wrapped YouTrack URLs: <https://...?issue=ARD-1850>
+	reYouTrackSlack   = regexp.MustCompile(`<https?://[^>]*[?&]issue=([A-Z]+-\d+)[^>]*>`)
+	// Extracts ticket ID from plain-text YouTrack URLs: https://...?issue=ARD-1850
 	reYouTrackIssue   = regexp.MustCompile(`https?://\S*[?&]issue=([A-Z]+-\d+)\S*`)
 	// Strips any remaining plain-text https?:// URLs after ticket extraction
 	rePlainURL        = regexp.MustCompile(`https?://\S+`)
@@ -121,10 +122,12 @@ func repairJSON(s string) string {
 func cleanForGroq(text string) string {
 	text = reStandupEdited.ReplaceAllString(text, "")
 	text = reStandupMention.ReplaceAllString(text, "")        // remove <@UXXX>
-	text = reStandupLink.ReplaceAllString(text, "$1")         // keep display text of Slack links
-	text = reStandupURL.ReplaceAllString(text, "")            // strip Slack-wrapped URLs <https://...>
-	// Extract ticket IDs from plain-text YouTrack URLs before stripping them
-	// e.g. https://loop.youtrack.cloud/...?issue=ARD-1850 → ARD-1850
+	text = reStandupLink.ReplaceAllString(text, "$1")         // keep display text of <url|label> links
+	// Extract ticket IDs from Slack-wrapped YouTrack URLs BEFORE stripping them
+	// e.g. <https://loop.youtrack.cloud/...?issue=ARD-1850> → ARD-1850
+	text = reYouTrackSlack.ReplaceAllString(text, "$1")
+	text = reStandupURL.ReplaceAllString(text, "")            // strip remaining Slack-wrapped URLs
+	// Extract ticket IDs from plain-text YouTrack URLs
 	text = reYouTrackIssue.ReplaceAllString(text, "$1")
 	text = rePlainURL.ReplaceAllString(text, "")              // strip remaining plain URLs
 	text = reStandupEmoji.ReplaceAllString(text, "")          // strip :emoji:

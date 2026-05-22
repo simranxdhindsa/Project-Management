@@ -276,6 +276,56 @@
   flex-wrap: wrap;
 }
 
+/* Cancel button — appears in place of Compile while running */
+.sc-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.08);
+  color: #ef4444;
+  transition: background 180ms ease, border-color 180ms ease, transform 80ms ease;
+}
+.sc-cancel-btn:hover {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.6);
+}
+.sc-cancel-btn:active {
+  transform: scale(0.97);
+}
+
+[data-theme="light"] .sc-cancel-btn {
+  background: rgba(220, 38, 38, 0.06);
+  border-color: rgba(220, 38, 38, 0.3);
+  color: #dc2626;
+}
+[data-theme="light"] .sc-cancel-btn:hover {
+  background: rgba(220, 38, 38, 0.12);
+}
+
+/* Glitch flash when returning to "Compile Updates" after cancel */
+@keyframes sc-glitch-in {
+  0%   { opacity: 0; transform: translateX(-4px) scaleX(0.96); filter: blur(2px); }
+  30%  { opacity: 1; transform: translateX(2px) scaleX(1.01); filter: blur(0); }
+  50%  { transform: translateX(-1px) scaleX(0.99); }
+  70%  { transform: translateX(1px); }
+  100% { opacity: 1; transform: translateX(0) scaleX(1); filter: blur(0); }
+}
+@keyframes sc-colour-wash {
+  0%   { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.4); color: #ef4444; }
+  45%  { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.2); color: #ef4444; }
+  100% { background: ''; border-color: ''; color: inherit; }
+}
+.sc-cancelled-flash {
+  animation: sc-glitch-in 320ms cubic-bezier(0.22,1,0.36,1) both,
+             sc-colour-wash 1.8s ease forwards;
+}
+
 .sc-status-msg {
   font-size: 0.78rem;
   color: var(--text-muted);

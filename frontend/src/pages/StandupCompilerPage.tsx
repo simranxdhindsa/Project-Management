@@ -85,6 +85,7 @@ export function StandupCompilerPage() {
   const [updates, setUpdates] = useState<PersonUpdate[]>([])
   const [parseProgress, setParseProgress] = useState<{ current: number; total: number; name: string; countdown: number } | null>(null)
   const parseAbortRef = useRef(false)
+  const [cancelled, setCancelled] = useState(false)
 
   // Post
   const [posting, setPosting] = useState(false)
@@ -156,8 +157,15 @@ export function StandupCompilerPage() {
     finally { setSaving(false) }
   }
 
+  function cancelCompile() {
+    parseAbortRef.current = true
+    setCancelled(true)
+    setTimeout(() => setCancelled(false), 2000)
+  }
+
   async function compile() {
     parseAbortRef.current = false
+    setCancelled(false)
     setCompiling(true); setCompileError(''); setUpdates([]); setPostMsg('')
     setChannelWarnings([]); setParseProgress(null)
     try {
@@ -186,7 +194,7 @@ export function StandupCompilerPage() {
         setParseProgress({ current: i + 1, total: toProcess.length, name: person.display_name, countdown: 0 })
 
         let sections: UpdateSection[] = []
-        while (true) {
+        while (!parseAbortRef.current) {
           const pr = await standupApi.parseOne(person.raw_text)
           if (pr.rate_limited) {
             const secs = pr.retry_after ?? 30
@@ -195,8 +203,9 @@ export function StandupCompilerPage() {
               setParseProgress(p => p ? { ...p, countdown: s } : p)
               await new Promise(r => setTimeout(r, 1000))
             }
+            if (parseAbortRef.current) break  // exit while, don't retry
             setParseProgress(p => p ? { ...p, countdown: 0 } : p)
-            continue // retry same person
+            continue // retry same person after countdown
           }
           sections = pr.sections ?? []
           break
@@ -484,11 +493,22 @@ export function StandupCompilerPage() {
               className="sc-input"
               value={compileDate}
               onChange={e => setCompileDate(e.target.value)}
+              disabled={compiling}
             />
-            <button className="btn btn-secondary btn-sm" onClick={compile} disabled={compiling}>
-              <RefreshCw size={13} />
-              {compiling ? 'Compiling…' : 'Compile Updates'}
-            </button>
+            {compiling ? (
+              <button className="sc-cancel-btn" onClick={cancelCompile}>
+                <X size={13} />
+                {cancelled ? 'Cancelling…' : 'Cancel'}
+              </button>
+            ) : (
+              <button
+                className={`btn btn-secondary btn-sm${cancelled ? ' sc-cancelled-flash' : ''}`}
+                onClick={compile}
+              >
+                <RefreshCw size={13} className={cancelled ? '' : ''} />
+                {cancelled ? 'Cancelled' : 'Compile Updates'}
+              </button>
+            )}
             {postMsg && <span className="sc-status-msg">{postMsg}</span>}
           </div>
 
