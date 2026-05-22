@@ -637,6 +637,53 @@ func (h *DayTrackHandler) DeleteCategory(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// daytracBuildSlackSections builds structured sections from DayTrack entries for Slack posting.
+// Uses original category names as-is and correctly separates yt-tested entries into "Tickets Tested".
+func daytracBuildSlackSections(entries []database.DayTrackEntry, displayName string) PersonUpdate {
+	skipCat := map[string]bool{
+		"sign in": true, "sign off": true, "signing in": true, "signing off": true,
+		"time on": true, "time off": true, "time on/off": true,
+		"break": true, "breaks": true,
+		"meeting": true, "meetings": true,
+	}
+
+	sectionMap := map[string][]string{}
+	var order []string
+
+	for _, e := range entries {
+		if e.ParentEntryID != nil && *e.ParentEntryID != "" {
+			continue
+		}
+		cat := strings.ToLower(strings.TrimSpace(e.Category))
+		if skipCat[cat] {
+			continue
+		}
+
+		// yt-tested entries live in Testing category in DB; separate them here
+		sec := e.Category
+		if strings.HasPrefix(e.ExternalRef, "yt-tested-") {
+			sec = "Tickets Tested"
+		}
+
+		if _, seen := sectionMap[sec]; !seen {
+			order = append(order, sec)
+		}
+		item := e.Name
+		if e.Notes != "" {
+			item += " — " + e.Notes
+		}
+		sectionMap[sec] = append(sectionMap[sec], item)
+	}
+
+	var sections []UpdateSection
+	for _, label := range order {
+		if len(sectionMap[label]) > 0 {
+			sections = append(sections, UpdateSection{Label: label, Items: sectionMap[label]})
+		}
+	}
+	return PersonUpdate{DisplayName: displayName, Sections: sections}
+}
+
 // PostToSlack formats today's DayTrack entries as a standup update and posts to the configured destination channel.
 func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUserFromContext(r)
@@ -649,17 +696,14 @@ func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no destination channel configured", http.StatusBadRequest)
 		return
 	}
-	groqKey := os.Getenv("GROQ_API_KEY")
 	today := time.Now().Format("2006-01-02")
-	ownerUpdate := standupBuildOwnerSection(r.Context(), user.ID, user.Name, today, groqKey)
-	ownerUpdate.IsOwner = true
-	filtered := ownerUpdate.Sections[:0]
-	for _, sec := range ownerUpdate.Sections {
-		if len(sec.Items) > 0 {
-			filtered = append(filtered, sec)
-		}
+	entries, err := h.repo.GetEntries(r.Context(), user.ID, today)
+	if err != nil || len(entries) == 0 {
+		http.Error(w, "no entries for today", http.StatusBadRequest)
+		return
 	}
-	ownerUpdate.Sections = filtered
+	ownerUpdate := daytracBuildSlackSections(entries, user.Name)
+	ownerUpdate.IsOwner = true
 	if len(ownerUpdate.Sections) == 0 {
 		http.Error(w, "no entries for today", http.StatusBadRequest)
 		return

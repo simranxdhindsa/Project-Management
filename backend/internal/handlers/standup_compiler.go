@@ -717,8 +717,6 @@ func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, _ 
 		"meeting": true, "meetings": true,
 	}
 
-	// Use DayTrack categories directly as section labels — no AI needed.
-	// Only remap categories that need a friendlier label.
 	catToSection := map[string]string{
 		"development":        "Done Today",
 		"review":             "Done Today",
@@ -739,10 +737,7 @@ func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, _ 
 		}
 		sec, ok := catToSection[cat]
 		if !ok {
-			sec = e.Category // use the category name as-is (Testing, Tickets Created, Tickets Tested, Research, …)
-		}
-		if e.Status == "active" || e.Status == "in_progress" {
-			sec = "In Progress"
+			sec = e.Category
 		}
 		if _, seen := sectionMap[sec]; !seen {
 			order = append(order, sec)

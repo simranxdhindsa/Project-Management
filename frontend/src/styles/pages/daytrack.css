@@ -1488,7 +1488,7 @@
 
 /* ── Post to Slack button ──────────────────────────────────────────────────── */
 .dt-post-slack-btn {
-  background: #16a34a;
+  background: var(--color-primary);
   color: #fff;
   border: none;
   cursor: pointer;
@@ -1502,9 +1502,9 @@
   transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
 }
 .dt-post-slack-btn:hover:not(:disabled) {
-  background: #15803d;
+  background: var(--color-primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(22,163,74,0.35);
+  box-shadow: var(--shadow-glow-sm);
 }
 .dt-post-slack-btn:active:not(:disabled) {
   transform: translateY(0);
@@ -1512,13 +1512,6 @@
 .dt-post-slack-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-[data-theme="light"] .dt-post-slack-btn {
-  background: #16a34a;
-}
-[data-theme="light"] .dt-post-slack-btn:hover:not(:disabled) {
-  background: #15803d;
-  box-shadow: 0 4px 12px rgba(22,163,74,0.25);
 }
 
 @keyframes spin {
