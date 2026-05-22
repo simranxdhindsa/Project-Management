@@ -992,6 +992,7 @@ func standupFormatMrkdwn(updates []PersonUpdate) string {
 			for _, item := range sec.Items {
 				sb.WriteString("• " + item + "\n")
 			}
+			sb.WriteString("\n") // blank line between sections
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
