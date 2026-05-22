@@ -108,6 +108,18 @@ func classifyPMQueryIntent(query string, issues []youtrack.Issue) pmQueryIntent 
 	q := strings.ToLower(strings.TrimSpace(query))
 	words := strings.Fields(q)
 
+	// Pipeline status MUST run first — queries with "status/pending/dev/stage" etc.
+	// would otherwise be swallowed by the summary check below.
+	pipelineHits := 0
+	for _, kw := range pipelineKW {
+		if strings.Contains(q, kw) {
+			pipelineHits++
+		}
+	}
+	if pipelineHits >= 2 {
+		return pmQueryIntent{kind: intentPipelineStatus}
+	}
+
 	// Short greeting check (≤6 words that start with a greeting word)
 	if len(words) <= 6 {
 		for _, g := range greetingPhrases {
@@ -133,17 +145,6 @@ func classifyPMQueryIntent(query string, issues []youtrack.Issue) pmQueryIntent 
 		if strings.Contains(q, d) {
 			return pmQueryIntent{kind: intentSprintOverview}
 		}
-	}
-
-	// Pipeline status: 2+ pipeline-stage keywords → multi-state QA overview
-	pipelineHits := 0
-	for _, kw := range pipelineKW {
-		if strings.Contains(q, kw) {
-			pipelineHits++
-		}
-	}
-	if pipelineHits >= 2 {
-		return pmQueryIntent{kind: intentPipelineStatus}
 	}
 
 	// Specific issue ID (e.g. ARD-1160)

@@ -2539,6 +2539,17 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	log.Printf("[PM-RAG] query=%q intent=%s sprint_issues=%d tracking_rows=%d context_bytes=%d",
 		req.Query, ragIntent.kind, len(sprintIssues), len(trackingLogs), len(ragContext))
 
+	// Pipeline status: the Go code already computed the full answer — return it directly,
+	// bypassing the LLM to guarantee zero hallucination.
+	if ragIntent.kind == intentPipelineStatus {
+		sendJSON(w, http.StatusOK, Response{Success: true, Data: map[string]interface{}{
+			"response": ragContext,
+			"action":   "",
+			"payload":  nil,
+		}})
+		return
+	}
+
 
 	// ── 7. Inject available sprints + sprint-action instructions ─────────────
 	if len(availableSprints) > 0 {

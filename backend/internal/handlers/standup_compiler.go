@@ -17,13 +17,18 @@ import (
 )
 
 var (
-	reStandupMention = regexp.MustCompile(`<@[A-Z0-9]+>`)
-	reStandupLink    = regexp.MustCompile(`<https?://[^|>]*\|([^>]*)>`)
-	reStandupURL     = regexp.MustCompile(`<https?://[^>]*>`)
-	reStandupEmoji   = regexp.MustCompile(`:[a-z0-9_+\-]+:`)
-	reStandupEdited  = regexp.MustCompile(`\s*\(edited\)\s*$`)
+	reStandupMention  = regexp.MustCompile(`<@[A-Z0-9]+>`)
+	reStandupLink     = regexp.MustCompile(`<https?://[^|>]*\|([^>]*)>`)
+	reStandupURL      = regexp.MustCompile(`<https?://[^>]*>`)
+	reStandupEmoji    = regexp.MustCompile(`:[a-z0-9_+\-]+:`)
+	reStandupEdited   = regexp.MustCompile(`\s*\(edited\)\s*$`)
 	// Matches stray " Groq inserts between sections array close ] and root object close }
-	reStrayEndQuote  = regexp.MustCompile(`\](\s*)"\s*}`)
+	reStrayEndQuote   = regexp.MustCompile(`\](\s*)"\s*}`)
+	// Extracts ticket ID from YouTrack URLs (plain text, not Slack mrkdwn)
+	// e.g. https://loop.youtrack.cloud/...?...&issue=ARD-1850 → ARD-1850
+	reYouTrackIssue   = regexp.MustCompile(`https?://\S*[?&]issue=([A-Z]+-\d+)\S*`)
+	// Strips any remaining plain-text https?:// URLs after ticket extraction
+	rePlainURL        = regexp.MustCompile(`https?://\S+`)
 )
 
 // cleanForGroq strips Slack mrkdwn noise before sending to Groq.
@@ -116,8 +121,12 @@ func repairJSON(s string) string {
 func cleanForGroq(text string) string {
 	text = reStandupEdited.ReplaceAllString(text, "")
 	text = reStandupMention.ReplaceAllString(text, "")        // remove <@UXXX>
-	text = reStandupLink.ReplaceAllString(text, "$1")         // keep display text of links
-	text = reStandupURL.ReplaceAllString(text, "")            // strip bare URLs
+	text = reStandupLink.ReplaceAllString(text, "$1")         // keep display text of Slack links
+	text = reStandupURL.ReplaceAllString(text, "")            // strip Slack-wrapped URLs <https://...>
+	// Extract ticket IDs from plain-text YouTrack URLs before stripping them
+	// e.g. https://loop.youtrack.cloud/...?issue=ARD-1850 → ARD-1850
+	text = reYouTrackIssue.ReplaceAllString(text, "$1")
+	text = rePlainURL.ReplaceAllString(text, "")              // strip remaining plain URLs
 	text = reStandupEmoji.ReplaceAllString(text, "")          // strip :emoji:
 	// Strip mrkdwn formatting chars but keep bullets and structure
 	var b strings.Builder
