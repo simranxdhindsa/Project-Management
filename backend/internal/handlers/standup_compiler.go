@@ -475,6 +475,14 @@ func (h *StandupCompilerHandler) ParseOne(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Try heuristic parse first — skip Groq entirely for clearly-structured messages
+	cleaned := cleanForGroq(req.RawText)
+	if sections, ok := tryHeuristicParse(cleaned); ok {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "sections": sections})
+		return
+	}
+
 	groqKey := os.Getenv("GROQ_API_KEY")
 	if groqKey == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -485,11 +493,11 @@ func (h *StandupCompilerHandler) ParseOne(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userMsg := "Developer update:\n" + req.RawText
+	userMsg := "Developer update:\n" + cleaned
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	result, err := callGroqChat(ctx, groqKey, "llama-3.3-70b-versatile", standupGroqSystem, userMsg, 2048)
+	result, err := callGroqChat(ctx, groqKey, "llama-3.3-70b-versatile", standupGroqSystem, userMsg, 2048) //nolint:lll
 	if err != nil {
 		lower := strings.ToLower(err.Error())
 		isRate := strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
@@ -554,6 +562,122 @@ func (h *StandupCompilerHandler) ParseOne(w http.ResponseWriter, r *http.Request
 		"success":  true,
 		"sections": sections,
 	})
+}
+
+// tryHeuristicParse attempts to parse a clearly-structured developer update without
+// calling Groq. Returns (sections, true) when the message has recognisable section
+// headers; returns (nil, false) to signal "fall through to Groq".
+func tryHeuristicParse(text string) ([]UpdateSection, bool) {
+	// Canonical header patterns → output label (empty = skip section)
+	type headerRule struct {
+		pattern *regexp.Regexp
+		label   string // "" = skip (in-progress / blocked)
+	}
+	rules := []headerRule{
+		{regexp.MustCompile(`(?i)^(done today|done|completed|finished)\s*[:\-]?\s*$`), "Done Today"},
+		{regexp.MustCompile(`(?i)^(created tickets?|tickets? created)\s*[:\-]?\s*$`), "Tickets Created"},
+		{regexp.MustCompile(`(?i)^(verified (stage |prod |production )?tickets?|tickets? (verified|tested))\s*[:\-]?\s*$`), "Tickets Tested"},
+		{regexp.MustCompile(`(?i)^(testing|tested)\s*[:\-]?\s*$`), "Testing"},
+		{regexp.MustCompile(`(?i)^(development|development done)\s*[:\-]?\s*$`), "Done Today"},
+		{regexp.MustCompile(`(?i)^(review|code review)\s*[:\-]?\s*$`), "Done Today"},
+		{regexp.MustCompile(`(?i)^(in progress|in progess|wip|working on)\s*[:\-]?\s*$`), ""},
+		{regexp.MustCompile(`(?i)^(blocked)\s*[:\-]?\s*$`), ""},
+	}
+
+	lines := strings.Split(text, "\n")
+
+	// Require at least one recognised header to trust heuristic output
+	foundHeader := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		for _, r := range rules {
+			if r.pattern.MatchString(trimmed) {
+				foundHeader = true
+				break
+			}
+		}
+		if foundHeader {
+			break
+		}
+	}
+	if !foundHeader {
+		return nil, false
+	}
+
+	var sections []UpdateSection
+	var order []string
+	sectionMap := map[string][]string{}
+	currentLabel := ""
+	skip := false
+
+	isItem := func(s string) bool {
+		// A content line: starts with -, •, *, digit, or a ticket ID, or is non-empty non-header
+		if s == "" {
+			return false
+		}
+		return strings.HasPrefix(s, "-") || strings.HasPrefix(s, "•") ||
+			strings.HasPrefix(s, "*") || regexp.MustCompile(`^[A-Z]+-\d+`).MatchString(s) ||
+			regexp.MustCompile(`^\d+\.`).MatchString(s)
+	}
+
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+
+		// Preamble lines like "Todays Task Update-" — skip
+		if regexp.MustCompile(`(?i)^(today'?s?\s*(task\s*)?update|task update)\s*[:\-]?\s*$`).MatchString(line) {
+			continue
+		}
+
+		matched := false
+		for _, r := range rules {
+			if r.pattern.MatchString(line) {
+				currentLabel = r.label
+				skip = r.label == ""
+				if !skip {
+					if _, seen := sectionMap[currentLabel]; !seen {
+						order = append(order, currentLabel)
+						sectionMap[currentLabel] = nil
+					}
+				}
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+
+		// Not a header — treat as item if we have a current section
+		if currentLabel != "" && !skip {
+			item := strings.TrimLeft(line, "-•* \t")
+			item = strings.TrimSpace(item)
+			if item != "" {
+				sectionMap[currentLabel] = append(sectionMap[currentLabel], item)
+			}
+		} else if currentLabel == "" && isItem(line) {
+			// Items before any header — put under implicit "Done Today"
+			if _, seen := sectionMap["Done Today"]; !seen {
+				order = append(order, "Done Today")
+				sectionMap["Done Today"] = nil
+			}
+			item := strings.TrimLeft(line, "-•* \t")
+			sectionMap["Done Today"] = append(sectionMap["Done Today"], strings.TrimSpace(item))
+		}
+	}
+
+	for _, label := range order {
+		if len(sectionMap[label]) > 0 {
+			sections = append(sections, UpdateSection{Label: label, Items: sectionMap[label]})
+		}
+	}
+
+	if len(sections) == 0 {
+		return nil, false
+	}
+	return sections, true
 }
 
 // standupParseRetryAfter extracts the wait seconds from a Groq rate-limit error.
@@ -626,12 +750,21 @@ func standupGetOwnerSlackID(ctx context.Context, userID, email string, client *s
 
 const standupGroqSystem = `You are a structured parser for developer standup updates.
 Given a developer's raw Slack message, extract ONLY the completed ("Done") items into labelled sections.
-Rules:
+
+Standard rules:
 - INCLUDE sections whose label contains "Done", "Enhancements", "Bug Fix", "Bugs Fixed", "Moved to Dev Today", "QA Findings", "Tickets Created", "Tickets Tested", "Tickets Verified".
 - EXCLUDE entirely any section whose label contains "In Progress", "In Progess", "In-Progress", "WIP", "Blocked", "Note", "Notes".
 - IMPORTANT: Preserve the exact section label wording from the original message — do NOT rename or normalise them.
 - Preserve ticket IDs exactly (e.g. ARD-1234). Do not invent items. Keep each item to one line.
-Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Done", "items": ["ARD-1234 FE: Fix login bug"]}, ...]}.
+
+Condensed sub-section rule — apply this when the message has named sub-sections (e.g. "UI", "Studio", "MC", "Backend", "Mobile", or any product-area name) each followed by a list of short items like feature names, flow names, or test areas (NOT ticket IDs like ARD-1234):
+- Do NOT apply this rule to ticket-based sections (Tickets Created, Tickets Tested, etc.) — those stay as separate items.
+- For each sub-section, create one output section labelled "Flows Tested on <AreaName>" where <AreaName> is exactly what the developer wrote (e.g. "Flows Tested on UI", "Flows Tested on Studio", "Flows Tested on MC").
+- Condense ALL items under that sub-section into a SINGLE comma-separated string on one line.
+- Never list each item separately — always join with ", " into one line per area.
+- You decide whether this pattern applies — use it whenever you see area-headers + short non-ticket item lists, regardless of what the items are called.
+
+Return ONLY valid JSON with no markdown fences: {"sections": [{"label": "Flows Tested on UI", "items": ["registration flow, onboarding flow, forgot password flow"]}, ...]}.
 If there are no done items, return {"sections": []}.`
 
 const standupOwnerGroqSystem = `You are a structured parser for a PM's daily standup update.
