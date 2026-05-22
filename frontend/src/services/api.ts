@@ -2378,6 +2378,8 @@ export interface DayTrackSlackConfig {
   keyword_rules: DayTrackKWRule[]
   enabled: boolean
   last_scanned_ts?: string
+  dest_channel_id: string
+  dest_channel_name: string
 }
 
 export const DEFAULT_KEYWORD_RULES: DayTrackKWRule[] = [
@@ -2461,6 +2463,8 @@ export const dayTrackApi = {
     dtFetch<{ summary: string }>(`${API_URL}/daytrack/summarize`, { method: 'POST', body: JSON.stringify(payload) }),
   resolveSlackUser: () =>
     dtFetch<{ slack_user_id: string }>(`${API_URL}/daytrack/slack-resolve-user`),
+  postToSlack: () =>
+    dtFetch<{ ok: boolean }>(`${API_URL}/daytrack/post-to-slack`, { method: 'POST' }),
   getEntriesRange: (start: string, end: string) =>
     dtFetch<DayTrackEntry[]>(`${API_URL}/daytrack/entries/range?start=${start}&end=${end}`),
 
@@ -2604,6 +2608,18 @@ export const standupApi = {
     dtFetch(`${API_URL}/standup/compile`, {
       method: 'POST',
       body: JSON.stringify({ date }),
+    }),
+
+  parseOne: (rawText: string): Promise<{
+    success: boolean
+    sections?: UpdateSection[]
+    rate_limited?: boolean
+    retry_after?: number
+    error?: string
+  }> =>
+    dtFetch(`${API_URL}/standup/parse-one`, {
+      method: 'POST',
+      body: JSON.stringify({ raw_text: rawText }),
     }),
 
   post: (updates: PersonUpdate[], channelId: string): Promise<{ success: boolean }> =>

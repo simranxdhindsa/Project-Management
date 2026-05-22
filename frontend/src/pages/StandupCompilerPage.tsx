@@ -83,6 +83,9 @@ export function StandupCompilerPage() {
   const [compileError, setCompileError] = useState('')
   const [channelWarnings, setChannelWarnings] = useState<string[]>([])
   const [updates, setUpdates] = useState<PersonUpdate[]>([])
+  const [parseProgress, setParseProgress] = useState<{ current: number; total: number; name: string; countdown: number } | null>(null)
+  const parseAbortRef = useRef(false)
+  const [cancelled, setCancelled] = useState(false)
 
   // Post
   const [posting, setPosting] = useState(false)
@@ -154,22 +157,70 @@ export function StandupCompilerPage() {
     finally { setSaving(false) }
   }
 
+  function cancelCompile() {
+    parseAbortRef.current = true
+    setCancelled(true)
+    setTimeout(() => setCancelled(false), 2000)
+  }
+
   async function compile() {
-    setCompiling(true); setCompileError(''); setUpdates([]); setPostMsg(''); setChannelWarnings([])
+    parseAbortRef.current = false
+    setCancelled(false)
+    setCompiling(true); setCompileError(''); setUpdates([]); setPostMsg('')
+    setChannelWarnings([]); setParseProgress(null)
     try {
+      // Step 1: fetch Slack messages (fast — no Groq)
       const res = await standupApi.compile(compileDate !== today ? compileDate : undefined)
-      if (res.success) {
-        setUpdates(res.updates)
-        if (res.debug?.channels) {
-          const warns = (res.debug.channels as {id: string; name: string; messages_found: number; error?: string}[])
-            .filter(ch => ch.error)
-            .map(ch => `#${ch.name || ch.id}: ${ch.error}`)
-          setChannelWarnings(warns)
-        }
+      if (!res.success) { setCompileError('Compile failed'); return }
+
+      if (res.debug?.channels) {
+        const warns = (res.debug.channels as {id: string; name: string; messages_found: number; error?: string}[])
+          .filter(ch => ch.error)
+          .map(ch => `#${ch.name || ch.id}: ${ch.error}`)
+        setChannelWarnings(warns)
       }
+
+      // Show raw updates immediately so the user sees the list
+      setUpdates(res.updates)
+
+      // Step 2: parse each non-owner dev one at a time via /parse-one
+      const toProcess = res.updates
+        .map((u, i) => ({ ...u, _idx: i }))
+        .filter(u => !u.is_owner && u.raw_text?.trim())
+
+      for (let i = 0; i < toProcess.length; i++) {
+        if (parseAbortRef.current) break
+        const person = toProcess[i]
+        setParseProgress({ current: i + 1, total: toProcess.length, name: person.display_name, countdown: 0 })
+
+        let sections: UpdateSection[] = []
+        while (!parseAbortRef.current) {
+          const pr = await standupApi.parseOne(person.raw_text)
+          if (pr.rate_limited) {
+            const secs = pr.retry_after ?? 30
+            for (let s = secs; s > 0; s--) {
+              if (parseAbortRef.current) break
+              setParseProgress(p => p ? { ...p, countdown: s } : p)
+              await new Promise(r => setTimeout(r, 1000))
+            }
+            if (parseAbortRef.current) break  // exit while, don't retry
+            setParseProgress(p => p ? { ...p, countdown: 0 } : p)
+            continue // retry same person after countdown
+          }
+          sections = pr.sections ?? []
+          break
+        }
+
+        setUpdates(prev => prev.map((u, i2) => i2 === person._idx ? { ...u, sections } : u))
+      }
+
+      setParseProgress(null)
     } catch (e: unknown) {
       setCompileError(e instanceof Error ? e.message : 'Compile failed')
-    } finally { setCompiling(false) }
+    } finally {
+      setCompiling(false)
+      setParseProgress(null)
+    }
   }
 
   async function postToSlack() {
@@ -442,11 +493,22 @@ export function StandupCompilerPage() {
               className="sc-input"
               value={compileDate}
               onChange={e => setCompileDate(e.target.value)}
+              disabled={compiling}
             />
-            <button className="btn btn-secondary btn-sm" onClick={compile} disabled={compiling}>
-              <RefreshCw size={13} />
-              {compiling ? 'Compiling…' : 'Compile Updates'}
-            </button>
+            {compiling ? (
+              <button className="sc-cancel-btn" onClick={cancelCompile}>
+                <X size={13} />
+                {cancelled ? 'Cancelling…' : 'Cancel'}
+              </button>
+            ) : (
+              <button
+                className={`btn btn-secondary btn-sm${cancelled ? ' sc-cancelled-flash' : ''}`}
+                onClick={compile}
+              >
+                <RefreshCw size={13} className={cancelled ? '' : ''} />
+                {cancelled ? 'Cancelled' : 'Compile Updates'}
+              </button>
+            )}
             {postMsg && <span className="sc-status-msg">{postMsg}</span>}
           </div>
 
@@ -459,14 +521,28 @@ export function StandupCompilerPage() {
             </div>
           )}
 
-          {compiling && (
+          {compiling && updates.length === 0 && (
             <div className="sc-loading">
               <div className="sc-spinner" />
-              Fetching from {cfg.source_channels.length} channel{cfg.source_channels.length !== 1 ? 's' : ''} and running AI…
+              Fetching messages from {cfg.source_channels.length} channel{cfg.source_channels.length !== 1 ? 's' : ''}…
             </div>
           )}
 
-          {!compiling && updates.length > 0 && (
+          {parseProgress && (
+            <div className="sc-parse-progress">
+              <div className="sc-parse-bar-wrap">
+                <div className="sc-parse-bar-fill" style={{ width: `${Math.round((parseProgress.current / parseProgress.total) * 100)}%` }} />
+              </div>
+              <span className="sc-parse-label">
+                {parseProgress.countdown > 0
+                  ? <><RefreshCw size={12} /> Rate limit — resuming in {parseProgress.countdown}s</>
+                  : <>{parseProgress.current} / {parseProgress.total} — parsing {parseProgress.name}…</>
+                }
+              </span>
+            </div>
+          )}
+
+          {updates.length > 0 && (
             <div className="sc-preview">
               <div className="sc-preview-header">
                 <h3 className="sc-preview-title">Preview — {updates.length} developer{updates.length !== 1 ? 's' : ''}</h3>
@@ -477,7 +553,7 @@ export function StandupCompilerPage() {
             </div>
           )}
 
-          {!compiling && updates.length === 0 && !compileError && (
+          {!compiling && !parseProgress && updates.length === 0 && !compileError && (
             <div className="sc-empty">Configure channels above and click "Compile Updates" to get started.</div>
           )}
         </>
@@ -584,16 +660,16 @@ function PersonCard({ person, personIdx, onUpdateItem }: PersonCardProps) {
         {person.is_owner && <span className="sc-daytrack-badge">DayTrack</span>}
       </div>
 
-      {person.sections.length === 0
+      {(person.sections ?? []).length === 0
         ? <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>No update parsed</span>
         : (
           <div className="sc-sections">
-            {person.sections.map((sec, si) =>
-              sec.items.length > 0 && (
+            {(person.sections ?? []).map((sec, si) =>
+              (sec.items ?? []).length > 0 && (
                 <div key={si}>
                   <div className="sc-section-label">{sec.label}</div>
                   <div className="sc-items">
-                    {sec.items.map((item, ii) => (
+                    {(sec.items ?? []).map((item, ii) => (
                       <div key={ii} className="sc-item">
                         <span className="sc-item-bullet">•</span>
                         <textarea

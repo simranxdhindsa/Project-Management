@@ -31,7 +31,8 @@ type pmQueryIntentType string
 
 const (
 	intentGreeting        pmQueryIntentType = "greeting"
-	intentSprintOverview  pmQueryIntentType = "sprint_overview" // detailed sprint summary — returns active+blocked issues
+	intentSprintOverview  pmQueryIntentType = "sprint_overview"   // detailed sprint summary
+	intentPipelineStatus  pmQueryIntentType = "pipeline_status"   // DEV/Stage/Prod multi-state QA overview
 	intentIssueID         pmQueryIntentType = "issue_id"
 	intentAssignee        pmQueryIntentType = "assignee"
 	intentStatusFilter    pmQueryIntentType = "status_filter"
@@ -54,6 +55,8 @@ var (
 
 	greetingPhrases = []string{"hi", "hello", "hey", "howdy", "sup", "morning", "afternoon"}
 	summaryPhrases  = []string{"summary", "overview", "status", "how are we", "how is the sprint", "sprint health"}
+	// pipelineKW triggers intentPipelineStatus when 2+ of these appear in the query
+	pipelineKW = []string{"dev", "stage", "prod", "production", "verify", "verification", "qa", "pending", "pipeline"}
 	// detailPhrases trigger a full active-issues dump rather than stats-only
 	detailPhrases = []string{"breakdown", "detailed", "full", "everyone", "all assignees", "overloaded", "velocity", "workload all", "complete picture", "full breakdown"}
 	blockedKW       = []string{"block", "blocked", "blocker", "stuck", "waiting", "wait"}
@@ -104,6 +107,18 @@ var (
 func classifyPMQueryIntent(query string, issues []youtrack.Issue) pmQueryIntent {
 	q := strings.ToLower(strings.TrimSpace(query))
 	words := strings.Fields(q)
+
+	// Pipeline status MUST run first — queries with "status/pending/dev/stage" etc.
+	// would otherwise be swallowed by the summary check below.
+	pipelineHits := 0
+	for _, kw := range pipelineKW {
+		if strings.Contains(q, kw) {
+			pipelineHits++
+		}
+	}
+	if pipelineHits >= 2 {
+		return pmQueryIntent{kind: intentPipelineStatus}
+	}
 
 	// Short greeting check (≤6 words that start with a greeting word)
 	if len(words) <= 6 {
@@ -301,6 +316,21 @@ func retrieveRelevantIssues(intent pmQueryIntent, query string, issues []youtrac
 				if len(result) >= 40 {
 					break
 				}
+			}
+		}
+		return result
+
+	case intentPipelineStatus:
+		// Return ALL tickets sitting in any post-dev pipeline state
+		var result []youtrack.Issue
+		for _, iss := range issues {
+			s := strings.ToLower(youtrack.GetStatus(iss))
+			if strings.Contains(s, "dev") ||
+				strings.Contains(s, "stage") ||
+				strings.Contains(s, "prod") ||
+				strings.Contains(s, "verif") ||
+				strings.Contains(s, "ready") {
+				result = append(result, iss)
 			}
 		}
 		return result
@@ -549,8 +579,13 @@ func BuildPMQueryContext(
 	var sb strings.Builder
 
 	if intent.kind == intentGreeting || relevant == nil {
-		// Stats-only context — very small
 		sb.WriteString(buildKPIContext(kpis))
+		return sb.String(), intent
+	}
+
+	// Pipeline status intent: pre-group by state and return structured context
+	if intent.kind == intentPipelineStatus {
+		sb.WriteString(buildPipelineContext(relevant, kpis))
 		return sb.String(), intent
 	}
 
@@ -707,6 +742,74 @@ func BuildPMQueryContext(
 	sb.WriteString(buildKPIContext(kpis))
 
 	return sb.String(), intent
+}
+
+// buildPipelineContext pre-groups issues by pipeline state so the LLM never needs to count or categorize.
+// This eliminates hallucination for queries like "what's pending in DEV / Stage / Prod".
+func buildPipelineContext(issues []youtrack.Issue, kpis SprintKPIs) string {
+	type bucket struct {
+		label   string
+		matches func(string) bool
+		issues  []youtrack.Issue
+	}
+	buckets := []bucket{
+		{"DEV (needs QA on dev server)", func(s string) bool {
+			return strings.Contains(s, "dev") && !strings.Contains(s, "ready") && !strings.Contains(s, "verif")
+		}, nil},
+		{"Ready for Stage", func(s string) bool {
+			return strings.Contains(s, "ready for stage") || strings.Contains(s, "ready to stage")
+		}, nil},
+		{"Stage (needs QA on stage)", func(s string) bool {
+			return s == "stage" || (strings.Contains(s, "stage") && !strings.Contains(s, "ready"))
+		}, nil},
+		{"Ready for Prod", func(s string) bool {
+			return strings.Contains(s, "ready for prod") || strings.Contains(s, "ready to prod") || strings.Contains(s, "ready for prod")
+		}, nil},
+		{"Prod (needs final verify)", func(s string) bool {
+			return (s == "prod" || s == "production") && !strings.Contains(s, "ready")
+		}, nil},
+		{"Verified / Done", func(s string) bool {
+			return strings.Contains(s, "verif") || strings.Contains(s, "done") || strings.Contains(s, "clos")
+		}, nil},
+	}
+
+	for _, iss := range issues {
+		st := strings.ToLower(youtrack.GetStatus(iss))
+		for i := range buckets {
+			if buckets[i].matches(st) {
+				buckets[i].issues = append(buckets[i].issues, iss)
+				break
+			}
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("⚠ DATA INTEGRITY RULE: ONLY reference ticket IDs listed below. Do NOT invent any IDs or names.\n\n")
+	sb.WriteString(fmt.Sprintf("## QA Pipeline Status — %s\n\n", kpis.SprintName))
+
+	for _, b := range buckets {
+		if len(b.issues) == 0 {
+			sb.WriteString(fmt.Sprintf("### %s: none\n\n", b.label))
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("### %s (%d tickets)\n", b.label, len(b.issues)))
+		for _, iss := range b.issues {
+			assignee := "Unassigned"
+			if a := youtrack.GetAssignee(iss); a != nil && a.FullName != "" {
+				assignee = a.FullName
+			}
+			issType := youtrack.GetCustomFieldValue(iss, "Type")
+			if issType == "" {
+				issType = "?"
+			}
+			sb.WriteString(fmt.Sprintf("- **%s** | %s | %s | %s | @%s\n",
+				iss.ID, youtrack.GetPriority(iss), issType, iss.Summary, assignee))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(buildKPIContext(kpis))
+	return sb.String()
 }
 
 func buildKPIContext(kpis SprintKPIs) string {

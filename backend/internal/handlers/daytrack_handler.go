@@ -15,6 +15,7 @@ import (
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
+	slacksvc "github.com/dhindsa/project-management/internal/services/slack"
 	"github.com/gorilla/mux"
 )
 
@@ -323,7 +324,11 @@ Output only the bullets — nothing else.`
 	dtJSON(w, map[string]string{"summary": body})
 }
 
-func callGroqChat(ctx context.Context, apiKey, model, system, user string) (string, error) {
+func callGroqChat(ctx context.Context, apiKey, model, system, user string, maxTokens ...int) (string, error) {
+	tokens := 1024
+	if len(maxTokens) > 0 && maxTokens[0] > 0 {
+		tokens = maxTokens[0]
+	}
 	payload := map[string]interface{}{
 		"model": model,
 		"messages": []map[string]string{
@@ -332,6 +337,7 @@ func callGroqChat(ctx context.Context, apiKey, model, system, user string) (stri
 		},
 		"stream":      false,
 		"temperature": 0,
+		"max_tokens":  tokens,
 	}
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(b))
@@ -629,4 +635,86 @@ func (h *DayTrackHandler) DeleteCategory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// daytracBuildSlackSections builds structured sections from DayTrack entries for Slack posting.
+// Uses original category names as-is and correctly separates yt-tested entries into "Tickets Tested".
+func daytracBuildSlackSections(entries []database.DayTrackEntry, displayName string) PersonUpdate {
+	skipCat := map[string]bool{
+		"sign in": true, "sign off": true, "signing in": true, "signing off": true,
+		"time on": true, "time off": true, "time on/off": true,
+		"break": true, "breaks": true,
+		"meeting": true, "meetings": true,
+	}
+
+	sectionMap := map[string][]string{}
+	var order []string
+
+	for _, e := range entries {
+		if e.ParentEntryID != nil && *e.ParentEntryID != "" {
+			continue
+		}
+		cat := strings.ToLower(strings.TrimSpace(e.Category))
+		if skipCat[cat] {
+			continue
+		}
+
+		// yt-tested entries live in Testing category in DB; separate them here
+		sec := e.Category
+		if strings.HasPrefix(e.ExternalRef, "yt-tested-") {
+			sec = "Tickets Tested"
+		} else if sec == "Tickets" {
+			sec = "Tickets Created" // legacy category name from older YouTrack sync
+		}
+
+		if _, seen := sectionMap[sec]; !seen {
+			order = append(order, sec)
+		}
+		item := e.Name
+		if e.Notes != "" {
+			item += " — " + e.Notes
+		}
+		sectionMap[sec] = append(sectionMap[sec], item)
+	}
+
+	var sections []UpdateSection
+	for _, label := range order {
+		if len(sectionMap[label]) > 0 {
+			sections = append(sections, UpdateSection{Label: label, Items: sectionMap[label]})
+		}
+	}
+	return PersonUpdate{DisplayName: displayName, Sections: sections}
+}
+
+// PostToSlack formats today's DayTrack entries as a standup update and posts to the configured destination channel.
+func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cfg, err := h.repo.GetSlackConfig(r.Context(), user.ID)
+	if err != nil || cfg.DestChannelID == "" {
+		http.Error(w, "no destination channel configured", http.StatusBadRequest)
+		return
+	}
+	today := time.Now().Format("2006-01-02")
+	entries, err := h.repo.GetEntries(r.Context(), user.ID, today)
+	if err != nil || len(entries) == 0 {
+		http.Error(w, "no entries for today", http.StatusBadRequest)
+		return
+	}
+	ownerUpdate := daytracBuildSlackSections(entries, user.Name)
+	ownerUpdate.IsOwner = true
+	if len(ownerUpdate.Sections) == 0 {
+		http.Error(w, "no entries for today", http.StatusBadRequest)
+		return
+	}
+	text := standupFormatMrkdwn([]PersonUpdate{ownerUpdate})
+	slackSvc := slacksvc.NewService()
+	if err := slackSvc.PostMessage(r.Context(), user.ID, cfg.DestChannelID, text); err != nil {
+		http.Error(w, "failed to post: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dtJSON(w, map[string]bool{"ok": true})
 }

@@ -247,6 +247,7 @@ func main() {
 	standupRoutes.HandleFunc("/config", standupHandler.GetConfig).Methods("GET")
 	standupRoutes.HandleFunc("/config", standupHandler.SaveConfig).Methods("PUT")
 	standupRoutes.HandleFunc("/compile", standupHandler.Compile).Methods("POST")
+	standupRoutes.HandleFunc("/parse-one", standupHandler.ParseOne).Methods("POST")
 	standupRoutes.HandleFunc("/post", standupHandler.Post).Methods("POST")
 	standupRoutes.HandleFunc("/weekly", standupHandler.Weekly).Methods("POST")
 
@@ -424,6 +425,7 @@ func main() {
 	dayTrackRoutes.HandleFunc("/yt-scan", youtrackHandler.ScanYouTrackTickets).Methods("POST")
 	dayTrackRoutes.HandleFunc("/slack-resolve-user", dayTrackHandler.ResolveSlackUser).Methods("GET")
 	dayTrackRoutes.HandleFunc("/transcribe", dayTrackHandler.Transcribe).Methods("POST")
+	dayTrackRoutes.HandleFunc("/post-to-slack", dayTrackHandler.PostToSlack).Methods("POST")
 
 	// Start DayTrack Slack background scanner (5-min polling)
 	handlers.RunDayTrackSlackScanner(database.NewDayTrackRepository())

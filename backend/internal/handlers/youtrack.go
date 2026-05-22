@@ -2539,6 +2539,17 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	log.Printf("[PM-RAG] query=%q intent=%s sprint_issues=%d tracking_rows=%d context_bytes=%d",
 		req.Query, ragIntent.kind, len(sprintIssues), len(trackingLogs), len(ragContext))
 
+	// Pipeline status: the Go code already computed the full answer — return it directly,
+	// bypassing the LLM to guarantee zero hallucination.
+	if ragIntent.kind == intentPipelineStatus {
+		sendJSON(w, http.StatusOK, Response{Success: true, Data: map[string]interface{}{
+			"response": ragContext,
+			"action":   "",
+			"payload":  nil,
+		}})
+		return
+	}
+
 
 	// ── 7. Inject available sprints + sprint-action instructions ─────────────
 	if len(availableSprints) > 0 {
@@ -2983,7 +2994,7 @@ func (h *YouTrackHandler) logYouTrackCreationToDayTrack(ctx context.Context, iss
 	}
 	extRef := "yt-create-" + issueID
 	_, err = h.dayTrackRepo.CreateEntrySourced(ctx, userID, dateStr,
-		entryName, "Tickets",
+		entryName, "Tickets Created",
 		timeStr, timeStr, nil, "", "done", nil,
 		"youtrack", extRef)
 	if err != nil {
@@ -3054,7 +3065,7 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		extRef := "yt-create-" + issueID
 
 		_, createErr := h.dayTrackRepo.CreateEntrySourced(ctx, userID, dateStr,
-			entryName, "Tickets",
+			entryName, "Tickets Created",
 			timeStr, timeStr, nil, "", "done", nil,
 			"youtrack", extRef)
 		if createErr != nil {
