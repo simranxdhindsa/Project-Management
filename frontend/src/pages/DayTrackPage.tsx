@@ -617,6 +617,7 @@ export function DayTrackPage() {
 
   useEffect(() => {
     dayTrackApi.getSuggestions().then(setSuggestions).catch(() => {})
+    loadSlackConfig()
   }, [])
 
   // Default category to first in list (only if not restored from draft)
@@ -1554,22 +1555,29 @@ ${aiSummaryBlock}
               : <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
             }
           </button>
-          {slackCfg?.dest_channel_id && (
-            <button
-              className="dt-post-slack-btn"
-              style={{ marginRight: 6, padding: '5px 11px', fontSize: 12 }}
-              onClick={postToSlack}
-              disabled={posting}
-              title={`Post today's updates to #${slackCfg.dest_channel_name || slackCfg.dest_channel_id}`}
-            >
-              {posting ? (
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-              ) : (
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              )}
-              {posting ? 'Posting…' : `Post to #${slackCfg.dest_channel_name || slackCfg.dest_channel_id}`}
-            </button>
-          )}
+          <button
+            className="dt-post-slack-btn"
+            style={{ marginRight: 6, padding: '5px 11px', fontSize: 12 }}
+            onClick={() => {
+              if (!slackCfg?.dest_channel_id) {
+                setSettingsOpen(true)
+                if (!slackCfg) loadSlackConfig()
+                if (slackChannels.length === 0) loadSlackChannels()
+                toast('Set a Destination Channel in settings first', 'info')
+                return
+              }
+              postToSlack()
+            }}
+            disabled={posting}
+            title={slackCfg?.dest_channel_id ? `Post today's updates to #${slackCfg.dest_channel_name || slackCfg.dest_channel_id}` : 'Configure destination channel in settings'}
+          >
+            {posting ? (
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            )}
+            {posting ? 'Posting…' : slackCfg?.dest_channel_id ? `Post to #${slackCfg.dest_channel_name || slackCfg.dest_channel_id}` : 'Post to Slack'}
+          </button>
           <button className="dt-header-settings-btn" title="Slack auto-log settings"
             onClick={() => {
               setSettingsOpen(true)

@@ -169,30 +169,50 @@ func (c *Client) AuthTest(ctx context.Context) (*TeamInfo, error) {
 	}, nil
 }
 
-// GetChannels returns a list of channels the bot is a member of
+// GetChannels returns all channels (public + private) the bot has access to, following pagination.
 func (c *Client) GetChannels(ctx context.Context) ([]Channel, error) {
-	params := url.Values{}
-	params.Set("types", "public_channel,private_channel")
-	params.Set("exclude_archived", "true")
+	var all []Channel
+	cursor := ""
+	for {
+		params := url.Values{}
+		params.Set("types", "public_channel,private_channel")
+		params.Set("exclude_archived", "true")
+		params.Set("limit", "1000")
+		if cursor != "" {
+			params.Set("cursor", cursor)
+		}
 
-	body, err := c.doGetRequest(ctx, "/conversations.list", params)
-	if err != nil {
-		return nil, err
-	}
+		body, err := c.doGetRequest(ctx, "/conversations.list", params)
+		if err != nil {
+			return nil, err
+		}
 
-	var resp struct {
-		Response
-		Channels []Channel `json:"channels"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-	}
+		var resp struct {
+			Response
+			Channels []Channel `json:"channels"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+		if !resp.OK {
+			return nil, fmt.Errorf("slack API error: %s", resp.Error)
+		}
 
-	if !resp.OK {
-		return nil, fmt.Errorf("slack API error: %s", resp.Error)
-	}
+		all = append(all, resp.Channels...)
 
-	return resp.Channels, nil
+		// Follow next_cursor if present
+		var meta struct {
+			NextCursor string `json:"next_cursor"`
+		}
+		if len(resp.Metadata) > 0 {
+			_ = json.Unmarshal(resp.Metadata, &meta)
+		}
+		if meta.NextCursor == "" {
+			break
+		}
+		cursor = meta.NextCursor
+	}
+	return all, nil
 }
 
 // GetChannelHistory returns messages from a channel within a time range
