@@ -580,28 +580,35 @@ func tryHeuristicParse(text string) ([]UpdateSection, bool) {
 		{regexp.MustCompile(`(?i)^(testing|tested)\s*[:\-]?\s*$`), "Testing"},
 		{regexp.MustCompile(`(?i)^(development|development done)\s*[:\-]?\s*$`), "Done Today"},
 		{regexp.MustCompile(`(?i)^(review|code review)\s*[:\-]?\s*$`), "Done Today"},
-		{regexp.MustCompile(`(?i)^(in progress|in progess|wip|working on)\s*[:\-]?\s*$`), ""},
-		{regexp.MustCompile(`(?i)^(blocked)\s*[:\-]?\s*$`), ""},
+		{regexp.MustCompile(`(?i)^(in progress|in progess|in-progress|wip|working on|i am working on|currently working on)\s*[:\-]?\s*$`), ""},
+		{regexp.MustCompile(`(?i)^(blocked|blockers?)\s*[:\-]?\s*$`), ""},
 	}
 
 	lines := strings.Split(text, "\n")
 
-	// Require at least one recognised header to trust heuristic output
+	// Require at least one recognised header to trust heuristic output.
+	// Track whether ALL recognised headers are skip-only (in-progress/blocked) so
+	// we can return empty sections and avoid a wasted Groq call.
 	foundHeader := false
+	foundInclude := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		for _, r := range rules {
 			if r.pattern.MatchString(trimmed) {
 				foundHeader = true
+				if r.label != "" {
+					foundInclude = true
+				}
 				break
 			}
-		}
-		if foundHeader {
-			break
 		}
 	}
 	if !foundHeader {
 		return nil, false
+	}
+	// All headers were skip-type (working on / blocked) — return empty, skip Groq
+	if !foundInclude {
+		return []UpdateSection{}, true
 	}
 
 	var sections []UpdateSection
