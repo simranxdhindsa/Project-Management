@@ -663,6 +663,8 @@ func daytracBuildSlackSections(entries []database.DayTrackEntry, displayName str
 		sec := e.Category
 		if strings.HasPrefix(e.ExternalRef, "yt-tested-") {
 			sec = "Tickets Tested"
+		} else if sec == "Tickets" {
+			sec = "Tickets Created" // legacy category name from older YouTrack sync
 		}
 
 		if _, seen := sectionMap[sec]; !seen {
