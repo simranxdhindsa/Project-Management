@@ -436,6 +436,10 @@ export function DayTrackPage() {
   const [slackChanOpen, setSlackChanOpen] = useState(false)
   const slackChanRef = useRef<HTMLButtonElement>(null)
   const [slackChanPos, setSlackChanPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [destChanOpen, setDestChanOpen] = useState(false)
+  const destChanRef = useRef<HTMLButtonElement>(null)
+  const [destChanPos, setDestChanPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [posting, setPosting] = useState(false)
   const [openRuleCatIdx, setOpenRuleCatIdx] = useState<number | null>(null)
   const [ruleCatPos, setRuleCatPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const ruleCatRefs = useRef<(HTMLButtonElement | null)[]>([])
@@ -562,6 +566,7 @@ export function DayTrackPage() {
       if (!inTrigger) setOpenDrop(null)
       if (!calTriggerRef.current?.contains(t) && !calDropRef.current?.contains(t)) setCalOpen(false)
       if (!slackChanRef.current?.contains(t)) { setSlackChanOpen(false) }
+      if (!destChanRef.current?.contains(t)) { setDestChanOpen(false) }
       const inRuleCat = ruleCatRefs.current.some(r => r?.contains(t))
       if (!inRuleCat) setOpenRuleCatIdx(null)
       const inRuleType = ruleTypeRefs.current.some(r => r?.contains(t))
@@ -953,7 +958,7 @@ export function DayTrackPage() {
       const cfg = await dayTrackApi.getSlackConfig()
       setSlackCfg(cfg.keyword_rules?.length ? cfg : { ...cfg, keyword_rules: DEFAULT_KEYWORD_RULES })
     } catch {
-      setSlackCfg({ channel_id: '', channel_name: '', slack_user_id: '', keyword_rules: DEFAULT_KEYWORD_RULES, enabled: true })
+      setSlackCfg({ channel_id: '', channel_name: '', slack_user_id: '', keyword_rules: DEFAULT_KEYWORD_RULES, enabled: true, dest_channel_id: '', dest_channel_name: '' })
     } finally {
       setSlackCfgLoading(false)
     }
@@ -1027,6 +1032,19 @@ export function DayTrackPage() {
         toast('Could not resolve Slack user — check your email', 'warn')
       }
     } catch { toast('Failed to resolve Slack user', 'warn') }
+  }
+
+  async function postToSlack() {
+    setPosting(true)
+    try {
+      await dayTrackApi.postToSlack()
+      toast('Posted to Slack!', 'success')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to post'
+      toast(msg, 'warn')
+    } finally {
+      setPosting(false)
+    }
   }
 
   function updateKWRule(idx: number, field: keyof DayTrackKWRule, value: string | string[]) {
@@ -1536,6 +1554,22 @@ ${aiSummaryBlock}
               : <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
             }
           </button>
+          {slackCfg?.dest_channel_id && (
+            <button
+              className="dt-post-slack-btn"
+              style={{ marginRight: 6, padding: '5px 11px', fontSize: 12 }}
+              onClick={postToSlack}
+              disabled={posting}
+              title={`Post today's updates to #${slackCfg.dest_channel_name || slackCfg.dest_channel_id}`}
+            >
+              {posting ? (
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              )}
+              {posting ? 'Posting…' : `Post to #${slackCfg.dest_channel_name || slackCfg.dest_channel_id}`}
+            </button>
+          )}
           <button className="dt-header-settings-btn" title="Slack auto-log settings"
             onClick={() => {
               setSettingsOpen(true)
@@ -2131,8 +2165,37 @@ ${aiSummaryBlock}
                   </div>
                 </div>
 
+                {/* Destination channel for Post to Slack */}
+                <div className="form-group" style={{ margin: '8px 0 0' }}>
+                  <label className="form-label" style={{ fontSize: 11 }}>Destination Channel <span style={{ opacity: 0.6, fontWeight: 400 }}>(Post to Slack)</span></label>
+                  <div className="dt-slack-user-row">
+                    <button
+                      ref={destChanRef}
+                      className="pm-custom-dropdown-trigger"
+                      style={{ flex: 1, justifyContent: 'space-between', fontSize: 12, padding: '5px 10px' }}
+                      onClick={() => {
+                        if (destChanOpen) { setDestChanOpen(false); return }
+                        if (destChanRef.current) {
+                          const r = destChanRef.current.getBoundingClientRect()
+                          setDestChanPos({ top: r.bottom + 4, left: r.left, width: r.width })
+                        }
+                        setDestChanOpen(true)
+                      }}>
+                      <span>{slackCfg.dest_channel_name ? `#${slackCfg.dest_channel_name}` : 'Select…'}</span>
+                      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
+                    <input
+                      className="form-input"
+                      style={{ fontSize: 12, padding: '5px 8px', width: 120, flexShrink: 0 }}
+                      placeholder="or Channel ID"
+                      value={slackCfg.dest_channel_id}
+                      onChange={e => setSlackCfg(c => c ? { ...c, dest_channel_id: e.target.value, dest_channel_name: e.target.value ? (c.dest_channel_name || '') : '' } : c)}
+                    />
+                  </div>
+                </div>
+
                 {/* Keyword rules */}
-                <div className="form-group">
+                <div className="form-group" style={{ marginTop: 16 }}>
                   <div className="dt-settings-rules-header">
                     <label className="form-label" style={{ margin: 0 }}>Keyword Rules</label>
                     <button className="dt-btn dt-btn-ghost dt-btn-sm" onClick={addKWRule}>+ Add Rule</button>
@@ -2471,6 +2534,31 @@ ${aiSummaryBlock}
               onMouseDown={() => {
                 setSlackCfg(c => c ? { ...c, channel_id: ch.id, channel_name: ch.name } : c)
                 setSlackChanOpen(false)
+              }}>
+              #{ch.name}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+
+      {/* Portal dest channel dropdown */}
+      {destChanOpen && destChanPos && slackCfg && createPortal(
+        <div
+          className="pm-custom-dropdown-menu"
+          style={{ position: 'fixed', top: destChanPos.top, left: destChanPos.left, width: destChanPos.width, zIndex: 10000, maxHeight: 220, overflowY: 'auto' }}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          {channelsLoading ? (
+            <div className="pm-dropdown-item" style={{ pointerEvents: 'none', opacity: 0.6 }}>Loading channels…</div>
+          ) : slackChannels.length === 0 ? (
+            <div className="pm-dropdown-item" style={{ pointerEvents: 'none', opacity: 0.6 }}>No channels — connect Slack first</div>
+          ) : slackChannels.map(ch => (
+            <button key={ch.id}
+              className={`pm-dropdown-item${slackCfg.dest_channel_id === ch.id ? ' active' : ''}`}
+              onMouseDown={() => {
+                setSlackCfg(c => c ? { ...c, dest_channel_id: ch.id, dest_channel_name: ch.name } : c)
+                setDestChanOpen(false)
               }}>
               #{ch.name}
             </button>

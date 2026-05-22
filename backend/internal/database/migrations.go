@@ -766,6 +766,11 @@ func RunMigrations() error {
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 
+		// DayTrack post-to-slack destination channel
+		`ALTER TABLE daytrack_slack_config
+		   ADD COLUMN IF NOT EXISTS dest_channel_id   TEXT NOT NULL DEFAULT '',
+		   ADD COLUMN IF NOT EXISTS dest_channel_name TEXT NOT NULL DEFAULT ''`,
+
 		// ── Daily Standup Compiler ───────────────────────────────────────────────
 		`CREATE TABLE IF NOT EXISTS standup_config (
 			id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),

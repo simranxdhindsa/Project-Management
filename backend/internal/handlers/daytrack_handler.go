@@ -15,6 +15,7 @@ import (
 
 	"github.com/dhindsa/project-management/internal/database"
 	"github.com/dhindsa/project-management/internal/middleware"
+	slacksvc "github.com/dhindsa/project-management/internal/services/slack"
 	"github.com/gorilla/mux"
 )
 
@@ -634,4 +635,40 @@ func (h *DayTrackHandler) DeleteCategory(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// PostToSlack formats today's DayTrack entries as a standup update and posts to the configured destination channel.
+func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cfg, err := h.repo.GetSlackConfig(r.Context(), user.ID)
+	if err != nil || cfg.DestChannelID == "" {
+		http.Error(w, "no destination channel configured", http.StatusBadRequest)
+		return
+	}
+	groqKey := os.Getenv("GROQ_API_KEY")
+	today := time.Now().Format("2006-01-02")
+	ownerUpdate := standupBuildOwnerSection(r.Context(), user.ID, user.Name, today, groqKey)
+	ownerUpdate.IsOwner = true
+	filtered := ownerUpdate.Sections[:0]
+	for _, sec := range ownerUpdate.Sections {
+		if len(sec.Items) > 0 {
+			filtered = append(filtered, sec)
+		}
+	}
+	ownerUpdate.Sections = filtered
+	if len(ownerUpdate.Sections) == 0 {
+		http.Error(w, "no entries for today", http.StatusBadRequest)
+		return
+	}
+	text := standupFormatMrkdwn([]PersonUpdate{ownerUpdate})
+	slackSvc := slacksvc.NewService()
+	if err := slackSvc.PostMessage(r.Context(), user.ID, cfg.DestChannelID, text); err != nil {
+		http.Error(w, "failed to post: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	dtJSON(w, map[string]bool{"ok": true})
 }

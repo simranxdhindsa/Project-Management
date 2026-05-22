@@ -28,14 +28,16 @@ type DayTrackEntry struct {
 
 // DayTrackSlackConfig holds per-user Slack auto-logging settings.
 type DayTrackSlackConfig struct {
-	ID             string             `json:"id"`
-	UserID         string             `json:"user_id"`
-	ChannelID      string             `json:"channel_id"`
-	ChannelName    string             `json:"channel_name"`
-	SlackUserID    string             `json:"slack_user_id"`
-	KeywordRules   []DayTrackKWRule   `json:"keyword_rules"`
-	Enabled        bool               `json:"enabled"`
-	LastScannedTS  string             `json:"last_scanned_ts"`
+	ID              string           `json:"id"`
+	UserID          string           `json:"user_id"`
+	ChannelID       string           `json:"channel_id"`
+	ChannelName     string           `json:"channel_name"`
+	SlackUserID     string           `json:"slack_user_id"`
+	KeywordRules    []DayTrackKWRule `json:"keyword_rules"`
+	Enabled         bool             `json:"enabled"`
+	LastScannedTS   string           `json:"last_scanned_ts"`
+	DestChannelID   string           `json:"dest_channel_id"`
+	DestChannelName string           `json:"dest_channel_name"`
 }
 
 // DayTrackKWRule is a single keyword → rule_type mapping.
@@ -350,10 +352,11 @@ func (r *DayTrackRepository) GetSlackConfig(ctx context.Context, userID string) 
 	var cfg DayTrackSlackConfig
 	var rulesJSON []byte
 	err := pool.QueryRow(ctx,
-		`SELECT id, user_id, channel_id, channel_name, slack_user_id, keyword_rules, enabled, last_scanned_ts
+		`SELECT id, user_id, channel_id, channel_name, slack_user_id, keyword_rules, enabled, last_scanned_ts,
+		        COALESCE(dest_channel_id,''), COALESCE(dest_channel_name,'')
 		 FROM daytrack_slack_config WHERE user_id=$1`, userID,
 	).Scan(&cfg.ID, &cfg.UserID, &cfg.ChannelID, &cfg.ChannelName, &cfg.SlackUserID,
-		&rulesJSON, &cfg.Enabled, &cfg.LastScannedTS)
+		&rulesJSON, &cfg.Enabled, &cfg.LastScannedTS, &cfg.DestChannelID, &cfg.DestChannelName)
 	if err != nil {
 		return nil, err
 	}
@@ -370,12 +373,13 @@ func (r *DayTrackRepository) UpsertSlackConfig(ctx context.Context, cfg *DayTrac
 		return err
 	}
 	_, err = pool.Exec(ctx,
-		`INSERT INTO daytrack_slack_config (user_id, channel_id, channel_name, slack_user_id, keyword_rules, enabled, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,NOW())
+		`INSERT INTO daytrack_slack_config (user_id, channel_id, channel_name, slack_user_id, keyword_rules, enabled, dest_channel_id, dest_channel_name, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
 		 ON CONFLICT(user_id) DO UPDATE SET
 		   channel_id=$2, channel_name=$3, slack_user_id=$4,
-		   keyword_rules=$5, enabled=$6, updated_at=NOW()`,
-		cfg.UserID, cfg.ChannelID, cfg.ChannelName, cfg.SlackUserID, rulesJSON, cfg.Enabled)
+		   keyword_rules=$5, enabled=$6, dest_channel_id=$7, dest_channel_name=$8, updated_at=NOW()`,
+		cfg.UserID, cfg.ChannelID, cfg.ChannelName, cfg.SlackUserID, rulesJSON, cfg.Enabled,
+		cfg.DestChannelID, cfg.DestChannelName)
 	return err
 }
 

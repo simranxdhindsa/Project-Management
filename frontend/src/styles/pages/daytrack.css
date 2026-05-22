@@ -1485,3 +1485,42 @@
 [data-theme="light"] .dt-export-toggle-hint {
   color: #94a3b8;
 }
+
+/* ── Post to Slack button ──────────────────────────────────────────────────── */
+.dt-post-slack-btn {
+  background: #16a34a;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 12px;
+  transition: background 0.15s, transform 0.12s, box-shadow 0.15s;
+}
+.dt-post-slack-btn:hover:not(:disabled) {
+  background: #15803d;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(22,163,74,0.35);
+}
+.dt-post-slack-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+.dt-post-slack-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+[data-theme="light"] .dt-post-slack-btn {
+  background: #16a34a;
+}
+[data-theme="light"] .dt-post-slack-btn:hover:not(:disabled) {
+  background: #15803d;
+  box-shadow: 0 4px 12px rgba(22,163,74,0.25);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
