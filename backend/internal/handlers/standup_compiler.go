@@ -703,7 +703,7 @@ func standupGroqParse(groqKey, rawText string) []UpdateSection {
 	return filtered
 }
 
-func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, groqKey string) PersonUpdate {
+func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, _ string) PersonUpdate {
 	repo := database.NewDayTrackRepository()
 	entries, err := repo.GetEntries(ctx, userID, date)
 	if err != nil || len(entries) == 0 {
@@ -717,51 +717,29 @@ func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, gr
 		"meeting": true, "meetings": true,
 	}
 
-	var sb strings.Builder
-	for _, e := range entries {
-		cat := strings.ToLower(e.Category)
-		if skipCat[cat] {
-			continue
-		}
-		sb.WriteString(fmt.Sprintf("- [%s] %s", e.Category, e.Name))
-		if e.Notes != "" {
-			sb.WriteString(" — " + e.Notes)
-		}
-		sb.WriteString("\n")
-	}
-
-	if groqKey != "" && sb.Len() > 0 {
-		groqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		raw, groqErr := callGroqChat(groqCtx, groqKey, "llama-3.3-70b-versatile", standupOwnerGroqSystem, "Work entries:\n"+sb.String(), 2048)
-		cancel()
-		if groqErr == nil {
-			var parsed struct {
-				Sections []UpdateSection `json:"sections"`
-			}
-			if jerr := json.Unmarshal([]byte(strings.TrimSpace(raw)), &parsed); jerr == nil && len(parsed.Sections) > 0 {
-				return PersonUpdate{DisplayName: displayName, Sections: parsed.Sections}
-			}
-		}
-	}
-
-	// Fallback: group by category directly
-	sectionMap := map[string][]string{}
-	order := []string{}
+	// Use DayTrack categories directly as section labels — no AI needed.
+	// Only remap categories that need a friendlier label.
 	catToSection := map[string]string{
-		"development": "Done Today",
-		"testing":     "Testing",
-		"review":      "Done Today",
-		"research":    "Research",
-		"pm":          "PM",
+		"development":        "Done Today",
+		"review":             "Done Today",
+		"pm":                 "PM",
+		"project management": "PM",
 	}
+
+	sectionMap := map[string][]string{}
+	var order []string
+
 	for _, e := range entries {
-		cat := strings.ToLower(e.Category)
+		if e.ParentEntryID != nil && *e.ParentEntryID != "" {
+			continue
+		}
+		cat := strings.ToLower(strings.TrimSpace(e.Category))
 		if skipCat[cat] {
 			continue
 		}
-		sec := catToSection[cat]
-		if sec == "" {
-			sec = "Done Today"
+		sec, ok := catToSection[cat]
+		if !ok {
+			sec = e.Category // use the category name as-is (Testing, Tickets Created, Tickets Tested, Research, …)
 		}
 		if e.Status == "active" || e.Status == "in_progress" {
 			sec = "In Progress"
@@ -778,7 +756,9 @@ func standupBuildOwnerSection(ctx context.Context, userID, displayName, date, gr
 
 	var sections []UpdateSection
 	for _, label := range order {
-		sections = append(sections, UpdateSection{Label: label, Items: sectionMap[label]})
+		if len(sectionMap[label]) > 0 {
+			sections = append(sections, UpdateSection{Label: label, Items: sectionMap[label]})
+		}
 	}
 	return PersonUpdate{DisplayName: displayName, Sections: sections}
 }
