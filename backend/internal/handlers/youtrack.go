@@ -2420,15 +2420,25 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 	sb.WriteString("• Type filter: Type: Bug  /  Type: Feature  /  Type: Task\n\n")
 
 	sb.WriteString("PROVEN EXAMPLES (use these exact patterns):\n")
-	sb.WriteString(fmt.Sprintf("  all sprint issues   → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  blocked tickets     → project: %s #{%s} #Blocked\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  in progress         → project: %s #{%s} #{In Progress}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  DEV + Stage + Prod  → project: %s #{%s} #DEV #Stage #{Ready For Prod}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  by assignee         → project: %s #{%s} Assignee: rajvirsingh\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  P0 or P1 open       → project: %s #{%s} #P0 #P1 #{In Progress} #{To Do}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  created today       → project: %s #{%s} created: Today\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  created yesterday   → project: %s #{%s} created: yesterday\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  created by X, yesterday, To Do, A1 → project: %s #{To Do} by: simran created: yesterday #A1\n", projectID))
+	sb.WriteString(fmt.Sprintf("  all sprint issues       → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  blocked tickets         → project: %s #{%s} #Blocked\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  in progress             → project: %s #{%s} #{In Progress}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  DEV + Stage + Prod      → project: %s #{%s} #DEV #Stage #{Ready For Prod}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  single assignee         → project: %s #{%s} Assignee: rajvirsingh\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  P0 or P1 open           → project: %s #{%s} #P0 #P1 #{In Progress} #{To Do}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  created today           → project: %s #{%s} created: Today\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  created yesterday       → project: %s #{%s} created: yesterday\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  hotfixes in progress    → project: %s #{%s} Type: Hotfix #{In Progress}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  bugs in sprint          → project: %s #{%s} Type: Bug\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  tasks for one person    → project: %s #{%s} Assignee: simran\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  bounced back            → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  bounced tickets         → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  highest bounce count    → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  overdue tickets         → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  past SLA deadline       → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  at-risk tickets         → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  cycle time per dev      → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  developer workload      → project: %s #{%s}\n", projectID, activeSprint))
 
 	sb.WriteString("\nCRITICAL RULES:\n")
 	sb.WriteString("1. NEVER use  State: value  or  Priority: value  — always use # prefix\n")
@@ -2436,6 +2446,10 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 	sb.WriteString("3. Multiple states: #{State1} #{State2} (space-separated, NOT comma-separated)\n")
 	sb.WriteString(fmt.Sprintf("4. Default to active sprint #{%s} unless user asks for historical data\n", activeSprint))
 	sb.WriteString("5. For 'summary' / 'all issues': only add #{SprintName}, no state filter\n")
+	sb.WriteString("6. For 'multiple assignees': use only one Assignee: filter or none — NEVER chain Assignee: x Assignee: y\n")
+	sb.WriteString("7. Type filter: Type: Hotfix / Type: Bug / Type: Task / Type: Feature (never use # for Type)\n")
+	sb.WriteString("8. NEVER use date comparisons like  due: <  or  updated: <=  — these are invalid YQL\n")
+	sb.WriteString("9. NEVER invent state names like #Bounced #Overdue #AtRisk #Reopened — these do not exist\n")
 	return sb.String()
 }
 
@@ -2449,7 +2463,8 @@ func normalizeYQL(yql string) string {
 	// Stops a field's value at the next field boundary OR an existing #tag.
 	nextBoundaryRe := regexp.MustCompile(`#|\b[A-Za-z]+\s*:`)
 
-	for _, field := range []string{"State", "Priority", "sprint", "Type"} {
+	// Type uses "Type: value" syntax — never "#value" — so it is excluded from this list.
+	for _, field := range []string{"State", "Priority", "sprint"} {
 		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(field) + `\s*:\s*`)
 		for {
 			loc := re.FindStringIndex(yql)
@@ -2486,7 +2501,7 @@ func normalizeYQL(yql string) string {
 
 // pmStateOrder is used to detect moved-back (regression) transitions.
 var pmStateOrder = map[string]int{
-	"backlog": 0, "open": 0,
+	"backlog": 0, "open": 0, "to do": 0, "todo": 0, "new": 0,
 	"in progress": 1,
 	"dev": 2,
 	"stage": 3, "ready for stage": 3,
@@ -2582,10 +2597,16 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		sprintIssues, _ = ytClient.GetIssues(r.Context())
 	}
 
-	// Collect issue IDs for the tracking fetch scope
+	// Collect issue IDs for the tracking fetch scope.
+	// issue_state_log stores readable IDs (e.g. "ARD-1872") written by the webhook handler,
+	// so we must use IDReadable here — not the internal ID — otherwise no rows match.
 	sprintIssueIDs := make([]string, 0, len(sprintIssues))
 	for _, iss := range sprintIssues {
-		sprintIssueIDs = append(sprintIssueIDs, iss.ID)
+		id := iss.IDReadable
+		if id == "" {
+			id = iss.ID // fallback for older YouTrack server format
+		}
+		sprintIssueIDs = append(sprintIssueIDs, id)
 	}
 
 	// ── 3. Fetch tracking log scoped to this sprint only ─────────────────────
@@ -2619,12 +2640,14 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	// ── 6. Build sprint KPIs — Overdue + Bounced from tracking logs ─────────────
 	overdueSet := map[string]bool{}
 	bouncedSet := map[string]bool{}
+	bounceCount := map[string]int{}
 	// Track most recent entry time into an active state (null duration = still there)
 	activeEntryTime := map[string]time.Time{}
 	issuePriority := map[string]string{}
 	for _, row := range trackingLogs {
 		if pmIsMovedBack(row.FromState, row.ToState) {
 			bouncedSet[row.IssueID] = true
+			bounceCount[row.IssueID]++
 		}
 		if row.DurationInPrevStateHours != nil {
 			if *row.DurationInPrevStateHours > pmOverdueThreshold(row.Priority) {
@@ -2648,6 +2671,30 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	for issID, entryTime := range activeEntryTime {
 		if now.Sub(entryTime).Hours() > pmOverdueThreshold(issuePriority[issID]) {
 			overdueSet[issID] = true
+		}
+	}
+
+	// Build transition history lines for bounced and blocked tickets only.
+	// Keeping scope narrow avoids token bloat for uninteresting tickets.
+	issueTransitions := map[string][]string{}
+	for _, row := range trackingLogs {
+		if bounceCount[row.IssueID] > 0 || blockerReasons[row.IssueID] != "" {
+			dur := "?"
+			if row.DurationInPrevStateHours != nil {
+				h := *row.DurationInPrevStateHours
+				d, hh := int(h)/24, int(h)%24
+				if d > 0 {
+					dur = fmt.Sprintf("%dd%dh", d, hh)
+				} else {
+					dur = fmt.Sprintf("%dh", int(h))
+				}
+			}
+			mover := row.MovedBy
+			if mover == "" {
+				mover = "?"
+			}
+			issueTransitions[row.IssueID] = append(issueTransitions[row.IssueID],
+				fmt.Sprintf("  → %s→%s (%s, by %s)", row.FromState, row.ToState, dur, mover))
 		}
 	}
 
@@ -2675,8 +2722,7 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 			case strings.Contains(lower, "progress"):
 				role = "active"
 			case strings.Contains(lower, "done") || strings.Contains(lower, "clos") ||
-				strings.Contains(lower, "deploy") || strings.Contains(lower, "verif") ||
-				strings.Contains(lower, "stage") || strings.Contains(lower, "prod"):
+				strings.Contains(lower, "deploy") || strings.Contains(lower, "verif"):
 				role = "closed"
 			}
 		}
@@ -2701,7 +2747,11 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	// Count overdue only among non-done issues present in the sprint
 	sprintIssueSet := map[string]bool{}
 	for _, iss := range sprintIssues {
-		sprintIssueSet[iss.ID] = true
+		id := iss.IDReadable
+		if id == "" {
+			id = iss.ID
+		}
+		sprintIssueSet[id] = true
 	}
 	overdueFinal := 0
 	for id := range overdueSet {
@@ -2727,6 +2777,28 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	yql = strings.Trim(yql, "`")
 	yql = strings.TrimSpace(yql)
 	yql = normalizeYQL(yql)
+
+	// Analytics override: queries about computed metrics (bounce, overdue, SLA, cycle time, workload)
+	// have no native YouTrack filter — override to a plain sprint fetch so the bot reads the
+	// bounces:N and [OVERDUE] flags that are embedded in every ticket line of the data context.
+	analyticsKeywords := []string{
+		"bounce", "bounced", "overdue", "sla", "cycle time", "cycletime",
+		"workload", "at-risk", "at risk", "delay severity", "developer load",
+		"developer workload", "who has the most",
+	}
+	queryLower := strings.ToLower(req.Query)
+	for _, kw := range analyticsKeywords {
+		if strings.Contains(queryLower, kw) {
+			sprintTag := ""
+			if req.SprintName != "" {
+				sprintTag = fmt.Sprintf(" #{%s}", req.SprintName)
+			}
+			yql = fmt.Sprintf("project: %s%s", projectID, sprintTag)
+			log.Printf("[PM-YQL] analytics override → %q", yql)
+			break
+		}
+	}
+
 	log.Printf("[PM-YQL] query=%q → yql=%q", req.Query, yql)
 
 	// ── 7. Execute YQL against YouTrack ──────────────────────────────────────
@@ -2742,17 +2814,20 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	ctxSB.WriteString(buildPMKPIContext(kpis))
 	ctxSB.WriteString("\n\n")
 	if len(yqlIssues) == 0 {
-		ctxSB.WriteString("QUERY RESULTS: No issues found matching your query.\n")
+		ctxSB.WriteString("QUERY RESULTS: No issues found matching your query. DO NOT invent ticket IDs, names, or data — answer only from the Sprint Summary above.\n")
 	} else {
 		ctxSB.WriteString(fmt.Sprintf("QUERY RESULTS (%d issues — complete list, never invent additional tickets):\n", len(yqlIssues)))
-		ctxSB.WriteString("ID | Priority | Summary | State | Assignee\n")
+		ctxSB.WriteString("ID | Priority | Type | Summary | State | Assignee\n")
 		for _, iss := range yqlIssues {
 			issID := iss.IDReadable
 			if issID == "" {
 				issID = iss.ID
 			}
+			// Use readable ID for all map lookups — tracking logs and blocker cache store "ARD-NNN" not internal IDs
+			lookupID := issID
 			state := youtrack.GetStatus(iss)
 			prio := youtrack.GetPriority(iss)
+			issType := youtrack.GetCustomFieldValue(iss, "Type")
 			asgn := ""
 			if a := youtrack.GetAssignee(iss); a != nil {
 				asgn = a.FullName
@@ -2760,11 +2835,23 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 					asgn = a.Login
 				}
 			}
-			blocker := ""
-			if reason, ok := blockerReasons[iss.ID]; ok && reason != "" {
-				blocker = " | BLOCKER: " + reason
+			flags := ""
+			if bc := bounceCount[lookupID]; bc > 0 {
+				flags += fmt.Sprintf(" bounces:%d", bc)
 			}
-			ctxSB.WriteString(fmt.Sprintf("%s | %s | %s | %s | %s%s\n", issID, prio, iss.Summary, state, asgn, blocker))
+			if overdueSet[lookupID] {
+				flags += " [OVERDUE]"
+			}
+			blocker := ""
+			if reason, ok := blockerReasons[lookupID]; ok && reason != "" {
+				blocker = "\n  BLOCKER: " + reason
+			}
+			transitions := ""
+			if tLines := issueTransitions[lookupID]; len(tLines) > 0 {
+				transitions = "\n" + strings.Join(tLines, "\n")
+			}
+			ctxSB.WriteString(fmt.Sprintf("%s | %s | %s | %s | %s | %s%s%s%s\n",
+				issID, prio, issType, iss.Summary, state, asgn, flags, blocker, transitions))
 		}
 	}
 	dataContext := ctxSB.String()
