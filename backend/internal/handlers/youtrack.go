@@ -2317,6 +2317,173 @@ ANSWERING RULES:
 9. If data is missing for a specific ticket: say "I don't have data for [ID] in this sprint" — do NOT guess or fabricate.
 10. Multi-turn: build on conversation history, never re-introduce yourself`
 
+// pmSprintKPIs carries sprint-level stats included in every PM assistant response.
+type pmSprintKPIs struct {
+	SprintName string
+	SprintEnds string
+	Total      int
+	Done       int
+	InProgress int
+	Blocked    int
+	Overdue    int
+	Bounced    int
+	TypeCounts map[string]int
+}
+
+func buildPMKPIContext(kpis pmSprintKPIs) string {
+	ends := ""
+	if kpis.SprintEnds != "" {
+		ends = " | Ends: " + kpis.SprintEnds
+	}
+	typeStr := ""
+	for t, n := range kpis.TypeCounts {
+		if typeStr != "" {
+			typeStr += ", "
+		}
+		typeStr += fmt.Sprintf("%s: %d", t, n)
+	}
+	pct := 0
+	if kpis.Total > 0 {
+		pct = kpis.Done * 100 / kpis.Total
+	}
+	return fmt.Sprintf("SPRINT SUMMARY: %s%s\nTotal: %d | Done: %d (%d%%) | In Progress: %d | Blocked: %d | Overdue: %d | Bounced: %d\nTicket Types: %s",
+		kpis.SprintName, ends, kpis.Total, kpis.Done, pct, kpis.InProgress, kpis.Blocked, kpis.Overdue, kpis.Bounced, typeStr)
+}
+
+// buildYQLTranslationPrompt builds the system prompt for the LLM that translates
+// natural-language questions into YouTrack Query Language (YQL).
+// All domain data (states, priorities, sprints, users) is injected dynamically — nothing hardcoded.
+func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack.State, priorities []youtrack.PriorityValue, sprints []youtrack.Sprint, users []youtrack.User) string {
+	var sb strings.Builder
+	sb.WriteString("You are a YouTrack Query Language (YQL) translator.\n")
+	sb.WriteString("Output ONLY the raw YQL query string — no explanation, no quotes, no markdown.\n\n")
+	sb.WriteString(fmt.Sprintf("PROJECT: %s\nACTIVE SPRINT: %s\nTODAY: %s\n\n", projectID, activeSprint, time.Now().Format("2006-01-02")))
+
+	// States as ready-to-paste YQL tokens
+	if len(states) > 0 {
+		sb.WriteString("STATES — copy-paste these tokens exactly:\n")
+		for _, s := range states {
+			if strings.ContainsAny(s.Name, " \t") {
+				sb.WriteString(fmt.Sprintf("  #{%s}\n", s.Name))
+			} else {
+				sb.WriteString(fmt.Sprintf("  #%s\n", s.Name))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Priorities as ready-to-paste YQL tokens
+	if len(priorities) > 0 {
+		sb.WriteString("PRIORITIES — copy-paste these tokens exactly:\n")
+		for _, p := range priorities {
+			if strings.ContainsAny(p.Name, " \t") {
+				sb.WriteString(fmt.Sprintf("  #{%s}\n", p.Name))
+			} else {
+				sb.WriteString(fmt.Sprintf("  #%s\n", p.Name))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Sprints as ready-to-paste YQL tokens
+	if len(sprints) > 0 {
+		sb.WriteString("SPRINTS — copy-paste these tokens exactly:\n")
+		for _, s := range sprints {
+			if strings.ContainsAny(s.Name, " \t") {
+				sb.WriteString(fmt.Sprintf("  #{%s}   (id: %s)\n", s.Name, s.ID))
+			} else {
+				sb.WriteString(fmt.Sprintf("  #%s   (id: %s)\n", s.Name, s.ID))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(users) > 0 {
+		sb.WriteString("TEAM MEMBERS (login → Full Name):\n")
+		for _, u := range users {
+			if u.Login != "" {
+				sb.WriteString(fmt.Sprintf("  %s → %s\n", u.Login, u.FullName))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("YQL SYNTAX RULES:\n")
+	sb.WriteString("• States, priorities, sprints all use # prefix:\n")
+	sb.WriteString("    Single-word:  #Blocked  #P0  #DEV\n")
+	sb.WriteString("    Multi-word:   #{In Progress}  #{Sprint 4}  #{Ready For Prod}\n")
+	sb.WriteString("• Multiple filters are space-separated: #{Sprint 4} #{In Progress} #P0\n")
+	sb.WriteString(fmt.Sprintf("• Always start with: project: %s\n", projectID))
+	sb.WriteString("• Assignee filter: Assignee: login  (no # prefix, exact login)\n")
+	sb.WriteString("• Reporter/creator filter: by: login\n")
+	sb.WriteString("• Date filters: created: Today  /  created: yesterday  /  updated: Today\n")
+	sb.WriteString("• Type filter: Type: Bug  /  Type: Feature  /  Type: Task\n\n")
+
+	sb.WriteString("PROVEN EXAMPLES (use these exact patterns):\n")
+	sb.WriteString(fmt.Sprintf("  all sprint issues   → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  blocked tickets     → project: %s #{%s} #Blocked\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  in progress         → project: %s #{%s} #{In Progress}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  DEV + Stage + Prod  → project: %s #{%s} #DEV #Stage #{Ready For Prod}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  by assignee         → project: %s #{%s} Assignee: rajvirsingh\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  P0 or P1 open       → project: %s #{%s} #P0 #P1 #{In Progress} #{To Do}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  created today       → project: %s #{%s} created: Today\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  created yesterday   → project: %s #{%s} created: yesterday\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  created by X, yesterday, To Do, A1 → project: %s #{To Do} by: simran created: yesterday #A1\n", projectID))
+
+	sb.WriteString("\nCRITICAL RULES:\n")
+	sb.WriteString("1. NEVER use  State: value  or  Priority: value  — always use # prefix\n")
+	sb.WriteString("2. NEVER use  sprint: {name}  — always use  #{Sprint Name}\n")
+	sb.WriteString("3. Multiple states: #{State1} #{State2} (space-separated, NOT comma-separated)\n")
+	sb.WriteString(fmt.Sprintf("4. Default to active sprint #{%s} unless user asks for historical data\n", activeSprint))
+	sb.WriteString("5. For 'summary' / 'all issues': only add #{SprintName}, no state filter\n")
+	return sb.String()
+}
+
+// normalizeYQL converts LLM-generated field:value syntax to YouTrack's #tag syntax.
+// "State: In Progress"   → "#{In Progress}"
+// "State: Blocked"       → "#Blocked"
+// "sprint: Sprint 4"     → "#{Sprint 4}"
+// "Priority: P0"         → "#P0"
+// Fields like project:, Assignee:, by:, created: are passed through unchanged.
+func normalizeYQL(yql string) string {
+	// Stops a field's value at the next field boundary OR an existing #tag.
+	nextBoundaryRe := regexp.MustCompile(`#|\b[A-Za-z]+\s*:`)
+
+	for _, field := range []string{"State", "Priority", "sprint", "Type"} {
+		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(field) + `\s*:\s*`)
+		for {
+			loc := re.FindStringIndex(yql)
+			if loc == nil {
+				break
+			}
+			valStart := loc[1]
+			rest := yql[valStart:]
+			next := nextBoundaryRe.FindStringIndex(rest)
+			var valEnd int
+			if next != nil {
+				valEnd = valStart + next[0]
+			} else {
+				valEnd = len(yql)
+			}
+			rawVal := strings.TrimSpace(yql[valStart:valEnd])
+			rawVal = strings.Trim(rawVal, "{}")
+			rawVal = strings.TrimPrefix(rawVal, "#")
+			rawVal = strings.TrimSpace(rawVal)
+			if rawVal == "" {
+				break
+			}
+			var tag string
+			if strings.ContainsAny(rawVal, " \t") {
+				tag = "#{" + rawVal + "}"
+			} else {
+				tag = "#" + rawVal
+			}
+			yql = strings.TrimSpace(yql[:loc[0]] + tag + " " + strings.TrimSpace(yql[valEnd:]))
+		}
+	}
+	return strings.TrimSpace(yql)
+}
+
 // pmStateOrder is used to detect moved-back (regression) transitions.
 var pmStateOrder = map[string]int{
 	"backlog": 0, "open": 0,
@@ -2387,22 +2554,32 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	// Substitute {{DATE}} variable
 	customInstructions = strings.ReplaceAll(customInstructions, "{{DATE}}", time.Now().Format("2006-01-02"))
 
-	// Inject sprint context if active
-	if req.SprintName != "" {
-		customInstructions = fmt.Sprintf("ACTIVE SPRINT: %s\nAll issue data below is scoped to this sprint only. Reference the sprint name when answering sprint-specific questions.\n\n", req.SprintName) + customInstructions
+	// ── 2. Get YouTrack client + fetch metadata (parallel) ───────────────────
+	ytClient, err := h.getYouTrackClient(r.Context())
+	if err != nil || ytClient == nil {
+		http.Error(w, "YouTrack not configured", http.StatusBadRequest)
+		return
 	}
+	projectID := ytClient.GetProjectID()
 
-	// ── 2. Fetch live YouTrack issues + available sprints ────────────────────
 	var sprintIssues []youtrack.Issue
 	var availableSprints []youtrack.Sprint
-	ytClient, err := h.getYouTrackClient(r.Context())
-	if err == nil && ytClient != nil {
-		if req.SprintID != "" {
-			sprintIssues, _ = ytClient.GetAllSprintIssues(r.Context(), req.SprintID)
-		} else {
-			sprintIssues, _ = ytClient.GetIssues(r.Context())
-		}
-		availableSprints, _ = ytClient.GetSprints(r.Context())
+	var ytStates []youtrack.State
+	var ytPriorities []youtrack.PriorityValue
+	var ytUsers []youtrack.User
+
+	var metaWg sync.WaitGroup
+	metaWg.Add(4)
+	go func() { defer metaWg.Done(); ytStates, _ = ytClient.GetStates(r.Context()) }()
+	go func() { defer metaWg.Done(); ytPriorities, _ = ytClient.GetPriorities(r.Context()) }()
+	go func() { defer metaWg.Done(); availableSprints, _ = ytClient.GetSprints(r.Context()) }()
+	go func() { defer metaWg.Done(); ytUsers, _ = ytClient.GetUsers(r.Context()) }()
+	metaWg.Wait()
+
+	if req.SprintID != "" {
+		sprintIssues, _ = ytClient.GetAllSprintIssues(r.Context(), req.SprintID)
+	} else {
+		sprintIssues, _ = ytClient.GetIssues(r.Context())
 	}
 
 	// Collect issue IDs for the tracking fetch scope
@@ -2479,7 +2656,7 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		sprintEnds = time.UnixMilli(req.SprintFinishMs).Format("Jan 2, 2006")
 	}
 
-	kpis := SprintKPIs{
+	kpis := pmSprintKPIs{
 		SprintName: req.SprintName,
 		SprintEnds: sprintEnds,
 		Bounced:    len(bouncedSet),
@@ -2534,24 +2711,65 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	}
 	kpis.Overdue = overdueFinal
 
-	// ── 6. RAG: retrieve only the issues relevant to this query ───────────────
-	ragContext, ragIntent := BuildPMQueryContext(req.Query, sprintIssues, trackingLogs, blockerReasons, kpis)
-	log.Printf("[PM-RAG] query=%q intent=%s sprint_issues=%d tracking_rows=%d context_bytes=%d",
-		req.Query, ragIntent.kind, len(sprintIssues), len(trackingLogs), len(ragContext))
-
-	// Pipeline status: the Go code already computed the full answer — return it directly,
-	// bypassing the LLM to guarantee zero hallucination.
-	if ragIntent.kind == intentPipelineStatus {
-		sendJSON(w, http.StatusOK, Response{Success: true, Data: map[string]interface{}{
-			"response": ragContext,
-			"action":   "",
-			"payload":  nil,
-		}})
-		return
+	// ── 6. Translate query to YQL via LLM ────────────────────────────────────
+	translationPrompt := buildYQLTranslationPrompt(projectID, req.SprintName, ytStates, ytPriorities, availableSprints, ytUsers)
+	yql, translErr := ai.QueryWithHistory(r.Context(), translationPrompt, nil, req.Query)
+	if translErr != nil {
+		log.Printf("[PM-YQL] translation failed: %v — using default sprint query", translErr)
+		if req.SprintName != "" {
+			yql = fmt.Sprintf("project: %s sprint: {%s}", projectID, req.SprintName)
+		} else {
+			yql = fmt.Sprintf("project: %s", projectID)
+		}
 	}
+	// Strip any code fences or extra whitespace the model may add, then normalize braces
+	yql = strings.TrimSpace(yql)
+	yql = strings.Trim(yql, "`")
+	yql = strings.TrimSpace(yql)
+	yql = normalizeYQL(yql)
+	log.Printf("[PM-YQL] query=%q → yql=%q", req.Query, yql)
 
+	// ── 7. Execute YQL against YouTrack ──────────────────────────────────────
+	yqlIssues, yqlErr := ytClient.SearchIssues(r.Context(), yql, 150)
+	if yqlErr != nil {
+		log.Printf("[PM-YQL] search failed: %v", yqlErr)
+		yqlIssues = []youtrack.Issue{}
+	}
+	log.Printf("[PM-YQL] results=%d issues for sprint=%q", len(yqlIssues), req.SprintName)
 
-	// ── 7. Inject available sprints + sprint-action instructions ─────────────
+	// ── 8. Build data context from YQL results + sprint KPIs ─────────────────
+	var ctxSB strings.Builder
+	ctxSB.WriteString(buildPMKPIContext(kpis))
+	ctxSB.WriteString("\n\n")
+	if len(yqlIssues) == 0 {
+		ctxSB.WriteString("QUERY RESULTS: No issues found matching your query.\n")
+	} else {
+		ctxSB.WriteString(fmt.Sprintf("QUERY RESULTS (%d issues — complete list, never invent additional tickets):\n", len(yqlIssues)))
+		ctxSB.WriteString("ID | Priority | Summary | State | Assignee\n")
+		for _, iss := range yqlIssues {
+			issID := iss.IDReadable
+			if issID == "" {
+				issID = iss.ID
+			}
+			state := youtrack.GetStatus(iss)
+			prio := youtrack.GetPriority(iss)
+			asgn := ""
+			if a := youtrack.GetAssignee(iss); a != nil {
+				asgn = a.FullName
+				if asgn == "" {
+					asgn = a.Login
+				}
+			}
+			blocker := ""
+			if reason, ok := blockerReasons[iss.ID]; ok && reason != "" {
+				blocker = " | BLOCKER: " + reason
+			}
+			ctxSB.WriteString(fmt.Sprintf("%s | %s | %s | %s | %s%s\n", issID, prio, iss.Summary, state, asgn, blocker))
+		}
+	}
+	dataContext := ctxSB.String()
+
+	// ── 9. Inject sprint list + sprint-action instructions ────────────────────
 	if len(availableSprints) > 0 {
 		var sprintListSB strings.Builder
 		sprintListSB.WriteString("AVAILABLE SPRINTS:\n")
@@ -2563,20 +2781,22 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		sprintListSB.WriteString("\nFor all other queries, respond normally in plain text or markdown.\n\n")
 		customInstructions = sprintListSB.String() + customInstructions
 	}
+	if req.SprintName != "" {
+		customInstructions = fmt.Sprintf("ACTIVE SPRINT: %s\n\n", req.SprintName) + customInstructions
+	}
 
-	// ── 8. Assemble system prompt (custom instructions + focused context) ─────
-	systemPrompt := customInstructions + "\n\n---\n" + ragContext
-	log.Printf("[PM-PROMPT] instructions_bytes=%d rag_bytes=%d total_bytes=%d",
-		len(customInstructions), len(ragContext), len(systemPrompt)+len(req.Query))
+	// ── 10. Assemble system prompt ────────────────────────────────────────────
+	systemPrompt := customInstructions + "\n\n---\n" + dataContext
+	log.Printf("[PM-YQL] instructions=%d data=%d total=%d bytes", len(customInstructions), len(dataContext), len(systemPrompt)+len(req.Query))
 
-	// ── 9. Query AI with conversation history ────────────────────────────────
+	// ── 11. Query AI for final response ──────────────────────────────────────
 	response, err := ai.QueryWithHistory(r.Context(), systemPrompt, req.History, req.Query)
 	if err != nil {
 		http.Error(w, "AI query failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// ── 10. Parse structured action response if AI returned JSON ─────────────
+	// ── 12. Parse structured action response if AI returned JSON ────────────
 	type actionPayload struct {
 		SprintID   string `json:"sprint_id"`
 		SprintName string `json:"sprint_name"`

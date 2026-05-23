@@ -91,6 +91,8 @@ Active source is stored in `user_data_source` table (backend) and `localStorage`
 
 Users can switch between **YouTrack** and **Asana**. Both use separate route namespaces: `/api/youtrack/*` and `/api/asana/pm/*`.
 
+**RULE — No hardcoding of domain data.** Every feature must fetch states, priorities, assignees, sprint names, and any other project data live from the active PM source. Never hardcode these values in backend or frontend code.
+
 ## Environment Variables
 
 **Backend** (`backend/.env`):

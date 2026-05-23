@@ -146,3 +146,5 @@ nul
 !LICENSE.md
 !CLAUDE.md
 !docs/
+.opencode.json
+CLAUDE.md
