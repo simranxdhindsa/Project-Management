@@ -116,6 +116,29 @@ func (c *Client) GetBaseURL() string {
 	return c.baseURL
 }
 
+// GetProjectID returns the project ID/short-name used in YQL queries
+func (c *Client) GetProjectID() string {
+	return c.projectID
+}
+
+// SearchIssues executes an arbitrary YQL query against YouTrack and returns matching issues.
+func (c *Client) SearchIssues(ctx context.Context, yqlQuery string, limit int) ([]Issue, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	fields := "id,idReadable,summary,description,created,updated,reporter(id,fullName,login,avatarUrl),customFields(name,value(name,presentation,fullName,login,email,avatarUrl,id)),project(shortName)"
+	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=%d", fields, url.QueryEscape(yqlQuery), limit)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var issues []Issue
+	if err := json.Unmarshal(body, &issues); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal search results: %w", err)
+	}
+	return issues, nil
+}
+
 // GetToken returns the YouTrack API token (used by the attachment proxy handler)
 func (c *Client) GetToken() string {
 	return c.token
