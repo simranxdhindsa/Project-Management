@@ -307,10 +307,10 @@ function ATicketRow({
 
 function ADevRow({ name, stats }: { name: string; stats: DevStat }) {
   const chips = [
-    { val: `${stats.totalHours}h`, color: 'var(--color-primary-light)', label: 'total' },
-    { val: stats.tickets,          color: 'var(--text-muted)',           label: 'tickets' },
-    { val: stats.bounced,          color: 'var(--dt-bounce)',             label: 'bounced' },
-    { val: stats.live,             color: 'var(--color-success)',         label: 'live' },
+    { val: fmtHours(stats.totalHours), color: 'var(--color-primary-light)', label: 'total' },
+    { val: stats.tickets,              color: 'var(--text-muted)',           label: 'tickets' },
+    { val: stats.bounced,              color: 'var(--dt-bounce)',             label: 'bounced' },
+    { val: stats.live,                 color: 'var(--color-success)',         label: 'live' },
   ]
   return (
     <div className="pm-tt-a-dev-row">
