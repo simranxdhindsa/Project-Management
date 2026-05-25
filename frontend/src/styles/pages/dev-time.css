@@ -276,26 +276,33 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 16px;
-  height: 40px;
+  padding: 6px 16px;
+  min-height: 40px;
   background: var(--dt-dev-row-bg);
   border-bottom: 1px solid var(--dt-border);
   border-top: 1px solid var(--dt-border);
   position: sticky;
-  top: 38px;
+  top: 0;
   z-index: 2;
+  overflow: hidden;
 }
 
 .pm-tt-a-dev-name {
   font-size: 13px;
   font-weight: 700;
   color: var(--dt-text);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .pm-tt-a-dev-chips {
   display: flex;
   gap: 6px;
-  margin-left: 8px;
+  margin-left: 4px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  overflow: hidden;
 }
 
 .pm-tt-a-dev-chip {
@@ -308,6 +315,8 @@
   border: 1px solid var(--dt-border);
   font-size: 10px;
   font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .pm-tt-a-dev-chip-label {
