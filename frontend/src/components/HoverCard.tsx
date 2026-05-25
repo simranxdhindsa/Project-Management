@@ -12,6 +12,7 @@ export default function HoverCard({ content, children, delay = 280, maxWidth = 3
   const [visible, setVisible] = useState(false)
   const [pos, setPos] = useState({ x: 0, y: 0, above: true })
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
   const show = useCallback(() => {
@@ -26,15 +27,25 @@ export default function HoverCard({ content, children, delay = 280, maxWidth = 3
     setVisible(true)
   }, [maxWidth])
 
+  const cancelHide = useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+  }, [])
+
+  const startHideTimer = useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = setTimeout(() => setVisible(false), 2000)
+  }, [])
+
   const handleEnter = useCallback(() => {
     if (!content) return
+    cancelHide()
     timerRef.current = setTimeout(show, delay)
-  }, [show, delay, content])
+  }, [show, delay, content, cancelHide])
 
   const handleLeave = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
-    setVisible(false)
-  }, [])
+    startHideTimer()
+  }, [startHideTimer])
 
   return (
     <div
@@ -48,6 +59,8 @@ export default function HoverCard({ content, children, delay = 280, maxWidth = 3
         <div
           className={`hc-card${pos.above ? ' hc-card--above' : ' hc-card--below'}`}
           style={{ left: pos.x, top: pos.y, maxWidth }}
+          onMouseEnter={cancelHide}
+          onMouseLeave={startHideTimer}
         >
           {content}
         </div>,

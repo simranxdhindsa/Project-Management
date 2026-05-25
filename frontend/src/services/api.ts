@@ -1302,8 +1302,12 @@ class ApiService {
     return this.request<string[]>('/reports/pins')
   }
 
-  async getIssueTimelines() {
-    return this.request<IssueTimeline[]>('/reports/issue-timelines')
+  async getIssueTimelines(sinceMs?: number, untilMs?: number) {
+    const params = new URLSearchParams()
+    if (sinceMs) params.set('since', String(sinceMs))
+    if (untilMs) params.set('until', String(untilMs))
+    const qs = params.toString()
+    return this.request<IssueTimeline[]>(`/reports/issue-timelines${qs ? `?${qs}` : ''}`)
   }
 
   async dismissAlert(issueID: string) {

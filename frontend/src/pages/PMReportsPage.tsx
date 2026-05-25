@@ -39,6 +39,8 @@ import {
 import DailyOpsTab from './DailyOpsTab'
 import { StandupCompilerPage } from './StandupCompilerPage'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
+import DevTimeView from '../components/DevTimeView'
+import type { DevTimeVariant } from '../components/DevTimeView'
 import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -1991,7 +1993,7 @@ function getColumnType(col: SprintBoardColumn): 'inprogress' | 'blocked' | 'comp
   return 'compact'
 }
 
-function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIssueIds?: Set<string>; sprintId?: string; sprintFinishMs?: number }) {
+function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs }: { blockerIssueIds?: Set<string>; sprintId?: string; sprintStartMs?: number; sprintFinishMs?: number }) {
   const [boardColumns, setBoardColumns] = useState<SprintBoardColumn[]>([])
   const [summary, setSummary] = useState<import('../services/api').SprintSummary | null>(null)
   const [loading, setLoading] = useState(false)
@@ -2004,9 +2006,11 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
   const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-  const [viewMode, setViewMode] = usePersistedState(PERSIST.TRACKING_VIEW, 'column' as 'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline', {
-    validate: ['column', 'assignee', 'swimlane', 'sidebar', 'heatmap', 'delay-bars', 'alert-first', 'split-pane', 'focus', 'qa-pipeline'],
+  const [viewMode, setViewMode] = usePersistedState(PERSIST.TRACKING_VIEW, 'column' as 'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline' | 'dev-time', {
+    validate: ['column', 'assignee', 'swimlane', 'sidebar', 'heatmap', 'delay-bars', 'alert-first', 'split-pane', 'focus', 'qa-pipeline', 'dev-time'],
   })
+  const [devTimeVariant, setDevTimeVariant] = useState<DevTimeVariant>('a')
+  const [devTimeTimelines, setDevTimeTimelines] = useState<IssueTimeline[]>([])
   const [qaFilterMode, setQaFilterMode] = useState<'all' | 'needs-qa'>('all')
   const [viewModeOpen, setViewModeOpen] = useState(false)
   const [sidebarPerson, setSidebarPerson] = useState<string>('')
@@ -2040,6 +2044,13 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
 
   useEffect(() => { fetchBoardStatus() }, [fetchBoardStatus])
   useEffect(() => { getAvatarMap().then(setAvatarMap) }, [])
+
+  useEffect(() => {
+    if (viewMode !== 'dev-time') return
+    setDevTimeTimelines([])
+    getIssueTimelines(sprintStartMs, sprintFinishMs).then(res => setDevTimeTimelines(res.data ?? [])).catch(() => {})
+  }, [viewMode, sprintId, sprintStartMs, sprintFinishMs])
+
   useEffect(() => {
     api.getYouTrackIntegration().then(res => {
       const d = (res as any)
@@ -2629,6 +2640,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
               { id: 'split-pane',  label: 'Split Pane',  icon: <Gauge size={11} /> },
               { id: 'focus',       label: 'Focus Mode',  icon: <ScanSearch size={11} /> },
               { id: 'qa-pipeline', label: 'QA Pipeline', icon: <ShieldCheck size={11} /> },
+              { id: 'dev-time',    label: 'Dev Time',    icon: <Clock size={11} /> },
             ] as const
             const current = VIEW_MODES.find(m => m.id === viewMode) || VIEW_MODES[0]
             return (
@@ -4086,6 +4098,108 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintFinishMs }: { blockerIss
         </div>
       )}
 
+      {/* ── Dev Time view ── */}
+      {viewMode === 'dev-time' && (() => {
+        const sk = (w: number | string, h: number, r = 5) => (
+          <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+        )
+        return (
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {/* Variant tab strip */}
+            <div style={{ display: 'flex', gap: 4, padding: '6px 20px', borderBottom: '1px solid var(--border-color)', flexShrink: 0, alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 4 }}>View</span>
+              {([
+                { id: 'a' as DevTimeVariant, label: 'Time Ledger' },
+                { id: 'b' as DevTimeVariant, label: 'Dev Cards' },
+                { id: 'c' as DevTimeVariant, label: 'Gantt' },
+              ]).map(v => (
+                <button
+                  key={v.id}
+                  className="pm-tt-variant-tab"
+                  data-active={String(devTimeVariant === v.id)}
+                  onClick={() => setDevTimeVariant(v.id)}
+                >
+                  {v.label}
+                </button>
+              ))}
+              <button
+                style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                onClick={() => { setDevTimeTimelines([]); getIssueTimelines(sprintStartMs, sprintFinishMs).then(res => setDevTimeTimelines(res.data ?? [])).catch(() => {}) }}
+              >
+                <RefreshCw size={11} /> Refresh
+              </button>
+            </div>
+
+            {devTimeTimelines.length === 0 ? (
+              /* Skeleton loader */
+              <div style={{ flex: 1, overflow: 'hidden', padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* KPI chips skeleton */}
+                <div style={{ display: 'flex', gap: 8, paddingBottom: 10, borderBottom: '1px solid var(--border-color)' }}>
+                  {[110, 110, 120, 130].map((w, i) => (
+                    <div key={i} className="skeleton" style={{ width: w, height: 36, borderRadius: 8 }} />
+                  ))}
+                </div>
+                {/* Content skeleton — changes by variant */}
+                {devTimeVariant === 'b' ? (
+                  /* Dev Cards grid skeleton */
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(440px, 1fr))', gap: 14 }}>
+                    {[0,1,2].map(ci => (
+                      <div key={ci} className="skeleton" style={{ height: 220, borderRadius: 14 }} />
+                    ))}
+                  </div>
+                ) : devTimeVariant === 'c' ? (
+                  /* Gantt skeleton */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {sk('100%', 32, 6)}
+                    {[0,1,2,3].map(ri => (
+                      <div key={ri} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                        {sk(140, 44, 8)}
+                        {sk('70%', 24, 6)}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  /* Time Ledger (A) table skeleton */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {sk('100%', 32, 6)}
+                    {[0,1,2].map(gi => (
+                      <React.Fragment key={gi}>
+                        {sk('100%', 36, 6)}
+                        {[0,1,2,3].map(ri => (
+                          <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px 0 28px' }}>
+                            {sk(10, 10, 2)}
+                            {sk(80, 20, 4)}
+                            {sk(44, 18, 4)}
+                            {sk('40%', 12, 4)}
+                            {sk(72, 20, 4)}
+                            {sk(24, 12, 3)}
+                            {sk(50, 12, 3)}
+                          </div>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <DevTimeView
+                timelines={devTimeTimelines}
+                variant={devTimeVariant}
+                onTicketClick={async (issueId) => {
+                  setYtDetailLoading(true)
+                  try {
+                    const issue = await api.getYouTrackIssue(issueId)
+                    setYtDetailIssue(issue)
+                  } catch {}
+                  finally { setYtDetailLoading(false) }
+                }}
+                ytBaseUrl={ytBaseUrl}
+              />
+            )}
+          </div>
+        )
+      })()}
+
       {/* ── Transition history modal ── */}
       {detailIssue && (
         <IssueDetailModal
@@ -5048,7 +5162,7 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
         <div className={`pm-tab-panel glass-card${activeTab === 'daily' ? ' pm-tab-panel--daily' : ''}`}>
           {activeTab === 'daily'      && <DailyReportTab sprintId={activeSprint?.id} sprintName={activeSprint?.name} />}
           {activeTab === 'assignees'  && <AssigneeStatsTab sprintId={activeSprint?.id} />}
-          {activeTab === 'tracking'   && <TrackingTab blockerIssueIds={blockerIssueIds} sprintId={activeSprint?.id} sprintFinishMs={activeSprint?.finish} />}
+          {activeTab === 'tracking'   && <TrackingTab blockerIssueIds={blockerIssueIds} sprintId={activeSprint?.id} sprintStartMs={activeSprint?.start} sprintFinishMs={activeSprint?.finish} />}
           {activeTab === 'dailyops'   && <DailyOpsTab onBlockersChange={setBlockerIssueIds} sprintId={activeSprint?.id} />}
           {activeTab === 'deployment' && <DeploymentReportTab activeSprint={activeSprint} />}
           {activeTab === 'standup'    && <StandupCompilerPage />}
