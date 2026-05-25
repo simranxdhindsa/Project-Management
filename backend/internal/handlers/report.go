@@ -862,7 +862,21 @@ func (h *ReportHandler) GetIssueTimelines(w http.ResponseWriter, r *http.Request
 	pinnedIDs, _ := h.reportRepo.GetPinnedIssueIDs(r.Context(), user.ID)
 	dismissedSet, _ := h.reportRepo.GetDismissedAlertIDs(r.Context(), user.ID)
 
-	timelines, err := h.reportRepo.GetIssueTimelines(r.Context(), pinnedIDs)
+	var since, until *time.Time
+	if v := r.URL.Query().Get("since"); v != "" {
+		if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
+			t := time.UnixMilli(ms).UTC()
+			since = &t
+		}
+	}
+	if v := r.URL.Query().Get("until"); v != "" {
+		if ms, err := strconv.ParseInt(v, 10, 64); err == nil {
+			t := time.UnixMilli(ms).UTC()
+			until = &t
+		}
+	}
+
+	timelines, err := h.reportRepo.GetIssueTimelines(r.Context(), pinnedIDs, since, until)
 	if err != nil {
 		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to get timelines: " + err.Error()})
 		return

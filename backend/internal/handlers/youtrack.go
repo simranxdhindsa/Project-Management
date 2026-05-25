@@ -2315,7 +2315,9 @@ ANSWERING RULES:
 7. If context header says "COMPLETE list" or "EXACTLY N tickets" — that IS the full set. Never imply more exist or add imaginary tickets.
 8. STRICT: ONLY use ticket IDs that appear in the DATA below. Never invent IDs like ARD-1234, names like "John/Dave/Alice", or timestamps you don't see in the data. If you can't find the answer in the data, say "I don't have that information in the current sprint data."
 9. If data is missing for a specific ticket: say "I don't have data for [ID] in this sprint" — do NOT guess or fabricate.
-10. Multi-turn: build on conversation history, never re-introduce yourself`
+10. Multi-turn: build on conversation history, never re-introduce yourself
+11. When query asks for date-based filtering (e.g., "exclude bugs resolved last week") but resolved dates are not in the data: list ALL matching tickets found and add a short note — do NOT ask the user for more context or refuse to answer
+12. If only 1 ticket is returned and the data says "COMPLETE list", that IS the full result — state it directly without asking for more context`
 
 // pmSprintKPIs carries sprint-level stats included in every PM assistant response.
 type pmSprintKPIs struct {
@@ -2353,7 +2355,7 @@ func buildPMKPIContext(kpis pmSprintKPIs) string {
 // buildYQLTranslationPrompt builds the system prompt for the LLM that translates
 // natural-language questions into YouTrack Query Language (YQL).
 // All domain data (states, priorities, sprints, users) is injected dynamically — nothing hardcoded.
-func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack.State, priorities []youtrack.PriorityValue, sprints []youtrack.Sprint, users []youtrack.User) string {
+func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack.State, priorities []youtrack.PriorityValue, sprints []youtrack.Sprint, users []youtrack.User, subsystems []youtrack.PriorityValue) string {
 	var sb strings.Builder
 	sb.WriteString("You are a YouTrack Query Language (YQL) translator.\n")
 	sb.WriteString("Output ONLY the raw YQL query string — no explanation, no quotes, no markdown.\n\n")
@@ -2408,6 +2410,28 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 		sb.WriteString("\n")
 	}
 
+	// Subsystem values — critical for "mission control", "studio", "BE/FE" queries
+	// Subsystems support BOTH #{value} hashtag AND Subsystem: {value} syntax.
+	// EXCLUSION LOGIC: YouTrack has NO exclusion operator for subsystems.
+	// To exclude a subsystem: list only the subsystems you WANT (omit the excluded one).
+	if len(subsystems) > 0 {
+		sb.WriteString("SUBSYSTEMS — each subsystem can be used as a hashtag #tag:\n")
+		for _, s := range subsystems {
+			if strings.Contains(s.Name, " ") {
+				sb.WriteString(fmt.Sprintf("  #{%s}\n", s.Name))
+			} else {
+				sb.WriteString(fmt.Sprintf("  #%s\n", s.Name))
+			}
+		}
+		sb.WriteString("\nSUBSYSTEM EXCLUSION LOGIC (CRITICAL):\n")
+		sb.WriteString("  YouTrack has NO exclusion operator for subsystems. NEVER use -Subsystem: or -#{value}.\n")
+		sb.WriteString("  Instead: identify all subsystems matching the category, then INCLUDE ONLY the ones the user wants.\n")
+		sb.WriteString("  Example: 'BE tickets except RAG' → subsystems are #{BE MC} #{BE UI} #{BE Studio} #{BE RAG}\n")
+		sb.WriteString("    → include only: #{Sprint 5} #{BE MC} #{BE Studio} #{BE UI}  (omit #{BE RAG})\n")
+		sb.WriteString("  Example: 'FE tickets for Mission Control' → #{Sprint 5} #{FE MC}\n")
+		sb.WriteString("  Example: 'all Mission Control tickets FE only' → #{Sprint 5} #{FE MC}\n\n")
+	}
+
 	sb.WriteString("YQL SYNTAX RULES:\n")
 	sb.WriteString("• States, priorities, sprints all use # prefix:\n")
 	sb.WriteString("    Single-word:  #Blocked  #P0  #DEV\n")
@@ -2416,8 +2440,14 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 	sb.WriteString(fmt.Sprintf("• Always start with: project: %s\n", projectID))
 	sb.WriteString("• Assignee filter: Assignee: login  (no # prefix, exact login)\n")
 	sb.WriteString("• Reporter/creator filter: by: login\n")
-	sb.WriteString("• Date filters: created: Today  /  created: yesterday  /  updated: Today\n")
-	sb.WriteString("• Type filter: Type: Bug  /  Type: Feature  /  Type: Task\n\n")
+	sb.WriteString("• Subsystem filter: use # hashtag — #{FE MC}  OR  Subsystem: {FE MC}  (both work)\n")
+	sb.WriteString("• Subsystem EXCLUSION: NOT SUPPORTED — instead list only the subsystems you want (see SUBSYSTEM EXCLUSION LOGIC above)\n")
+	sb.WriteString("• Type filter: Type: Bug  /  Type: Feature  /  Type: Hotfix  /  Type: Task\n")
+	sb.WriteString("• Date filters:\n")
+	sb.WriteString("    created: Today  |  created: yesterday  |  created: {This week}  |  created: {Last week}\n")
+	sb.WriteString("    resolved: {This week}  |  updated: Today\n")
+	sb.WriteString("    Date range: created: 2026-05-01 .. 2026-05-24\n")
+	sb.WriteString("• Exclude a date period: -resolved: {Last week}  (means NOT resolved last week)\n\n")
 
 	sb.WriteString("PROVEN EXAMPLES (use these exact patterns):\n")
 	sb.WriteString(fmt.Sprintf("  all sprint issues       → project: %s #{%s}\n", projectID, activeSprint))
@@ -2431,6 +2461,13 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 	sb.WriteString(fmt.Sprintf("  hotfixes in progress    → project: %s #{%s} Type: Hotfix #{In Progress}\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  bugs in sprint          → project: %s #{%s} Type: Bug\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  tasks for one person    → project: %s #{%s} Assignee: simran\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  FE MC done tickets      → project: %s #{%s} #{FE MC} #DEV #Done\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  MC FE tickets only      → project: %s #{%s} #{FE MC}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  MC excl backend         → project: %s #{%s} #{FE MC}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  BE excl RAG             → project: %s #{%s} #{BE MC} #{BE Studio} #{BE UI}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  bugs this sprint only   → project: %s #{%s} Type: Bug\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  bugs not from last week → project: %s #{%s} Type: Bug\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  created this week       → project: %s created: {This week}\n", projectID))
 	sb.WriteString(fmt.Sprintf("  bounced back            → project: %s #{%s}\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  bounced tickets         → project: %s #{%s}\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  highest bounce count    → project: %s #{%s}\n", projectID, activeSprint))
@@ -2449,7 +2486,11 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 	sb.WriteString("6. For 'multiple assignees': use only one Assignee: filter or none — NEVER chain Assignee: x Assignee: y\n")
 	sb.WriteString("7. Type filter: Type: Hotfix / Type: Bug / Type: Task / Type: Feature (never use # for Type)\n")
 	sb.WriteString("8. NEVER use date comparisons like  due: <  or  updated: <=  — these are invalid YQL\n")
-	sb.WriteString("9. NEVER invent state names like #Bounced #Overdue #AtRisk #Reopened — these do not exist\n")
+	sb.WriteString("   NEVER use  resolved: {period}  — this project does NOT have resolved dates; use state filters instead\n")
+	sb.WriteString("   For 'exclude resolved last week': just return sprint + type filter — the bot will reason from ticket data\n")
+	sb.WriteString("9. NEVER invent state names like #Bounced #Overdue #AtRisk #Reopened #Fixed — these do not exist\n")
+	sb.WriteString("10. Subsystem EXCLUSION (-Subsystem:) is NOT valid YQL — to get 'MC excluding backend', use Subsystem: {FE MC} only\n")
+	sb.WriteString("11. Only use state names from the STATES list above — do not guess or invent state names\n")
 	return sb.String()
 }
 
@@ -2582,13 +2623,18 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	var ytStates []youtrack.State
 	var ytPriorities []youtrack.PriorityValue
 	var ytUsers []youtrack.User
+	var ytSubsystems []youtrack.PriorityValue
 
 	var metaWg sync.WaitGroup
-	metaWg.Add(4)
+	metaWg.Add(5)
 	go func() { defer metaWg.Done(); ytStates, _ = ytClient.GetStates(r.Context()) }()
 	go func() { defer metaWg.Done(); ytPriorities, _ = ytClient.GetPriorities(r.Context()) }()
 	go func() { defer metaWg.Done(); availableSprints, _ = ytClient.GetSprints(r.Context()) }()
 	go func() { defer metaWg.Done(); ytUsers, _ = ytClient.GetUsers(r.Context()) }()
+	go func() {
+		defer metaWg.Done()
+		ytSubsystems, _ = ytClient.GetCustomFieldValues(r.Context(), "Subsystem")
+	}()
 	metaWg.Wait()
 
 	if req.SprintID != "" {
@@ -2762,7 +2808,7 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	kpis.Overdue = overdueFinal
 
 	// ── 6. Translate query to YQL via LLM ────────────────────────────────────
-	translationPrompt := buildYQLTranslationPrompt(projectID, req.SprintName, ytStates, ytPriorities, availableSprints, ytUsers)
+	translationPrompt := buildYQLTranslationPrompt(projectID, req.SprintName, ytStates, ytPriorities, availableSprints, ytUsers, ytSubsystems)
 	yql, translErr := ai.QueryWithHistory(r.Context(), translationPrompt, nil, req.Query)
 	if translErr != nil {
 		log.Printf("[PM-YQL] translation failed: %v — using default sprint query", translErr)
@@ -2785,6 +2831,10 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		"bounce", "bounced", "overdue", "sla", "cycle time", "cycletime",
 		"workload", "at-risk", "at risk", "delay severity", "developer load",
 		"developer workload", "who has the most",
+		// Date-exclusion patterns: YouTrack has no resolved date in this project, so these
+		// can't be filtered via YQL — fall back to full sprint fetch and let LLM reason from data
+		"resolved by last week", "resolved last week", "exclude last week", "not last week",
+		"last week bugs", "last week tickets",
 	}
 	queryLower := strings.ToLower(req.Query)
 	for _, kw := range analyticsKeywords {
@@ -2793,7 +2843,12 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 			if req.SprintName != "" {
 				sprintTag = fmt.Sprintf(" #{%s}", req.SprintName)
 			}
-			yql = fmt.Sprintf("project: %s%s", projectID, sprintTag)
+			// Preserve Type: filter from the generated YQL if present (e.g. Type: Bug)
+			typeFilter := ""
+			if m := regexp.MustCompile(`(?i)\bType:\s*\w+`).FindString(yql); m != "" {
+				typeFilter = " " + m
+			}
+			yql = fmt.Sprintf("project: %s%s%s", projectID, sprintTag, typeFilter)
 			log.Printf("[PM-YQL] analytics override → %q", yql)
 			break
 		}
@@ -2813,10 +2868,17 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	var ctxSB strings.Builder
 	ctxSB.WriteString(buildPMKPIContext(kpis))
 	ctxSB.WriteString("\n\n")
+	// Build a human-readable explanation of what the filter did
+	filterNote := fmt.Sprintf("SEARCH FILTER APPLIED: %s\n", yql)
+	if strings.Contains(yql, "Subsystem:") {
+		filterNote += "NOTE: The Subsystem: filter above has already applied the subsystem/component restriction (e.g. 'FE MC' = Frontend Mission Control, which excludes backend). The results below are already filtered by subsystem.\n"
+	}
+	filterNote += "INSTRUCTION: The issues below are the COMPLETE result of this filter. State the answer directly — do NOT ask for more context, do NOT say data is missing. If 0 results, say 'no matching tickets found'.\n\n"
+	ctxSB.WriteString(filterNote)
 	if len(yqlIssues) == 0 {
-		ctxSB.WriteString("QUERY RESULTS: No issues found matching your query. DO NOT invent ticket IDs, names, or data — answer only from the Sprint Summary above.\n")
+		ctxSB.WriteString("QUERY RESULTS: No issues found matching this filter. Answer only from the Sprint Summary above — do NOT invent ticket IDs or data.\n")
 	} else {
-		ctxSB.WriteString(fmt.Sprintf("QUERY RESULTS (%d issues — complete list, never invent additional tickets):\n", len(yqlIssues)))
+		ctxSB.WriteString(fmt.Sprintf("QUERY RESULTS (%d issues — COMPLETE, answer directly from this list):\n", len(yqlIssues)))
 		ctxSB.WriteString("ID | Priority | Type | Summary | State | Assignee\n")
 		for _, iss := range yqlIssues {
 			issID := iss.IDReadable

@@ -140,7 +140,7 @@ $RECYCLE.BIN/
 nul
 
 # Documentation files (sensitive configs)
-*.md
+# *.md
 !README.md
 !CONTRIBUTING.md
 !LICENSE.md
@@ -148,3 +148,5 @@ nul
 !docs/
 .opencode.json
 CLAUDE.md
+pompt.md
+backend/migrations/BOT_PROMPTS.md

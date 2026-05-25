@@ -265,7 +265,9 @@ View modes: By Column, By Assignee, Swimlane, Sidebar, Heatmap, Delay Bars, Aler
 Single Developer Load view — per-developer cards with sprint progress, stat chips (done/active/blocked/bounced/overdue/hours), active and blocked issue lists.
 
 ### PM Assistant
-AI chat over sprint data using BM25 RAG (`pm_query_rag.go`). Supports action execution (e.g. sprint switching) via structured JSON responses. Entry point: `BuildPMQueryContext()`.
+AI chat over YouTrack sprint data. Uses a two-step LLM flow: (1) translate user query to YQL, (2) fetch issues, (3) respond with per-ticket context including bounce counts and overdue flags.
+
+**Full technical reference: [`backend/YQL.md`](backend/YQL.md)** — covers YQL syntax, subsystem exclusion logic, analytics overrides, bounce detection, bot prompt locations, model config, and known limitations. Read this file before modifying the PM Assistant.
 
 ### Board & List Views
 Kanban board (`BoardPage.tsx`) and flat list (`ListViewPage.tsx`) — both driven by the active PM source.
