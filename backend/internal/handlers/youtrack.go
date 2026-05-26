@@ -2445,14 +2445,19 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 	sb.WriteString("• Type filter: Type: Bug  /  Type: Feature  /  Type: Hotfix  /  Type: Task\n")
 	sb.WriteString("• Date filters:\n")
 	sb.WriteString("    created: Today  |  created: yesterday  |  created: {This week}  |  created: {Last week}\n")
-	sb.WriteString("    resolved: {This week}  |  updated: Today\n")
+	sb.WriteString("    updated: Today  |  updated: yesterday  |  updated: {This week}\n")
 	sb.WriteString("    Date range: created: 2026-05-01 .. 2026-05-24\n")
-	sb.WriteString("• Exclude a date period: -resolved: {Last week}  (means NOT resolved last week)\n\n")
+	sb.WriteString("• 'moved to [state] today/recently' → use that state + updated: Today  (NOT created:)\n")
+	sb.WriteString("• NEVER use 'created:' for transition/movement queries — only for ticket creation date\n\n")
 
 	sb.WriteString("PROVEN EXAMPLES (use these exact patterns):\n")
 	sb.WriteString(fmt.Sprintf("  all sprint issues       → project: %s #{%s}\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  blocked tickets         → project: %s #{%s} #Blocked\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  in progress             → project: %s #{%s} #{In Progress}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  moved to DEV today      → project: %s #{%s} #DEV updated: Today\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  moved to Stage today    → project: %s #{%s} #Stage updated: Today\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  moved to Done today     → project: %s #{%s} #Done updated: Today\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  updated this week       → project: %s #{%s} updated: {This week}\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  DEV + Stage + Prod      → project: %s #{%s} #DEV #Stage #{Ready For Prod}\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  single assignee         → project: %s #{%s} Assignee: rajvirsingh\n", projectID, activeSprint))
 	sb.WriteString(fmt.Sprintf("  P0 or P1 open           → project: %s #{%s} #P0 #P1 #{In Progress} #{To Do}\n", projectID, activeSprint))
@@ -2868,13 +2873,16 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	var ctxSB strings.Builder
 	ctxSB.WriteString(buildPMKPIContext(kpis))
 	ctxSB.WriteString("\n\n")
-	// Build a human-readable explanation of what the filter did
-	filterNote := fmt.Sprintf("SEARCH FILTER APPLIED: %s\n", yql)
-	if strings.Contains(yql, "Subsystem:") {
-		filterNote += "NOTE: The Subsystem: filter above has already applied the subsystem/component restriction (e.g. 'FE MC' = Frontend Mission Control, which excludes backend). The results below are already filtered by subsystem.\n"
+
+	// Build a query-context hint injected into the SYSTEM PROMPT (not the data context)
+	// so the LLM understands the filter but never echoes it in the response.
+	var queryContextHint string
+	queryContextHint = fmt.Sprintf("The search filter applied was: %s\n", yql)
+	if strings.Contains(yql, "Subsystem:") || strings.Contains(yql, "#{") && (strings.Contains(strings.ToLower(yql), "mc") || strings.Contains(strings.ToLower(yql), "studio")) {
+		queryContextHint += "The subsystem filter above has already restricted results to the requested component (e.g. '#{FE MC}' = Frontend Mission Control only, excludes backend).\n"
 	}
-	filterNote += "INSTRUCTION: The issues below are the COMPLETE result of this filter. State the answer directly — do NOT ask for more context, do NOT say data is missing. If 0 results, say 'no matching tickets found'.\n\n"
-	ctxSB.WriteString(filterNote)
+	queryContextHint += "The issues listed below are the COMPLETE result of this filter. Answer directly — never ask for more context, never say data is missing. If 0 results, say 'no matching tickets found'.\n"
+
 	if len(yqlIssues) == 0 {
 		ctxSB.WriteString("QUERY RESULTS: No issues found matching this filter. Answer only from the Sprint Summary above — do NOT invent ticket IDs or data.\n")
 	} else {
@@ -2935,7 +2943,9 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	}
 
 	// ── 10. Assemble system prompt ────────────────────────────────────────────
-	systemPrompt := customInstructions + "\n\n---\n" + dataContext
+	// queryContextHint is injected into the system prompt so the LLM knows what was
+	// searched without ever including it in the visible response.
+	systemPrompt := customInstructions + "\n\n[QUERY CONTEXT — internal, never output this section]\n" + queryContextHint + "\n---\n" + dataContext
 	log.Printf("[PM-YQL] instructions=%d data=%d total=%d bytes", len(customInstructions), len(dataContext), len(systemPrompt)+len(req.Query))
 
 	// ── 11. Query AI for final response ──────────────────────────────────────
@@ -2955,7 +2965,23 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		Action  string        `json:"action"`
 		Payload actionPayload `json:"payload"`
 	}
+	// Strip any accidental echo of internal metadata lines the LLM should never output
 	displayResponse := response
+	for _, prefix := range []string{"SEARCH FILTER APPLIED:", "[QUERY CONTEXT", "INSTRUCTION: The issues"} {
+		if idx := strings.Index(displayResponse, prefix); idx != -1 {
+			// Find the end of the metadata block (double newline or "QUERY RESULTS")
+			rest := displayResponse[idx:]
+			cut := strings.Index(rest, "\n\n")
+			if cut2 := strings.Index(rest, "QUERY RESULTS"); cut2 != -1 && (cut == -1 || cut2 < cut) {
+				cut = cut2
+			}
+			if cut != -1 {
+				displayResponse = strings.TrimSpace(displayResponse[:idx] + displayResponse[idx+cut:])
+			} else {
+				displayResponse = strings.TrimSpace(displayResponse[:idx])
+			}
+		}
+	}
 	respAction := ""
 	var respPayload interface{}
 	var ar actionResponse
