@@ -1355,6 +1355,76 @@ func (c *Client) UploadAttachment(ctx context.Context, issueID, filename, mimeTy
 	return nil
 }
 
+// IssueLink represents a linked issue returned by GetIssueLinks.
+type IssueLink struct {
+	IDReadable string `json:"id_readable"`
+	Summary    string `json:"summary"`
+	State      string `json:"state"`
+	Resolved   bool   `json:"resolved"`
+}
+
+// GetIssueLinks fetches YouTrack native "Relates To" links for an issue.
+// Only link types whose name contains "relate" (case-insensitive) are returned.
+func (c *Client) GetIssueLinks(ctx context.Context, issueID string) ([]IssueLink, error) {
+	fields := "id,linkType(name,sourceToTarget,targetToSource),trimmedIssues(id,idReadable,summary,resolved,fields(value(name),$type,projectCustomField(field(name))))"
+	path := fmt.Sprintf("/api/issues/%s/links?$topLinks=50&fields=%s", url.PathEscape(issueID), fields)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var raw []struct {
+		LinkType struct {
+			Name string `json:"name"`
+		} `json:"linkType"`
+		TrimmedIssues []struct {
+			ID         string `json:"id"`
+			IDReadable string `json:"idReadable"`
+			Summary    string `json:"summary"`
+			Resolved   bool   `json:"resolved"`
+			Fields     []struct {
+				Type  string          `json:"$type"`
+				Value json.RawMessage `json:"value"`
+				ProjectCustomField struct {
+					Field struct {
+						Name string `json:"name"`
+					} `json:"field"`
+				} `json:"projectCustomField"`
+			} `json:"fields"`
+		} `json:"trimmedIssues"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal issue links: %w", err)
+	}
+
+	var result []IssueLink
+	for _, group := range raw {
+		if !strings.Contains(strings.ToLower(group.LinkType.Name), "relate") {
+			continue
+		}
+		for _, issue := range group.TrimmedIssues {
+			state := ""
+			for _, f := range issue.Fields {
+				if f.Type == "StateIssueCustomField" {
+					var v struct {
+						Name string `json:"name"`
+					}
+					if json.Unmarshal(f.Value, &v) == nil {
+						state = v.Name
+					}
+				}
+			}
+			result = append(result, IssueLink{
+				IDReadable: issue.IDReadable,
+				Summary:    issue.Summary,
+				State:      state,
+				Resolved:   issue.Resolved,
+			})
+		}
+	}
+	return result, nil
+}
+
 // AddIssueToSprint adds an existing issue to a sprint.
 func (c *Client) AddIssueToSprint(ctx context.Context, sprintID, issueID string) error {
 	boardID, err := c.resolveBoard(ctx)

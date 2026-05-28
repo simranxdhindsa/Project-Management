@@ -45,6 +45,7 @@
 @import "./styles/pages/daytrack.css";
 @import "./styles/pages/calendar.css";
 @import "./styles/pages/dev-time.css";
+@import "./styles/pages/feature-groups.css";
 
 @import "./styles/pages/theme-customizer.css";
 @import "./styles/pages/theme-settings.css";

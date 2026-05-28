@@ -1673,9 +1673,33 @@ class ApiService {
       `/asana/pm/deployment/sections/${sectionGid}/tasks`
     )
   }
+
+  async getFeatureGroups(sprintId?: string) {
+    const qs = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : ''
+    return this.request<FeatureGroup[]>(`/youtrack/feature-groups${qs}`)
+  }
 }
 
 // Types
+export interface FeatureIssue {
+  id_readable: string
+  summary: string
+  issue_type: string
+  state: string
+  assignee: string
+  priority: string
+  in_sprint: boolean
+}
+
+export interface FeatureGroup {
+  id: string
+  name: string
+  issues: FeatureIssue[]
+  done_count: number
+  total_count: number
+  health: 'done' | 'partial' | 'pending'
+}
+
 export interface User {
   id: string
   email: string

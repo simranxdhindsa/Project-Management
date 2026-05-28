@@ -216,6 +216,7 @@ func main() {
 	youtrackRoutes.HandleFunc("/blocker-reasons", youtrackHandler.GetBlockerReasons).Methods("GET")
 	youtrackRoutes.HandleFunc("/save-plan", youtrackHandler.SaveCarryoverPlan).Methods("POST")
 	youtrackRoutes.HandleFunc("/carryover", youtrackHandler.GetCarryover).Methods("GET")
+	youtrackRoutes.HandleFunc("/feature-groups", youtrackHandler.GetFeatureGroups).Methods("GET")
 
 	// Task-specific YouTrack routes (protected)
 	taskYouTrackRoutes := api.PathPrefix("/tasks/{id}/youtrack").Subrouter()

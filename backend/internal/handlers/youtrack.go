@@ -4297,6 +4297,332 @@ func (h *YouTrackHandler) SaveCarryoverPlan(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
 
+// ============================================================
+// Feature Groups — cross-ticket status clustering
+// ============================================================
+
+// FeatureIssue is one ticket inside a feature cluster.
+type FeatureIssue struct {
+	IDReadable   string `json:"id_readable"`
+	Summary      string `json:"summary"`
+	IssueType    string `json:"issue_type"`   // FE, BE, RAG, Mobile, etc.
+	CurrentState string `json:"current_state"`
+	StateClass   string `json:"state_class"` // "done"|"active"|"pending"|"blocked"
+	Assignee     string `json:"assignee"`
+	Priority     string `json:"priority"`
+	InSprint     bool   `json:"in_sprint"`
+}
+
+// FeatureGroup is a cluster of related tickets that belong to the same feature.
+type FeatureGroup struct {
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	Issues     []FeatureIssue `json:"issues"`
+	DoneCount  int            `json:"done_count"`
+	TotalCount int            `json:"total_count"`
+	Health     string         `json:"health"` // "done"|"partial"|"pending"
+}
+
+// classifyState maps a YouTrack state name to a broad state class.
+func classifyState(state string) string {
+	s := strings.ToLower(state)
+	doneKeywords := []string{"dev done", "verified", "closed", "released", "stage done", "prod done", "done", "fixed", "ready for prod"}
+	for _, kw := range doneKeywords {
+		if strings.Contains(s, kw) {
+			return "done"
+		}
+	}
+	if strings.Contains(s, "in progress") || strings.Contains(s, "in-progress") {
+		return "active"
+	}
+	if strings.Contains(s, "blocked") {
+		return "blocked"
+	}
+	return "pending"
+}
+
+// issueTypeFromSummary extracts the ticket type prefix (FE, BE, RAG, etc.) from the summary.
+func issueTypeFromSummary(summary string) string {
+	upper := strings.ToUpper(summary)
+	prefixes := []struct{ keyword, typ string }{
+		{"FE", "FE"}, {"BE", "BE"}, {"RAG", "RAG"}, {"MOBILE", "Mobile"},
+		{"INFRA", "Infra"}, {"DEVOPS", "DevOps"}, {"QA", "QA"},
+	}
+	priorityPrefixes := []string{"P0 ", "P1 ", "P2 ", "P3 "}
+	for _, p := range prefixes {
+		kw := p.keyword + " "
+		if strings.HasPrefix(upper, kw) {
+			return p.typ
+		}
+		for _, pri := range priorityPrefixes {
+			if strings.HasPrefix(upper, pri+kw) {
+				return p.typ
+			}
+		}
+	}
+	return "Other"
+}
+
+// featureNameFromSummary strips the priority prefix and FE/BE/RAG prefix to get the feature label.
+var featurePrefixRe = regexp.MustCompile(`(?i)^(?:P\d+\s+)?(?:FE|BE|RAG|Mobile|Frontend|Backend|Infra|QA)\s+\S+:\s*`)
+
+func featureNameFromSummary(summary string) string {
+	name := featurePrefixRe.ReplaceAllString(summary, "")
+	if strings.TrimSpace(name) == "" {
+		return summary
+	}
+	return strings.TrimSpace(name)
+}
+
+// GetFeatureGroups clusters sprint tickets into feature groups by shared links and description cross-references.
+// GET /api/youtrack/feature-groups?sprint_id=<id>
+func (h *YouTrackHandler) GetFeatureGroups(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	sprintID := r.URL.Query().Get("sprint_id")
+	if sprintID == "" {
+		http.Error(w, "sprint_id is required", http.StatusBadRequest)
+		return
+	}
+
+	ytClient, err := h.getYouTrackClient(r.Context())
+	if err != nil || ytClient == nil {
+		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	sprintIssues, err := ytClient.GetAllSprintIssues(ctx, sprintID)
+	if err != nil {
+		http.Error(w, "Failed to fetch sprint issues: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Build a map: IDReadable → Issue for quick lookups
+	issueMap := make(map[string]youtrack.Issue, len(sprintIssues))
+	for _, iss := range sprintIssues {
+		issueMap[iss.IDReadable] = iss
+	}
+
+	// adjacency list: IDReadable → set of linked IDReadables
+	adj := make(map[string]map[string]struct{}, len(sprintIssues))
+	addEdge := func(a, b string) {
+		if _, ok := adj[a]; !ok {
+			adj[a] = make(map[string]struct{})
+		}
+		if _, ok := adj[b]; !ok {
+			adj[b] = make(map[string]struct{})
+		}
+		adj[a][b] = struct{}{}
+		adj[b][a] = struct{}{}
+	}
+
+	// ── Source 1: description regex parsing ──────────────────────────────────
+	descLinkRe := regexp.MustCompile(`(?i)(?:FE|BE|RAG|Mobile|Frontend|Backend)\s+Ticket\s+Link:\s+(ARD-\d+)`)
+	for _, iss := range sprintIssues {
+		matches := descLinkRe.FindAllStringSubmatch(iss.Description, -1)
+		for _, m := range matches {
+			linkedID := m[1]
+			if linkedID != iss.IDReadable {
+				addEdge(iss.IDReadable, linkedID)
+			}
+		}
+	}
+
+	// ── Source 2: YouTrack native links (concurrent fetch) ───────────────────
+	type linkResult struct {
+		issueID string
+		links   []youtrack.IssueLink
+	}
+	sem := make(chan struct{}, 8)
+	resultCh := make(chan linkResult, len(sprintIssues))
+
+	var wg sync.WaitGroup
+	for _, iss := range sprintIssues {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			links, lerr := ytClient.GetIssueLinks(ctx, id)
+			if lerr != nil {
+				log.Printf("[FeatureGroups] GetIssueLinks failed for %s: %v", id, lerr)
+				return
+			}
+			resultCh <- linkResult{issueID: id, links: links}
+		}(iss.IDReadable)
+	}
+	wg.Wait()
+	close(resultCh)
+
+	// Collect states for linked issues that may not be in the sprint
+	linkedStateMap := make(map[string]string) // IDReadable → state
+	for res := range resultCh {
+		for _, link := range res.links {
+			if link.IDReadable != "" && link.IDReadable != res.issueID {
+				addEdge(res.issueID, link.IDReadable)
+				if link.State != "" {
+					linkedStateMap[link.IDReadable] = link.State
+				}
+			}
+		}
+	}
+
+	// ── Union-Find ────────────────────────────────────────────────────────────
+	// Collect all node IDs (sprint + any externally linked)
+	allNodes := make(map[string]struct{})
+	for _, iss := range sprintIssues {
+		allNodes[iss.IDReadable] = struct{}{}
+	}
+	for id := range adj {
+		allNodes[id] = struct{}{}
+	}
+
+	parent := make(map[string]string)
+	for id := range allNodes {
+		parent[id] = id
+	}
+	var find func(x string) string
+	find = func(x string) string {
+		if parent[x] != x {
+			parent[x] = find(parent[x])
+		}
+		return parent[x]
+	}
+	union := func(a, b string) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[ra] = rb
+		}
+	}
+	for id, neighbours := range adj {
+		for nb := range neighbours {
+			union(id, nb)
+		}
+	}
+
+	// Group by component
+	components := make(map[string][]string)
+	for id := range allNodes {
+		root := find(id)
+		components[root] = append(components[root], id)
+	}
+
+	// ── Build FeatureGroup per component ─────────────────────────────────────
+	var groups []FeatureGroup
+	for _, members := range components {
+		if len(members) < 2 {
+			continue
+		}
+
+		var issues []FeatureIssue
+		for _, id := range members {
+			var state, assignee, priority, summary string
+			inSprint := false
+
+			if iss, ok := issueMap[id]; ok {
+				inSprint = true
+				summary = iss.Summary
+				state = youtrack.GetStatus(iss)
+				priority = youtrack.GetPriority(iss)
+				if u := youtrack.GetAssignee(iss); u != nil {
+					assignee = u.FullName
+					if assignee == "" {
+						assignee = u.Login
+					}
+				}
+			} else {
+				// External linked issue — use state from link response
+				state = linkedStateMap[id]
+				summary = id // fallback label
+			}
+
+			issues = append(issues, FeatureIssue{
+				IDReadable:   id,
+				Summary:      summary,
+				IssueType:    issueTypeFromSummary(summary),
+				CurrentState: state,
+				StateClass:   classifyState(state),
+				Assignee:     assignee,
+				Priority:     priority,
+				InSprint:     inSprint,
+			})
+		}
+
+		// Count done
+		doneCount := 0
+		for _, iss := range issues {
+			if iss.StateClass == "done" {
+				doneCount++
+			}
+		}
+
+		health := "pending"
+		if doneCount == len(issues) {
+			health = "done"
+		} else if doneCount > 0 {
+			health = "partial"
+		}
+
+		// Feature name: use the first sprint issue's cleaned summary
+		featureName := ""
+		for _, iss := range issues {
+			if iss.InSprint {
+				featureName = featureNameFromSummary(iss.Summary)
+				break
+			}
+		}
+		if featureName == "" && len(issues) > 0 {
+			featureName = featureNameFromSummary(issues[0].Summary)
+		}
+
+		// Use first sprint member ID as group ID
+		groupID := ""
+		for _, iss := range issues {
+			if iss.InSprint {
+				groupID = iss.IDReadable
+				break
+			}
+		}
+		if groupID == "" {
+			groupID = issues[0].IDReadable
+		}
+
+		groups = append(groups, FeatureGroup{
+			ID:         groupID,
+			Name:       featureName,
+			Issues:     issues,
+			DoneCount:  doneCount,
+			TotalCount: len(issues),
+			Health:     health,
+		})
+	}
+
+	// Sort: partial first, then pending, then done
+	healthOrder := map[string]int{"partial": 0, "pending": 1, "done": 2}
+	for i := 0; i < len(groups)-1; i++ {
+		for j := i + 1; j < len(groups); j++ {
+			if healthOrder[groups[i].Health] > healthOrder[groups[j].Health] {
+				groups[i], groups[j] = groups[j], groups[i]
+			}
+		}
+	}
+
+	if groups == nil {
+		groups = []FeatureGroup{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"data":    groups,
+	})
+}
+
 // GetCarryover returns yesterday's saved action items (for morning brief) and today's (for EOD).
 // GET /api/youtrack/carryover
 func (h *YouTrackHandler) GetCarryover(w http.ResponseWriter, r *http.Request) {

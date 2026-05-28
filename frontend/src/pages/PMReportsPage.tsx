@@ -41,6 +41,7 @@ import { StandupCompilerPage } from './StandupCompilerPage'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import DevTimeView from '../components/DevTimeView'
 import type { DevTimeVariant } from '../components/DevTimeView'
+import FeatureGroupsView from '../components/FeatureGroupsView'
 import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -2006,11 +2007,14 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
   const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-  const [viewMode, setViewMode] = usePersistedState(PERSIST.TRACKING_VIEW, 'column' as 'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline' | 'dev-time', {
-    validate: ['column', 'assignee', 'swimlane', 'sidebar', 'heatmap', 'delay-bars', 'alert-first', 'split-pane', 'focus', 'qa-pipeline', 'dev-time'],
+  const [viewMode, setViewMode] = usePersistedState(PERSIST.TRACKING_VIEW, 'column' as 'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline' | 'dev-time' | 'feature-groups', {
+    validate: ['column', 'assignee', 'swimlane', 'sidebar', 'heatmap', 'delay-bars', 'alert-first', 'split-pane', 'focus', 'qa-pipeline', 'dev-time', 'feature-groups'],
   })
   const [devTimeVariant, setDevTimeVariant] = useState<DevTimeVariant>('a')
   const [devTimeTimelines, setDevTimeTimelines] = useState<IssueTimeline[]>([])
+  const [featureGroups, setFeatureGroups] = useState<import('../services/api').FeatureGroup[]>([])
+  const [featureGroupsLoading, setFeatureGroupsLoading] = useState(false)
+  const featureGroupsSprintRef = useRef<string | undefined>(undefined)
   const [qaFilterMode, setQaFilterMode] = useState<'all' | 'needs-qa'>('all')
   const [viewModeOpen, setViewModeOpen] = useState(false)
   const [sidebarPerson, setSidebarPerson] = useState<string>('')
@@ -2045,11 +2049,30 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
   useEffect(() => { fetchBoardStatus() }, [fetchBoardStatus])
   useEffect(() => { getAvatarMap().then(setAvatarMap) }, [])
 
+  // Reset feature groups cache when sprint changes so next switch re-fetches
+  useEffect(() => {
+    featureGroupsSprintRef.current = undefined
+    setFeatureGroups([])
+  }, [sprintId])
+
   useEffect(() => {
     if (viewMode !== 'dev-time') return
     setDevTimeTimelines([])
     getIssueTimelines(sprintStartMs, sprintFinishMs).then(res => setDevTimeTimelines(res.data ?? [])).catch(() => {})
   }, [viewMode, sprintId, sprintStartMs, sprintFinishMs])
+
+  useEffect(() => {
+    if (viewMode !== 'feature-groups') return
+    if (!sprintId) return
+    // skip if we already have data for this sprint
+    if (featureGroupsSprintRef.current === sprintId) return
+    featureGroupsSprintRef.current = sprintId
+    setFeatureGroupsLoading(true)
+    api.getFeatureGroups(sprintId)
+      .then(res => setFeatureGroups((res as any).data ?? []))
+      .catch(() => {})
+      .finally(() => setFeatureGroupsLoading(false))
+  }, [viewMode, sprintId])
 
   useEffect(() => {
     api.getYouTrackIntegration().then(res => {
@@ -2652,7 +2675,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
               { id: 'split-pane',  label: 'Split Pane',  icon: <Gauge size={11} /> },
               { id: 'focus',       label: 'Focus Mode',  icon: <ScanSearch size={11} /> },
               { id: 'qa-pipeline', label: 'QA Pipeline', icon: <ShieldCheck size={11} /> },
-              { id: 'dev-time',    label: 'Dev Time',    icon: <Clock size={11} /> },
+              { id: 'dev-time',       label: 'Dev Time',       icon: <Clock size={11} /> },
+              { id: 'feature-groups', label: 'Feature Groups', icon: <Network size={11} /> },
             ] as const
             const current = VIEW_MODES.find(m => m.id === viewMode) || VIEW_MODES[0]
             return (
@@ -4215,6 +4239,27 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
           </div>
         )
       })()}
+
+      {/* ── Feature Groups view ── */}
+      {viewMode === 'feature-groups' && (
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 20px' }}>
+          <FeatureGroupsView
+            sprintId={sprintId || undefined}
+            groups={featureGroups}
+            loading={featureGroupsLoading}
+            onRefresh={() => {
+              if (!sprintId) return
+              featureGroupsSprintRef.current = undefined
+              setFeatureGroups([])
+              setFeatureGroupsLoading(true)
+              api.getFeatureGroups(sprintId)
+                .then(res => setFeatureGroups((res as any).data ?? []))
+                .catch(() => {})
+                .finally(() => setFeatureGroupsLoading(false))
+            }}
+          />
+        </div>
+      )}
 
       {/* ── Transition history modal ── */}
       {detailIssue && (

@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ChevronDown, Check, RefreshCw, GitBranch,
-  BarChart2, Zap, Target, Activity, X,
+  BarChart2, Zap, Target, Activity, X, GitMerge,
 } from 'lucide-react'
 import api from '@/services/api'
 import type {
   YouTrackSprint, SprintBoardIssue, SprintBoardColumn,
   SprintSummary, SprintBoardStatusResponse, YouTrackIssue,
+  FeatureGroup,
 } from '@/services/api'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '@/components/HoverCard'
@@ -734,6 +735,167 @@ interface DevStat {
   bounceCount: number; totalActiveHours: number
 }
 
+// ─── Feature Health Widget ────────────────────────────────────────────────────
+
+const HEALTH_ORDER: Record<string, number> = { partial: 0, pending: 1, done: 2 }
+
+function FGIssueLine({ issue }: { issue: FeatureGroup['issues'][0] }) {
+  const typeLabel = (t: string) => {
+    const u = (t || '').toUpperCase()
+    if (u === 'FRONTEND' || u === 'FE') return 'FE'
+    if (u === 'BACKEND'  || u === 'BE') return 'BE'
+    if (u === 'RAG')    return 'RAG'
+    if (u === 'MOBILE') return 'MOB'
+    return u.slice(0, 3) || '?'
+  }
+  const typeCls = (t: string) => {
+    const u = (t || '').toUpperCase()
+    if (u === 'FRONTEND' || u === 'FE') return 'fg-type--fe'
+    if (u === 'BACKEND'  || u === 'BE') return 'fg-type--be'
+    if (u === 'RAG')    return 'fg-type--rag'
+    if (u === 'MOBILE') return 'fg-type--mob'
+    return 'fg-type--other'
+  }
+  const stateRole = (s: string) => {
+    const v = (s || '').toLowerCase()
+    if (v.includes('done') || v.includes('closed') || v.includes('deploy') || v.includes('verif') || v.includes('fixed')) return 'done'
+    if (v.includes('progress') || v.includes('review') || v.includes('block') || v.includes('testing')) return 'active'
+    return 'pending'
+  }
+  return (
+    <div className="fg-issue-row">
+      <span className={`fg-type-badge ${typeCls(issue.issue_type)}`}>{typeLabel(issue.issue_type)}</span>
+      <span className="fg-issue-id">{issue.id_readable}</span>
+      <span className="fg-issue-summary" title={issue.summary}>{issue.summary}</span>
+      <span className={`fg-state-pill fg-state--${stateRole(issue.state)}`}>{issue.state || '—'}</span>
+      {issue.assignee && <span className="fg-assignee">{issue.assignee}</span>}
+    </div>
+  )
+}
+
+function FeatureHealthWidget({ sprintId, expandable }: { sprintId?: string; expandable?: boolean }) {
+  const [groups, setGroups]   = useState<FeatureGroup[]>([])
+  const [loading, setLoading] = useState(true)
+  const [expanded, setExpanded] = useState(false)
+  // Per-group collapse state when fully expanded
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    if (!sprintId) { setLoading(false); return }
+    setLoading(true)
+    api.getFeatureGroups(sprintId)
+      .then(res => setGroups((res as any).data ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [sprintId])
+
+  const done    = groups.filter(g => g.health === 'done').length
+  const partial = groups.filter(g => g.health === 'partial').length
+  const pending = groups.filter(g => g.health === 'pending').length
+
+  const sortedGroups = [...groups].sort((a, b) => (HEALTH_ORDER[a.health] ?? 3) - (HEALTH_ORDER[b.health] ?? 3))
+  const previewGroups = sortedGroups.filter(g => g.health !== 'done').slice(0, 4)
+
+  const toggleGroup = (id: string) => setCollapsedGroups(prev => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
+
+  function healthBadgeCls(h: string) {
+    if (h === 'done')    return 'fg-health--done'
+    if (h === 'partial') return 'fg-health--partial'
+    return 'fg-health--pending'
+  }
+  function healthLabel(h: string) {
+    if (h === 'done')    return 'Done'
+    if (h === 'partial') return 'Partial'
+    return 'Pending'
+  }
+
+  return (
+    <div className="fg-widget">
+      <div className="fg-widget-header">
+        <GitMerge size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+        <span className="fg-widget-title">Feature Groups</span>
+        {expandable && !loading && expanded && (
+          <button className="fg-widget-toggle-btn" onClick={() => setExpanded(false)}>
+            ↑ Collapse
+          </button>
+        )}
+      </div>
+
+      {loading && (
+        <div className="fg-widget-loading">
+          <div className="skeleton" style={{ width: '100%', height: 24, borderRadius: 4 }} />
+          <div className="skeleton" style={{ width: '70%',  height: 14, borderRadius: 4 }} />
+        </div>
+      )}
+
+      {!loading && groups.length === 0 && (
+        <div className="fg-widget-empty">No feature groups detected</div>
+      )}
+
+      {!loading && groups.length > 0 && (
+        <>
+          <div className="fg-widget-chips">
+            <span className="fg-widget-chip fg-widget-chip--done">{done} complete</span>
+            <span className="fg-widget-chip fg-widget-chip--partial">{partial} partial</span>
+            {pending > 0 && <span className="fg-widget-chip fg-widget-chip--pending">{pending} pending</span>}
+          </div>
+
+          {/* Collapsed: show compact partial/pending list */}
+          {!expanded && previewGroups.length > 0 && (
+            <div className="fg-widget-list">
+              {previewGroups.map(g => (
+                <div key={g.id} className="fg-widget-row">
+                  <span className={`fg-health-badge ${healthBadgeCls(g.health)}`} style={{ fontSize: 9, padding: '1px 5px' }}>
+                    {healthLabel(g.health)}
+                  </span>
+                  <span className="fg-widget-row-name" title={g.name}>{g.name}</span>
+                  <span className="fg-widget-row-count">{g.done_count}/{g.total_count}</span>
+                </div>
+              ))}
+              {groups.length > previewGroups.length && !expanded && (
+                <button className="db-view-more-btn" onClick={() => setExpanded(true)}>
+                  ↓ View {groups.length - previewGroups.length} more
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Expanded: full group cards with issue rows */}
+          {expanded && (
+            <div className="fg-widget-expanded">
+              {sortedGroups.map(g => {
+                const pct = g.total_count > 0 ? Math.round((g.done_count / g.total_count) * 100) : 0
+                const isCollapsed = collapsedGroups.has(g.id)
+                return (
+                  <div key={g.id} className={`fg-card fg-card--${g.health}`} style={{ margin: '0 0 6px' }}>
+                    <div className="fg-card-header" onClick={() => toggleGroup(g.id)}>
+                      <span className={`fg-health-badge ${healthBadgeCls(g.health)}`}>{healthLabel(g.health)}</span>
+                      <span className="fg-card-name">{g.name}</span>
+                      <span className="fg-card-count">{g.done_count}/{g.total_count}</span>
+                      <div className="fg-card-bar"><div className="fg-card-bar-fill" style={{ width: `${pct}%` }} /></div>
+                      <span className="fg-card-pct">{pct}%</span>
+                      <ChevronDown size={12} className={`fg-card-chevron${isCollapsed ? '' : ' fg-card-chevron--open'}`} />
+                    </div>
+                    {!isCollapsed && (
+                      <div className="fg-card-issues">
+                        {g.issues.map(iss => <FGIssueLine key={iss.id_readable} issue={iss} />)}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 interface DesignProps {
   summary: SprintSummary
   columns: SprintBoardColumn[]
@@ -741,9 +903,10 @@ interface DesignProps {
   onIdClick: (id: string, e: React.MouseEvent) => void
   ytDetailLoading?: boolean
   onKpiClick?: (drawer: DbKpiDrawer) => void
+  sprintId?: string
 }
 
-function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, onKpiClick }: DesignProps) {
+function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, onKpiClick, sprintId }: DesignProps) {
   const [expandedDev, setExpandedDev] = useState<string | null>(null)
   const [showAllAtRisk, setShowAllAtRisk] = useState(false)
   const [showAllDelay, setShowAllDelay] = useState(false)
@@ -987,6 +1150,10 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
         <SprintTrack pct={toPct(summary.completion_pct)} />
         {summary.sprint_finish_ms > 0 && <Countdown finishMs={summary.sprint_finish_ms} />}
 
+        <div style={{ marginTop: 14 }}>
+          <FeatureHealthWidget sprintId={sprintId} />
+        </div>
+
         <div className="db-mc-section-label" style={{ marginTop: 16 }}>By Column</div>
         {columns.map(col => (
           <div key={col.name} className="db-mc-col-row">
@@ -1032,7 +1199,7 @@ function SprintDonut({ pct, size = 110 }: { pct: number; size?: number }) {
   )
 }
 
-function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
+function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: DesignProps) {
   const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
   const pct = toPct(summary.completion_pct)
   const [showAllNeeds, setShowAllNeeds]   = useState(false)
@@ -1236,6 +1403,14 @@ function Design2({ summary, columns, onTitleClick, onIdClick }: DesignProps) {
         </div>
       </div>
 
+      {/* Row 2b: Feature Groups */}
+      <div className="db-bg-row" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+        <div className="db-bg-card" style={{ gridColumn: '1 / -1' }}>
+          <div className="db-bg-topline" style={{ background: 'linear-gradient(90deg,#6366f1,#8b5cf6)' }} />
+          <FeatureHealthWidget sprintId={sprintId} expandable />
+        </div>
+      </div>
+
       {/* Row 3: All Issues Table */}
       <div className="db-bg-row db-bg-row--r3">
         <div className="db-bg-card" style={{ gridColumn: '1 / -1' }}>
@@ -1305,13 +1480,14 @@ function FeedDivider({ label, color }: { label: string; color?: string }) {
 }
 
 function Design3({
-  summary, columns, activeSprint, onTitleClick, onIdClick,
+  summary, columns, activeSprint, onTitleClick, onIdClick, sprintId,
 }: {
   summary: SprintSummary
   columns: SprintBoardColumn[]
   activeSprint: YouTrackSprint | null
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
+  sprintId?: string
 }) {
   const [showAllBounced, setShowAllBounced]     = useState(false)
   const [showAllInProgress, setShowAllInProgress] = useState(false)
@@ -1494,6 +1670,10 @@ function Design3({
 
         <div className="db-oc-panel-section">
           <TypeDeliveryPanel columns={columns} summary={summary} columnRoleMap={columnRoleMap} />
+        </div>
+
+        <div className="db-oc-panel-section">
+          <FeatureHealthWidget sprintId={sprintId} expandable />
         </div>
       </div>
 
@@ -1989,6 +2169,7 @@ export function SprintDashboardPage() {
               onIdClick={openInYt}
               ytDetailLoading={ytDetailLoading}
               onKpiClick={setKpiDrawer}
+              sprintId={activeSprint?.id}
             />
           )}
           {designMode === 'bento' && (
@@ -1997,6 +2178,7 @@ export function SprintDashboardPage() {
               columns={boardData.columns}
               onTitleClick={openIssueDetail}
               onIdClick={openInYt}
+              sprintId={activeSprint?.id}
             />
           )}
           {designMode === 'ops' && (
@@ -2006,6 +2188,7 @@ export function SprintDashboardPage() {
               activeSprint={activeSprint}
               onTitleClick={openIssueDetail}
               onIdClick={openInYt}
+              sprintId={activeSprint?.id}
             />
           )}
         </div>
