@@ -785,6 +785,10 @@ func RunMigrations() error {
 			UNIQUE(user_id)
 		)`,
 
+		// DayTrack Slack: user timezone for correct local-time conversion of Slack timestamps
+		`ALTER TABLE daytrack_slack_config
+		   ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'Asia/Kolkata'`,
+
 		// PM Assistant prompt: add rules for date-exclusion queries and single-result completeness (idempotent)
 		`UPDATE bot_configs SET
 			prompt = prompt || E'\n11. When query asks for date-based filtering (e.g., "exclude bugs resolved last week") but resolved dates are not available: list ALL matching tickets found and add a short note about the limitation — do NOT ask for more context or refuse to answer.\n12. SEARCH FILTER APPLIED line in the data tells you exactly what was searched. If N tickets are returned and the header says "COMPLETE list": that IS the full result — never say you need more context when the data IS the answer.'

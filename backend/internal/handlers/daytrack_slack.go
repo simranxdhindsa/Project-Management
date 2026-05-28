@@ -159,11 +159,16 @@ func matchKeywords(cleanMsg string, keywords []string) bool {
 
 // ── Slack TS helpers ──────────────────────────────────────────────────────────
 
-// slackTSToTime converts a Slack timestamp string (e.g. "1714900800.000100") to time.Time.
-func slackTSToTime(ts string) time.Time {
+// slackTSToTime converts a Slack timestamp string (e.g. "1714900800.000100") to time.Time
+// in the given IANA timezone (e.g. "Asia/Kolkata"). Falls back to UTC on invalid tz.
+func slackTSToTime(ts string, tz string) time.Time {
 	parts := strings.SplitN(ts, ".", 2)
 	sec, _ := strconv.ParseInt(parts[0], 10, 64)
-	return time.Unix(sec, 0)
+	loc, err := time.LoadLocation(tz)
+	if err != nil || tz == "" {
+		loc = time.UTC
+	}
+	return time.Unix(sec, 0).In(loc)
 }
 
 // formatTimeAMPM formats a time.Time to "3:04 PM" style.
@@ -220,6 +225,7 @@ func ProcessSlackDaytrackMessage(
 	rawText string,
 	ts string,
 	rules []database.DayTrackKWRule,
+	timezone string,
 ) {
 	// Deduplicate: if we already processed this Slack message, skip.
 	if exists, _ := repo.EntryExistsByExternalRef(ctx, userID, ts); exists {
@@ -231,7 +237,7 @@ func ProcessSlackDaytrackMessage(
 		return
 	}
 
-	msgTime := slackTSToTime(ts)
+	msgTime := slackTSToTime(ts, timezone)
 	timeStr := formatTimeAMPM(msgTime)
 	dateStr := msgTime.Format("2006-01-02")
 
@@ -340,11 +346,15 @@ func scanUserChannel(ctx context.Context, repo *database.DayTrackRepository, cfg
 	oldest := cfg.LastScannedTS
 	var oldestUnix int64
 	if oldest != "" {
-		t := slackTSToTime(oldest)
+		t := slackTSToTime(oldest, cfg.Timezone)
 		oldestUnix = t.Unix() + 1 // +1 so we don't re-process the last seen message
 	} else {
-		now := time.Now()
-		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		loc, err := time.LoadLocation(cfg.Timezone)
+		if err != nil || cfg.Timezone == "" {
+			loc = time.UTC
+		}
+		now := time.Now().In(loc)
+		startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 		oldestUnix = startOfDay.Unix()
 	}
 
@@ -360,7 +370,7 @@ func scanUserChannel(ctx context.Context, repo *database.DayTrackRepository, cfg
 		if msg.User != cfg.SlackUserID {
 			continue
 		}
-		ProcessSlackDaytrackMessage(ctx, repo, cfg.UserID, msg.Text, msg.TS, cfg.KeywordRules)
+		ProcessSlackDaytrackMessage(ctx, repo, cfg.UserID, msg.Text, msg.TS, cfg.KeywordRules, cfg.Timezone)
 		if msg.TS > latestTS {
 			latestTS = msg.TS
 		}

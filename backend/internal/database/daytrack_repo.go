@@ -38,6 +38,7 @@ type DayTrackSlackConfig struct {
 	LastScannedTS   string           `json:"last_scanned_ts"`
 	DestChannelID   string           `json:"dest_channel_id"`
 	DestChannelName string           `json:"dest_channel_name"`
+	Timezone        string           `json:"timezone"` // IANA tz name, e.g. "Asia/Kolkata"
 }
 
 // DayTrackKWRule is a single keyword → rule_type mapping.
@@ -353,10 +354,10 @@ func (r *DayTrackRepository) GetSlackConfig(ctx context.Context, userID string) 
 	var rulesJSON []byte
 	err := pool.QueryRow(ctx,
 		`SELECT id, user_id, channel_id, channel_name, slack_user_id, keyword_rules, enabled, last_scanned_ts,
-		        COALESCE(dest_channel_id,''), COALESCE(dest_channel_name,'')
+		        COALESCE(dest_channel_id,''), COALESCE(dest_channel_name,''), COALESCE(timezone,'Asia/Kolkata')
 		 FROM daytrack_slack_config WHERE user_id=$1`, userID,
 	).Scan(&cfg.ID, &cfg.UserID, &cfg.ChannelID, &cfg.ChannelName, &cfg.SlackUserID,
-		&rulesJSON, &cfg.Enabled, &cfg.LastScannedTS, &cfg.DestChannelID, &cfg.DestChannelName)
+		&rulesJSON, &cfg.Enabled, &cfg.LastScannedTS, &cfg.DestChannelID, &cfg.DestChannelName, &cfg.Timezone)
 	if err != nil {
 		return nil, err
 	}
@@ -372,14 +373,18 @@ func (r *DayTrackRepository) UpsertSlackConfig(ctx context.Context, cfg *DayTrac
 	if err != nil {
 		return err
 	}
+	tz := cfg.Timezone
+	if tz == "" {
+		tz = "Asia/Kolkata"
+	}
 	_, err = pool.Exec(ctx,
-		`INSERT INTO daytrack_slack_config (user_id, channel_id, channel_name, slack_user_id, keyword_rules, enabled, dest_channel_id, dest_channel_name, updated_at)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+		`INSERT INTO daytrack_slack_config (user_id, channel_id, channel_name, slack_user_id, keyword_rules, enabled, dest_channel_id, dest_channel_name, timezone, updated_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
 		 ON CONFLICT(user_id) DO UPDATE SET
 		   channel_id=$2, channel_name=$3, slack_user_id=$4,
-		   keyword_rules=$5, enabled=$6, dest_channel_id=$7, dest_channel_name=$8, updated_at=NOW()`,
+		   keyword_rules=$5, enabled=$6, dest_channel_id=$7, dest_channel_name=$8, timezone=$9, updated_at=NOW()`,
 		cfg.UserID, cfg.ChannelID, cfg.ChannelName, cfg.SlackUserID, rulesJSON, cfg.Enabled,
-		cfg.DestChannelID, cfg.DestChannelName)
+		cfg.DestChannelID, cfg.DestChannelName, tz)
 	return err
 }
 
@@ -392,13 +397,14 @@ type SlackScanConfig struct {
 	LastScannedTS string
 	BotToken      string
 	KeywordRules  []DayTrackKWRule
+	Timezone      string
 }
 
 func (r *DayTrackRepository) GetAllEnabledSlackConfigs(ctx context.Context) ([]SlackScanConfig, error) {
 	pool := GetPool()
 	rows, err := pool.Query(ctx,
 		`SELECT dsc.user_id, dsc.channel_id, dsc.slack_user_id, dsc.last_scanned_ts,
-		        si.bot_token, dsc.keyword_rules
+		        si.bot_token, dsc.keyword_rules, COALESCE(dsc.timezone,'Asia/Kolkata')
 		 FROM daytrack_slack_config dsc
 		 JOIN slack_integrations si ON si.user_id = dsc.user_id
 		 WHERE dsc.enabled = true
@@ -413,7 +419,7 @@ func (r *DayTrackRepository) GetAllEnabledSlackConfigs(ctx context.Context) ([]S
 	for rows.Next() {
 		var c SlackScanConfig
 		var rulesJSON []byte
-		if err := rows.Scan(&c.UserID, &c.ChannelID, &c.SlackUserID, &c.LastScannedTS, &c.BotToken, &rulesJSON); err != nil {
+		if err := rows.Scan(&c.UserID, &c.ChannelID, &c.SlackUserID, &c.LastScannedTS, &c.BotToken, &rulesJSON, &c.Timezone); err != nil {
 			continue
 		}
 		if len(rulesJSON) > 0 {
