@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
-import type { IssueTimeline, IssueStint } from '../services/api'
+import type { IssueTimeline, IssueStint, SprintBoardIssue } from '../services/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,6 +12,9 @@ export interface DevTimeViewProps {
   variant: DevTimeVariant
   onTicketClick: (issueId: string) => void
   ytBaseUrl: string
+  sprintStartMs?: number
+  sprintFinishMs?: number
+  boardIssues?: SprintBoardIssue[]
 }
 
 interface DevStat {
@@ -66,6 +69,88 @@ function slaStatus(t: IssueTimeline): 'overdue' | 'warning' | 'ok' {
   if (ratio >= 1.0) return 'overdue'
   if (ratio >= 0.8) return 'warning'
   return 'ok'
+}
+
+function clipToSprintWindow(timelines: IssueTimeline[], startMs: number, endMs: number): IssueTimeline[] {
+  const nowMs = Date.now()
+  const result: IssueTimeline[] = []
+
+  for (const t of timelines) {
+    const clipped: IssueStint[] = []
+
+    for (const s of t.stints) {
+      const sStart = new Date(s.entered_at).getTime()
+      const sEnd   = s.exited_at ? new Date(s.exited_at).getTime() : nowMs
+      if (sStart >= endMs || sEnd <= startMs) continue
+      const cStart = Math.max(sStart, startMs)
+      const cEnd   = Math.min(sEnd, endMs)
+      clipped.push({ ...s, duration_hours: (cEnd - cStart) / 3_600_000 })
+    }
+
+    if (clipped.length === 0) continue
+
+    const totalHours = roundH(clipped.reduce((sum, s) => sum + (s.duration_hours ?? 0), 0))
+    result.push({
+      ...t,
+      stints:       clipped,
+      total_stints: clipped.length,
+      total_hours:  totalHours,
+      is_overdue:   totalHours >= t.threshold_hours,
+    })
+  }
+
+  return result
+}
+
+// Cross-reference timelines against the live board data to fix stale is_live flags.
+// Two cases handled:
+//   1. Ticket IS on the board but in a non-InProgress state (e.g. Verified, Done) → close open stint
+//   2. Ticket is NOT on the board at all (e.g. from a previous sprint) → also close open stint
+// If it were truly live it would appear in an In Progress column on the current board.
+function reconcileWithBoard(timelines: IssueTimeline[], boardIssues: SprintBoardIssue[]): IssueTimeline[] {
+  const boardMap = new Map<string, SprintBoardIssue>()
+  const allBoardIds = new Set<string>()
+  for (const b of boardIssues) {
+    boardMap.set(b.idReadable, b)
+    boardMap.set(b.id, b)
+    allBoardIds.add(b.idReadable)
+    allBoardIds.add(b.id)
+  }
+
+  const closeStint = (t: IssueTimeline, resolvedState: string): IssueTimeline => {
+    const closedStints = t.stints.map(s => {
+      if (!s.exited_at) {
+        const exitMs  = new Date(t.last_activity_at).getTime()
+        const enterMs = new Date(s.entered_at).getTime()
+        return {
+          ...s,
+          exited_at:      t.last_activity_at,
+          exited_to:      resolvedState,
+          duration_hours: Math.max(0, (exitMs - enterMs) / 3_600_000),
+        }
+      }
+      return s
+    })
+    const totalHours = roundH(closedStints.reduce((sum, s) => sum + (s.duration_hours ?? 0), 0))
+    return { ...t, stints: closedStints, total_hours: totalHours, is_live: false, live_hours: 0, is_overdue: totalHours >= t.threshold_hours }
+  }
+
+  return timelines.map(t => {
+    if (!t.is_live) return t
+
+    const board = boardMap.get(t.issue_id)
+
+    if (board) {
+      // On the board — check if it's still actually In Progress
+      const inProgress = board.current_state.toLowerCase().includes('in progress')
+      if (!inProgress) return closeStint(t, board.current_state)
+    } else {
+      // Not on the board at all → ticket is from a different sprint or was removed; not live
+      return closeStint(t, 'Done')
+    }
+
+    return t
+  })
 }
 
 function buildDevStats(timelines: IssueTimeline[]): Record<string, DevStat> {
@@ -349,8 +434,12 @@ function VariantA({ timelines, onTicketClick, ytBaseUrl }: Omit<DevTimeViewProps
 
       {/* Table header */}
       <div className="pm-tt-a-thead">
-        {['', 'ID', 'Pri', 'Summary', 'Active Time', 'Stints', 'Status'].map((h, i) => (
-          <span key={i} className="pm-tt-a-thead-cell">{h}</span>
+        {(['', 'ID', 'Pri', 'Summary', 'Active Time', 'Stints', 'Status'] as const).map((h, i) => (
+          <span
+            key={i}
+            className="pm-tt-a-thead-cell"
+            style={i === 4 ? { textAlign: 'right' } : i === 5 ? { textAlign: 'center' } : undefined}
+          >{h}</span>
         ))}
       </div>
 
@@ -980,12 +1069,24 @@ function VariantC({ timelines, onTicketClick, ytBaseUrl }: Omit<DevTimeViewProps
 // ══════════════════════════════════════════════════════════════════════════════
 
 export default function DevTimeView(props: DevTimeViewProps) {
-  const { variant, ...rest } = props
+  const { variant, sprintStartMs, sprintFinishMs, boardIssues, ...rest } = props
+
+  // Step 1 — fix stale is_live flags using live board data (YouTrack-authoritative)
+  const reconciled = boardIssues?.length
+    ? reconcileWithBoard(rest.timelines, boardIssues)
+    : rest.timelines
+
+  // Step 2 — clip to sprint window
+  const timelines = (sprintStartMs && sprintFinishMs)
+    ? clipToSprintWindow(reconciled, sprintStartMs, sprintFinishMs)
+    : reconciled
+
+  const scoped = { ...rest, timelines }
   return (
     <div className="pm-tt-root">
-      {variant === 'a' && <VariantA {...rest} />}
-      {variant === 'b' && <VariantB {...rest} />}
-      {variant === 'c' && <VariantC {...rest} />}
+      {variant === 'a' && <VariantA {...scoped} />}
+      {variant === 'b' && <VariantB {...scoped} />}
+      {variant === 'c' && <VariantC {...scoped} />}
     </div>
   )
 }

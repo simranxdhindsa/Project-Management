@@ -2369,7 +2369,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
   }, [filteredColumns])
 
   // ── Issue row renderer (shared by column + assignee views) ────────────────
-  const renderIssueRow = (issue: SprintBoardIssue) => {
+  const renderIssueRow = (issue: SprintBoardIssue, showState = false) => {
     const avatarUrl = issue.avatarUrl || avatarMap[issue.assignee] || avatarMap[issue.assigneeLogin]
     const isExpanded = expandedIssue === issue.idReadable
     const overdueClass = issue.overdue_level === 'deadline' ? ' pm-tracking-issue-row--overdue-deadline'
@@ -2454,7 +2454,19 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
               <span className="pm-tracking-verif-chip pm-tracking-verif-chip--prod" title={`Prod verified by ${issue.verified_on_prod}`}>PRD✓</span>
             )}
           </span>
-          {issue.assignee ? (
+          {showState ? (
+            <span className="pm-tracking-assignee-cell pm-tracking-state-chip" data-state-role={
+              (issue.current_state || '').toLowerCase().includes('progress') ? 'active'
+              : (issue.current_state || '').toLowerCase().includes('block') ? 'blocked'
+              : (issue.current_state || '').toLowerCase().includes('verified') ? 'verified'
+              : (issue.current_state || '').toLowerCase().includes('prod') ? 'prod'
+              : (issue.current_state || '').toLowerCase().includes('dev') ? 'dev'
+              : (issue.current_state || '').toLowerCase().includes('done') ? 'done'
+              : 'default'
+            }>
+              {issue.current_state || '—'}
+            </span>
+          ) : issue.assignee ? (
             <div className="pm-tracking-assignee-cell">
               {avatarUrl
                 ? <img className="pm-tracking-avatar" src={avatarUrl} alt={issue.assignee} onError={(e) => { (e.target as HTMLImageElement).style.display='none'; (e.target as HTMLImageElement).nextElementSibling?.removeAttribute('style') }} />
@@ -3164,7 +3176,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
                     <span className="pm-tracking-verif-badges pm-tracking-col-heading">Verified</span>
                     <span className="pm-tracking-assignee-cell pm-tracking-col-heading">Column</span>
                   </div>
-                  {selectedPersonData.issues.map(issue => renderIssueRow(issue))}
+                  {selectedPersonData.issues.map(issue => renderIssueRow(issue, true))}
                 </>
               ) : (
                 <div className="pm-tracking-sidebar-empty">Select a person to view their tickets</div>
@@ -4061,7 +4073,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
                     <span className="pm-tracking-verif-badges pm-tracking-col-heading">Verified</span>
                     <span className="pm-tracking-assignee-cell pm-tracking-col-heading">Column</span>
                   </div>
-                  {group.issues.map(issue => renderIssueRow(issue))}
+                  {group.issues.map(issue => renderIssueRow(issue, true))}
                   {/* QA verified subsection */}
                   {(() => {
                     const qa = qaByPerson.get(group.assignee)
@@ -4185,11 +4197,15 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
               <DevTimeView
                 timelines={devTimeTimelines}
                 variant={devTimeVariant}
+                sprintStartMs={sprintStartMs}
+                sprintFinishMs={sprintFinishMs}
+                boardIssues={boardColumns.flatMap(col => col.issues)}
                 onTicketClick={async (issueId) => {
                   setYtDetailLoading(true)
                   try {
-                    const issue = await api.getYouTrackIssue(issueId)
-                    setYtDetailIssue(issue)
+                    const res = await api.getYouTrackIssue(issueId)
+                    const issue = (res as any).data as import('../services/api').YouTrackIssue
+                    if (issue) setYtDetailIssue(issue)
                   } catch {}
                   finally { setYtDetailLoading(false) }
                 }}
