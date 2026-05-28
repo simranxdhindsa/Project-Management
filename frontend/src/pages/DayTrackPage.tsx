@@ -959,7 +959,7 @@ export function DayTrackPage() {
       const cfg = await dayTrackApi.getSlackConfig()
       setSlackCfg(cfg.keyword_rules?.length ? cfg : { ...cfg, keyword_rules: DEFAULT_KEYWORD_RULES })
     } catch {
-      setSlackCfg({ channel_id: '', channel_name: '', slack_user_id: '', keyword_rules: DEFAULT_KEYWORD_RULES, enabled: true, dest_channel_id: '', dest_channel_name: '' })
+      setSlackCfg({ channel_id: '', channel_name: '', slack_user_id: '', keyword_rules: DEFAULT_KEYWORD_RULES, enabled: true, dest_channel_id: '', dest_channel_name: '', timezone: 'Asia/Kolkata' })
     } finally {
       setSlackCfgLoading(false)
     }
@@ -2171,6 +2171,16 @@ ${aiSummaryBlock}
                       </button>
                     </div>
                   </div>
+                </div>
+
+                {/* Timezone */}
+                <div className="form-group" style={{ margin: '8px 0 0' }}>
+                  <label className="form-label" style={{ fontSize: 11 }}>Your Timezone</label>
+                  <input className="form-input" style={{ fontSize: 12, padding: '5px 8px' }}
+                    value={slackCfg.timezone || 'Asia/Kolkata'}
+                    onChange={e => setSlackCfg(c => c ? { ...c, timezone: e.target.value } : c)}
+                    placeholder="Asia/Kolkata" />
+                  <div style={{ fontSize: 10, opacity: 0.55, marginTop: 3 }}>IANA name — used to convert Slack timestamps to your local time</div>
                 </div>
 
                 {/* Destination channel for Post to Slack */}

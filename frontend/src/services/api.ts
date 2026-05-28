@@ -1,5 +1,14 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
 
+export class GatewayError extends Error {
+  status: number
+  constructor(status: number) {
+    super(`Gateway error ${status}`)
+    this.name = 'GatewayError'
+    this.status = status
+  }
+}
+
 interface ApiResponse<T = unknown> {
   success: boolean
   message?: string
@@ -49,6 +58,10 @@ class ApiService {
       ...options,
       headers,
     })
+
+    if (response.status === 502 || response.status === 503 || response.status === 504) {
+      throw new GatewayError(response.status)
+    }
 
     const text = await response.text()
     let data: any
@@ -2384,6 +2397,7 @@ export interface DayTrackSlackConfig {
   last_scanned_ts?: string
   dest_channel_id: string
   dest_channel_name: string
+  timezone: string  // IANA tz, e.g. "Asia/Kolkata"
 }
 
 export const DEFAULT_KEYWORD_RULES: DayTrackKWRule[] = [
