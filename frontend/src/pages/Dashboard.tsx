@@ -769,16 +769,6 @@ export default function Dashboard() {
           </h1>
         </div>
         <div className="header-actions">
-          <div className="search-bar">
-            <Search size={18} className="search-bar-icon" />
-            <input
-              type="text"
-              className="search-bar-input"
-              placeholder="Search tasks..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-            />
-          </div>
           <JellySwitch
             checked={darkMode}
             onChange={setDarkMode}
