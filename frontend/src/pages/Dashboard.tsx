@@ -226,6 +226,7 @@ export default function Dashboard() {
   }, [currentPage])
 
   const [showNotifications, setShowNotifications] = useState(false)
+  const [notifAnchorRect, setNotifAnchorRect] = useState<DOMRect | null>(null)
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('theme') !== 'light'
   })
@@ -774,21 +775,31 @@ export default function Dashboard() {
             onChange={setDarkMode}
             label="Dark Mode"
           />
-          <div className="notification-bell-container" ref={notifRef}>
+          <div className="notification-bell-container">
             <button
-              className={`notification-bell ${showNotifications ? 'active' : ''}`}
-              onClick={() => setShowNotifications(!showNotifications)}
+              data-np-bell
+              ref={notifRef as React.RefObject<HTMLButtonElement>}
+              className={`notification-bell${showNotifications ? ' active' : ''}${unreadCount > 0 && !showNotifications ? ' notification-bell--wiggle' : ''}`}
+              onClick={(e) => {
+                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                setNotifAnchorRect(rect)
+                setShowNotifications(o => !o)
+              }}
               aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`}
             >
               <Bell size={20} />
               {unreadCount > 0 && (
-                <span className="notification-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+                <span className="notification-badge" style={{
+                  position: 'absolute', top: 7, right: 7,
+                  minWidth: 8, height: 8, borderRadius: 99,
+                  background: '#ef4444', border: '1.5px solid var(--bg-primary)',
+                }} />
               )}
             </button>
-            {showNotifications && (
+            {showNotifications && notifAnchorRect && (
               <RightPanel
+                anchorRect={notifAnchorRect}
                 onClose={() => setShowNotifications(false)}
-                initialTab="notifications"
                 localNotifications={notifications}
                 onMoveToBlocked={handleMoveToBlocked}
                 onDismissLocal={dismissNotification}
