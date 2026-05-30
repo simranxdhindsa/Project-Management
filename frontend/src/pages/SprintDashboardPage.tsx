@@ -762,14 +762,30 @@ function FGIssueLine({ issue }: { issue: FeatureGroup['issues'][0] }) {
     if (v.includes('progress') || v.includes('review') || v.includes('block') || v.includes('testing')) return 'active'
     return 'pending'
   }
-  return (
-    <div className="fg-issue-row">
-      <span className={`fg-type-badge ${typeCls(issue.issue_type)}`}>{typeLabel(issue.issue_type)}</span>
-      <span className="fg-issue-id">{issue.id_readable}</span>
-      <span className="fg-issue-summary" title={issue.summary}>{issue.summary}</span>
-      <span className={`fg-state-pill fg-state--${stateRole(issue.state)}`}>{issue.state || '—'}</span>
-      {issue.assignee && <span className="fg-assignee">{issue.assignee}</span>}
+  const hoverContent = (
+    <div>
+      <div className="hc-title" style={{ marginBottom: 2 }}>
+        {issue.id_readable}
+        <HCBadge label={typeLabel(issue.issue_type)} />
+        {!issue.in_sprint && <HCBadge label="External" variant="warn" />}
+      </div>
+      <div className="hc-subtitle">{issue.summary}</div>
+      <HCDivider />
+      <HCRow label="State"    value={issue.state    || '—'} />
+      <HCRow label="Assignee" value={issue.assignee || '—'} />
+      {issue.priority && <HCRow label="Priority" value={issue.priority} />}
     </div>
+  )
+  return (
+    <HoverCard content={hoverContent} maxWidth={280}>
+      <div className="fg-issue-row">
+        <span className={`fg-type-badge ${typeCls(issue.issue_type)}`}>{typeLabel(issue.issue_type)}</span>
+        <span className="fg-issue-id">{issue.id_readable}</span>
+        <span className="fg-issue-summary" title={issue.summary}>{issue.summary}</span>
+        <span className={`fg-state-pill fg-state--${stateRole(issue.state)}`}>{issue.state || '—'}</span>
+        {issue.assignee && <span className="fg-assignee">{issue.assignee}</span>}
+      </div>
+    </HoverCard>
   )
 }
 

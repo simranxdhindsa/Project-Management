@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { GitMerge, RefreshCw, CheckCircle2, Clock, AlertCircle, ChevronDown } from 'lucide-react'
 import type { FeatureGroup, FeatureIssue } from '../services/api'
+import HoverCard, { HCRow, HCDivider, HCBadge } from './HoverCard'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -84,17 +85,38 @@ function sortGroups(groups: FeatureGroup[], mode: SortMode): FeatureGroup[] {
   })
 }
 
+// ─── Issue hover content ─────────────────────────────────────────────────────
+
+function issueHoverContent(issue: FeatureIssue) {
+  return (
+    <div>
+      <div className="hc-title" style={{ marginBottom: 2 }}>
+        {issue.id_readable}
+        {issue.issue_type && <HCBadge label={typeLabel(issue.issue_type)} />}
+        {!issue.in_sprint && <HCBadge label="External" variant="warn" />}
+      </div>
+      <div className="hc-subtitle">{issue.summary}</div>
+      <HCDivider />
+      <HCRow label="State"    value={issue.state    || '—'} />
+      <HCRow label="Assignee" value={issue.assignee || '—'} />
+      {issue.priority && <HCRow label="Priority" value={issue.priority} />}
+    </div>
+  )
+}
+
 // ─── Issue row ───────────────────────────────────────────────────────────────
 
 function IssueRow({ issue }: { issue: FeatureIssue }) {
   return (
-    <div className="fg-issue-row">
-      <span className={`fg-type-badge ${typeCls(issue.issue_type)}`}>{typeLabel(issue.issue_type)}</span>
-      <span className="fg-issue-id">{issue.id_readable}</span>
-      <span className="fg-issue-summary" title={issue.summary}>{issue.summary}</span>
-      <span className={`fg-state-pill ${statePillCls(issue.state)}`}>{issue.state || '—'}</span>
-      {issue.assignee && <span className="fg-assignee">{issue.assignee}</span>}
-    </div>
+    <HoverCard content={issueHoverContent(issue)} maxWidth={280}>
+      <div className="fg-issue-row">
+        <span className={`fg-type-badge ${typeCls(issue.issue_type)}`}>{typeLabel(issue.issue_type)}</span>
+        <span className="fg-issue-id">{issue.id_readable}</span>
+        <span className="fg-issue-summary" title={issue.summary}>{issue.summary}</span>
+        <span className={`fg-state-pill ${statePillCls(issue.state)}`}>{issue.state || '—'}</span>
+        {issue.assignee && <span className="fg-assignee">{issue.assignee}</span>}
+      </div>
+    </HoverCard>
   )
 }
 
