@@ -12,6 +12,7 @@ import {
 } from '@dnd-kit/core'
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/contexts/AuthContext'
+import { StatCarousel } from '@/components/StatCarousel'
 import { PERSIST } from '@/hooks/usePersistedState'
 import api from '@/services/api'
 import { ConfirmModal } from '@/components/ConfirmModal'
@@ -768,6 +769,14 @@ export default function Dashboard() {
             {currentPage === 'daytrack' && 'DayTrack'}
             {currentPage === 'theme' && 'Theme'}
           </h1>
+        </div>
+        <div className="header-center">
+          <StatCarousel onNavigate={(target) => {
+            if (target === 'dashboard') setCurrentPage('dashboard')
+            if (target === 'daily-ops') setCurrentPage('daily-ops')
+            if (target === 'sprint-dashboard') setCurrentPage('dashboard')
+            if (target === 'pm-reports') setCurrentPage('pm-reports')
+          }} />
         </div>
         <div className="header-actions">
           <JellySwitch

@@ -456,11 +456,6 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                       {dev.queuedIssues.length} to do
                     </div>
                   )}
-                  {dev.totalActiveHours > 1 && (
-                    <div className="dl-stat-chip dl-stat-chip--hours">
-                      {fmtHours(dev.totalActiveHours)} worked
-                    </div>
-                  )}
                 </div>
 
                 {/* Active issues preview */}
