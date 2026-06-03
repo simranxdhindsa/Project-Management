@@ -819,11 +819,28 @@
 .db-mc-dev-bounced { color: #fb923c; }
 .db-mc-dev-hours { font-family: var(--font-mono); font-size: 0.62rem; color: var(--text-muted); flex-shrink: 0; }
 
-.db-mc-load-bar { display: flex; height: 3px; overflow: hidden; }
-.db-mc-load-seg { height: 100%; }
+.db-mc-load-bar {
+  display: flex; height: 3px; overflow: hidden; border-radius: 0 0 4px 4px;
+  background: rgba(255,255,255,0.08); /* visible track */
+}
+[data-theme="light"] .db-mc-load-bar { background: rgba(99,102,241,0.1); }
+.db-mc-load-seg { height: 100%; transition: width 0.3s ease; }
 .db-mc-load-seg--active  { background: var(--color-primary); }
+.db-mc-load-seg--queued  { background: rgba(255,255,255,0.2); }
 .db-mc-load-seg--blocked { background: var(--color-danger); }
 .db-mc-load-seg--done    { background: var(--color-success); }
+[data-theme="light"] .db-mc-load-seg--queued { background: rgba(99,102,241,0.15); }
+
+/* ── Dev ticket section labels ── */
+.db-mc-dev-section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; padding: 5px 10px 3px;
+  color: var(--text-muted);
+}
+.db-mc-dev-section-label--active  { color: var(--color-primary-light); }
+.db-mc-dev-section-label--blocked { color: var(--color-danger-light); }
+.db-mc-dev-section-label--queued  { color: var(--text-muted); }
+.db-mc-ticket-more { font-size: 10px; color: var(--text-muted); padding: 3px 10px 5px; }
 
 .db-mc-dev-tickets {
   border-top: 1px solid var(--glass-border);

@@ -1005,11 +1005,11 @@ export function DayTrackPage() {
   async function scanYouTrackTickets() {
     setYtScanning(true)
     try {
-      const res = await dayTrackApi.scanYouTrackTickets()
+      const res = await dayTrackApi.scanYouTrackTickets(date)
       if (res.added > 0) {
         toast(`Synced ${res.added} YouTrack ticket${res.added !== 1 ? 's' : ''} to DayTrack`, 'success')
       } else {
-        toast('No new tickets found for today', 'info')
+        toast(`No new tickets found for ${date}`, 'info')
       }
     } catch { toast('YouTrack sync failed', 'warn') }
     finally { setYtScanning(false) }
@@ -1038,7 +1038,7 @@ export function DayTrackPage() {
   async function postToSlack() {
     setPosting(true)
     try {
-      await dayTrackApi.postToSlack()
+      await dayTrackApi.postToSlack(date)
       toast('Posted to Slack!', 'success')
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to post'

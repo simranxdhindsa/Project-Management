@@ -8,7 +8,7 @@ import api from '@/services/api'
 import type {
   YouTrackSprint, SprintBoardIssue, SprintBoardColumn,
   SprintSummary, SprintBoardStatusResponse, YouTrackIssue,
-  FeatureGroup,
+  FeatureGroup, PriorityTag,
 } from '@/services/api'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '@/components/HoverCard'
@@ -159,7 +159,28 @@ function DBAvatar({ name, url, size = 28 }: { name: string; url?: string; size?:
   )
 }
 
-function PriPill({ priority }: { priority: string }) {
+function getPriColorFromTags(priority: string, tags: PriorityTag[]): string | null {
+  if (!tags?.length || !priority) return null
+  const p = priority.toLowerCase()
+  const tag = tags.find(t =>
+    t.prefixes?.some(px => px.toLowerCase() === p) ||
+    t.yt_mappings?.some(m => m.toLowerCase() === p) ||
+    t.label?.toLowerCase() === p
+  )
+  return tag?.color ?? null
+}
+
+function PriPill({ priority, tags }: { priority: string; tags?: PriorityTag[] }) {
+  const color = tags ? getPriColorFromTags(priority, tags) : null
+  if (color) {
+    return (
+      <span className="db-pri-pill" style={{
+        background: color + '26', color, border: `1px solid ${color}44`,
+      }}>
+        {priority || '?'}
+      </span>
+    )
+  }
   return <span className={`db-pri-pill ${getPriClass(priority)}`}>{priority || '?'}</span>
 }
 
@@ -731,7 +752,9 @@ function SkeletonOps() {
 
 interface DevStat {
   name: string; avatarUrl: string
-  active: SprintBoardIssue[]; blocked: SprintBoardIssue[]; done: SprintBoardIssue[]
+  inProgress: SprintBoardIssue[]; queued: SprintBoardIssue[]
+  blocked: SprintBoardIssue[]; done: SprintBoardIssue[]
+  active: SprintBoardIssue[]  // inProgress + queued combined (for backward-compat)
   bounceCount: number; totalActiveHours: number
 }
 
@@ -771,7 +794,7 @@ function FGIssueLine({ issue }: { issue: FeatureGroup['issues'][0] }) {
       </div>
       <div className="hc-subtitle">{issue.summary}</div>
       <HCDivider />
-      <HCRow label="State"    value={issue.state    || '—'} />
+      <HCRow label="State"    value={issue.current_state || '—'} />
       <HCRow label="Assignee" value={issue.assignee || '—'} />
       {issue.priority && <HCRow label="Priority" value={issue.priority} />}
     </div>
@@ -782,7 +805,7 @@ function FGIssueLine({ issue }: { issue: FeatureGroup['issues'][0] }) {
         <span className={`fg-type-badge ${typeCls(issue.issue_type)}`}>{typeLabel(issue.issue_type)}</span>
         <span className="fg-issue-id">{issue.id_readable}</span>
         <span className="fg-issue-summary" title={issue.summary}>{issue.summary}</span>
-        <span className={`fg-state-pill fg-state--${stateRole(issue.state)}`}>{issue.state || '—'}</span>
+        <span className={`fg-state-pill fg-state--${issue.state_class || 'pending'}`}>{issue.current_state || '—'}</span>
         {issue.assignee && <span className="fg-assignee">{issue.assignee}</span>}
       </div>
     </HoverCard>
@@ -924,6 +947,7 @@ interface DesignProps {
 
 function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, onKpiClick, sprintId }: DesignProps) {
   const [expandedDev, setExpandedDev] = useState<string | null>(null)
+  const [devModal, setDevModal] = useState<{ title: string; issues: SprintBoardIssue[] } | null>(null)
   const [showAllAtRisk, setShowAllAtRisk] = useState(false)
   const [showAllDelay, setShowAllDelay] = useState(false)
 
@@ -945,16 +969,17 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
       const key = iss.assignee || 'Unassigned'
       if (!map.has(key)) map.set(key, {
         name: key, avatarUrl: iss.avatarUrl,
-        active: [], blocked: [], done: [], bounceCount: 0, totalActiveHours: 0,
+        inProgress: [], queued: [], active: [], blocked: [], done: [],
+        bounceCount: 0, totalActiveHours: 0,
       })
       const d = map.get(key)!
-      d.bounceCount += iss.bounce_count
       d.totalActiveHours += iss.total_active_hours
-      if (isBlockedCol(col.name))       d.blocked.push(iss)
+      if (isBlockedCol(col.name))       { d.blocked.push(iss); d.bounceCount += iss.bounce_count }
       else if (isDoneCol(col.name))     d.done.push(iss)
-      else                              d.active.push(iss)
+      else if (isProgressCol(col.name)) { d.inProgress.push(iss); d.active.push(iss); d.bounceCount += iss.bounce_count }
+      else                              { d.queued.push(iss); d.active.push(iss) }
     }))
-    return Array.from(map.values()).sort((a, b) => b.active.length - a.active.length)
+    return Array.from(map.values()).sort((a, b) => b.inProgress.length - a.inProgress.length)
   }, [columns])
 
   const atRisk = useMemo(() =>
@@ -995,12 +1020,13 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
   }
 
   return (
+    <>
     <div className="db-mc-layout">
       {/* ── Left: Developer Load ── */}
       <div className="db-mc-col db-mc-col--left">
         <div className="db-mc-section-label">Developer Load</div>
         {developers.map(dev => {
-          const total = dev.active.length + dev.blocked.length + dev.done.length
+          const total = dev.inProgress.length + dev.queued.length + dev.blocked.length + dev.done.length
           return (
             <HoverCard key={dev.name} content={devHoverContent(dev)} delay={350} maxWidth={230}>
             <div className="db-mc-dev-card">
@@ -1012,7 +1038,8 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
                 <div className="db-mc-dev-info">
                   <span className="db-mc-dev-name">{dev.name.split(' ')[0]}</span>
                   <span className="db-mc-dev-meta">
-                    {dev.active.length} active
+                    {dev.inProgress.length} in prog.
+                    {dev.queued.length > 0  && <span> · {dev.queued.length} to do</span>}
                     {dev.blocked.length > 0 && <span className="db-mc-dev-blocked"> · {dev.blocked.length} blocked</span>}
                     {dev.bounceCount > 0    && <span className="db-mc-dev-bounced"> · ↩{dev.bounceCount}</span>}
                   </span>
@@ -1021,29 +1048,62 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
               </div>
               {total > 0 && (
                 <div className="db-mc-load-bar">
-                  <div className="db-mc-load-seg db-mc-load-seg--active"  style={{ width: `${(dev.active.length  / total) * 100}%` }} />
-                  <div className="db-mc-load-seg db-mc-load-seg--blocked" style={{ width: `${(dev.blocked.length / total) * 100}%` }} />
-                  <div className="db-mc-load-seg db-mc-load-seg--done"    style={{ width: `${(dev.done.length    / total) * 100}%` }} />
+                  <div className="db-mc-load-seg db-mc-load-seg--active"  style={{ width: `${(dev.inProgress.length / total) * 100}%` }} />
+                  <div className="db-mc-load-seg db-mc-load-seg--queued"  style={{ width: `${(dev.queued.length    / total) * 100}%` }} />
+                  <div className="db-mc-load-seg db-mc-load-seg--blocked" style={{ width: `${(dev.blocked.length   / total) * 100}%` }} />
+                  <div className="db-mc-load-seg db-mc-load-seg--done"    style={{ width: `${(dev.done.length      / total) * 100}%` }} />
                 </div>
               )}
               {expandedDev === dev.name && (
                 <div className="db-mc-dev-tickets">
-                  {[...dev.active, ...dev.blocked].map(iss => (
-                    <div key={iss.idReadable} className={`db-mc-ticket-row ${urgencyClass(iss)}`}>
-                      <PriPill priority={iss.priority} />
-                      <span
-                        className="db-ticket-id db-ticket-id--link"
-                        onClick={(e) => onIdClick(iss.idReadable, e)}
-                        title={`Open ${iss.idReadable} in YouTrack`}
-                      >{iss.idReadable}</span>
-                      <span
-                        className="db-mc-ticket-title db-ticket-title--link"
-                        onClick={(e) => onTitleClick(iss.idReadable, e)}
-                        title={iss.summary}
-                      >{iss.summary}</span>
-                      <span className="db-mc-ticket-time">{fmtHours(iss.hours_in_state)}</span>
-                    </div>
-                  ))}
+                  {/* In Progress */}
+                  {dev.inProgress.length > 0 && (
+                    <>
+                      <div className="db-mc-dev-section-label db-mc-dev-section-label--active">In Progress ({dev.inProgress.length})</div>
+                      {dev.inProgress.map(iss => (
+                        <div key={iss.idReadable} className={`db-mc-ticket-row ${urgencyClass(iss)}`}>
+                          <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
+                          <span className="db-ticket-id db-ticket-id--link" onClick={(e) => onIdClick(iss.idReadable, e)}>{iss.idReadable}</span>
+                          <span className="db-mc-ticket-title db-ticket-title--link" onClick={(e) => onTitleClick(iss.idReadable, e)} title={iss.summary}>{iss.summary}</span>
+                          {iss.bounce_count > 0 && <span className="db-bounce-chip">↩{iss.bounce_count}</span>}
+                          <span className="db-mc-ticket-time">{fmtHours(iss.hours_in_state)}</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {/* Blocked */}
+                  {dev.blocked.length > 0 && (
+                    <>
+                      <div className="db-mc-dev-section-label db-mc-dev-section-label--blocked">Blocked ({dev.blocked.length})</div>
+                      {dev.blocked.map(iss => (
+                        <div key={iss.idReadable} className={`db-mc-ticket-row ${urgencyClass(iss)}`}>
+                          <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
+                          <span className="db-ticket-id db-ticket-id--link" onClick={(e) => onIdClick(iss.idReadable, e)}>{iss.idReadable}</span>
+                          <span className="db-mc-ticket-title db-ticket-title--link" onClick={(e) => onTitleClick(iss.idReadable, e)} title={iss.summary}>{iss.summary}</span>
+                          <span className="db-mc-ticket-time">{fmtHours(iss.hours_in_state)}</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  {/* To Do */}
+                  {dev.queued.length > 0 && (
+                    <>
+                      <div className="db-mc-dev-section-label db-mc-dev-section-label--queued">To Do ({dev.queued.length})</div>
+                      {dev.queued.slice(0, 5).map(iss => (
+                        <div key={iss.idReadable} className="db-mc-ticket-row">
+                          <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
+                          <span className="db-ticket-id db-ticket-id--link" onClick={(e) => onIdClick(iss.idReadable, e)}>{iss.idReadable}</span>
+                          <span className="db-mc-ticket-title db-ticket-title--link" onClick={(e) => onTitleClick(iss.idReadable, e)} title={iss.summary}>{iss.summary}</span>
+                        </div>
+                      ))}
+                      {dev.queued.length > 5 && (
+                        <button className="db-mc-ticket-more db-view-more-btn"
+                          onClick={() => setDevModal({ title: `To Do · ${dev.name}`, issues: dev.queued })}>
+                          ↓ View {dev.queued.length - 5} more to do
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1063,7 +1123,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
             <HoverCard key={iss.idReadable} content={issueHoverContent(iss)} maxWidth={270} delay={300}>
             <div className={`db-mc-focus-card ${urgencyClass(iss)}`}>
               <div className="db-mc-focus-top">
-                <PriPill priority={iss.priority} />
+                <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
                 <IssueTypePill issueType={iss.issue_type} />
                 <span
                   className="db-ticket-id db-ticket-id--link"
@@ -1122,7 +1182,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
               return (
                 <div key={iss.idReadable} className="db-mc-delay-row">
                   <div className="db-mc-delay-id">
-                    <PriPill priority={iss.priority} />
+                    <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
                     <span
                       className="db-ticket-id db-ticket-id--link"
                       onClick={(e) => onIdClick(iss.idReadable, e)}
@@ -1192,6 +1252,34 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
         <TypeDeliveryPanel columns={columns} summary={summary} columnRoleMap={columnRoleMap} />
       </div>
     </div>
+
+    {/* Dev issue list modal */}
+    {devModal && createPortal(
+      <div className="pm-tracking-detail-overlay" onClick={() => setDevModal(null)}>
+        <div className="pm-tracking-detail-modal do-chip-modal" onClick={e => e.stopPropagation()}>
+          <div className="pm-tracking-detail-header">
+            <span className="pm-tracking-detail-summary" style={{ fontWeight: 600 }}>{devModal.title}</span>
+            <button className="pm-tracking-detail-close" onClick={() => setDevModal(null)}><X size={16} /></button>
+          </div>
+          <div className="do-chip-modal-body">
+            {devModal.issues.map(iss => (
+              <div key={iss.idReadable} className="do-chip-modal-row">
+                <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
+                <span className="do-issue-id do-issue-id--link" onClick={(e) => onIdClick(iss.idReadable, e)}>{iss.idReadable}</span>
+                <span className="do-chip-modal-summary do-issue-summary--clickable" title={iss.summary} onClick={(e) => onTitleClick(iss.idReadable, e)}>{iss.summary}</span>
+                <div className="do-chip-modal-meta">
+                  {iss.current_state && <span className="do-chip-modal-state">{iss.current_state}</span>}
+                  {iss.is_delayed && <span className="do-overdue-chip">Late</span>}
+                  {iss.bounce_count > 0 && <span className="dl-bounce-dot">↩{iss.bounce_count}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   )
 }
 
@@ -1262,16 +1350,17 @@ function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: Design
   , [allIssues, columnRoleMap])
 
   const developers = useMemo(() => {
-    const map = new Map<string, { name: string; url: string; active: number; blocked: number; done: number; hours: number }>()
+    const map = new Map<string, { name: string; url: string; inProgress: number; queued: number; active: number; blocked: number; done: number; hours: number }>()
     columns.forEach(col => col.issues.forEach(iss => {
       const key = iss.assignee || 'Unassigned'
-      if (!map.has(key)) map.set(key, { name: key, url: iss.avatarUrl, active: 0, blocked: 0, done: 0, hours: 0 })
+      if (!map.has(key)) map.set(key, { name: key, url: iss.avatarUrl, inProgress: 0, queued: 0, active: 0, blocked: 0, done: 0, hours: 0 })
       const d = map.get(key)!
       d.hours += iss.total_active_hours
       const role = resolveRole(col.name, columnRoleMap)
       if (role === 'blocked')          d.blocked++
       else if (DONE_ROLES.has(role))  d.done++
-      else                            d.active++
+      else if (role === 'active')      { d.inProgress++; d.active++ }
+      else                             { d.queued++;     d.active++ }
     }))
     return Array.from(map.values())
   }, [columns, columnRoleMap])
@@ -1346,7 +1435,7 @@ function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: Design
             {needsAttention.slice(0, showAllNeeds ? needsAttention.length : 5).map(iss => (
               <div key={iss.idReadable} className={`db-bg-critical-row ${urgencyClass(iss)}`}>
                 <div className="db-bg-cr-top">
-                  <PriPill priority={iss.priority} />
+                  <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
                   <IssueTypePill issueType={iss.issue_type} />
                   <span
                     className="db-ticket-id db-ticket-id--link"
@@ -1393,7 +1482,7 @@ function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: Design
           <div className="db-bg-card-label">Developer Load</div>
           <div className="db-bg-dev-list">
             {developers.map(dev => {
-              const total = dev.active + dev.blocked + dev.done
+              const total = dev.inProgress + dev.queued + dev.blocked + dev.done
               return (
                 <div key={dev.name} className="db-bg-dev-row">
                   <DBAvatar name={dev.name} url={dev.url} size={24} />
@@ -1401,15 +1490,17 @@ function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: Design
                     <span className="db-bg-dev-name">{dev.name.split(' ')[0]}</span>
                     <div className="db-bg-dev-bar">
                       {total > 0 && <>
-                        <div className="db-bg-dev-bar-seg db-bg-dev-bar-seg--active"  style={{ width: `${(dev.active  / total) * 100}%` }} />
-                        <div className="db-bg-dev-bar-seg db-bg-dev-bar-seg--blocked" style={{ width: `${(dev.blocked / total) * 100}%` }} />
-                        <div className="db-bg-dev-bar-seg db-bg-dev-bar-seg--done"    style={{ width: `${(dev.done    / total) * 100}%` }} />
+                        <div className="db-bg-dev-bar-seg db-bg-dev-bar-seg--active"  style={{ width: `${(dev.inProgress / total) * 100}%` }} />
+                        <div className="db-bg-dev-bar-seg db-bg-dev-bar-seg--queued"  style={{ width: `${(dev.queued    / total) * 100}%` }} />
+                        <div className="db-bg-dev-bar-seg db-bg-dev-bar-seg--blocked" style={{ width: `${(dev.blocked   / total) * 100}%` }} />
+                        <div className="db-bg-dev-bar-seg db-bg-dev-bar-seg--done"    style={{ width: `${(dev.done      / total) * 100}%` }} />
                       </>}
                     </div>
                   </div>
                   <span className="db-bg-dev-hours">{fmtHours(dev.hours)}</span>
                   <div className="db-bg-dev-chips">
-                    <span>{dev.active}</span>
+                    <span title="In Progress">{dev.inProgress}</span>
+                    {dev.queued > 0 && <span style={{ opacity: 0.55 }} title="To Do">/{dev.queued}</span>}
                     {dev.blocked > 0 && <span className="db-bg-dev-chip--blocked">⛔{dev.blocked}</span>}
                   </div>
                 </div>
@@ -1448,7 +1539,7 @@ function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: Design
                       onClick={(e) => onIdClick(iss.idReadable, e)}
                       title={`Open ${iss.idReadable} in YouTrack`}
                     >{iss.idReadable}</span>
-                    <span><PriPill priority={iss.priority} /></span>
+                    <span><PriPill priority={iss.priority} tags={wfConfig?.priority_tags} /></span>
                     <span
                       className="db-bg-table-title db-ticket-title--link"
                       title={iss.summary}
@@ -1582,17 +1673,18 @@ function Design3({
   , [sorted, blockedIds, bouncedIds, columnRoleMap])
 
   const developers = useMemo(() => {
-    const map = new Map<string, { name: string; url: string; active: number; blocked: number; total: number }>()
+    const map = new Map<string, { name: string; url: string; inProgress: number; queued: number; active: number; blocked: number; total: number }>()
     columns.forEach(col => col.issues.forEach(iss => {
       const key = iss.assignee || 'Unassigned'
-      if (!map.has(key)) map.set(key, { name: key, url: iss.avatarUrl, active: 0, blocked: 0, total: 0 })
+      if (!map.has(key)) map.set(key, { name: key, url: iss.avatarUrl, inProgress: 0, queued: 0, active: 0, blocked: 0, total: 0 })
       const d = map.get(key)!
       d.total++
       const role = resolveRole(col.name, columnRoleMap)
-      if (role === 'active')   d.active++
+      if (role === 'active')   { d.inProgress++; d.active++ }
+      else if (!DONE_ROLES.has(role) && role !== 'blocked') { d.queued++; }
       if (role === 'blocked')  d.blocked++
     }))
-    return Array.from(map.values()).sort((a, b) => b.active - a.active)
+    return Array.from(map.values()).sort((a, b) => b.inProgress - a.inProgress)
   }, [columns, columnRoleMap])
 
   function FeedRow({ iss, leftBarCls }: { iss: SprintBoardIssue; leftBarCls?: string }) {
@@ -1601,7 +1693,7 @@ function Design3({
         <div className={`db-oc-feed-left-bar${leftBarCls ? ` ${leftBarCls}` : ''}`} />
         <div className="db-oc-feed-content">
           <div className="db-oc-feed-top">
-            <PriPill priority={iss.priority} />
+            <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
             <IssueTypePill issueType={iss.issue_type} />
             <span
               className="db-ticket-id db-ticket-id--link"
@@ -1672,13 +1764,15 @@ function Design3({
                 <span className="db-oc-dev-name">{dev.name.split(' ')[0]}</span>
                 <div className="db-oc-mini-bar">
                   {dev.total > 0 && <>
-                    <div className="db-oc-mini-bar-active"  style={{ width: `${(dev.active  / dev.total) * 100}%` }} />
+                    <div className="db-oc-mini-bar-active"  style={{ width: `${(dev.inProgress / dev.total) * 100}%` }} />
+                    <div className="db-oc-mini-bar-queued"  style={{ width: `${(dev.queued     / dev.total) * 100}%`, background: 'rgba(255,255,255,0.12)' }} />
                     {dev.blocked > 0 && <div className="db-oc-mini-bar-blocked" style={{ width: `${(dev.blocked / dev.total) * 100}%` }} />}
                   </>}
                 </div>
               </div>
               <span className="db-oc-dev-cnt">
-                {dev.active} <span style={{ opacity: 0.45 }}>active</span>
+                {dev.inProgress} <span style={{ opacity: 0.45 }}>in prog.</span>
+                {dev.queued > 0 && <span style={{ opacity: 0.45 }}> · {dev.queued} to do</span>}
               </span>
             </div>
           ))}

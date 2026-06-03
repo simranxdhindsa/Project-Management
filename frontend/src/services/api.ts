@@ -1685,7 +1685,8 @@ export interface FeatureIssue {
   id_readable: string
   summary: string
   issue_type: string
-  state: string
+  current_state: string
+  state_class: string
   assignee: string
   priority: string
   in_sprint: boolean
@@ -2499,14 +2500,14 @@ export const dayTrackApi = {
     dtFetch<{ ok: boolean }>(`${API_URL}/daytrack/slack-scan`, { method: 'POST' }),
   resetSlackScanWindow: () =>
     dtFetch<{ ok: boolean }>(`${API_URL}/daytrack/slack-reset-scan`, { method: 'POST' }),
-  scanYouTrackTickets: () =>
-    dtFetch<{ ok: boolean; added: number; skipped: number }>(`${API_URL}/daytrack/yt-scan`, { method: 'POST' }),
+  scanYouTrackTickets: (date?: string) =>
+    dtFetch<{ ok: boolean; added: number; skipped: number }>(`${API_URL}/daytrack/yt-scan`, { method: 'POST', body: JSON.stringify({ date: date ?? '' }) }),
   summarize: (payload: { date_label: string; lines: { category: string; name: string; duration: string; notes: string }[] }) =>
     dtFetch<{ summary: string }>(`${API_URL}/daytrack/summarize`, { method: 'POST', body: JSON.stringify(payload) }),
   resolveSlackUser: () =>
     dtFetch<{ slack_user_id: string }>(`${API_URL}/daytrack/slack-resolve-user`),
-  postToSlack: () =>
-    dtFetch<{ ok: boolean }>(`${API_URL}/daytrack/post-to-slack`, { method: 'POST' }),
+  postToSlack: (date?: string) =>
+    dtFetch<{ ok: boolean }>(`${API_URL}/daytrack/post-to-slack`, { method: 'POST', body: JSON.stringify({ date: date ?? '' }) }),
   getEntriesRange: (start: string, end: string) =>
     dtFetch<DayTrackEntry[]>(`${API_URL}/daytrack/entries/range?start=${start}&end=${end}`),
 

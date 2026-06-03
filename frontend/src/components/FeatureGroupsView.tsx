@@ -97,7 +97,7 @@ function issueHoverContent(issue: FeatureIssue) {
       </div>
       <div className="hc-subtitle">{issue.summary}</div>
       <HCDivider />
-      <HCRow label="State"    value={issue.state    || '—'} />
+      <HCRow label="State"    value={issue.current_state    || '—'} />
       <HCRow label="Assignee" value={issue.assignee || '—'} />
       {issue.priority && <HCRow label="Priority" value={issue.priority} />}
     </div>
@@ -113,7 +113,7 @@ function IssueRow({ issue }: { issue: FeatureIssue }) {
         <span className={`fg-type-badge ${typeCls(issue.issue_type)}`}>{typeLabel(issue.issue_type)}</span>
         <span className="fg-issue-id">{issue.id_readable}</span>
         <span className="fg-issue-summary" title={issue.summary}>{issue.summary}</span>
-        <span className={`fg-state-pill ${statePillCls(issue.state)}`}>{issue.state || '—'}</span>
+        <span className={`fg-state-pill fg-state--${issue.state_class || 'pending'}`}>{issue.current_state || '—'}</span>
         {issue.assignee && <span className="fg-assignee">{issue.assignee}</span>}
       </div>
     </HoverCard>

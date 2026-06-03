@@ -2267,13 +2267,45 @@
 .pm-chat-user .pm-chat-bubble { align-items: flex-end; }
 
 .pm-chat-content {
-  padding: 0.55rem 0.85rem;
+  padding: 0.65rem 0.9rem;
   border-radius: var(--radius-lg);
   font-size: 0.82rem;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 .pm-chat-user .pm-chat-content      { background: rgba(99,102,241,0.18); border: 1px solid rgba(99,102,241,0.28); color: var(--text-primary); }
 .pm-chat-assistant .pm-chat-content { background: rgba(255,255,255,0.04); border: 1px solid var(--border-subtle); color: var(--text-secondary); }
+
+/* Rich markdown inside assistant bubbles */
+.pm-chat-assistant .pm-chat-content p  { margin: 0 0 0.45rem; }
+.pm-chat-assistant .pm-chat-content p:last-child { margin-bottom: 0; }
+.pm-chat-assistant .pm-chat-content ul,
+.pm-chat-assistant .pm-chat-content ol { margin: 0.3rem 0 0.5rem 1.1rem; padding: 0; }
+.pm-chat-assistant .pm-chat-content li { margin-bottom: 0.3rem; line-height: 1.5; }
+.pm-chat-assistant .pm-chat-content li ul { margin-top: 0.2rem; margin-bottom: 0.1rem; }
+.pm-chat-assistant .pm-chat-content strong { color: var(--text-primary); font-weight: 600; }
+.pm-chat-assistant .pm-chat-content em { color: var(--text-muted); font-style: normal; font-size: 0.78rem; }
+.pm-chat-assistant .pm-chat-content h2 { font-size: 0.88rem; font-weight: 700; color: var(--text-primary); margin: 0.7rem 0 0.3rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.2rem; }
+.pm-chat-assistant .pm-chat-content h3 { font-size: 0.83rem; font-weight: 600; color: var(--text-primary); margin: 0.55rem 0 0.25rem; }
+.pm-chat-assistant .pm-chat-content h4 { font-size: 0.8rem; font-weight: 600; color: var(--accent); margin: 0.4rem 0 0.2rem; }
+.pm-chat-assistant .pm-chat-content code { background: rgba(255,255,255,0.08); border: 1px solid var(--border-subtle); border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.77rem; font-family: monospace; color: var(--text-primary); }
+.pm-chat-assistant .pm-chat-content pre.pm-code-block { background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 0.55rem 0.75rem; font-size: 0.76rem; overflow-x: auto; margin: 0.4rem 0; }
+.pm-chat-assistant .pm-chat-content table.pm-report-table { width: 100%; margin: 0.4rem 0 0.6rem; border-collapse: collapse; font-size: 0.79rem; }
+.pm-chat-assistant .pm-chat-content table.pm-report-table th { background: rgba(99,102,241,0.15); color: var(--text-primary); font-weight: 600; padding: 0.3rem 0.55rem; text-align: left; border: 1px solid var(--border-subtle); }
+.pm-chat-assistant .pm-chat-content table.pm-report-table td { padding: 0.25rem 0.55rem; border: 1px solid var(--border-subtle); color: var(--text-secondary); }
+.pm-chat-assistant .pm-chat-content table.pm-report-table tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+.pm-chat-assistant .pm-chat-content br { display: block; margin: 0.1rem 0; content: ''; }
+
+/* Light mode overrides */
+[data-theme="light"] .pm-chat-assistant .pm-chat-content strong { color: #1e293b; }
+[data-theme="light"] .pm-chat-assistant .pm-chat-content em { color: #64748b; }
+[data-theme="light"] .pm-chat-assistant .pm-chat-content h2,
+[data-theme="light"] .pm-chat-assistant .pm-chat-content h3 { color: #0f172a; }
+[data-theme="light"] .pm-chat-assistant .pm-chat-content h4 { color: #4f46e5; }
+[data-theme="light"] .pm-chat-assistant .pm-chat-content code { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.2); color: #1e293b; }
+[data-theme="light"] .pm-chat-assistant .pm-chat-content pre.pm-code-block { background: #f1f5f9; border-color: rgba(99,102,241,0.15); }
+[data-theme="light"] .pm-chat-assistant .pm-chat-content table.pm-report-table th { background: rgba(99,102,241,0.1); color: #1e293b; border-color: rgba(99,102,241,0.15); }
+[data-theme="light"] .pm-chat-assistant .pm-chat-content table.pm-report-table td { border-color: rgba(99,102,241,0.1); color: #334155; }
+[data-theme="light"] .pm-chat-assistant .pm-chat-content table.pm-report-table tr:nth-child(even) td { background: rgba(99,102,241,0.03); }
 
 .pm-chat-time {
   font-size: 0.62rem;

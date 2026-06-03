@@ -686,7 +686,7 @@ func daytracBuildSlackSections(entries []database.DayTrackEntry, displayName str
 	return PersonUpdate{DisplayName: displayName, Sections: sections}
 }
 
-// PostToSlack formats today's DayTrack entries as a standup update and posts to the configured destination channel.
+// PostToSlack formats DayTrack entries for a given date and posts to the configured destination channel.
 func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUserFromContext(r)
 	if user == nil {
@@ -698,16 +698,23 @@ func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no destination channel configured", http.StatusBadRequest)
 		return
 	}
-	today := time.Now().Format("2006-01-02")
-	entries, err := h.repo.GetEntries(r.Context(), user.ID, today)
+	var reqBody struct {
+		Date string `json:"date"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&reqBody)
+	date := strings.TrimSpace(reqBody.Date)
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+	entries, err := h.repo.GetEntries(r.Context(), user.ID, date)
 	if err != nil || len(entries) == 0 {
-		http.Error(w, "no entries for today", http.StatusBadRequest)
+		http.Error(w, "no entries for "+date, http.StatusBadRequest)
 		return
 	}
 	ownerUpdate := daytracBuildSlackSections(entries, user.Name)
 	ownerUpdate.IsOwner = true
 	if len(ownerUpdate.Sections) == 0 {
-		http.Error(w, "no entries for today", http.StatusBadRequest)
+		http.Error(w, "no entries for "+date, http.StatusBadRequest)
 		return
 	}
 	text := standupFormatMrkdwn([]PersonUpdate{ownerUpdate})

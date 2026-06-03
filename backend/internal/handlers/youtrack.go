@@ -3399,11 +3399,27 @@ func (h *YouTrackHandler) logYouTrackCreationToDayTrack(ctx context.Context, iss
 	}
 }
 
-// ScanYouTrackTickets fetches YouTrack issues created today by the logged-in user
+// ScanYouTrackTickets fetches YouTrack issues created on a given date by the logged-in user
 // and logs any new ones to DayTrack (deduped by external_ref).
 func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := middleware.GetUserID(ctx)
+
+	// Optional date payload — defaults to today
+	var reqBody struct {
+		Date string `json:"date"` // "YYYY-MM-DD"
+	}
+	_ = json.NewDecoder(r.Body).Decode(&reqBody)
+	scanDate := strings.TrimSpace(reqBody.Date)
+	if scanDate == "" {
+		scanDate = time.Now().Format("2006-01-02")
+	}
+	// Validate format
+	scanDay, parseErr := time.ParseInLocation("2006-01-02", scanDate, time.Local)
+	if parseErr != nil {
+		http.Error(w, "invalid date format, expected YYYY-MM-DD", http.StatusBadRequest)
+		return
+	}
 
 	ytClient, err := h.getYouTrackClientForUser(ctx, userID)
 	if err != nil || ytClient == nil {
@@ -3419,8 +3435,7 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Could not identify YouTrack user", http.StatusInternalServerError)
 		return
 	}
-	today := time.Now().Format("2006-01-02")
-	issues, err := ytClient.GetIssuesCreatedToday(ctx, today, "")
+	issues, err := ytClient.GetIssuesCreatedToday(ctx, scanDate, "")
 	if err != nil {
 		log.Printf("[ScanYTTickets] GetIssuesCreatedToday error: %v", err)
 		http.Error(w, "YouTrack query failed: "+err.Error(), http.StatusInternalServerError)
@@ -3478,7 +3493,7 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 	if actErr != nil {
 		log.Printf("[ScanYTTickets] GetProjectActivities error: %v", actErr)
 	} else {
-		todayStart := time.Now().Truncate(24 * time.Hour)
+		todayStart := scanDay.Truncate(24 * time.Hour)
 		todayEnd := todayStart.Add(24 * time.Hour)
 		for _, act := range activities {
 			// Only State-field changes by the current user
