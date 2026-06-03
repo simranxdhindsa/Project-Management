@@ -6,10 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Backend (run from `backend/`)
 ```bash
-go run .           # Start API server on :8080
-go build .         # Compile binary
+air                # Hot-reload dev server — rebuilds on every .go/.toml/.env change (PREFERRED)
+go run .           # One-shot start without hot reload
+go build .         # Compile binary only
 go test ./...      # Run all tests
 ```
+
+**Hot reload:** `air` is installed and configured via `backend/.air.toml`. It watches all `.go`, `.toml`, and `.env` files and auto-rebuilds/restarts the server. **Do NOT manually restart the backend** when `air` is already running — file saves trigger rebuilds automatically. Only run `go build .` to verify compilation, never to restart.
 
 ### Frontend (run from `frontend/`)
 ```bash

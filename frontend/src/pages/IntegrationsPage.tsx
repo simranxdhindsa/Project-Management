@@ -276,6 +276,8 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
   const [ytBoardID, setYtBoardID] = useState('')
   const [ytConnected, setYtConnected] = useState(false)
   const [showYtForm, setShowYtForm] = useState(false)
+  const [ytBoards, setYtBoards] = useState<Array<{ id: string; name: string }>>([])
+  const [ytBoardsLoading, setYtBoardsLoading] = useState(false)
 
   // ── Asana ────────────────────────────────────────────────────────────────────
   const [asanaConnected, setAsanaConnected] = useState(false)
@@ -372,6 +374,11 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
       .finally(() => setLoading(false))
   }, [])
 
+  // Fetch boards whenever the form is shown (so dropdown is populated)
+  useEffect(() => {
+    if (showYtForm && ytConnected) fetchYtBoards()
+  }, [showYtForm]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (ytMappingOpen === null) return
     const close = () => setYtMappingOpen(null)
@@ -424,10 +431,20 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
     }
   }
 
+  const fetchYtBoards = async () => {
+    setYtBoardsLoading(true)
+    try {
+      const res = await api.getYouTrackBoards()
+      const boards = (res as any)?.data ?? res ?? []
+      setYtBoards(Array.isArray(boards) ? boards : [])
+    } catch { /* silently ignore */ }
+    finally { setYtBoardsLoading(false) }
+  }
+
   const handleSaveYt = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!ytBaseURL.trim() || !ytToken.trim() || !ytProjectID.trim()) {
-      setYtError('Base URL, token, and project ID are required')
+    if (!ytBaseURL.trim() || !ytProjectID.trim() || (!ytToken.trim() && !ytConfigured)) {
+      setYtError(ytConfigured ? 'Base URL and project ID are required' : 'Base URL, token, and project ID are required')
       return
     }
     try {
@@ -960,8 +977,14 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
                 <input type="text" value={ytProjectID} onChange={e => setYtProjectID(e.target.value)} placeholder="PM" className="int-input" autoComplete="off" required />
               </div>
               <div className="int-field">
-                <label>Board ID <span className="int-label-hint">optional — for sprint tracking</span></label>
-                <input type="text" value={ytBoardID} onChange={e => setYtBoardID(e.target.value)} placeholder="1" className="int-input" autoComplete="off" />
+                <label>Board <span className="int-label-hint">optional — for sprint tracking</span></label>
+                <WcObjDropdown
+                  value={ytBoardID}
+                  placeholder={ytBoardsLoading ? 'Loading boards…' : ytBoards.length === 0 ? 'No boards found' : '— Select a board —'}
+                  options={ytBoards}
+                  onChange={setYtBoardID}
+                  disabled={ytBoardsLoading}
+                />
               </div>
               <div className="int-form-actions">
                 {showYtForm && (
