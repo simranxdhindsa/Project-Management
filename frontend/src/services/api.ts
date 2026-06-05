@@ -2501,7 +2501,7 @@ export const dayTrackApi = {
   resetSlackScanWindow: () =>
     dtFetch<{ ok: boolean }>(`${API_URL}/daytrack/slack-reset-scan`, { method: 'POST' }),
   scanYouTrackTickets: (date?: string) =>
-    dtFetch<{ ok: boolean; added: number; skipped: number }>(`${API_URL}/daytrack/yt-scan`, { method: 'POST', body: JSON.stringify({ date: date ?? '' }) }),
+    dtFetch<{ ok: boolean; added: number; skipped: number; tested: number }>(`${API_URL}/daytrack/yt-scan`, { method: 'POST', body: JSON.stringify({ date: date ?? '' }) }),
   summarize: (payload: { date_label: string; lines: { category: string; name: string; duration: string; notes: string }[] }) =>
     dtFetch<{ summary: string }>(`${API_URL}/daytrack/summarize`, { method: 'POST', body: JSON.stringify(payload) }),
   resolveSlackUser: () =>

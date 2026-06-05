@@ -1006,10 +1006,13 @@ export function DayTrackPage() {
     setYtScanning(true)
     try {
       const res = await dayTrackApi.scanYouTrackTickets(date)
-      if (res.added > 0) {
-        toast(`Synced ${res.added} YouTrack ticket${res.added !== 1 ? 's' : ''} to DayTrack`, 'success')
+      const parts: string[] = []
+      if (res.added > 0)   parts.push(`${res.added} created`)
+      if (res.tested > 0)  parts.push(`${res.tested} tested`)
+      if (parts.length > 0) {
+        toast(`Synced ${parts.join(' · ')} from YouTrack`, 'success')
       } else {
-        toast(`No new tickets found for ${date}`, 'info')
+        toast(`No new YouTrack activity found for ${date}`, 'info')
       }
     } catch { toast('YouTrack sync failed', 'warn') }
     finally { setYtScanning(false) }
