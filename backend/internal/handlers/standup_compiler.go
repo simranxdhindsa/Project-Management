@@ -1093,7 +1093,9 @@ func standupFormatMrkdwn(updates []PersonUpdate) string {
 		if i > 0 {
 			sb.WriteString("\n\n") // blank line between people
 		}
-		sb.WriteString(fmt.Sprintf("*%s*\n", u.DisplayName))
+		if u.DisplayName != "" {
+			sb.WriteString(fmt.Sprintf("*%s*\n", u.DisplayName))
+		}
 		if len(u.Sections) > 0 {
 			sb.WriteString("✅ *Done Today:*\n\n")
 		}
