@@ -1073,7 +1073,7 @@ func (h *ReportHandler) ImportHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// One API call for the entire project — no per-issue loops
-	activities, err := ytClient.GetProjectActivities(r.Context(), 2000)
+	activities, err := ytClient.GetProjectActivities(r.Context(), 2000, "")
 	if err != nil {
 		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to fetch project activities: " + err.Error()})
 		return

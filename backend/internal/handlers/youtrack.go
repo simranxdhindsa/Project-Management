@@ -3486,68 +3486,118 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// --- Backfill: log tested entries by querying YouTrack activities API directly ---
-	// This avoids relying on issue_state_log being populated by webhook/scheduler.
+	// --- Hybrid tested-ticket sync ---
+	//
+	// PRIMARY (Option C — YQL issues query):
+	//   Query YouTrack directly for issues updated by this user today whose current
+	//   state matches a tested column. This is reliable regardless of project activity
+	//   volume because it uses the issues API with a targeted YQL filter.
+	//
+	// SECONDARY (Option B — date-scoped activities stream):
+	//   Query the activities page filtered to today's issues only. This catches tickets
+	//   that the user moved to a tested state but were subsequently updated by someone
+	//   else (so "updated by" no longer matches). The activities stream is now scoped to
+	//   a single day, making the 500-item cap more than sufficient.
+	//
+	// ON CONFLICT (user_id, external_ref) DO NOTHING in the DB deduplicates any overlaps.
+
 	testedAdded := 0
-	activities, actErr := ytClient.GetProjectActivities(ctx, 500)
+	seenExtRefs := make(map[string]struct{})
+
+	// helper: create one tested DayTrack entry, track uniqueness in seenExtRefs.
+	createTestedEntry := func(issueID, summary, toState, timeStr, dateStr string) {
+		env, extSuffix, ok := testedEnvFromState(toState)
+		if !ok {
+			return
+		}
+		extRef := "yt-tested-" + issueID + "-" + extSuffix
+		if _, dup := seenExtRefs[extRef]; dup {
+			return
+		}
+		seenExtRefs[extRef] = struct{}{}
+
+		entryName := issueID + ": Verified on " + env
+		if summary != "" {
+			if full := issueID + ": " + summary + " – Verified on " + env; len(full) <= 120 {
+				entryName = full
+			}
+		}
+		// CreateEntrySourced returns (nil, nil) when ON CONFLICT DO NOTHING skips the row.
+		// Only count as newly added when a real row is returned.
+		entry, createErr := h.dayTrackRepo.CreateEntrySourced(ctx, userID, dateStr,
+			entryName, "Testing",
+			timeStr, timeStr, nil, "", "done", nil,
+			"youtrack", extRef)
+		if createErr != nil {
+			log.Printf("[ScanYTTickets] tested entry failed for %s: %v", issueID, createErr)
+			return
+		}
+		if entry != nil {
+			log.Printf("[ScanYTTickets] tested entry saved: issue=%s env=%s", issueID, env)
+			testedAdded++
+		}
+	}
+
+	// PRIMARY: issues updated by this user today whose current state is a tested column.
+	yqlIssues, yqlErr := ytClient.GetIssuesUpdatedByUserToday(ctx, scanDate, ytMe.Login)
+	if yqlErr != nil {
+		log.Printf("[ScanYTTickets] YQL tested query error: %v", yqlErr)
+	} else {
+		for _, issue := range yqlIssues {
+			issueID := issue.IDReadable
+			if issueID == "" {
+				issueID = issue.ID
+			}
+			stateName := youtrack.IssueStateName(issue)
+			if stateName == "" {
+				continue
+			}
+			if _, _, ok := testedEnvFromState(stateName); !ok {
+				continue
+			}
+			updatedAt := time.UnixMilli(issue.Updated)
+			log.Printf("[ScanYTTickets] tested yql: issue=%s state=%q updated=%s", issueID, stateName, updatedAt.Format(time.RFC3339))
+			createTestedEntry(issueID, issue.Summary, stateName, updatedAt.Format("3:04 PM"), updatedAt.Format("2006-01-02"))
+		}
+	}
+
+	// SECONDARY: date-scoped activities stream for tickets moved by this user but
+	// since touched by someone else (so they'd fall outside the YQL "updated by" filter).
+	todayStart := scanDay.Truncate(24 * time.Hour)
+	todayEnd := todayStart.Add(24 * time.Hour)
+	activities, actErr := ytClient.GetProjectActivities(ctx, 500, scanDate)
 	if actErr != nil {
 		log.Printf("[ScanYTTickets] GetProjectActivities error: %v", actErr)
 	} else {
-		todayStart := scanDay.Truncate(24 * time.Hour)
-		todayEnd := todayStart.Add(24 * time.Hour)
 		for _, act := range activities {
-			// Only State-field changes by the current user
 			if act.Field.Presentation != "State" {
 				continue
 			}
 			if act.Author == nil {
 				continue
 			}
-			// Match by YT user ID (most reliable), then login as fallback
 			idMatch := act.Author.ID != "" && act.Author.ID == ytMe.ID
 			loginMatch := act.Author.Login != "" && strings.EqualFold(act.Author.Login, ytMe.Login)
 			if !idMatch && !loginMatch {
 				continue
 			}
-			// Only activities from today
 			actTime := time.UnixMilli(act.Timestamp)
 			if actTime.Before(todayStart) || !actTime.Before(todayEnd) {
 				continue
 			}
-			// Only moves to verified columns
 			if len(act.Added) == 0 {
 				continue
 			}
 			toState := act.Added[0].Name
-			env, extSuffix, ok := testedEnvFromState(toState)
-			if !ok {
+			if _, _, ok := testedEnvFromState(toState); !ok {
 				continue
 			}
 			issueID := act.Target.IDReadable
 			if issueID == "" {
 				issueID = act.Target.ID
 			}
-			entryName := issueID + ": Verified on " + env
-			if act.Target.Summary != "" {
-				full := issueID + ": " + act.Target.Summary + " – Verified on " + env
-				if len(full) <= 120 {
-					entryName = full
-				}
-			}
-			timeStr := actTime.Format("3:04 PM")
-			dateStr := actTime.Format("2006-01-02")
-			extRef := "yt-tested-" + issueID + "-" + extSuffix
-			log.Printf("[ScanYTTickets] tested activity: issue=%s toState=%q env=%s author_id=%s", issueID, toState, env, act.Author.ID)
-			_, createErr := h.dayTrackRepo.CreateEntrySourced(ctx, userID, dateStr,
-				entryName, "Testing",
-				timeStr, timeStr, nil, "", "done", nil,
-				"youtrack", extRef)
-			if createErr != nil {
-				log.Printf("[ScanYTTickets] tested entry failed for %s: %v", issueID, createErr)
-			} else {
-				testedAdded++
-
-			}
+			log.Printf("[ScanYTTickets] tested activity (secondary): issue=%s toState=%q author=%s", issueID, toState, act.Author.Login)
+			createTestedEntry(issueID, act.Target.Summary, toState, actTime.Format("3:04 PM"), actTime.Format("2006-01-02"))
 		}
 	}
 

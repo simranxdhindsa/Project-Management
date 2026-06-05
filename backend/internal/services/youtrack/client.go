@@ -1274,14 +1274,19 @@ func (c *Client) GetIssueActivities(ctx context.Context, issueID string) ([]Issu
 	return page.Activities, nil
 }
 
-// GetProjectActivities fetches ALL CustomField activities (State + Assignee changes) across
-// the entire project in a single API call. Returns activities in chronological order.
-// The caller is responsible for filtering by field.presentation.
-func (c *Client) GetProjectActivities(ctx context.Context, top int) ([]IssueActivityItem, error) {
+// GetProjectActivities fetches CustomField activities (State + Assignee changes) across
+// the project. When date is non-empty (YYYY-MM-DD) the YouTrack query is scoped to
+// issues updated on that date, dramatically reducing result size and making the top
+// limit effective for a single day. Pass "" to fetch across all time.
+func (c *Client) GetProjectActivities(ctx context.Context, top int, date string) ([]IssueActivityItem, error) {
 	if top <= 0 {
 		top = 500
 	}
-	query := url.QueryEscape(fmt.Sprintf("project: %s", c.projectID))
+	q := fmt.Sprintf("project: %s", c.projectID)
+	if date != "" {
+		q += fmt.Sprintf(" updated: %s", date)
+	}
+	query := url.QueryEscape(q)
 	// Note: fields must NOT be URL-encoded — YouTrack parses the parentheses literally.
 	// $top must be encoded as %24top to avoid shell/framework misinterpretation.
 	path := fmt.Sprintf(
@@ -1301,6 +1306,47 @@ func (c *Client) GetProjectActivities(ctx context.Context, top int) ([]IssueActi
 		return nil, fmt.Errorf("failed to unmarshal project activities: %w", err)
 	}
 	return page.Activities, nil
+}
+
+// GetIssuesUpdatedByUserToday returns issues in the project whose state field currently
+// matches a tested state (Ready For Prod, Ready for Stage, Verified, Mobile Done) and
+// that were last updated by the given user login on the specified date (YYYY-MM-DD).
+// This is the primary path for the DayTrack tested-ticket sync; the activities stream
+// is used as a secondary sweep to catch tickets moved on by someone else afterward.
+func (c *Client) GetIssuesUpdatedByUserToday(ctx context.Context, date, userLogin string) ([]Issue, error) {
+	if date == "" || userLogin == "" {
+		return nil, nil
+	}
+	queryStr := fmt.Sprintf("project: %s updated by: %s updated: %s", c.projectID, userLogin, date)
+	fields := "id,idReadable,summary,updated,customFields(name,value(name))"
+	path := fmt.Sprintf("/api/issues?fields=%s&query=%s&$top=300", fields, url.QueryEscape(queryStr))
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("GetIssuesUpdatedByUserToday: %w", err)
+	}
+	var issues []Issue
+	if err := json.Unmarshal(body, &issues); err != nil {
+		return nil, fmt.Errorf("GetIssuesUpdatedByUserToday unmarshal: %w", err)
+	}
+	return issues, nil
+}
+
+// IssueStateName extracts the "State" custom-field value name from an Issue.
+func IssueStateName(issue Issue) string {
+	for _, cf := range issue.CustomFields {
+		if cf.Name != "State" {
+			continue
+		}
+		switch v := cf.Value.(type) {
+		case map[string]interface{}:
+			if name, ok := v["name"].(string); ok {
+				return name
+			}
+		case string:
+			return v
+		}
+	}
+	return ""
 }
 
 // IsDuplicateIssue checks if an issue with the same summary already exists
