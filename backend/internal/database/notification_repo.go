@@ -21,12 +21,14 @@ func NewNotificationRepository() *NotificationRepository {
 func (r *NotificationRepository) Create(ctx context.Context, notif *models.Notification) error {
 	pool := GetPool()
 
+	// user_id is TEXT in the notifications table (migrated from uuid).
+	// Use ::text casts throughout to avoid "operator does not exist: text = uuid".
 	err := pool.QueryRow(ctx, `
 		INSERT INTO notifications (user_id, type, title, message, task_id, read)
-		SELECT $1::uuid, $2::text, $3::text, $4::text, $5::text, false
+		SELECT $1::text, $2::text, $3::text, $4::text, $5::text, false
 		WHERE NOT EXISTS (
 			SELECT 1 FROM notifications
-			WHERE user_id = $1::uuid AND type = $2::text AND title = $3::text
+			WHERE user_id = $1::text AND type = $2::text AND title = $3::text
 			  AND created_at > NOW() - INTERVAL '24 hours'
 		)
 		RETURNING id, created_at

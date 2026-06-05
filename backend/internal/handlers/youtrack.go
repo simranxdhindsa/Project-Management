@@ -3474,13 +3474,13 @@ func (h *YouTrackHandler) ScanYouTrackTickets(w http.ResponseWriter, r *http.Req
 		}
 		extRef := "yt-create-" + issueID
 
-		_, createErr := h.dayTrackRepo.CreateEntrySourced(ctx, userID, dateStr,
+		entry, createErr := h.dayTrackRepo.CreateEntrySourced(ctx, userID, dateStr,
 			entryName, "Tickets Created",
 			timeStr, timeStr, nil, "", "done", nil,
 			"youtrack", extRef)
 		if createErr != nil {
 			log.Printf("[ScanYTTickets] CreateEntrySourced failed for %s: %v", issueID, createErr)
-		} else {
+		} else if entry != nil {
 			log.Printf("[ScanYTTickets] logged DayTrack entry for %s", issueID)
 			added++
 		}

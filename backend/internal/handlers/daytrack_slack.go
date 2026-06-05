@@ -323,7 +323,7 @@ func RunDayTrackSlackScanner(daytrackRepo *database.DayTrackRepository) {
 }
 
 func runScan(repo *database.DayTrackRepository) {
-	listCtx, listCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	listCtx, listCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	configs, err := repo.GetAllEnabledSlackConfigs(listCtx)
 	listCancel()
 	if err != nil {
