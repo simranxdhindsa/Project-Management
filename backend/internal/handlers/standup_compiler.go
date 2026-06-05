@@ -1094,16 +1094,18 @@ func standupFormatMrkdwn(updates []PersonUpdate) string {
 			sb.WriteString("\n\n") // blank line between people
 		}
 		sb.WriteString(fmt.Sprintf("*%s*\n", u.DisplayName))
+		if len(u.Sections) > 0 {
+			sb.WriteString("✅ *Done Today:*\n\n")
+		}
 		for _, sec := range u.Sections {
 			if len(sec.Items) == 0 {
 				continue
 			}
-			// Don't double-up the colon if label already ends with one
 			label := sec.Label
 			if !strings.HasSuffix(label, ":") {
 				label += ":"
 			}
-			sb.WriteString(label + "\n")
+			sb.WriteString("*" + label + "*\n")
 			for _, item := range sec.Items {
 				sb.WriteString("• " + item + "\n")
 			}

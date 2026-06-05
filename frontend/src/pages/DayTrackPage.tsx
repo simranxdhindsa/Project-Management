@@ -1126,7 +1126,7 @@ export function DayTrackPage() {
 
     let doneBlock = ''
     doneByCategory.forEach((items, cat) => {
-      doneBlock += `${catHeading(cat)}:\n`
+      doneBlock += `*${catHeading(cat)}:*\n`
       items.forEach(e => {
         doneBlock += `• ${getName(e)}${e.duration_mins != null ? ` (${minsLabel(e.duration_mins)})` : ''}\n`
       })
@@ -1144,8 +1144,8 @@ export function DayTrackPage() {
 
     let text = `📋 DayTrack Report – ${today}\n`
     text += `⏱ Total: ${totalMins ? minsLabel(totalMins) : '—'} | Focus Rate: ${focusRate != null ? focusRate + '%' : '—'}\n\n`
-    text += `✅ Done Today:\n\n${doneBlock || '• (none)\n\n'}`
-    text += `🧪 Tickets Tested:\n${testedBlock}\n`
+    text += `✅ *Done Today:*\n\n${doneBlock || '• (none)\n\n'}`
+    text += `🧪 *Tickets Tested:*\n${testedBlock}\n`
     if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
     text += `📌 Planned / Upcoming:\n${planList || '• (none)'}\n\n`
     text += `🚧 Blockers:\n• None`
@@ -1419,7 +1419,7 @@ ${aiSummaryBlock}
 
     let doneBlock = ''
     doneByCategory.forEach((items, cat) => {
-      doneBlock += `${catHeading(cat)}:\n`
+      doneBlock += `*${catHeading(cat)}:*\n`
       items.forEach(e => {
         doneBlock += `- ${e.name}${e.duration_mins != null ? ` (${minsLabel(e.duration_mins)})` : ''}\n`
       })
@@ -1440,8 +1440,8 @@ ${aiSummaryBlock}
 
     let text = `📋 DayTrack Report – ${today}\n`
     text += `⏱ Total: ${totalMins ? minsLabel(totalMins) : '—'} | Focus Rate: ${focusRate != null ? focusRate + '%' : '—'}\n\n`
-    text += `✅ Done Today:\n\n${doneBlock || '- (none)\n\n'}`
-    text += `🧪 Tickets Tested:\n${testedBlock}\n`
+    text += `✅ *Done Today:*\n\n${doneBlock || '- (none)\n\n'}`
+    text += `🧪 *Tickets Tested:*\n${testedBlock}\n`
     if (activeList) text += `🔄 In Progress:\n${activeList}\n\n`
     text += `📌 Planned / Upcoming:\n${planList || '- (none)'}\n\n`
     text += `🚧 Blockers:\n- None`
