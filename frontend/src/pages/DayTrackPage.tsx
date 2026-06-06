@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { createPortal } from 'react-dom'
 import { dayTrackApi, api, type DayTrackEntry, type DayTrackPlanned, type DayTrackSlackConfig, type DayTrackKWRule, DEFAULT_KEYWORD_RULES } from '../services/api'
 import { CalendarPicker } from '../components/CalendarPicker'
@@ -414,6 +414,23 @@ function MicButton({ onResult, onError }: {
   )
 }
 
+// Isolated clock component — keeps 1-second re-renders scoped to this tiny node
+// instead of re-rendering the entire DayTrackPage tree.
+const ClockDisplay = memo(function ClockDisplay() {
+  const [clock, setClock] = useState(() => {
+    const n = new Date()
+    return n.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  })
+  useEffect(() => {
+    const id = setInterval(() => {
+      const n = new Date()
+      setClock(n.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <>{clock}</>
+})
+
 export function DayTrackPage() {
   const [date, setDate] = useState<string>(toDateStr(new Date()))
   const [entries, setEntries] = useState<DayTrackEntry[]>([])
@@ -555,8 +572,7 @@ export function DayTrackPage() {
   const [toasts, setToasts] = useState<Toast[]>([])
   const toastId = useRef(0)
 
-  // Live clock
-  const [clock, setClock] = useState('')
+  // Live clock rendered by isolated ClockDisplay component above
 
   // Close dropdowns / calendar on outside click
   useEffect(() => {
@@ -574,16 +590,6 @@ export function DayTrackPage() {
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  useEffect(() => {
-    const tick = () => {
-      const n = new Date()
-      setClock(n.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-    }
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
   }, [])
 
   const toast = useCallback((msg: string, type: ToastType = 'success') => {
@@ -1549,7 +1555,7 @@ ${aiSummaryBlock}
             </div>
           </div>
 
-          <div className="dt-clock">{clock}</div>
+          <div className="dt-clock"><ClockDisplay /></div>
           <button className="dt-header-settings-btn" title="Sync YouTrack tickets created today"
             onClick={scanYouTrackTickets} disabled={ytScanning}
             style={{ marginRight: 4 }}>

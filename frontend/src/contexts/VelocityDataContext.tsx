@@ -19,6 +19,7 @@ import {
   useState, useEffect, type ReactNode,
 } from 'react'
 import api from '@/services/api'
+import { sseService } from '@/services/sseService'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -123,11 +124,9 @@ export function VelocityDataProvider({ children }: { children: ReactNode }) {
     const token = localStorage.getItem('token') || localStorage.getItem('auth_token')
     if (!token) return
 
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
-    const es = new EventSource(`${apiUrl}/events`)
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
-    es.addEventListener('youtrack_update', () => {
+    const unsubscribe = sseService.subscribe('youtrack_update', () => {
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
         invalidatePrefix('board:')
@@ -136,7 +135,7 @@ export function VelocityDataProvider({ children }: { children: ReactNode }) {
     })
 
     return () => {
-      es.close()
+      unsubscribe()
       if (debounceTimer) clearTimeout(debounceTimer)
     }
   }, [invalidate, invalidatePrefix])

@@ -94,7 +94,7 @@
   color: var(--text-muted);
   font-size: 0.8625rem;
   font-weight: 500;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), border-color var(--transition-fast);
   margin-bottom: 0.125rem;
   cursor: pointer;
   position: relative;
@@ -194,7 +194,7 @@
   cursor: pointer;
   text-align: left;
   border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
   font-family: inherit;
 }
 .logout-button:hover,
@@ -306,7 +306,7 @@
   font-size: 0.875rem;
   color: var(--color-primary);
   text-decoration: none;
-  transition: all var(--transition-fast);
+  transition: gap var(--transition-fast), color var(--transition-fast);
 }
 .section-link:hover { gap: 0.5rem; }
 
@@ -350,7 +350,7 @@
   color: var(--text-primary);
   font-size: 0.8625rem;
   font-family: inherit;
-  transition: all var(--transition-normal);
+  transition: border-color var(--transition-normal), background-color var(--transition-normal), box-shadow var(--transition-normal);
   outline: none;
 }
 .search-bar-input::placeholder { color: var(--text-muted); }
@@ -388,7 +388,7 @@
   cursor: pointer;
   color: var(--text-muted);
   background: transparent;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
   font-family: inherit;
 }
 .toggle-btn.active {
@@ -409,7 +409,7 @@
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 .icon-button:hover {
   background: rgba(255,255,255,0.09);
