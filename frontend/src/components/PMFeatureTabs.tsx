@@ -177,22 +177,30 @@ export function BurndownTab({ sprints, activeSprint }: BurndownTabProps) {
     if (!sprint) return []
     const startMs = sprint.start
     const endMs = sprint.finish
-    const totalDays = Math.round((endMs - startMs) / 86400000) + 1
+    const sprintDays = Math.round((endMs - startMs) / 86400000) + 1
     const snapshotMap = new Map((data?.points ?? []).map(p => [p.date, p]))
     const totalAtStart = data?.points?.[0]?.total ?? 0
     const todayStr = new Date().toISOString().split('T')[0]
 
+    // Start from earliest snapshot date or sprint start, whichever is earlier
+    const firstSnapMs = data?.points?.[0]?.date
+      ? new Date(data.points[0].date + 'T00:00:00Z').getTime()
+      : startMs
+    const chartStartMs = Math.min(startMs, firstSnapMs)
+
     const result = []
-    for (let i = 0; i < totalDays; i++) {
-      const dateStr = new Date(startMs + i * 86400000).toISOString().split('T')[0]
-      const ideal = totalDays > 1 && totalAtStart > 0
-        ? Math.round(totalAtStart * (1 - i / (totalDays - 1)) * 10) / 10
-        : 0
+    for (let ms = chartStartMs; ms <= endMs; ms += 86400000) {
+      const dateStr = new Date(ms).toISOString().split('T')[0]
+      const sprintOffset = Math.round((ms - startMs) / 86400000)
+      const ideal = sprintOffset < 0
+        ? totalAtStart  // flat before sprint starts
+        : (sprintDays > 1 && totalAtStart > 0
+          ? Math.round(totalAtStart * (1 - sprintOffset / (sprintDays - 1)) * 10) / 10
+          : 0)
       const snap = snapshotMap.get(dateStr)
       result.push({
         date: dateStr,
         ideal_remain: ideal,
-        // undefined → recharts skips the point, so lines only connect on actual data days
         remaining: snap && dateStr <= todayStr ? snap.remaining : undefined,
         completed: snap && dateStr <= todayStr ? snap.completed : undefined,
       })
