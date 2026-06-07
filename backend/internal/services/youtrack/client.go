@@ -1401,12 +1401,14 @@ func (c *Client) UploadAttachment(ctx context.Context, issueID, filename, mimeTy
 	return nil
 }
 
-// IssueLink represents a linked issue returned by GetIssueLinks.
+// IssueLink represents a linked issue returned by GetIssueLinks / GetAllIssueLinks.
 type IssueLink struct {
 	IDReadable string `json:"id_readable"`
 	Summary    string `json:"summary"`
 	State      string `json:"state"`
 	Resolved   bool   `json:"resolved"`
+	LinkType   string `json:"link_type,omitempty"`
+	Direction  string `json:"direction,omitempty"` // "outward" | "inward"
 }
 
 // GetIssueLinks fetches YouTrack native "Relates To" links for an issue.
@@ -1469,6 +1471,133 @@ func (c *Client) GetIssueLinks(ctx context.Context, issueID string) ([]IssueLink
 		}
 	}
 	return result, nil
+}
+
+// GetAllIssueLinks fetches all link types for an issue (not just "Relates To").
+func (c *Client) GetAllIssueLinks(ctx context.Context, issueID string) ([]IssueLink, error) {
+	fields := "id,direction,linkType(name,sourceToTarget,targetToSource),trimmedIssues(id,idReadable,summary,resolved,fields(value(name),$type,projectCustomField(field(name))))"
+	path := fmt.Sprintf("/api/issues/%s/links?$topLinks=100&fields=%s", url.PathEscape(issueID), fields)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var raw []struct {
+		Direction string `json:"direction"`
+		LinkType  struct {
+			Name           string `json:"name"`
+			SourceToTarget string `json:"sourceToTarget"`
+			TargetToSource string `json:"targetToSource"`
+		} `json:"linkType"`
+		TrimmedIssues []struct {
+			ID         string `json:"id"`
+			IDReadable string `json:"idReadable"`
+			Summary    string `json:"summary"`
+			Resolved   bool   `json:"resolved"`
+			Fields     []struct {
+				Type  string          `json:"$type"`
+				Value json.RawMessage `json:"value"`
+				ProjectCustomField struct {
+					Field struct {
+						Name string `json:"name"`
+					} `json:"field"`
+				} `json:"projectCustomField"`
+			} `json:"fields"`
+		} `json:"trimmedIssues"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal issue links: %w", err)
+	}
+
+	var result []IssueLink
+	for _, group := range raw {
+		dir := strings.ToLower(group.Direction)
+		linkTypeName := group.LinkType.Name
+		for _, issue := range group.TrimmedIssues {
+			state := ""
+			for _, f := range issue.Fields {
+				if f.Type == "StateIssueCustomField" {
+					var v struct{ Name string `json:"name"` }
+					if json.Unmarshal(f.Value, &v) == nil {
+						state = v.Name
+					}
+				}
+			}
+			result = append(result, IssueLink{
+				IDReadable: issue.IDReadable,
+				Summary:    issue.Summary,
+				State:      state,
+				Resolved:   issue.Resolved,
+				LinkType:   linkTypeName,
+				Direction:  dir,
+			})
+		}
+	}
+	return result, nil
+}
+
+// GetFixVersions returns all fix version / milestone names for the configured project.
+func (c *Client) GetFixVersions(ctx context.Context) ([]string, error) {
+	projectID := c.projectID
+	if projectID == "" {
+		return nil, fmt.Errorf("project ID not configured")
+	}
+	path := fmt.Sprintf("/api/admin/projects/%s/customFields?fields=field(name),bundle(values(name,isResolved,releaseDate))&$top=100", url.PathEscape(projectID))
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var raw []struct {
+		Field struct {
+			Name string `json:"name"`
+		} `json:"field"`
+		Bundle struct {
+			Values []struct {
+				Name        string `json:"name"`
+				IsResolved  bool   `json:"isResolved"`
+				ReleaseDate *int64 `json:"releaseDate"`
+			} `json:"values"`
+		} `json:"bundle"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal custom fields: %w", err)
+	}
+
+	var versions []string
+	for _, cf := range raw {
+		if strings.Contains(strings.ToLower(cf.Field.Name), "fix version") ||
+			strings.Contains(strings.ToLower(cf.Field.Name), "fixversion") ||
+			strings.Contains(strings.ToLower(cf.Field.Name), "milestone") ||
+			strings.Contains(strings.ToLower(cf.Field.Name), "release") {
+			for _, v := range cf.Bundle.Values {
+				if v.Name != "" {
+					versions = append(versions, v.Name)
+				}
+			}
+		}
+	}
+	return versions, nil
+}
+
+// GetIssuesByFixVersion returns all issues with a specific fix version / milestone value.
+func (c *Client) GetIssuesByFixVersion(ctx context.Context, version string) ([]Issue, error) {
+	projectID := c.projectID
+	if projectID == "" {
+		return nil, fmt.Errorf("project ID not configured")
+	}
+	query := fmt.Sprintf("project: %s Fix versions: {%s}", projectID, version)
+	fields := "id,idReadable,summary,resolved,fields(value(name),$type,projectCustomField(field(name)))"
+	path := fmt.Sprintf("/api/issues?query=%s&fields=%s&$top=500", url.QueryEscape(query), fields)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var issues []Issue
+	if err := json.Unmarshal(body, &issues); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal issues: %w", err)
+	}
+	return issues, nil
 }
 
 // AddIssueToSprint adds an existing issue to a sprint.

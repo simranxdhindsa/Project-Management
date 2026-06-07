@@ -11,6 +11,7 @@ import type {
   FeatureGroup, PriorityTag,
 } from '@/services/api'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
+import { VelocityTab, BurndownTab } from '@/components/PMFeatureTabs'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '@/components/HoverCard'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import '../styles/pages/dashboard.css'
@@ -20,12 +21,14 @@ import '../styles/pages/dashboard.css'
 const SPRINT_ID_KEY   = 'pm_active_sprint_id'
 const SPRINT_NAME_KEY = 'pm_active_sprint_name'
 
-type DesignMode = 'velocity' | 'bento' | 'ops'
+type DesignMode = 'velocity' | 'bento' | 'ops' | 'sprint-velocity' | 'burndown'
 
 const DESIGN_MODES: { id: DesignMode; label: string; icon: typeof Activity }[] = [
-  { id: 'velocity', label: 'Velocity',    icon: Activity },
-  { id: 'bento',   label: 'Bento Grid',  icon: BarChart2 },
-  { id: 'ops',     label: 'Ops Command', icon: Zap },
+  { id: 'velocity',        label: 'Velocity',        icon: Activity },
+  { id: 'bento',           label: 'Bento Grid',      icon: BarChart2 },
+  { id: 'ops',             label: 'Ops Command',     icon: Zap },
+  { id: 'sprint-velocity', label: 'Sprint Velocity', icon: Target },
+  { id: 'burndown',        label: 'Burndown',        icon: GitMerge },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2262,9 +2265,11 @@ export function SprintDashboardPage() {
       {/* Skeleton views while loading */}
       {loading && (
         <div className="db-content">
-          {designMode === 'velocity' && <SkeletonVelocity />}
-          {designMode === 'bento'    && <SkeletonBento />}
-          {designMode === 'ops'      && <SkeletonOps />}
+          {designMode === 'velocity'        && <SkeletonVelocity />}
+          {designMode === 'bento'           && <SkeletonBento />}
+          {designMode === 'ops'             && <SkeletonOps />}
+          {designMode === 'sprint-velocity' && <SkeletonVelocity />}
+          {designMode === 'burndown'        && <SkeletonVelocity />}
         </div>
       )}
 
@@ -2300,6 +2305,16 @@ export function SprintDashboardPage() {
               onIdClick={openInYt}
               sprintId={activeSprint?.id}
             />
+          )}
+          {designMode === 'sprint-velocity' && (
+            <div style={{ padding: '0 4px' }}>
+              <VelocityTab hideControls />
+            </div>
+          )}
+          {designMode === 'burndown' && (
+            <div style={{ padding: '0 4px' }}>
+              <BurndownTab sprints={sprints} activeSprint={activeSprint} />
+            </div>
           )}
         </div>
       )}

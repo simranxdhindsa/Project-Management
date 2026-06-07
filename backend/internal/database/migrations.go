@@ -883,6 +883,38 @@ OTHER RULES
 <!-- v3 -->'
 			WHERE bot_type = 'pm_assistant'
 			  AND prompt NOT LIKE ''||chr(60)||'!-- v3 --'||chr(62)||'%'`,
+
+		// PM Features — burndown snapshots
+		`CREATE TABLE IF NOT EXISTS pm_burndown_snapshots (
+			sprint_id   VARCHAR(255) NOT NULL,
+			sprint_name VARCHAR(255) NOT NULL DEFAULT '',
+			date        DATE         NOT NULL,
+			total       INT          NOT NULL DEFAULT 0,
+			completed   INT          NOT NULL DEFAULT 0,
+			PRIMARY KEY (sprint_id, date)
+		)`,
+
+		// PM Features — team capacity planner
+		`CREATE TABLE IF NOT EXISTS pm_sprint_capacity (
+			id             VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id        VARCHAR(255) NOT NULL,
+			sprint_id      VARCHAR(255) NOT NULL,
+			sprint_name    VARCHAR(255) NOT NULL DEFAULT '',
+			assignee_name  VARCHAR(255) NOT NULL,
+			available_days NUMERIC(5,2) NOT NULL DEFAULT 10,
+			notes          TEXT         NOT NULL DEFAULT '',
+			created_at     TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE (user_id, sprint_id, assignee_name)
+		)`,
+
+		// PM Features — blocker escalation config
+		`CREATE TABLE IF NOT EXISTS pm_escalation_config (
+			user_id              VARCHAR(255) PRIMARY KEY,
+			sla_hours            NUMERIC(8,2) NOT NULL DEFAULT 24,
+			notify_slack_channel VARCHAR(255) NOT NULL DEFAULT '',
+			auto_notify          BOOLEAN      NOT NULL DEFAULT false,
+			updated_at           TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
 	}
 
 	for i, migration := range migrations {

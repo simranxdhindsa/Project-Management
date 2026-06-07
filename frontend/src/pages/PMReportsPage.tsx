@@ -23,7 +23,7 @@ import {
   Brain, ScanSearch, BarChart2, GitBranch, Layers,
   Cpu, Database, Radar, Gauge, ListChecks,
   Workflow, Telescope, FlaskConical, Network, Compass,
-  Rocket, ShieldCheck, Shield,
+  Rocket, ShieldCheck, Shield, Flame,
 } from 'lucide-react'
 import { DAILY_LIMIT_MSGS, GENERIC_LIMIT_MSGS } from '../data/assistantMessages'
 import api from '../services/api'
@@ -38,6 +38,7 @@ import {
 } from '../services/pmDataService'
 import DailyOpsTab from './DailyOpsTab'
 import { StandupCompilerPage } from './StandupCompilerPage'
+import { VelocityTab, BurndownTab } from '../components/PMFeatureTabs'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import DevTimeView from '../components/DevTimeView'
 import type { DevTimeVariant } from '../components/DevTimeView'
@@ -135,12 +136,12 @@ function toISODate(d: Date): string {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'tracking',    label: 'Tracking',          icon: Activity  },
-  { id: 'daily',       label: 'Reports',            icon: FileText  },
-  { id: 'assignees',   label: 'Assignee Stats',     icon: Users     },
-  { id: 'dailyops',    label: 'Daily Ops',          icon: Zap       },
-  { id: 'deployment',  label: 'Deployment Report',  icon: Rocket    },
-  { id: 'standup',     label: 'Compiler',           icon: Send      },
+  { id: 'tracking',    label: 'Tracking',          icon: Activity   },
+  { id: 'daily',       label: 'Reports',            icon: FileText   },
+  { id: 'assignees',   label: 'Assignee Stats',     icon: Users      },
+  { id: 'dailyops',    label: 'Daily Ops',          icon: Zap        },
+  { id: 'deployment',  label: 'Deployment Report',  icon: Rocket     },
+  { id: 'standup',     label: 'Compiler',           icon: Send       },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -2007,8 +2008,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
   const [collapsedCols, setCollapsedCols] = useState<Set<string>>(new Set())
   const [allCollapsed, setAllCollapsed] = useState(false)
   const [avatarMap, setAvatarMap] = useState<Record<string, string>>({})
-  const [viewMode, setViewMode] = usePersistedState(PERSIST.TRACKING_VIEW, 'column' as 'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline' | 'dev-time' | 'feature-groups', {
-    validate: ['column', 'assignee', 'swimlane', 'sidebar', 'heatmap', 'delay-bars', 'alert-first', 'split-pane', 'focus', 'qa-pipeline', 'dev-time', 'feature-groups'],
+  const [viewMode, setViewMode] = usePersistedState(PERSIST.TRACKING_VIEW, 'column' as 'column' | 'assignee' | 'swimlane' | 'sidebar' | 'heatmap' | 'delay-bars' | 'alert-first' | 'split-pane' | 'focus' | 'qa-pipeline' | 'dev-time' | 'feature-groups' | 'velocity' | 'burndown', {
+    validate: ['column', 'assignee', 'swimlane', 'sidebar', 'heatmap', 'delay-bars', 'alert-first', 'split-pane', 'focus', 'qa-pipeline', 'dev-time', 'feature-groups', 'velocity', 'burndown'],
   })
   const [devTimeVariant, setDevTimeVariant] = useState<DevTimeVariant>('a')
   const [devTimeTimelines, setDevTimeTimelines] = useState<IssueTimeline[]>([])
@@ -2677,6 +2678,8 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
               { id: 'qa-pipeline', label: 'QA Pipeline', icon: <ShieldCheck size={11} /> },
               { id: 'dev-time',       label: 'Dev Time',       icon: <Clock size={11} /> },
               { id: 'feature-groups', label: 'Feature Groups', icon: <Network size={11} /> },
+              { id: 'velocity',       label: 'Velocity',       icon: <TrendingUp size={11} /> },
+              { id: 'burndown',       label: 'Burndown',       icon: <Flame size={11} /> },
             ] as const
             const current = VIEW_MODES.find(m => m.id === viewMode) || VIEW_MODES[0]
             return (
@@ -4258,6 +4261,31 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
                 .finally(() => setFeatureGroupsLoading(false))
             }}
           />
+        </div>
+      )}
+
+      {/* ── Velocity view ── */}
+      {viewMode === 'velocity' && (
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 20px' }}>
+          <VelocityTab />
+        </div>
+      )}
+
+      {/* ── Burndown view ── */}
+      {viewMode === 'burndown' && sprintId && (
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 20px' }}>
+          <BurndownTab
+            sprints={[{ id: sprintId, name: 'Current sprint', start: sprintStartMs ?? 0, finish: sprintFinishMs ?? 0, isCompleted: false }]}
+            activeSprint={{ id: sprintId, name: 'Current sprint', start: sprintStartMs ?? 0, finish: sprintFinishMs ?? 0, isCompleted: false }}
+          />
+        </div>
+      )}
+      {viewMode === 'burndown' && !sprintId && (
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 20px' }}>
+          <div className="pmf-empty" style={{ padding: '4rem 1rem' }}>
+            <Flame size={32} style={{ opacity: 0.3 }} />
+            <p>Select a sprint to view the burndown chart.</p>
+          </div>
         </div>
       )}
 

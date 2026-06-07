@@ -1307,6 +1307,52 @@ class ApiService {
     return this.request<void>('/reports/pins', { method: 'POST', body: JSON.stringify({ issue_id: issueID }) })
   }
 
+  // PM Features
+  async getSprintVelocity(limit = 8) {
+    return this.request<SprintVelocityPoint[]>(`/reports/sprint-velocity?limit=${limit}`)
+  }
+
+  async getSprintBurndown(params: { sprint_id: string; sprint_name?: string; sprint_start_ms?: number; sprint_finish_ms?: number }) {
+    const qs = new URLSearchParams({ sprint_id: params.sprint_id })
+    if (params.sprint_name) qs.set('sprint_name', params.sprint_name)
+    if (params.sprint_start_ms) qs.set('sprint_start_ms', String(params.sprint_start_ms))
+    if (params.sprint_finish_ms) qs.set('sprint_finish_ms', String(params.sprint_finish_ms))
+    return this.request<{ points: BurndownPoint[]; sprint_name: string }>(`/reports/sprint-burndown?${qs}`)
+  }
+
+  async getSprintCapacity(sprintId?: string) {
+    const qs = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : ''
+    return this.request<{ capacity: CapacityRow[]; load: Record<string, number> | null }>(`/reports/capacity${qs}`)
+  }
+
+  async saveSprintCapacity(body: { sprint_id: string; sprint_name: string; assignee_name: string; available_days: number; notes?: string }) {
+    return this.request<{ id: string }>('/reports/capacity', { method: 'POST', body: JSON.stringify(body) })
+  }
+
+  async deleteSprintCapacity(id: string) {
+    return this.request<void>(`/reports/capacity/${id}`, { method: 'DELETE' })
+  }
+
+  async getReleases() {
+    return this.request<ReleaseInfo[]>('/reports/releases')
+  }
+
+  async getIssueDependencies(issueId: string) {
+    return this.request<DependencyLink[]>(`/reports/dependencies?issue_id=${encodeURIComponent(issueId)}`)
+  }
+
+  async getBlockerSLA() {
+    return this.request<{ items: BlockerSLAItem[]; sla_hours: number }>('/reports/blocker-sla')
+  }
+
+  async getEscalationConfig() {
+    return this.request<EscalationConfig>('/reports/blocker-sla/config')
+  }
+
+  async saveEscalationConfig(body: { sla_hours: number; notify_slack_channel: string; auto_notify: boolean }) {
+    return this.request<void>('/reports/blocker-sla/config', { method: 'POST', body: JSON.stringify(body) })
+  }
+
   async unpinIssue(issueID: string) {
     return this.request<void>(`/reports/pins/${encodeURIComponent(issueID)}`, { method: 'DELETE' })
   }
@@ -2380,6 +2426,78 @@ export interface WorkflowConfig {
   column_hierarchy: ColumnState[]
   hotfix_rules: HotfixRules
   report_config: ReportConfig
+}
+
+// PM Feature interfaces
+export interface SprintVelocityPoint {
+  sprint_id: string
+  sprint_name: string
+  start: number
+  finish: number
+  completed: number
+  total: number
+  is_completed: boolean
+  completion_rate: number
+}
+
+export interface BurndownPoint {
+  date: string
+  total: number
+  completed: number
+  remaining: number
+  ideal_remain: number
+}
+
+export interface CapacityRow {
+  id: string
+  sprint_id: string
+  sprint_name: string
+  assignee_name: string
+  available_days: number
+  notes: string
+}
+
+export interface ReleaseIssue {
+  id: string
+  summary: string
+  state: string
+  assignee: string
+  priority: string
+  done: boolean
+}
+
+export interface ReleaseInfo {
+  version: string
+  issues: ReleaseIssue[]
+  total: number
+  completed: number
+  progress: number
+}
+
+export interface DependencyLink {
+  id_readable: string
+  summary: string
+  state: string
+  resolved: boolean
+  link_type: string
+  direction: string
+}
+
+export interface BlockerSLAItem {
+  issue_id: string
+  summary: string
+  assignee: string
+  blocked_since: string
+  hours_blocked: number
+  sla_hours: number
+  breached: boolean
+  reason: string
+}
+
+export interface EscalationConfig {
+  sla_hours: number
+  notify_slack_channel: string
+  auto_notify: boolean
 }
 
 // Export singleton instance
