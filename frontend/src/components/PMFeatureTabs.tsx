@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, ReferenceLine,
@@ -171,6 +171,38 @@ export function BurndownTab({ sprints, activeSprint }: BurndownTabProps) {
     [sprint?.id]
   )
 
+  // Build a merged dataset: ideal line spans full sprint, actual data only on snapshot days.
+  // This makes the chart readable even with 1 snapshot — you always see the ideal trajectory.
+  const chartData = useMemo(() => {
+    if (!sprint) return []
+    const startMs = sprint.start
+    const endMs = sprint.finish
+    const totalDays = Math.round((endMs - startMs) / 86400000) + 1
+    const snapshotMap = new Map((data?.points ?? []).map(p => [p.date, p]))
+    const totalAtStart = data?.points?.[0]?.total ?? 0
+    const todayStr = new Date().toISOString().split('T')[0]
+
+    const result = []
+    for (let i = 0; i < totalDays; i++) {
+      const dateStr = new Date(startMs + i * 86400000).toISOString().split('T')[0]
+      const ideal = totalDays > 1 && totalAtStart > 0
+        ? Math.round(totalAtStart * (1 - i / (totalDays - 1)) * 10) / 10
+        : 0
+      const snap = snapshotMap.get(dateStr)
+      result.push({
+        date: dateStr,
+        ideal_remain: ideal,
+        // undefined → recharts skips the point, so lines only connect on actual data days
+        remaining: snap && dateStr <= todayStr ? snap.remaining : undefined,
+        completed: snap && dateStr <= todayStr ? snap.completed : undefined,
+      })
+    }
+    return result
+  }, [sprint, data])
+
+  const doneCount  = data?.points?.at(-1)?.completed ?? 0
+  const totalCount = data?.points?.[0]?.total ?? 0
+
   return (
     <div className="pmf-tab">
       <div className="pmf-header">
@@ -184,28 +216,43 @@ export function BurndownTab({ sprints, activeSprint }: BurndownTabProps) {
       {!sprint && <EmptyState icon={Flame} text="No sprint selected. Use the sprint selector at the top." />}
       {loading && sprint && <Spinner />}
       {error && <div className="pmf-error">{error}</div>}
-      {!loading && !error && data && sprint && (
+      {!loading && !error && sprint && (
         <>
-          {(!data.points || data.points.length === 0)
-            ? <EmptyState icon={Flame} text="No snapshot data yet. The first snapshot is taken automatically. Check back tomorrow or re-open this tab to trigger one now." />
-            : (
-              <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={data.points} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="date" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                  <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, fontSize: 12 }}
-                    labelStyle={{ color: 'var(--text-primary)', fontWeight: 600 }}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 12, color: 'var(--text-muted)' }} />
-                  <Line type="monotone" dataKey="remaining" name="Remaining" stroke="#818cf8" strokeWidth={2} dot={{ r: 3 }} />
-                  <Line type="monotone" dataKey="ideal_remain" name="Ideal" stroke="rgba(255,255,255,0.3)" strokeWidth={1.5} strokeDasharray="5 5" dot={false} />
-                  <Line type="monotone" dataKey="completed" name="Completed" stroke="#34d399" strokeWidth={2} dot={{ r: 3 }} />
-                </LineChart>
-              </ResponsiveContainer>
-            )
-          }
+          {totalCount > 0 && (
+            <div className="pmf-kpi-row">
+              <div className="pmf-kpi">
+                <span className="pmf-kpi-value">{totalCount}</span>
+                <span className="pmf-kpi-label">Sprint total</span>
+              </div>
+              <div className="pmf-kpi">
+                <span className="pmf-kpi-value">{doneCount}</span>
+                <span className="pmf-kpi-label">Completed so far</span>
+              </div>
+              <div className="pmf-kpi">
+                <span className="pmf-kpi-value">{totalCount - doneCount}</span>
+                <span className="pmf-kpi-label">Remaining</span>
+              </div>
+              <div className={`pmf-kpi ${doneCount / totalCount >= 0.5 ? '' : 'pmf-kpi-warn'}`}>
+                <span className="pmf-kpi-value">{totalCount > 0 ? Math.round(doneCount / totalCount * 100) : 0}%</span>
+                <span className="pmf-kpi-label">Completion</span>
+              </div>
+            </div>
+          )}
+          <ResponsiveContainer width="100%" height={320}>
+            <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+              <XAxis dataKey="date" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
+              <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: 'var(--text-primary)', fontWeight: 600 }}
+              />
+              <Legend wrapperStyle={{ fontSize: 12, color: 'var(--text-muted)' }} />
+              <Line type="monotone" dataKey="ideal_remain" name="Ideal" stroke="rgba(255,255,255,0.3)" strokeWidth={1.5} strokeDasharray="5 5" dot={false} connectNulls />
+              <Line type="monotone" dataKey="remaining" name="Remaining" stroke="#818cf8" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
+              <Line type="monotone" dataKey="completed" name="Completed" stroke="#34d399" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
+            </LineChart>
+          </ResponsiveContainer>
         </>
       )}
     </div>
