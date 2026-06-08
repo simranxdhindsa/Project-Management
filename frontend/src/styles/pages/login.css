@@ -46,7 +46,7 @@
   border-radius: var(--radius-xl);
   color: white;
   margin: 0 auto 1.5rem;
-  box-shadow: 0 0 48px rgba(99,102,241,0.55), var(--shadow-xl);
+  box-shadow: var(--shadow-glow-strong), var(--shadow-xl);
   position: relative;
   flex-shrink: 0;
 }

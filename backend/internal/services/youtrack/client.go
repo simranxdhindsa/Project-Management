@@ -929,7 +929,7 @@ func GetPriority(issue Issue) string {
 			}
 		}
 	}
-	return "Normal"
+	return ""
 }
 
 // TestConnection tests the connection to YouTrack

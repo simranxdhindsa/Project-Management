@@ -1919,7 +1919,7 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 	for _, issue := range sprintIssues {
 		currentState := youtrack.GetStatus(issue)
 		priority := youtrack.GetPriority(issue)
-		if wfCfg != nil {
+		if wfCfg != nil && priority != "" {
 			priority = mapYTPriorityFromConfig(priority, wfCfg.PriorityTags)
 		}
 		assignee := youtrack.GetAssignee(issue)

@@ -34,14 +34,13 @@
   margin-bottom: 1rem;
   border-bottom: 1px solid rgba(255,255,255,0.05);
   flex-shrink: 0;
-  overflow: hidden;
 }
 
 .logo-icon {
   width: 34px; height: 34px;
   background: var(--gradient-primary);
-  border-radius: var(--radius-md);
-  box-shadow: 0 0 20px rgba(99,102,241,0.5), var(--shadow-md);
+  border-radius: 50%;
+  box-shadow: var(--shadow-glow), var(--shadow-md);
   display: flex;
   align-items: center;
   justify-content: center;

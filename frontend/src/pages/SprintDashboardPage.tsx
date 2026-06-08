@@ -174,17 +174,18 @@ function getPriColorFromTags(priority: string, tags: PriorityTag[]): string | nu
 }
 
 function PriPill({ priority, tags }: { priority: string; tags?: PriorityTag[] }) {
+  if (!priority) return null
   const color = tags ? getPriColorFromTags(priority, tags) : null
   if (color) {
     return (
       <span className="db-pri-pill" style={{
         background: color + '26', color, border: `1px solid ${color}44`,
       }}>
-        {priority || '?'}
+        {priority}
       </span>
     )
   }
-  return <span className={`db-pri-pill ${getPriClass(priority)}`}>{priority || '?'}</span>
+  return <span className={`db-pri-pill ${getPriClass(priority)}`}>{priority}</span>
 }
 
 function VerifBadges({ dev, stg, prd }: { dev?: string; stg?: string; prd?: string }) {
