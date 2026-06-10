@@ -57,9 +57,9 @@ import { IntegrationsPage } from './IntegrationsPage'
 import { SettingsPage } from './SettingsPage'
 import { BoardPage } from './BoardPage'
 import { DailyOpsPage } from './DailyOpsTab'
-import { DailyAnalysisViewPage } from './DailyAnalysisViewPage'
 import { BotConfigPage } from './BotConfigPage'
 import { AIAnalysisPage } from './AIAnalysisPage'
+import { DevActivityPage } from './DevActivityPage'
 import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
 import { SlackIntelligencePage } from './SlackIntelligencePage'
@@ -71,10 +71,10 @@ import { applyUserTheme } from '../utils/themeUtils'
 import { RightPanel } from '../components/notifications/RightPanel'
 import type { LocalNotification } from '../components/notifications/RightPanel'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-ops' | 'daily-analysis' | 'calendar' | 'reports' | 'ai-analysis' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'daily-analysis', 'pm-reports', 'daytrack', 'integrations']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -146,10 +146,10 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'board': 'board',
   'list': 'list',
   'daily-ops': 'daily-ops',
-  'daily-analysis': 'daily-analysis',
   'calendar': 'calendar',
   'reports': 'reports',
   'ai-analysis': 'ai-analysis',
+  'dev-activity': 'dev-activity',
   'pm-reports': 'pm-reports',
   'bots': 'bots',
   'team': 'team',
@@ -206,7 +206,7 @@ export default function Dashboard() {
     const path = location.pathname
     if (path === '/' || path === '') {
       const last = localStorage.getItem(PERSIST.LAST_PAGE) as Page | null
-      const valid: Page[] = ['board', 'list', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'daily-analysis', 'integrations', 'settings', 'bots', 'theme']
+      const valid: Page[] = ['board', 'list', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'dev-activity', 'integrations', 'settings', 'bots', 'theme']
       if (last && valid.includes(last)) {
         navigate(`/${last}`, { replace: true })
       }
@@ -270,7 +270,7 @@ export default function Dashboard() {
       'board':          'Board View',
       'list':           'List View',
       'daily-ops':      'DailyOps',
-      'daily-analysis': 'Daily Analysis',
+      'dev-activity':   'Dev Activity',
       'calendar':       'Calendar',
       'reports':        'Reports',
       'ai-analysis':    'AI Analysis',
@@ -650,11 +650,11 @@ export default function Dashboard() {
               <span>AI Analysis</span>
             </button>
             <button
-              className={`sidebar-nav-item ${currentPage === 'daily-analysis' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('daily-analysis')}
+              className={`sidebar-nav-item ${currentPage === 'dev-activity' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('dev-activity')}
             >
-              <CheckCircle size={20} />
-              <span>Daily Status</span>
+              <Activity size={20} />
+              <span>Dev Activity</span>
             </button>
             <button
               className={`sidebar-nav-item ${currentPage === 'pm-reports' ? 'active' : ''}`}
@@ -758,7 +758,7 @@ export default function Dashboard() {
             {currentPage === 'daily-ops' && 'DailyOps'}
             {currentPage === 'calendar' && 'Calendar'}
             {currentPage === 'ai-analysis' && 'AI Task Analysis'}
-            {currentPage === 'daily-analysis' && 'Daily Status'}
+            {currentPage === 'dev-activity' && 'Dev Activity'}
             {currentPage === 'pm-reports' && 'Reports'}
             {currentPage === 'team' && 'Team Management'}
             {currentPage === 'bots' && 'Bot Configuration'}
@@ -877,12 +877,12 @@ export default function Dashboard() {
         )}
         {mountedTabs.has('ai-analysis') && (
           <div className={currentPage !== 'ai-analysis' ? 'dash-tab-hidden' : undefined}>
-            <AIAnalysisPage onNavigateToDailyAnalysis={() => setCurrentPage('daily-analysis')} />
+            <AIAnalysisPage onNavigateToDailyAnalysis={() => setCurrentPage('dev-activity')} />
           </div>
         )}
-        {mountedTabs.has('daily-analysis') && (
-          <div className={currentPage !== 'daily-analysis' ? 'dash-tab-hidden' : undefined}>
-            <DailyAnalysisViewPage />
+        {mountedTabs.has('dev-activity') && (
+          <div className={currentPage !== 'dev-activity' ? 'dash-tab-hidden' : undefined}>
+            <DevActivityPage />
           </div>
         )}
         {mountedTabs.has('integrations') && (

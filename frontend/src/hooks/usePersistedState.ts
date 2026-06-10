@@ -27,6 +27,10 @@ export const PERSIST = {
   THEME:            'theme',
   /** Per-user theme cache (JSON) */
   THEME_CACHE:      'user-theme-cache',
+  /** Dev Activity page — which of the 4 views was last active */
+  DEV_ACTIVITY_VIEW: 'dev_activity_view',
+  /** Dev Activity page — date range filter */
+  DEV_ACTIVITY_DATE: 'dev_activity_date',
 } as const
 
 export type PersistKey = typeof PERSIST[keyof typeof PERSIST]
