@@ -8,7 +8,12 @@ import type { IssueTimeline, IssueStint, YouTrackSprint, TimeTrackingRow } from 
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import { CustomDropdown } from '../components/CustomDropdown'
 import { CalendarPicker } from '../components/CalendarPicker'
-import '../styles/pages/dev-activity.css'
+import '../styles/pages/dev-activity-base.css'
+import '../styles/pages/dev-activity-feed.css'
+import '../styles/pages/dev-activity-cards.css'
+import '../styles/pages/dev-activity-log.css'
+import '../styles/pages/dev-activity-heatmap.css'
+import '../styles/pages/dev-activity-report.css'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 

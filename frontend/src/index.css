@@ -47,7 +47,12 @@
 @import "./styles/pages/dev-time.css";
 @import "./styles/pages/feature-groups.css";
 @import "./styles/pages/pm-features.css";
-@import "./styles/pages/dev-activity.css";
+@import "./styles/pages/dev-activity-base.css";
+@import "./styles/pages/dev-activity-feed.css";
+@import "./styles/pages/dev-activity-cards.css";
+@import "./styles/pages/dev-activity-log.css";
+@import "./styles/pages/dev-activity-heatmap.css";
+@import "./styles/pages/dev-activity-report.css";
 
 @import "./styles/pages/theme-customizer.css";
 @import "./styles/pages/theme-settings.css";

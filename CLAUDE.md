@@ -262,6 +262,20 @@ CSS files per feature:
 - `styles/pages/pm-features.css` — Velocity and Burndown chart tabs (`.pmf-*` classes)
 - `index.css` — global shared classes
 
+**CSS file splitting rule — one file per subtab:** When a page has multiple subtabs/views, split its CSS into one file per subtab plus a shared base file. Do NOT put all subtab styles in a single large file.
+
+Dev Activity page follows this pattern exactly:
+- `styles/pages/dev-activity-base.css` — shared: shell, tabs, filter bar, KPI chips, state badges, avatar, empty state
+- `styles/pages/dev-activity-feed.css` — Activity Feed subtab (`.da-feed-*`, `.da-dev-section`, `.da-ticket-row`, `.da-history-*`, `.da-density-*`)
+- `styles/pages/dev-activity-cards.css` — Developer Cards subtab (`.da-cards-scroll`, `.da-dev-card`, `.da-card-*`)
+- `styles/pages/dev-activity-log.css` — Transition Log subtab (`.da-log-*`, `.da-export-btn`, `.da-group-toggle-*`)
+- `styles/pages/dev-activity-heatmap.css` — Lifecycle Heatmap subtab (`.da-heatmap-*`, `.da-bottleneck-*`)
+- `styles/pages/dev-activity-report.css` — Dev Report subtab (`.dr-*`, skeuomorphic design)
+
+All 6 are imported in `DevActivityPage.tsx` and in `index.css` (replacing the old single `dev-activity.css`).
+
+When building a new multi-subtab page: create `<page>-base.css` + one `<page>-<subtab>.css` per view. Import all in the page component and in `index.css`.
+
 ---
 
 ## Features Overview
