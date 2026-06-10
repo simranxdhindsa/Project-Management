@@ -96,6 +96,10 @@ Users can switch between **YouTrack** and **Asana**. Both use separate route nam
 
 **RULE — No hardcoding of domain data.** Every feature must fetch states, priorities, assignees, sprint names, and any other project data live from the active PM source. Never hardcode these values in backend or frontend code.
 
+**RULE — YouTrack priority must be the raw field value.** `youtrack.GetPriority(issue)` returns the literal YouTrack Priority custom field value (e.g. "Normal", "Critical"). Do **not** pass it through `mapYTPriorityFromConfig` before storing in `SprintBoardIssue.Priority` — that mapping converts real values to internal labels (e.g. "Normal" → "P2") and destroys the original. The frontend `getPriColorFromTags` already checks `yt_mappings` for coloring, so the raw value can be styled correctly without label conversion.
+
+**RULE — Sprint board issues must be fetched via YQL, not the agile endpoint.** `/api/agiles/{board}/sprints/{sprint}/issues` only returns board-configured fields — custom fields like Priority come back empty. Always use `ytClient.GetIssuesByStateForSprint(ctx, sprintName, nil)` (which calls `/api/issues?query=sprint:{name}`) as the primary fetch in `GetSprintBoardStatus`. The agile endpoint is only a fallback when sprint name is unavailable.
+
 ## Environment Variables
 
 **Backend** (`backend/.env`):
@@ -255,6 +259,7 @@ CSS files per feature:
 - `styles/pages/pm-reports.css` — PMReports, Tracking, QA Pipeline
 - `styles/pages/daily-ops.css` — Daily Ops tab
 - `styles/pages/integrations.css` — Integrations page
+- `styles/pages/pm-features.css` — Velocity and Burndown chart tabs (`.pmf-*` classes)
 - `index.css` — global shared classes
 
 ---
@@ -262,7 +267,9 @@ CSS files per feature:
 ## Features Overview
 
 ### Tracking Tab (`PMReportsPage.tsx` — `TrackingTab`)
-View modes: By Column, By Assignee, Swimlane, Sidebar, Heatmap, Delay Bars, Alert First, Split Pane, Focus Mode, QA Pipeline.
+View modes (12 total): By Column, By Assignee, Swimlane, Sidebar, Heatmap, Delay Bars, Alert First, Split Pane, Focus Mode, QA Pipeline, **Velocity**, **Burndown**.
+
+The `viewMode` state uses `usePersistedState(PERSIST.TRACKING_VIEW, ...)` — adding a new view requires extending the `validate` array there.
 
 ### Daily Ops Tab
 Single Developer Load view — per-developer cards with sprint progress, stat chips (done/active/blocked/bounced/overdue/hours), active and blocked issue lists.
@@ -274,6 +281,17 @@ AI chat over YouTrack sprint data. Uses a two-step LLM flow: (1) translate user 
 
 ### Board & List Views
 Kanban board (`BoardPage.tsx`) and flat list (`ListViewPage.tsx`) — both driven by the active PM source.
+
+### Sprint Dashboard (`SprintDashboardPage.tsx`)
+5 design modes: Velocity, Bento Grid, Ops Command, Sprint Velocity, Burndown. The `DesignMode` type and `DESIGN_MODES` array live at the top of the file.
+
+### PM Charts (`frontend/src/components/PMFeatureTabs.tsx`)
+`VelocityTab` and `BurndownTab` are shared between the Tracking tab and the Sprint Dashboard. Both use the `useAsync<T>` hook defined in the same file.
+
+- `VelocityTab` accepts `hideControls?: boolean` — pass it when embedding in the dashboard to suppress the limit dropdown.
+- `BurndownTab` accepts `{ sprints, activeSprint }` — always uses the active sprint from the top bar, never its own sprint selector. The ideal burndown line is generated **client-side** from `sprint.start`/`sprint.finish` milliseconds so it spans the full sprint even with only one snapshot. Snapshots are stored in `pm_burndown_snapshots` and taken once per day by the background job or on first load.
+
+CSS for these charts: `styles/pages/pm-features.css` (import already in `index.css`).
 
 ### Other Tabs
 Calendar, Activity Feed, Reminders, Day Track, Integrations (column hierarchy + workflow config), Settings (access control + denylist), Admin, Reports, Bot Config, AI Analysis, Slack.
