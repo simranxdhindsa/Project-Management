@@ -1021,10 +1021,9 @@ interface CompletionRecord {
   completedAt: string
 }
 
-const DR_DONE_STATES = ['dev', 'stage', 'prod', 'mobile done', 'deployed', 'verified', 'done', 'closed']
+const DR_DONE_STATES = new Set(['dev', 'stage', 'prod', 'mobile done', 'deployed', 'verified', 'done', 'closed'])
 function drIsDone(state: string): boolean {
-  const lc = state.toLowerCase()
-  return DR_DONE_STATES.some(d => lc === d || lc.includes(d))
+  return DR_DONE_STATES.has(state.toLowerCase())
 }
 
 function DevReportView({ onOpenDetail, ytBaseUrl }: {
@@ -1450,7 +1449,7 @@ export function DevActivityPage({ initialView }: Props) {
           />
         )}
 
-        {loading && (
+        {loading && view !== 'report' && (
           <div className="da-loading">
             <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
             Loading activity data…
