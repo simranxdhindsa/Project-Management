@@ -1134,27 +1134,73 @@ func (h *ReportHandler) ImportHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// First pass: build assignee map per issue from Assignee activity items.
-	// When field.presentation == "Assignee", added[0].name is the current assignee login.
-	// We walk chronologically so the last Assignee activity wins (most recent assignment).
+	// Walk chronologically — last Assignee activity wins (most recent assignment).
 	assigneeByIssue := make(map[string]string) // issueID -> assignee name
+	stateIssueIDs := make(map[string]bool)      // all issue IDs that have State activities
 	for _, act := range activities {
-		if !strings.EqualFold(act.Field.Presentation, "Assignee") {
-			continue
-		}
-		if len(act.Added) == 0 {
-			continue
-		}
 		issueID := act.Target.IDReadable
 		if issueID == "" {
 			issueID = act.Target.ID
 		}
-		assigneeByIssue[issueID] = act.Added[0].Name
+		if strings.EqualFold(act.Field.Presentation, "Assignee") {
+			if len(act.Added) > 0 {
+				assigneeByIssue[issueID] = act.Added[0].Name
+			}
+		}
+		if strings.EqualFold(act.Field.Presentation, "State") {
+			stateIssueIDs[issueID] = true
+		}
+	}
+
+	// Second pass: for issues that had state transitions but no assignee activity in the
+	// 2000-activity window, fetch their current assignee from YouTrack live.
+	// This prevents corrupting issue_state_log with moved_by as a fake assignee.
+	var missingIDs []string
+	for id := range stateIssueIDs {
+		if assigneeByIssue[id] == "" {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+	if len(missingIDs) > 0 {
+		// Batch fetch using YQL: limit to 100 IDs to keep query length reasonable
+		batchSize := 100
+		for start := 0; start < len(missingIDs) && start < batchSize; start += batchSize {
+			end := start + batchSize
+			if end > len(missingIDs) {
+				end = len(missingIDs)
+			}
+			parts := make([]string, 0, end-start)
+			for _, id := range missingIDs[start:end] {
+				parts = append(parts, "#"+id)
+			}
+			yql := strings.Join(parts, " ")
+			batchCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			issues, fetchErr := ytClient.SearchIssues(batchCtx, yql, batchSize)
+			cancel()
+			if fetchErr == nil {
+				for _, issue := range issues {
+					id := issue.IDReadable
+					if id == "" {
+						id = issue.ID
+					}
+					if u := youtrack.GetAssignee(issue); u != nil {
+						name := u.FullName
+						if name == "" {
+							name = u.Login
+						}
+						if name != "" {
+							assigneeByIssue[id] = name
+						}
+					}
+				}
+			}
+		}
 	}
 
 	inserted := 0
 	skipped := 0
 
-	// Second pass: insert State transitions with accurate assignee data
+	// Third pass: insert State transitions with accurate assignee data
 	for _, act := range activities {
 		if !strings.EqualFold(act.Field.Presentation, "State") {
 			continue
@@ -1184,11 +1230,8 @@ func (h *ReportHandler) ImportHistory(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Use the most recent assignee for this issue from the Assignee activities
+		// Use the real assignee — never fall back to movedBy (different people, different roles)
 		assignee := assigneeByIssue[issueID]
-		if assignee == "" {
-			assignee = movedBy // fallback: whoever moved it
-		}
 
 		priority := extractPriority(issueSummary)
 		transitionedAt := time.Unix(act.Timestamp/1000, (act.Timestamp%1000)*int64(time.Millisecond))

@@ -1048,8 +1048,16 @@ function DevReportView({ onOpenDetail, ytBaseUrl }: {
     api.getIssueTimelines(now - 30 * 86400000, now)
       .then(res => {
         const tls = (res as any)?.data as IssueTimeline[] ?? []
-        const devs = [...new Set(tls.map(t => t.assignee).filter(Boolean))].sort()
-        setAllDevs(devs)
+        // Collect devs from done-stint movers (who actually moved tickets to done)
+        // and assignees. moved_by is the ground truth for "who did the work."
+        const devSet = new Set<string>()
+        for (const tl of tls) {
+          if (tl.assignee) devSet.add(tl.assignee)
+          for (const stint of tl.stints ?? []) {
+            if (stint.moved_by && drIsDone(stint.exited_to ?? '')) devSet.add(stint.moved_by)
+          }
+        }
+        setAllDevs([...devSet].sort())
       })
       .catch(() => {})
   }, [])
@@ -1070,15 +1078,17 @@ function DevReportView({ onOpenDetail, ytBaseUrl }: {
     try {
       const res = await api.getIssueTimelines(sinceMs, untilMs)
       const tls = (res as any)?.data as IssueTimeline[] ?? []
-      const filtered = tls.filter(t => selectedDevs.includes(t.assignee))
       const byDev: Record<string, CompletionRecord[]> = {}
-      for (const tl of filtered) {
-        const dev = tl.assignee || 'Unknown'
+      for (const tl of tls) {
         for (const stint of tl.stints ?? []) {
           if (!stint.exited_to || !drIsDone(stint.exited_to)) continue
           if (!stint.exited_at) continue
           const exitMs = new Date(stint.exited_at).getTime()
           if (exitMs < sinceMs || exitMs > untilMs) continue
+          // Credit the person who moved the ticket to done (moved_by), not just the assignee.
+          // This correctly handles cases where someone moves a ticket they don't own.
+          const dev = stint.moved_by || tl.assignee || 'Unknown'
+          if (!selectedDevs.includes(dev)) continue
           if (!byDev[dev]) byDev[dev] = []
           byDev[dev].push({
             issueId: tl.issue_id,
