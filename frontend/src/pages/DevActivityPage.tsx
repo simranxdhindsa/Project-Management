@@ -41,7 +41,7 @@ const VIEWS = [
 ] as const
 type ViewId = typeof VIEWS[number]['id']
 
-const DATE_OPTS = ['Today', 'Yesterday', 'Last Week', 'Custom'] as const
+const DATE_OPTS = ['Today', 'Last 2 Days', 'Last Week', 'Custom'] as const
 type DateRange = typeof DATE_OPTS[number]
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -53,10 +53,8 @@ function getDateRange(range: DateRange, customFrom?: string, customTo?: string):
   switch (range) {
     case 'Today':
       return { sinceMs: todayMs, untilMs: now }
-    case 'Yesterday': {
-      const yest = todayMs - 86400000
-      return { sinceMs: yest, untilMs: todayMs - 1 }
-    }
+    case 'Last 2 Days':
+      return { sinceMs: todayMs - 86400000, untilMs: now }
     case 'Last Week':
       return { sinceMs: todayMs - 7 * 86400000, untilMs: now }
     case 'Custom': {
@@ -1035,7 +1033,7 @@ function DevReportView({ onOpenDetail, ytBaseUrl }: {
 }) {
   const [allDevs, setAllDevs] = useState<string[]>([])
   const [selectedDevs, setSelectedDevs] = useState<string[]>([])
-  const [drDateRange, setDrDateRange] = useState<DateRange>('Yesterday')
+  const [drDateRange, setDrDateRange] = useState<DateRange>('Last 2 Days')
   const [drCustomFrom, setDrCustomFrom] = useState('')
   const [drCustomTo, setDrCustomTo] = useState('')
   const [generating, setGenerating] = useState(false)
