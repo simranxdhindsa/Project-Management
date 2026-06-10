@@ -1,108 +1,73 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
 ## Commands
 
 ### Backend (run from `backend/`)
 ```bash
-air                # Hot-reload dev server — rebuilds on every .go/.toml/.env change (PREFERRED)
-go run .           # One-shot start without hot reload
-go build .         # Compile binary only
-go test ./...      # Run all tests
+air          # Hot-reload dev server — PREFERRED. Rebuilds on every .go/.toml/.env save.
+go build .   # Compile only (to verify, never to restart)
+go test ./...
 ```
-
-**Hot reload:** `air` is installed and configured via `backend/.air.toml`. It watches all `.go`, `.toml`, and `.env` files and auto-rebuilds/restarts the server. **Do NOT manually restart the backend** when `air` is already running — file saves trigger rebuilds automatically. Only run `go build .` to verify compilation, never to restart.
+**Never manually restart the backend** when `air` is running — file saves trigger rebuilds automatically.
 
 ### Frontend (run from `frontend/`)
 ```bash
-npm run dev        # Start Vite dev server on :5173
-npm run build      # Production build
-npm run lint       # ESLint
+npm run dev    # Vite dev server on :5173
+npm run build
+npm run lint
 ```
-
-The backend loads `backend/.env` automatically on startup via `godotenv`.
 
 ## Workflow Rule
 
-After every task, output a short commit message (don't run git commit). Keep it plain — no prefixes required, just describe what changed clearly in one line.
+After every task, output a short commit message (don't run git commit). Plain one-liner, no prefixes.
 
-## Architecture Overview
+**Documentation rule:** When implementing a significant new feature or fixing something with non-obvious context, ask whether it should be noted in CLAUDE.md (if it's a pattern/rule) or in the relevant `docs/features/*.md` file (if it's feature-specific detail). Don't silently skip it and don't add it without asking.
 
-Velocity is a React + Go project management tool. Frontend (port 5173) talks to a Go REST API (port 8080) at `http://localhost:8080/api`. All protected routes require `Authorization: Bearer <JWT>`.
+## Architecture
 
-### Backend Structure
+Velocity is a React + Go project management tool. Frontend (port 5173) → Go REST API (port 8080) at `/api`. All protected routes require `Authorization: Bearer <JWT>`.
 
+### Backend
 ```
 backend/
-  main.go                         # Route registration (200+ routes), server init, background jobs
+  main.go               # Route registration (200+ routes), server init, background jobs
   internal/
-    auth/                         # JWT generation/validation, Google OAuth
-    middleware/auth.go            # JWT extraction → DB user lookup → context injection
-    handlers/                     # One file per feature domain (tasks, asana, youtrack, slack, ai, ...)
-    database/                     # Repository pattern: one *_repo.go per domain
-    models/                       # Shared structs
-    services/asana/ youtrack/     # Business logic for external API integrations
-  migrations/                     # SQL files run automatically on startup via migrations.go
+    auth/               # JWT + Google OAuth
+    middleware/auth.go  # JWT → DB user → context
+    handlers/           # One file per domain
+    database/           # Repository pattern: one *_repo.go per domain
+    models/             # Shared structs
+    services/asana/ youtrack/
+  migrations/           # Auto-run on startup via migrations.go (use CREATE TABLE IF NOT EXISTS)
 ```
 
-**Key pattern**: Handlers call repositories directly — no service layer for most features. Repositories use a global pgxpool (`database.GetPool()`).
-
-**Auto-migrations**: `internal/database/migrations.go` runs all DDL on startup. Add new tables there — use `CREATE TABLE IF NOT EXISTS`.
-
-**Background jobs** (started in `main.go`): mid-day/evening blocker detection, daily cleanup (deletes notifications + activity logs older than 30 days), reminder polling.
-
-**Real-time**: SSE hub in `handlers/sse_hub.go` broadcasts events to connected clients.
-
-**AI**: Groq, OpenAI, or Gemini — selected via `AI_PROVIDER` env var. Bot prompts editable at runtime via `bot_configs` table.
-
-### Frontend Structure
-
+### Frontend
 ```
 frontend/src/
-  App.tsx                         # Router + auth guard
-  contexts/AuthContext.tsx        # Auth state, token storage, 12h refresh interval
-  services/api.ts                 # All API methods + TypeScript interfaces (single source of truth for types)
-  pages/Dashboard.tsx             # Main shell — renders all sub-pages via tab state
-  components/                     # Feature components (kanban, reports, integrations, etc.)
+  App.tsx               # Router + auth guard
+  contexts/AuthContext.tsx
+  services/api.ts       # All API methods + TS interfaces — single source of truth for types
+  pages/Dashboard.tsx   # Main shell — tab state drives all sub-pages
+  components/
 ```
 
-All API calls go through `api.ts`, which injects the JWT from localStorage automatically.
+→ Auth details: [`docs/features/auth.md`](docs/features/auth.md)
 
-### Authentication Flow
+## PM Data Source Rules — RULE #1
 
-1. Google Sign-In → `POST /api/auth/google` with credential (ID token)
-2. Backend validates with Google, checks denylist then whitelist, creates/fetches user in DB
-3. Returns JWT (24h default, 30d if `remember_me: true`)
-4. Middleware on every request: validates JWT → looks up user by **email** in DB → puts DB user in context
+**The active PM source controls everything.** Set in Integrations → Active PM Data Source; stored in `user_data_source` table and `localStorage` key `pm_active_source`. `pmDataService.ts` routes every call via `getActiveSource()`.
 
-The middleware resolves by email (not JWT user_id) to handle in-memory UUID mismatches. If the user doesn't exist in DB yet, middleware auto-creates them.
+**Before touching any PM feature, verify it reads the active source.**
 
-**Dev mode**: Any token starting with `dev-mode-token-` bypasses JWT validation and uses hardcoded admin (`simranjot@apyhub.com`, ID `08938fa6-27b4-446f-a9aa-b8fe5c7b97c4`). This ID must exist in the `users` table.
-
-**Access control**: `simranjot@apyhub.com` is always admin. Domain `@apyhub.com` grants `member` role. Configurable via `whitelist` table. Blocked emails in `denied_emails` table are rejected before the whitelist check — blocked users get a specific error message, non-whitelisted get "not authorised". The `AuthContext` catches 403 errors and sets `accessDenied` state; `App.tsx` renders `NoAccessPage` when that's true.
-
-### PM Data Sources (Dual-Tracker Design) — RULE #1
-
-**The active PM source controls EVERYTHING.** When the user sets their active source in Integrations → Active PM Data Source:
-
-- All data is fetched from that source only — boards, kanban, PM reports, tracking, daily ops, activity feed, calendar, etc.
-- All configuration comes from that source — workflow config, priority tags, column hierarchy, open/blocked states, done role.
-- Switching source immediately changes all of the above — no mixing of YouTrack data with Asana config.
-
-Active source is stored in `user_data_source` table (backend) and `localStorage` key `pm_active_source` (frontend). The service layer (`pmDataService.ts`) routes every call to the correct API via `getActiveSource()`. **Before building or modifying any PM feature, verify it reads the active source.**
-
-Users can switch between **YouTrack** and **Asana**. Both use separate route namespaces: `/api/youtrack/*` and `/api/asana/pm/*`.
-
-**RULE — No hardcoding of domain data.** Every feature must fetch states, priorities, assignees, sprint names, and any other project data live from the active PM source. Never hardcode these values in backend or frontend code.
-
-**RULE — YouTrack priority must be the raw field value.** `youtrack.GetPriority(issue)` returns the literal YouTrack Priority custom field value (e.g. "Normal", "Critical"). Do **not** pass it through `mapYTPriorityFromConfig` before storing in `SprintBoardIssue.Priority` — that mapping converts real values to internal labels (e.g. "Normal" → "P2") and destroys the original. The frontend `getPriColorFromTags` already checks `yt_mappings` for coloring, so the raw value can be styled correctly without label conversion.
-
-**RULE — Sprint board issues must be fetched via YQL, not the agile endpoint.** `/api/agiles/{board}/sprints/{sprint}/issues` only returns board-configured fields — custom fields like Priority come back empty. Always use `ytClient.GetIssuesByStateForSprint(ctx, sprintName, nil)` (which calls `/api/issues?query=sprint:{name}`) as the primary fetch in `GetSprintBoardStatus`. The agile endpoint is only a fallback when sprint name is unavailable.
+- **No hardcoding** — fetch states, priorities, assignees, sprint names live. Never hardcode them.
+- **YouTrack priority = raw field value** — `youtrack.GetPriority(issue)` returns the literal value (e.g. "Normal"). Do NOT pass through `mapYTPriorityFromConfig` before storing in `SprintBoardIssue.Priority`.
+- **Sprint board issues via YQL** — use `ytClient.GetIssuesByStateForSprint()` (`/api/issues?query=sprint:{name}`), not the agile endpoint (`/api/agiles/{board}/sprints/{sprint}/issues` returns empty custom fields).
 
 ## Environment Variables
 
-**Backend** (`backend/.env`):
+**`backend/.env`:**
 ```
 DATABASE_URL=postgresql://...
 JWT_SECRET=
@@ -116,53 +81,51 @@ GROQ_API_KEY=
 OPENAI_API_KEY=
 GEMINI_API_KEY=
 SLACK_BOT_TOKEN=
-ASANA_PAT=                # fallback if user hasn't connected Asana via UI
+ASANA_PAT=
 ASANA_PROJECT_ID=
 ```
 
-**Frontend** (`frontend/.env`):
+**`frontend/.env`:**
 ```
 VITE_API_URL=http://localhost:8080/api
-VITE_GOOGLE_CLIENT_ID=    # must match backend GOOGLE_CLIENT_ID
+VITE_GOOGLE_CLIENT_ID=
+VITE_ENVIRONMENT=production   # hides dev login in prod builds
 ```
 
 ## Database Notes
 
-- PostgreSQL via pgx/pgxpool. Connection pool: max 10, min 2, 1h max lifetime.
-- If `DATABASE_URL` is unset, app runs with in-memory maps (limited persistence).
-- The `go.mod` toolchain version must match an **actually released** Go version — `go 1.25.x` does not exist, use `go 1.24.0` or lower.
-- Windows: Windows Defender may corrupt module cache downloads. Add `C:\Users\<user>\go\pkg\mod` to Defender exclusions if you see `unexpected NUL in input` errors.
+- PostgreSQL via pgx/pgxpool. Pool: max 10, min 2, 1h lifetime.
+- `DATABASE_URL` unset → in-memory maps (no persistence).
+- `go.mod` toolchain must be a released version (`go 1.24.0`, not `go 1.25.x`).
 
 ---
 
 ## Frontend Development Rules
 
-### 1 — Always follow the Workflow Config
+### 1 — Workflow Config
 
-Every PM feature must derive its column classification, roles, and thresholds from the live workflow config — **never hardcode column or state names**.
+Every PM feature derives column roles from the live workflow config — never hardcode column/state names.
 
-- Load with `useWorkflowConfig()` hook (`frontend/src/hooks/useWorkflowConfig.ts`)
-- Column role lookup: build a `Map<string, string>` from `wfConfig.column_hierarchy` (state + all aliases, lowercased); fall back to keyword heuristics only when the map is empty
+- Load with `useWorkflowConfig()` (`frontend/src/hooks/useWorkflowConfig.ts`)
+- Build a `Map<string, string>` from `wfConfig.column_hierarchy` (lowercased); keyword fallback only when map is empty
 
 | Role | Meaning |
 |---|---|
 | `active` | In Progress |
-| `blocked` | Blocked — dev can't act |
+| `blocked` | Blocked |
 | `dev_done` | Done / DEV |
-| `verified` | Ready for Stage or Prod |
+| `verified` | Ready for Stage/Prod |
 | `deployed` | Deployed |
 | `closed` | Fully resolved |
 | `backlog` / `''` | To Do / Queued |
 
-- Done tickets (`dev_done`, `verified`, `deployed`, `closed`) must **never** show overdue
-- Blocked tickets must **never** count as overdue
-- Only `active` and `backlog` tickets count toward a developer's overdue metric
+Done (`dev_done`, `verified`, `deployed`, `closed`) and blocked tickets **never** count as overdue. Only `active` + `backlog` count.
 
-### 2 — Use the Established Dropdown and Calendar Components
+### 2 — Dropdown & Calendar Components
 
-Do not build new dropdown or calendar implementations.
+Never build new dropdown or calendar implementations.
 
-**`pm-custom-dropdown` pattern** — used in `PMReportsPage.tsx`, `BoardPage.tsx`, `DayTrackPage.tsx`, etc.
+**`pm-custom-dropdown` pattern** (portal-based, used everywhere):
 ```tsx
 <div className="pm-custom-dropdown" ref={myRef}>
   <button className="pm-custom-dropdown-trigger" onClick={() => setOpen(o => !o)}>
@@ -180,148 +143,74 @@ Do not build new dropdown or calendar implementations.
 </div>
 ```
 
-**`WcSelectDropdown` component** — defined in `IntegrationsPage.tsx`. Portal-based; the portal div **must** have `wc-sel-dropdown` in its className — without it, the global mousedown outside-click handler closes the menu before the option's `onClick` fires.
+**`WcSelectDropdown`** — for `{id, name}` option lists (defined in `IntegrationsPage.tsx`). Portal div **must** have `wc-sel-dropdown` in className or the outside-click handler fires before `onClick`.
 
-**`CalendarView` component** — `frontend/src/components/calendar/CalendarView.tsx`. Use this for any date-range or calendar display.
+**`CalendarView`** — `frontend/src/components/calendar/CalendarView.tsx`. Use for all date-range displays.
 
 ### 3 — Persisted UI State
 
-Any UI state that should survive a page refresh or new browser tab **must** use `usePersistedState` from `frontend/src/hooks/usePersistedState.ts`. Never call `localStorage.setItem/getItem` directly in a component.
+Use `usePersistedState` from `frontend/src/hooks/usePersistedState.ts`. Never call `localStorage` directly in a component.
 
-**Adding a new persisted value — two steps:**
+1. Add key to `PERSIST` constant in `usePersistedState.ts`
+2. Replace `useState` with `usePersistedState(PERSIST.MY_KEY, defaultValue, { validate: [...] })`
 
-1. Add the key to the `PERSIST` constant in `usePersistedState.ts`:
-   ```ts
-   export const PERSIST = {
-     LAST_PAGE:     'velocity_last_page',  // main tab
-     TRACKING_VIEW: 'pm_tracking_view',    // PM Reports 10-view selector
-     SPRINT_ID:     'pm_active_sprint_id',
-     ...
-     MY_NEW_KEY:    'my_feature_key',      // ← add here
-   }
-   ```
+Tabs stay mounted via `.dash-tab-hidden` CSS (session keep-alive). `usePersistedState` handles cross-session persistence.
 
-2. Replace `useState` with `usePersistedState`:
-   ```ts
-   // Before
-   const [mode, setMode] = useState<Mode>('default')
+### 4 — Theming
 
-   // After
-   const [mode, setMode] = usePersistedState(PERSIST.MY_NEW_KEY, 'default', {
-     validate: ['default', 'other'],  // optional — rejects unknown stored values
-   })
-   ```
+Every component must work in both dark (default) and light mode. Use CSS variables or `[data-theme="light"]` overrides — never hardcoded colours that only work in one theme.
 
-**Currently persisted:**
-| Key | What it stores | Used in |
-|-----|---------------|---------|
-| `velocity_last_page` | Last main Dashboard tab visited | `Dashboard.tsx` |
-| `pm_tracking_view` | Last of 10 tracking views selected | `PMReportsPage.tsx` |
-| `pm_active_sprint_id` | Active sprint ID | `PMReportsPage`, `DailyOpsTab` |
-| `pm_active_sprint_name` | Active sprint name | same |
-| `theme` | Dark/light mode | `Dashboard.tsx` |
-
-**Tab keep-alive (related):** Tabs are kept mounted via `.dash-tab-hidden` CSS in `Dashboard.tsx`. This preserves local component state within a session. `usePersistedState` handles cross-session persistence. Together they ensure no stale UI on tab switch or refresh.
-
-### 4 — Light Mode and Dark Mode
-
-**Every frontend component must be fully theme-aware.** All colors, backgrounds, borders, shadows, and text MUST use CSS variables or `[data-theme="light"]` overrides — never hardcoded hex/rgba that only works in one theme. Verify both themes before marking any UI task complete.
-
-**Pattern:**
 ```css
-/* Dark mode (default) */
-.my-class {
-  background: rgba(255,255,255,0.06);
-  color: rgba(255,255,255,0.8);
-  border: 1px solid rgba(255,255,255,0.1);
-}
-
-[data-theme="light"] .my-class {
-  background: rgba(241,245,249,0.9);
-  color: #1e293b;
-  border: 1px solid rgba(99,102,241,0.15);
-}
+.my-class { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.8); }
+[data-theme="light"] .my-class { background: rgba(241,245,249,0.9); color: #1e293b; }
 ```
 
-Light-mode values to use consistently:
-- Surface: `rgba(241,245,249,0.9)` / `#ffffff`
-- Primary text: `#1e293b` / `#0f172a`
-- Secondary text: `#475569` / `#64748b`
-- Muted: `#94a3b8`
-- Border: `rgba(99,102,241,0.12)–rgba(99,102,241,0.2)`
-- Accent: `#4f46e5` / `#6366f1`
-- Danger: `#dc2626` / `#ef4444`
-- Warning: `#d97706` · Success: `#16a34a`
+Light-mode palette: surface `#fff` / `rgba(241,245,249,0.9)`, text `#1e293b`, muted `#94a3b8`, border `rgba(99,102,241,0.12–0.2)`, accent `#4f46e5`, danger `#dc2626`, warning `#d97706`, success `#16a34a`.
 
-**No inline `style={{}}`** except truly dynamic values (e.g. `width: ${pct}%`). All colours and layout go in CSS files.
+No `style={{}}` for colours/layout — CSS files only.
 
-CSS files per feature:
+### 5 — CSS File Organisation
+
+One CSS file per subtab/view + one shared base file. Never put all subtab styles in a single large file.
+
+**CSS files by page:**
 - `styles/pages/pm-reports.css` — PMReports, Tracking, QA Pipeline
 - `styles/pages/daily-ops.css` — Daily Ops tab
 - `styles/pages/integrations.css` — Integrations page
-- `styles/pages/pm-features.css` — Velocity and Burndown chart tabs (`.pmf-*` classes)
+- `styles/pages/pm-features.css` — Velocity + Burndown charts (`.pmf-*`)
+- `styles/pages/dev-activity-base.css` + `dev-activity-{feed,cards,log,heatmap,report}.css` — Dev Activity 5 subtabs
 - `index.css` — global shared classes
 
-**CSS file splitting rule — one file per subtab:** When a page has multiple subtabs/views, split its CSS into one file per subtab plus a shared base file. Do NOT put all subtab styles in a single large file.
-
-Dev Activity page follows this pattern exactly:
-- `styles/pages/dev-activity-base.css` — shared: shell, tabs, filter bar, KPI chips, state badges, avatar, empty state
-- `styles/pages/dev-activity-feed.css` — Activity Feed subtab (`.da-feed-*`, `.da-dev-section`, `.da-ticket-row`, `.da-history-*`, `.da-density-*`)
-- `styles/pages/dev-activity-cards.css` — Developer Cards subtab (`.da-cards-scroll`, `.da-dev-card`, `.da-card-*`)
-- `styles/pages/dev-activity-log.css` — Transition Log subtab (`.da-log-*`, `.da-export-btn`, `.da-group-toggle-*`)
-- `styles/pages/dev-activity-heatmap.css` — Lifecycle Heatmap subtab (`.da-heatmap-*`, `.da-bottleneck-*`)
-- `styles/pages/dev-activity-report.css` — Dev Report subtab (`.dr-*`, skeuomorphic design)
-
-All 6 are imported in `DevActivityPage.tsx` and in `index.css` (replacing the old single `dev-activity.css`).
-
-When building a new multi-subtab page: create `<page>-base.css` + one `<page>-<subtab>.css` per view. Import all in the page component and in `index.css`.
-
----
-
-## Features Overview
-
-### Tracking Tab (`PMReportsPage.tsx` — `TrackingTab`)
-View modes (12 total): By Column, By Assignee, Swimlane, Sidebar, Heatmap, Delay Bars, Alert First, Split Pane, Focus Mode, QA Pipeline, **Velocity**, **Burndown**.
-
-The `viewMode` state uses `usePersistedState(PERSIST.TRACKING_VIEW, ...)` — adding a new view requires extending the `validate` array there.
-
-### Daily Ops Tab
-Single Developer Load view — per-developer cards with sprint progress, stat chips (done/active/blocked/bounced/overdue/hours), active and blocked issue lists.
-
-### PM Assistant
-AI chat over YouTrack sprint data. Uses a two-step LLM flow: (1) translate user query to YQL, (2) fetch issues, (3) respond with per-ticket context including bounce counts and overdue flags.
-
-**Full technical reference: [`backend/YQL.md`](backend/YQL.md)** — covers YQL syntax, subsystem exclusion logic, analytics overrides, bounce detection, bot prompt locations, model config, and known limitations. Read this file before modifying the PM Assistant.
-
-### Board & List Views
-Kanban board (`BoardPage.tsx`) and flat list (`ListViewPage.tsx`) — both driven by the active PM source.
-
-### Sprint Dashboard (`SprintDashboardPage.tsx`)
-5 design modes: Velocity, Bento Grid, Ops Command, Sprint Velocity, Burndown. The `DesignMode` type and `DESIGN_MODES` array live at the top of the file.
-
-### PM Charts (`frontend/src/components/PMFeatureTabs.tsx`)
-`VelocityTab` and `BurndownTab` are shared between the Tracking tab and the Sprint Dashboard. Both use the `useAsync<T>` hook defined in the same file.
-
-- `VelocityTab` accepts `hideControls?: boolean` — pass it when embedding in the dashboard to suppress the limit dropdown.
-- `BurndownTab` accepts `{ sprints, activeSprint }` — always uses the active sprint from the top bar, never its own sprint selector. The ideal burndown line is generated **client-side** from `sprint.start`/`sprint.finish` milliseconds so it spans the full sprint even with only one snapshot. Snapshots are stored in `pm_burndown_snapshots` and taken once per day by the background job or on first load.
-
-CSS for these charts: `styles/pages/pm-features.css` (import already in `index.css`).
-
-### Other Tabs
-Calendar, Activity Feed, Reminders, Day Track, Integrations (column hierarchy + workflow config), Settings (access control + denylist), Admin, Reports, Bot Config, AI Analysis, Slack.
+When adding a new multi-subtab page: `<page>-base.css` + one `<page>-<subtab>.css` per view. Import all in the page component and in `index.css`.
 
 ---
 
 ## MCP Tools: code-review-graph
 
-**IMPORTANT: ALWAYS use code-review-graph MCP tools BEFORE Grep/Glob/Read to explore the codebase.** The graph is faster, cheaper, and gives structural context (callers, dependents, test coverage) that file scanning cannot.
+**Always use code-review-graph tools BEFORE Grep/Glob/Read for codebase exploration.**
 
 | Tool | Use when |
-|------|----------|
-| `semantic_search_nodes` / `query_graph` | Exploring code instead of Grep |
-| `get_impact_radius` | Understanding blast radius of a change |
+|---|---|
+| `semantic_search_nodes` / `query_graph` | Exploring code |
+| `get_impact_radius` | Blast radius of a change |
 | `detect_changes` + `get_review_context` | Code review |
-| `get_affected_flows` | Finding impacted execution paths |
+| `get_affected_flows` | Impacted execution paths |
 | `get_architecture_overview` + `list_communities` | Architecture questions |
 
-The graph auto-updates on every file change via PostToolUse hook. Run `code-review-graph build` manually after adding a new feature or major refactor.
+Graph auto-updates on file change. Run `code-review-graph build` after a major refactor.
+
+---
+
+## Feature Reference Docs
+
+Detailed descriptions of each feature/tab live in `docs/features/`. Read the relevant file before working on that feature.
+
+| File | Covers |
+|---|---|
+| [`docs/features/auth.md`](docs/features/auth.md) | Login flow, dev mode, access control |
+| [`docs/features/pm-reports.md`](docs/features/pm-reports.md) | Tracking tab (12 views), Velocity chart, Burndown chart |
+| [`docs/features/daily-ops.md`](docs/features/daily-ops.md) | Developer Load view |
+| [`docs/features/pm-assistant.md`](docs/features/pm-assistant.md) | AI chat, YQL reference |
+| [`docs/features/board.md`](docs/features/board.md) | Kanban board, List view, Sprint Dashboard |
+| [`docs/features/dev-activity.md`](docs/features/dev-activity.md) | Dev Activity page — 5 subtabs, CSS map, skeuomorphic report design |
+| [`docs/features/other-tabs.md`](docs/features/other-tabs.md) | Calendar, Reminders, Day Track, Integrations, Settings, Admin, Reports, Slack, Bot Config, AI Analysis |
