@@ -711,7 +711,7 @@ func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no entries for "+date, http.StatusBadRequest)
 		return
 	}
-	ownerUpdate := daytracBuildSlackSections(entries, "")
+	ownerUpdate := daytracBuildSlackSections(entries, user.Name)
 	ownerUpdate.IsOwner = true
 	if len(ownerUpdate.Sections) == 0 {
 		http.Error(w, "no entries for "+date, http.StatusBadRequest)
