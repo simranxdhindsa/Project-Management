@@ -501,6 +501,9 @@ export function DayTrackPage() {
   const [pCat, setPCat] = useState(_draft?.pCat ?? '')
   const [pTime, setPTime] = useState(_draft?.pTime ?? '')
   const [pWhen, setPWhen] = useState<'today'|'tomorrow'>(_draft?.pWhen ?? 'today')
+  const [pWhenOpen, setPWhenOpen] = useState(false)
+  const [pWhenPos, setPWhenPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const pWhenRef = useRef<HTMLButtonElement>(null)
   const [pNotes, setPNotes] = useState(_draft?.pNotes ?? '')
 
   // Export modal
@@ -582,6 +585,7 @@ export function DayTrackPage() {
       if (!inTrigger) setOpenDrop(null)
       if (!calTriggerRef.current?.contains(t) && !calDropRef.current?.contains(t)) setCalOpen(false)
       if (!slackChanRef.current?.contains(t)) { setSlackChanOpen(false) }
+      if (!pWhenRef.current?.contains(t)) { setPWhenOpen(false) }
       if (!destChanRef.current?.contains(t)) { setDestChanOpen(false) }
       const inRuleCat = ruleCatRefs.current.some(r => r?.contains(t))
       if (!inRuleCat) setOpenRuleCatIdx(null)
@@ -662,10 +666,11 @@ export function DayTrackPage() {
   async function addManualEntry() {
     if (!mName.trim()) { toast('Enter a task name', 'warn'); return }
     const dur = calcDuration(mStart, mEnd)
+    const name = mName.trim()
     try {
-      await dayTrackApi.createEntry({
+      const created = await dayTrackApi.createEntry({
         entry_date: date,
-        name: mName.trim(),
+        name,
         category: mCat || categories[0] || 'General',
         start_time: mStart,
         end_time: mEnd,
@@ -676,9 +681,9 @@ export function DayTrackPage() {
       const nextStart = mEnd ? addMinute(mEnd) : ''
       setMName(''); setMStart(nextStart); setMEnd(''); setMNotes('')
       clearDraft()
-      await loadAll()
+      setEntries(prev => [...prev, created])
       dayTrackApi.getSuggestions().then(setSuggestions).catch(() => {})
-      toast(`"${mName.trim()}" logged`)
+      toast(`"${name}" logged`)
     } catch { toast('Failed to add entry', 'warn') }
   }
 
@@ -715,7 +720,7 @@ export function DayTrackPage() {
     const fmt = (d: Date) => to12h(`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`)
     const name = tName.trim()
     try {
-      await dayTrackApi.createEntry({
+      const created = await dayTrackApi.createEntry({
         entry_date: date,
         name,
         category: tCat || categories[0] || 'General',
@@ -725,7 +730,7 @@ export function DayTrackPage() {
         notes: tNotes,
         status: 'done',
       })
-      await loadAll()
+      setEntries(prev => [...prev, created])
       toast(`"${name}" logged — ${minsLabel(mins)}`)
     } catch { toast('Failed to log entry', 'warn') }
     setTimerRunning(false); setTimerPaused(false); setTimerStatus('idle')
@@ -736,10 +741,11 @@ export function DayTrackPage() {
 
   async function addPlanned() {
     if (!pName.trim()) { toast('Enter a task name', 'warn'); return }
+    const name = pName.trim()
     try {
-      await dayTrackApi.createPlanned({
+      const created = await dayTrackApi.createPlanned({
         entry_date: date,
-        name: pName.trim(),
+        name,
         category: pCat || categories[0] || 'General',
         scheduled_time: pTime,
         when_type: pWhen,
@@ -748,15 +754,15 @@ export function DayTrackPage() {
       })
       setPName(''); setPTime(''); setPNotes('')
       clearDraft()
-      await loadAll()
-      toast(`"${pName.trim()}" scheduled for ${pWhen}`)
+      setPlanned(prev => [...prev, created])
+      toast(`"${name}" scheduled for ${pWhen}`)
     } catch { toast('Failed to schedule task', 'warn') }
   }
 
   async function deleteEntry(id: string) {
     try {
       await dayTrackApi.deleteEntry(id)
-      await loadAll()
+      setEntries(prev => prev.filter(e => e.id !== id && e.parent_entry_id !== id))
       toast('Entry removed', 'info')
     } catch { toast('Failed to delete', 'warn') }
   }
@@ -764,7 +770,7 @@ export function DayTrackPage() {
   async function deletePlanned(id: string) {
     try {
       await dayTrackApi.deletePlanned(id)
-      await loadAll()
+      setPlanned(prev => prev.filter(p => p.id !== id))
     } catch { toast('Failed to delete', 'warn') }
   }
 
@@ -807,18 +813,21 @@ export function DayTrackPage() {
   async function startPlanned(item: DayTrackPlanned) {
     const now = nowHHMM()
     try {
-      await dayTrackApi.createEntry({
-        entry_date: date,
-        name: item.name,
-        category: item.category,
-        start_time: now,
-        end_time: '',
-        duration_mins: null,
-        notes: item.notes,
-        status: 'active',
-      })
-      await dayTrackApi.deletePlanned(item.id)
-      await loadAll()
+      const [created] = await Promise.all([
+        dayTrackApi.createEntry({
+          entry_date: date,
+          name: item.name,
+          category: item.category,
+          start_time: now,
+          end_time: '',
+          duration_mins: null,
+          notes: item.notes,
+          status: 'active',
+        }),
+        dayTrackApi.deletePlanned(item.id),
+      ])
+      setEntries(prev => [...prev, created])
+      setPlanned(prev => prev.filter(p => p.id !== item.id))
       toast(`Started "${item.name}"`)
     } catch { toast('Failed to start task', 'warn') }
   }
@@ -828,18 +837,21 @@ export function DayTrackPage() {
     const e = item.end_time || ''
     const dur = calcDuration(s, e)
     try {
-      await dayTrackApi.createEntry({
-        entry_date: date,
-        name: item.name,
-        category: item.category,
-        start_time: s,
-        end_time: e,
-        duration_mins: dur,
-        notes: item.notes,
-        status: (s && e) ? 'done' : 'active',
-      })
-      await dayTrackApi.deletePlanned(item.id)
-      await loadAll()
+      const [created] = await Promise.all([
+        dayTrackApi.createEntry({
+          entry_date: date,
+          name: item.name,
+          category: item.category,
+          start_time: s,
+          end_time: e,
+          duration_mins: dur,
+          notes: item.notes,
+          status: (s && e) ? 'done' : 'active',
+        }),
+        dayTrackApi.deletePlanned(item.id),
+      ])
+      setEntries(prev => [...prev, created])
+      setPlanned(prev => prev.filter(p => p.id !== item.id))
       toast(`"${item.name}" rolled back to today's log`)
     } catch { toast('Failed to roll back task', 'warn') }
   }
@@ -1758,10 +1770,38 @@ ${aiSummaryBlock}
               </div>
               <div className="form-group">
                 <label className="form-label">Schedule For</label>
-                <select className="form-input" value={pWhen} onChange={e => setPWhen(e.target.value as 'today'|'tomorrow')}>
-                  <option value="today">Today</option>
-                  <option value="tomorrow">Tomorrow (Carry Over)</option>
-                </select>
+                <div className="pm-custom-dropdown" style={{ width: '100%' }}>
+                  <button
+                    ref={pWhenRef}
+                    type="button"
+                    className="pm-custom-dropdown-trigger"
+                    style={{ width: '100%', justifyContent: 'space-between' }}
+                    onClick={() => {
+                      if (pWhenOpen) { setPWhenOpen(false); return }
+                      const r = pWhenRef.current?.getBoundingClientRect()
+                      if (r) setPWhenPos({ top: r.bottom + 4, left: r.left, width: r.width })
+                      setPWhenOpen(true)
+                    }}
+                  >
+                    <span>{pWhen === 'today' ? 'Today' : 'Tomorrow (Carry Over)'}</span>
+                    <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6"/></svg>
+                  </button>
+                </div>
+                {pWhenOpen && pWhenPos && createPortal(
+                  <div
+                    className="pm-custom-dropdown-menu"
+                    style={{ position: 'fixed', top: pWhenPos.top, left: pWhenPos.left, minWidth: pWhenPos.width, zIndex: 9999 }}
+                    onMouseDown={e => e.stopPropagation()}
+                  >
+                    {(['today', 'tomorrow'] as const).map(opt => (
+                      <button key={opt} className={`pm-dropdown-item${pWhen === opt ? ' active' : ''}`}
+                        onClick={() => { setPWhen(opt); setPWhenOpen(false) }}>
+                        {opt === 'today' ? 'Today' : 'Tomorrow (Carry Over)'}
+                      </button>
+                    ))}
+                  </div>,
+                  document.body
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Notes</label>

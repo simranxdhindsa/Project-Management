@@ -894,6 +894,7 @@ func (r *ReportRepository) GetIssueTimelines(ctx context.Context, pinnedIDs []st
 				LOWER(to_state) = 'in progress'
 				OR LOWER(to_state) IN ('dev','stage','prod','mobile done','deployed','verified','done','closed')
 			)%s
+			LIMIT 300
 		)
 		ORDER BY issue_id, transitioned_at ASC
 	`, sprintFilter), args...)

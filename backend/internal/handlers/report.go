@@ -885,6 +885,60 @@ func (h *ReportHandler) GetIssueTimelines(w http.ResponseWriter, r *http.Request
 		timelines = []database.IssueTimeline{}
 	}
 
+	// ── YQL enrichment: merge in issues updated in the window that local log missed ──
+	if since != nil || until != nil {
+		if ytClient, ytErr := h.getYouTrackClient(r.Context()); ytErr == nil {
+			fromStr := "*"
+			toStr := "*"
+			if since != nil {
+				fromStr = since.Format("2006-01-02")
+			}
+			if until != nil {
+				toStr = until.Format("2006-01-02")
+			}
+			yql := fmt.Sprintf("updated: %s .. %s", fromStr, toStr)
+
+			ytCtx, ytCancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer ytCancel()
+			if ytIssues, ytSearchErr := ytClient.SearchIssues(ytCtx, yql, 200); ytSearchErr == nil {
+				knownIDs := make(map[string]bool, len(timelines))
+				for _, t := range timelines {
+					knownIDs[t.IssueID] = true
+				}
+				for _, issue := range ytIssues {
+					id := issue.IDReadable
+					if id == "" {
+						id = issue.ID
+					}
+					if knownIDs[id] {
+						continue
+					}
+					assigneeName := ""
+					if u := youtrack.GetAssignee(issue); u != nil {
+						if u.FullName != "" {
+							assigneeName = u.FullName
+						} else {
+							assigneeName = u.Login
+						}
+					}
+					state := youtrack.GetStatus(issue)
+					priority := youtrack.GetPriority(issue)
+					updatedAt := time.UnixMilli(issue.Updated).UTC()
+					timelines = append(timelines, database.IssueTimeline{
+						IssueID:        id,
+						IssueSummary:   issue.Summary,
+						Assignee:       assigneeName,
+						Priority:       priority,
+						Stints:         []database.IssueStint{},
+						IsLive:         strings.EqualFold(state, "in progress"),
+						LastActivityAt: updatedAt,
+						FirstEnteredAt: updatedAt,
+					})
+				}
+			}
+		}
+	}
+
 	// Annotate each timeline with whether the user has dismissed its moved-back alert
 	type TimelineWithDismiss struct {
 		database.IssueTimeline
