@@ -1803,39 +1803,32 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Fetch sprint issues — try agile endpoint first, fall back to query API
+	// Fetch sprint issues — prefer YQL /api/issues endpoint (returns full custom fields including
+	// Priority). The agile board endpoint only returns board-configured fields, so custom fields
+	// like Priority come back empty even when requested.
 	var sprintIssues []youtrack.Issue
-	if sprintID != "" {
+	if sprintName != "" {
+		// YQL is the primary path: full custom fields, no board-config dependency
+		sprintIssues, err = ytClient.GetIssuesByStateForSprint(r.Context(), sprintName, nil)
+		if err != nil && sprintID != "" {
+			// YQL failed — fall back to agile endpoint
+			sprintIssues, err = ytClient.GetAllSprintIssues(r.Context(), sprintID)
+		}
+	} else if sprintID != "" {
+		// No sprint name provided — must use agile endpoint, then resolve name for any retry
 		sprintIssues, err = ytClient.GetAllSprintIssues(r.Context(), sprintID)
 		if err != nil {
-			agileErr := err
-			// Agile endpoint failed (404 on some YouTrack versions) — resolve sprint name and use query API
-			resolvedName := sprintName
-			if resolvedName == "" {
-				sprints, sErr := ytClient.GetSprints(r.Context())
-				if sErr != nil {
-					sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: fmt.Sprintf("Sprint agile fetch failed (%v); sprint list also failed: %v", agileErr, sErr)})
-					return
-				}
+			// Agile endpoint failed — resolve sprint name and retry with YQL
+			sprints, sErr := ytClient.GetSprints(r.Context())
+			if sErr == nil {
 				for _, s := range sprints {
 					if s.ID == sprintID {
-						resolvedName = s.Name
+						sprintIssues, err = ytClient.GetIssuesByStateForSprint(r.Context(), s.Name, nil)
 						break
 					}
 				}
-				if resolvedName == "" {
-					sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: fmt.Sprintf("Sprint %q not found in board sprints (agile error: %v)", sprintID, agileErr)})
-					return
-				}
-			}
-			sprintIssues, err = ytClient.GetIssuesByStateForSprint(r.Context(), resolvedName, nil)
-			if err != nil {
-				sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: fmt.Sprintf("Sprint query fallback also failed (sprint=%q): %v", resolvedName, err)})
-				return
 			}
 		}
-	} else if sprintName != "" {
-		sprintIssues, err = ytClient.GetIssuesByStateForSprint(r.Context(), sprintName, nil)
 	}
 	if err != nil {
 		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: "Failed to fetch sprint issues: " + err.Error()})
@@ -1919,9 +1912,6 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 	for _, issue := range sprintIssues {
 		currentState := youtrack.GetStatus(issue)
 		priority := youtrack.GetPriority(issue)
-		if wfCfg != nil && priority != "" {
-			priority = mapYTPriorityFromConfig(priority, wfCfg.PriorityTags)
-		}
 		assignee := youtrack.GetAssignee(issue)
 		assigneeName := ""
 		assigneeLogin := ""
