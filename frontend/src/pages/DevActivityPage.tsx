@@ -6,6 +6,7 @@ import api from '../services/api'
 import { getActiveSource } from '../services/pmDataService'
 import type { IssueTimeline, IssueStint, YouTrackSprint, TimeTrackingRow } from '../services/api'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
+import { CustomDropdown } from '../components/CustomDropdown'
 import '../styles/pages/dev-activity.css'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -16,7 +17,7 @@ const HEATMAP_STATES = ['To Do', 'In Progress', 'Blocked', 'DEV', 'Stage', 'Prod
 interface StateConfig { color: string; bg: string; border: string }
 const STATE_CFG: Record<string, StateConfig> = {
   'To Do':       { color: '#64748b', bg: 'rgba(100,116,139,0.15)', border: 'rgba(100,116,139,0.3)' },
-  'In Progress': { color: '#6366f1', bg: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.3)'  },
+  'In Progress': { color: 'var(--color-primary)', bg: 'rgba(var(--color-primary-rgb),0.15)',  border: 'rgba(var(--color-primary-rgb),0.3)'  },
   'Blocked':     { color: '#ef4444', bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.3)'   },
   'DEV':         { color: '#10b981', bg: 'rgba(16,185,129,0.15)',  border: 'rgba(16,185,129,0.3)'  },
   'Stage':       { color: '#06b6d4', bg: 'rgba(6,182,212,0.15)',   border: 'rgba(6,182,212,0.3)'   },
@@ -139,10 +140,10 @@ function isBackwardTransition(from: string, to: string): boolean {
 function heatColor(hours: number, maxH: number): { bg: string; border: string; text: string } | null {
   if (!hours) return null
   const r = hours / maxH
-  if (r < 0.25) return { bg: 'rgba(99,102,241,0.18)', border: 'rgba(99,102,241,0.3)',  text: '#818cf8' }
-  if (r < 0.5)  return { bg: 'rgba(99,102,241,0.32)', border: 'rgba(99,102,241,0.4)',  text: '#818cf8' }
-  if (r < 0.75) return { bg: 'rgba(99,102,241,0.52)', border: 'rgba(99,102,241,0.55)', text: '#a5b4fc' }
-  return              { bg: 'rgba(99,102,241,0.80)', border: 'rgba(99,102,241,0.9)',  text: '#e0e7ff' }
+  if (r < 0.25) return { bg: 'rgba(var(--color-primary-rgb),0.18)', border: 'rgba(var(--color-primary-rgb),0.3)',  text: 'var(--color-primary-light)' }
+  if (r < 0.5)  return { bg: 'rgba(var(--color-primary-rgb),0.32)', border: 'rgba(var(--color-primary-rgb),0.4)',  text: 'var(--color-primary-light)' }
+  if (r < 0.75) return { bg: 'rgba(var(--color-primary-rgb),0.52)', border: 'rgba(var(--color-primary-rgb),0.55)', text: 'var(--color-accent)' }
+  return              { bg: 'rgba(var(--color-primary-rgb),0.80)', border: 'rgba(var(--color-primary-rgb),0.9)',  text: '#e0e7ff' }
 }
 
 // ─── Atom components ─────────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ function DaTicketId({ id, href }: { id: string; href?: string }) {
 function DaPriDot({ priority }: { priority: string }) {
   const c = priority === 'Critical' ? '#ef4444'
           : priority === 'Major'    ? '#f59e0b'
-          : priority === 'Normal'   ? '#6366f1'
+          : priority === 'Normal'   ? 'var(--color-primary)'
           : '#94a3b8'
   return <span className="da-pri-dot" style={{ background: c, boxShadow: `0 0 4px ${c}` }} title={priority} />
 }
@@ -226,7 +227,7 @@ function DaSummaryBar({ timelines }: { timelines: IssueTimeline[] }) {
   const chips = [
     { label: 'Touched',  value: total,   color: 'rgba(255,255,255,0.85)', icon: '🎯' },
     { label: 'Done',     value: done,    color: '#4ade80',                icon: '✅' },
-    { label: 'Active',   value: active,  color: '#818cf8',                icon: '🔄' },
+    { label: 'Active',   value: active,  color: 'var(--color-primary-light)', icon: '🔄' },
     { label: 'Blocked',  value: blocked, color: '#f87171',                icon: '⛔' },
     { label: 'Bounced',  value: bounced, color: '#fb923c',                icon: '↩' },
   ]
@@ -266,10 +267,15 @@ function DaFilterBar({ dateRange, onDateRange, assignee, onAssignee, assignees, 
         ))}
       </div>
       <span className="da-filter-divider" />
-      <select className="da-filter-select" value={assignee} onChange={e => onAssignee(e.target.value)}>
-        <option value="">All Devs</option>
-        {assignees.map(a => <option key={a} value={a}>{a}</option>)}
-      </select>
+      <CustomDropdown
+        value={assignee}
+        onChange={onAssignee}
+        placeholder="All Devs"
+        options={[
+          { value: '', label: 'All Devs' },
+          ...assignees.map(a => ({ value: a, label: a })),
+        ]}
+      />
       {children}
     </div>
   )
@@ -348,7 +354,7 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter }: {
                 <div className="da-dev-stats">
                   {[
                     { v: stats.done,    c: '#4ade80', l: 'done'    },
-                    { v: stats.active,  c: '#818cf8', l: 'active'  },
+                    { v: stats.active,  c: 'var(--color-primary-light)', l: 'active'  },
                     { v: stats.blocked, c: '#f87171', l: 'blocked' },
                     { v: stats.bounced, c: '#fb923c', l: 'bounced' },
                     { v: `${stats.hoursWorked}h`, c: 'rgba(255,255,255,0.4)', l: 'worked' },
@@ -500,7 +506,7 @@ function DeveloperCardsView({ timelines, onOpenDetail, assigneeFilter }: {
               <div className="da-card-kpis">
                 {[
                   { label: 'Done',    value: stats.done,    color: '#4ade80', icon: '✅' },
-                  { label: 'Active',  value: stats.active,  color: '#818cf8', icon: '🔄' },
+                  { label: 'Active',  value: stats.active,  color: 'var(--color-primary-light)', icon: '🔄' },
                   { label: 'Blocked', value: stats.blocked, color: '#f87171', icon: '⛔' },
                   { label: 'Bounced', value: stats.bounced, color: '#fb923c', icon: '↩' },
                 ].map(c => (
@@ -814,12 +820,15 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter }: {
       <DaFilterBar dateRange={dateRange} onDateRange={setDateRange}
         assignee={assigneeFilter} onAssignee={() => {}} assignees={uniqueAssignees}>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>Sort</span>
-          <select className="da-filter-select" value={sort} onChange={e => setSort(e.target.value as typeof sort)}>
-            <option>Total Time</option>
-            <option>Bounce Count</option>
-            <option>Assignee</option>
-          </select>
+          <CustomDropdown
+            value={sort}
+            onChange={v => setSort(v as typeof sort)}
+            options={[
+              { value: 'Total Time',   label: 'Total Time' },
+              { value: 'Bounce Count', label: 'Bounce Count' },
+              { value: 'Assignee',     label: 'Assignee' },
+            ]}
+          />
         </div>
       </DaFilterBar>
 
@@ -842,7 +851,7 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter }: {
                   <span className="da-heatmap-dev-moved">{moved}/{devT.length}</span>
                 </div>
                 <div className="da-heatmap-dev-bar">
-                  <div className="da-heatmap-dev-bar-fill" style={{ width: `${pct}%`, background: isActive ? color : '#6366f1' }} />
+                  <div className="da-heatmap-dev-bar-fill" style={{ width: `${pct}%`, background: isActive ? color : 'var(--color-primary)' }} />
                 </div>
                 <div className="da-heatmap-dev-sub">{moved} of {devT.length} tickets touched</div>
               </div>
@@ -852,10 +861,10 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter }: {
           <div className="da-heatmap-legend">
             <div className="da-heatmap-legend-title">Time in state</div>
             {[
-              { label: 'Short (< 25%)', bg: 'rgba(99,102,241,0.18)', border: 'rgba(99,102,241,0.3)' },
-              { label: 'Medium',        bg: 'rgba(99,102,241,0.32)', border: 'rgba(99,102,241,0.4)' },
-              { label: 'Long',          bg: 'rgba(99,102,241,0.52)', border: 'rgba(99,102,241,0.55)' },
-              { label: 'Very long',     bg: 'rgba(99,102,241,0.80)', border: 'rgba(99,102,241,0.9)' },
+              { label: 'Short (< 25%)', bg: 'rgba(var(--color-primary-rgb),0.18)', border: 'rgba(var(--color-primary-rgb),0.3)' },
+              { label: 'Medium',        bg: 'rgba(var(--color-primary-rgb),0.32)', border: 'rgba(var(--color-primary-rgb),0.4)' },
+              { label: 'Long',          bg: 'rgba(var(--color-primary-rgb),0.52)', border: 'rgba(var(--color-primary-rgb),0.55)' },
+              { label: 'Very long',     bg: 'rgba(var(--color-primary-rgb),0.80)', border: 'rgba(var(--color-primary-rgb),0.9)' },
             ].map(l => (
               <div key={l.label} className="da-heatmap-legend-item">
                 <div className="da-heatmap-legend-swatch" style={{ background: l.bg, border: `1px solid ${l.border}` }} />

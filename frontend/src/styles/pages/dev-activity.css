@@ -32,7 +32,7 @@
 
 [data-theme="light"] .da-tab-bar {
   background: rgba(255,255,255,0.8);
-  border-color: rgba(99,102,241,0.15);
+  border-color: rgba(var(--color-primary-rgb),0.15);
 }
 
 .da-tab-btn {
@@ -58,9 +58,9 @@
 }
 
 .da-tab-btn.active {
-  color: #818cf8;
-  border-bottom-color: #6366f1;
-  background: rgba(99,102,241,0.07);
+  color: var(--color-primary-light);
+  border-bottom-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb),0.07);
 }
 
 [data-theme="light"] .da-tab-btn {
@@ -68,12 +68,12 @@
 }
 [data-theme="light"] .da-tab-btn:hover:not(.active) {
   color: #475569;
-  background: rgba(99,102,241,0.04);
+  background: rgba(var(--color-primary-rgb),0.04);
 }
 [data-theme="light"] .da-tab-btn.active {
-  color: #4f46e5;
-  border-bottom-color: #4f46e5;
-  background: rgba(99,102,241,0.07);
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb),0.07);
 }
 
 .da-tab-desc {
@@ -103,7 +103,7 @@
 
 [data-theme="light"] .da-panel {
   background: rgba(255,255,255,0.8);
-  border-color: rgba(99,102,241,0.15);
+  border-color: rgba(var(--color-primary-rgb),0.15);
 }
 
 @keyframes daFadeUp {
@@ -123,7 +123,7 @@
 }
 
 [data-theme="light"] .da-filter-bar {
-  border-bottom-color: rgba(99,102,241,0.1);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-date-pills {
@@ -150,23 +150,23 @@
 }
 
 .da-date-pill.active {
-  background: rgba(99,102,241,0.15);
-  border-color: rgba(99,102,241,0.45);
-  color: #818cf8;
+  background: rgba(var(--color-primary-rgb),0.15);
+  border-color: rgba(var(--color-primary-rgb),0.45);
+  color: var(--color-primary-light);
 }
 
 [data-theme="light"] .da-date-pill {
-  border-color: rgba(99,102,241,0.15);
+  border-color: rgba(var(--color-primary-rgb),0.15);
   color: #94a3b8;
 }
 [data-theme="light"] .da-date-pill:hover:not(.active) {
   color: #475569;
-  border-color: rgba(99,102,241,0.25);
+  border-color: rgba(var(--color-primary-rgb),0.25);
 }
 [data-theme="light"] .da-date-pill.active {
-  color: #4f46e5;
-  background: rgba(99,102,241,0.1);
-  border-color: rgba(99,102,241,0.35);
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb),0.1);
+  border-color: rgba(var(--color-primary-rgb),0.35);
 }
 
 .da-filter-divider {
@@ -177,7 +177,7 @@
 }
 
 [data-theme="light"] .da-filter-divider {
-  background: rgba(99,102,241,0.15);
+  background: rgba(var(--color-primary-rgb),0.15);
 }
 
 .da-filter-select {
@@ -198,12 +198,12 @@
 }
 
 .da-filter-select:focus {
-  border-color: rgba(99,102,241,0.4);
+  border-color: rgba(var(--color-primary-rgb),0.4);
 }
 
 [data-theme="light"] .da-filter-select {
   background-color: rgba(255,255,255,0.9);
-  border-color: rgba(99,102,241,0.15);
+  border-color: rgba(var(--color-primary-rgb),0.15);
   color: #1e293b;
 }
 
@@ -228,7 +228,7 @@
 }
 
 [data-theme="light"] .da-summary-bar {
-  border-bottom-color: rgba(99,102,241,0.08);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.08);
 }
 
 .da-kpi-chip {
@@ -242,8 +242,8 @@
 }
 
 [data-theme="light"] .da-kpi-chip {
-  background: rgba(99,102,241,0.04);
-  border-color: rgba(99,102,241,0.12);
+  background: rgba(var(--color-primary-rgb),0.04);
+  border-color: rgba(var(--color-primary-rgb),0.12);
 }
 
 .da-kpi-value {
@@ -379,7 +379,7 @@
 }
 
 [data-theme="light"] .da-dev-section {
-  border-color: rgba(99,102,241,0.12);
+  border-color: rgba(var(--color-primary-rgb),0.12);
   background: rgba(255,255,255,0.6);
 }
 
@@ -399,12 +399,12 @@
 }
 
 [data-theme="light"] .da-dev-header {
-  background: rgba(99,102,241,0.04);
-  border-bottom-color: rgba(99,102,241,0.1);
+  background: rgba(var(--color-primary-rgb),0.04);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 [data-theme="light"] .da-dev-header:hover {
-  background: rgba(99,102,241,0.07);
+  background: rgba(var(--color-primary-rgb),0.07);
 }
 
 .da-health-dot {
@@ -441,8 +441,8 @@
 }
 
 [data-theme="light"] .da-dev-stat-chip {
-  background: rgba(99,102,241,0.04);
-  border-color: rgba(99,102,241,0.1);
+  background: rgba(var(--color-primary-rgb),0.04);
+  border-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-dev-stat-label {
@@ -477,11 +477,11 @@
 }
 
 [data-theme="light"] .da-ticket-row:hover {
-  background: rgba(99,102,241,0.04);
+  background: rgba(var(--color-primary-rgb),0.04);
 }
 
 [data-theme="light"] .da-ticket-row {
-  border-bottom-color: rgba(99,102,241,0.06);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.06);
 }
 
 .da-ticket-row.bounced {
@@ -549,8 +549,8 @@
 }
 
 [data-theme="light"] .da-history-table {
-  background: rgba(99,102,241,0.04);
-  border-color: rgba(99,102,241,0.12);
+  background: rgba(var(--color-primary-rgb),0.04);
+  border-color: rgba(var(--color-primary-rgb),0.12);
 }
 
 .da-history-header {
@@ -630,20 +630,20 @@
 }
 
 .da-density-btn.active {
-  border-color: rgba(99,102,241,0.4);
-  background: rgba(99,102,241,0.14);
-  color: #818cf8;
+  border-color: rgba(var(--color-primary-rgb),0.4);
+  background: rgba(var(--color-primary-rgb),0.14);
+  color: var(--color-primary-light);
 }
 
 [data-theme="light"] .da-density-btn {
-  border-color: rgba(99,102,241,0.15);
+  border-color: rgba(var(--color-primary-rgb),0.15);
   color: #94a3b8;
 }
 
 [data-theme="light"] .da-density-btn.active {
-  color: #4f46e5;
-  background: rgba(99,102,241,0.1);
-  border-color: rgba(99,102,241,0.35);
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb),0.1);
+  border-color: rgba(var(--color-primary-rgb),0.35);
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -687,12 +687,12 @@
 }
 
 [data-theme="light"] .da-card-header {
-  background: rgba(99,102,241,0.04);
-  border-bottom-color: rgba(99,102,241,0.1);
+  background: rgba(var(--color-primary-rgb),0.04);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 [data-theme="light"] .da-card-header:hover {
-  background: rgba(99,102,241,0.07);
+  background: rgba(var(--color-primary-rgb),0.07);
 }
 
 .da-card-dev-info {
@@ -740,8 +740,8 @@
 }
 
 [data-theme="light"] .da-card-kpi {
-  background: rgba(99,102,241,0.04);
-  border-color: rgba(99,102,241,0.1);
+  background: rgba(var(--color-primary-rgb),0.04);
+  border-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-card-kpi-icon {
@@ -781,7 +781,7 @@
 }
 
 [data-theme="light"] .da-card-progress-bar {
-  background: rgba(99,102,241,0.1);
+  background: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-card-progress-fill {
@@ -800,7 +800,7 @@
 }
 
 [data-theme="light"] .da-card-hours {
-  border-top-color: rgba(99,102,241,0.08);
+  border-top-color: rgba(var(--color-primary-rgb),0.08);
   color: #94a3b8;
 }
 
@@ -812,7 +812,7 @@
 }
 
 [data-theme="light"] .da-card-ticket-list {
-  border-top-color: rgba(99,102,241,0.1);
+  border-top-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-card-ticket-row {
@@ -834,11 +834,11 @@
 }
 
 [data-theme="light"] .da-card-ticket-row {
-  border-bottom-color: rgba(99,102,241,0.06);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.06);
 }
 
 [data-theme="light"] .da-card-ticket-row:hover {
-  background: rgba(99,102,241,0.04);
+  background: rgba(var(--color-primary-rgb),0.04);
 }
 
 .da-card-state-dot {
@@ -862,14 +862,14 @@
 .da-card-more {
   padding: 7px 15px;
   font-size: 12px;
-  color: #818cf8;
+  color: var(--color-primary-light);
   cursor: pointer;
   text-align: center;
   transition: background 130ms;
 }
 
 .da-card-more:hover {
-  background: rgba(99,102,241,0.07);
+  background: rgba(var(--color-primary-rgb),0.07);
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -889,7 +889,7 @@
 }
 
 [data-theme="light"] .da-log-legend {
-  border-bottom-color: rgba(99,102,241,0.08);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.08);
 }
 
 .da-log-legend-item {
@@ -922,8 +922,8 @@
 }
 
 [data-theme="light"] .da-log-col-header {
-  background: rgba(99,102,241,0.04);
-  border-bottom-color: rgba(99,102,241,0.12);
+  background: rgba(var(--color-primary-rgb),0.04);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.12);
 }
 
 .da-log-col-head-label {
@@ -948,7 +948,7 @@
 }
 
 [data-theme="light"] .da-log-date-divider {
-  background: rgba(99,102,241,0.03);
+  background: rgba(var(--color-primary-rgb),0.03);
 }
 
 .da-log-divider-line {
@@ -958,7 +958,7 @@
 }
 
 [data-theme="light"] .da-log-divider-line {
-  background: rgba(99,102,241,0.12);
+  background: rgba(var(--color-primary-rgb),0.12);
 }
 
 .da-log-divider-label {
@@ -998,7 +998,7 @@
 }
 
 [data-theme="light"] .da-log-row:hover {
-  background: rgba(99,102,241,0.04);
+  background: rgba(var(--color-primary-rgb),0.04);
 }
 
 [data-theme="light"] .da-log-row.backward {
@@ -1087,8 +1087,8 @@
 }
 
 [data-theme="light"] .da-log-group-header {
-  background: rgba(99,102,241,0.04);
-  border-bottom-color: rgba(99,102,241,0.08);
+  background: rgba(var(--color-primary-rgb),0.04);
+  border-bottom-color: rgba(var(--color-primary-rgb),0.08);
 }
 
 .da-log-group-label {
@@ -1108,7 +1108,7 @@
 
 [data-theme="light"] .da-log-group-count {
   color: #94a3b8;
-  background: rgba(99,102,241,0.08);
+  background: rgba(var(--color-primary-rgb),0.08);
 }
 
 .da-export-btn {
@@ -1117,9 +1117,9 @@
   gap: 5px;
   padding: 4px 10px;
   border-radius: 7px;
-  background: rgba(99,102,241,0.12);
-  border: 1px solid rgba(99,102,241,0.3);
-  color: #818cf8;
+  background: rgba(var(--color-primary-rgb),0.12);
+  border: 1px solid rgba(var(--color-primary-rgb),0.3);
+  color: var(--color-primary-light);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -1129,13 +1129,13 @@
 }
 
 .da-export-btn:hover {
-  background: rgba(99,102,241,0.2);
+  background: rgba(var(--color-primary-rgb),0.2);
 }
 
 [data-theme="light"] .da-export-btn {
-  color: #4f46e5;
-  background: rgba(99,102,241,0.08);
-  border-color: rgba(99,102,241,0.25);
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb),0.08);
+  border-color: rgba(var(--color-primary-rgb),0.25);
 }
 
 .da-group-toggle-row {
@@ -1157,20 +1157,20 @@
 }
 
 .da-group-toggle-btn.active {
-  border-color: rgba(99,102,241,0.4);
-  background: rgba(99,102,241,0.14);
-  color: #818cf8;
+  border-color: rgba(var(--color-primary-rgb),0.4);
+  background: rgba(var(--color-primary-rgb),0.14);
+  color: var(--color-primary-light);
 }
 
 [data-theme="light"] .da-group-toggle-btn {
-  border-color: rgba(99,102,241,0.15);
+  border-color: rgba(var(--color-primary-rgb),0.15);
   color: #94a3b8;
 }
 
 [data-theme="light"] .da-group-toggle-btn.active {
-  color: #4f46e5;
-  background: rgba(99,102,241,0.1);
-  border-color: rgba(99,102,241,0.35);
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb),0.1);
+  border-color: rgba(var(--color-primary-rgb),0.35);
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -1194,7 +1194,7 @@
 }
 
 [data-theme="light"] .da-heatmap-left {
-  border-right-color: rgba(99,102,241,0.1);
+  border-right-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-heatmap-section-title {
@@ -1223,12 +1223,12 @@
 }
 
 .da-heatmap-dev-row.active {
-  border-color: var(--da-dev-color, #6366f1);
-  background: rgba(99,102,241,0.08);
+  border-color: var(--da-dev-color, var(--color-primary));
+  background: rgba(var(--color-primary-rgb),0.08);
 }
 
 [data-theme="light"] .da-heatmap-dev-row {
-  border-color: rgba(99,102,241,0.1);
+  border-color: rgba(var(--color-primary-rgb),0.1);
   background: rgba(255,255,255,0.6);
 }
 
@@ -1257,7 +1257,7 @@
 }
 
 [data-theme="light"] .da-heatmap-dev-bar {
-  background: rgba(99,102,241,0.1);
+  background: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-heatmap-dev-bar-fill {
@@ -1284,7 +1284,7 @@
 
 [data-theme="light"] .da-heatmap-legend {
   background: rgba(255,255,255,0.6);
-  border-color: rgba(99,102,241,0.1);
+  border-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-heatmap-legend-title {
@@ -1458,8 +1458,8 @@
 
 [data-theme="light"] .da-heatmap-tooltip {
   background: rgba(255,255,255,0.97);
-  border-color: rgba(99,102,241,0.2);
-  box-shadow: 0 4px 16px rgba(99,102,241,0.15);
+  border-color: rgba(var(--color-primary-rgb),0.2);
+  box-shadow: 0 4px 16px rgba(var(--color-primary-rgb),0.15);
 }
 
 .da-heatmap-tooltip-state {
@@ -1483,7 +1483,7 @@
 }
 
 [data-theme="light"] .da-bottleneck {
-  border-top-color: rgba(99,102,241,0.1);
+  border-top-color: rgba(var(--color-primary-rgb),0.1);
 }
 
 .da-bottleneck-title {
@@ -1521,7 +1521,7 @@
 }
 
 [data-theme="light"] .da-bottleneck-track {
-  background: rgba(99,102,241,0.08);
+  background: rgba(var(--color-primary-rgb),0.08);
 }
 
 .da-bottleneck-fill {
