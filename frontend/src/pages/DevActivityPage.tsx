@@ -7,6 +7,7 @@ import { getActiveSource } from '../services/pmDataService'
 import type { IssueTimeline, IssueStint, YouTrackSprint, TimeTrackingRow } from '../services/api'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import { CustomDropdown } from '../components/CustomDropdown'
+import { CalendarPicker } from '../components/CalendarPicker'
 import '../styles/pages/dev-activity.css'
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -36,6 +37,7 @@ const VIEWS = [
   { id: 'cards',   label: 'Developer Cards',  desc: 'Bento grid with metrics' },
   { id: 'log',     label: 'Transition Log',   desc: 'Audit table, exportable' },
   { id: 'heatmap', label: 'Lifecycle Heatmap',desc: 'State coverage grid' },
+  { id: 'report',  label: 'Dev Report',       desc: 'Completion analytics' },
 ] as const
 type ViewId = typeof VIEWS[number]['id']
 
@@ -44,7 +46,7 @@ type DateRange = typeof DATE_OPTS[number]
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function getDateRange(range: DateRange): { sinceMs: number; untilMs: number } {
+function getDateRange(range: DateRange, customFrom?: string, customTo?: string): { sinceMs: number; untilMs: number } {
   const now = Date.now()
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const todayMs = today.getTime()
@@ -57,8 +59,14 @@ function getDateRange(range: DateRange): { sinceMs: number; untilMs: number } {
     }
     case 'Last Week':
       return { sinceMs: todayMs - 7 * 86400000, untilMs: now }
-    default:
+    case 'Custom': {
+      if (customFrom && customTo) {
+        const from = new Date(customFrom); from.setHours(0, 0, 0, 0)
+        const to   = new Date(customTo);   to.setHours(23, 59, 59, 999)
+        return { sinceMs: from.getTime(), untilMs: to.getTime() }
+      }
       return { sinceMs: todayMs - 30 * 86400000, untilMs: now }
+    }
   }
 }
 
@@ -252,10 +260,15 @@ interface FilterBarProps {
   assignee: string
   onAssignee: (a: string) => void
   assignees: string[]
-  children?: React.ReactNode
+  customFrom: string
+  customTo: string
+  onCustomFrom: (d: string) => void
+  onCustomTo: (d: string) => void
+  onApplyCustom: () => void
 }
 
-function DaFilterBar({ dateRange, onDateRange, assignee, onAssignee, assignees, children }: FilterBarProps) {
+function DaFilterBar({ dateRange, onDateRange, assignee, onAssignee, assignees,
+  customFrom, customTo, onCustomFrom, onCustomTo, onApplyCustom }: FilterBarProps) {
   return (
     <div className="da-filter-bar">
       <div className="da-date-pills">
@@ -266,6 +279,30 @@ function DaFilterBar({ dateRange, onDateRange, assignee, onAssignee, assignees, 
           </button>
         ))}
       </div>
+
+      {dateRange === 'Custom' && (
+        <div className="da-custom-range">
+          <CalendarPicker
+            value={customFrom}
+            onChange={onCustomFrom}
+            placeholder="From date"
+          />
+          <span className="da-date-sep">→</span>
+          <CalendarPicker
+            value={customTo}
+            onChange={onCustomTo}
+            placeholder="To date"
+          />
+          <button
+            className="da-apply-btn"
+            disabled={!customFrom || !customTo || customFrom > customTo}
+            onClick={onApplyCustom}
+          >
+            Apply
+          </button>
+        </div>
+      )}
+
       <span className="da-filter-divider" />
       <CustomDropdown
         value={assignee}
@@ -276,19 +313,18 @@ function DaFilterBar({ dateRange, onDateRange, assignee, onAssignee, assignees, 
           ...assignees.map(a => ({ value: a, label: a })),
         ]}
       />
-      {children}
     </div>
   )
 }
 
 // ─── View 1 — Activity Feed ───────────────────────────────────────────────────
 
-function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter }: {
+function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter, dateRange }: {
   timelines: IssueTimeline[]
   onOpenDetail: (id: string) => void
   assigneeFilter: string
+  dateRange: DateRange
 }) {
-  const [dateRange, setDateRange] = usePersistedState<DateRange>(PERSIST.DEV_ACTIVITY_DATE, 'Today', { validate: [...DATE_OPTS] })
   const [compact, setCompact] = useState(false)
   const [openDevs, setOpenDevs] = useState<Record<string, boolean>>({})
   const [expandedTicket, setExpandedTicket] = useState<string | null>(null)
@@ -313,12 +349,9 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter }: {
     })
   }, [devGroups])
 
-  const uniqueAssignees = useMemo(() => [...new Set(timelines.map(t => t.assignee))].sort(), [timelines])
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <DaFilterBar dateRange={dateRange} onDateRange={setDateRange}
-        assignee={assigneeFilter} onAssignee={() => {}} assignees={uniqueAssignees}>
+      <div className="da-view-controls">
         <div className="da-density-toggle">
           <span className="da-density-label">Density</span>
           {(['Compact', 'Expanded'] as const).map(opt => (
@@ -328,7 +361,7 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter }: {
             </button>
           ))}
         </div>
-      </DaFilterBar>
+      </div>
 
       <DaSummaryBar timelines={timelines} />
 
@@ -411,10 +444,21 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter }: {
                           ))}
                         </div>
                         {(t.stints ?? []).map((s, i) => {
-                          const cfg = stateCfg('In Progress')
+                          const inProgCfg = stateCfg('In Progress')
+                          const exitCfg   = s.exited_to ? stateCfg(s.exited_to) : null
                           return (
                             <div key={i} className="da-history-row">
-                              <DaStateBadge state="In Progress" small />
+                              {/* Stint = In Progress period → exited_to state */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <DaStateBadge state="In Progress" small />
+                                {s.exited_to && (
+                                  <>
+                                    <span style={{ fontSize: 10, opacity: 0.4 }}>→</span>
+                                    <DaStateBadge state={s.exited_to} small />
+                                  </>
+                                )}
+                                {!s.exited_to && <span style={{ fontSize: 10, color: '#4ade80' }}>ongoing</span>}
+                              </div>
                               <span className="da-history-time">
                                 {new Date(s.entered_at).toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}
                               </span>
@@ -423,7 +467,7 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter }: {
                                   ? new Date(s.exited_at).toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
                                   : 'now'}
                               </span>
-                              <span className="da-history-dur" style={{ color: s.duration_hours == null ? '#4ade80' : cfg.color }}>
+                              <span className="da-history-dur" style={{ color: s.duration_hours == null ? '#4ade80' : inProgCfg.color }}>
                                 {s.duration_hours != null ? fmtH(s.duration_hours) : 'ongoing'}
                               </span>
                             </div>
@@ -444,12 +488,12 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter }: {
 
 // ─── View 2 — Developer Cards ─────────────────────────────────────────────────
 
-function DeveloperCardsView({ timelines, onOpenDetail, assigneeFilter }: {
+function DeveloperCardsView({ timelines, onOpenDetail, assigneeFilter, dateRange }: {
   timelines: IssueTimeline[]
   onOpenDetail: (id: string) => void
   assigneeFilter: string
+  dateRange: DateRange
 }) {
-  const [dateRange, setDateRange] = usePersistedState<DateRange>(PERSIST.DEV_ACTIVITY_DATE, 'Today', { validate: [...DATE_OPTS] })
   const [expandedDev, setExpandedDev] = useState<string | null>(null)
 
   const devGroups = useMemo(() => {
@@ -462,12 +506,8 @@ function DeveloperCardsView({ timelines, onOpenDetail, assigneeFilter }: {
     return Array.from(map.entries()).sort((a, b) => b[1].length - a[1].length)
   }, [timelines, assigneeFilter])
 
-  const uniqueAssignees = useMemo(() => [...new Set(timelines.map(t => t.assignee))].sort(), [timelines])
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <DaFilterBar dateRange={dateRange} onDateRange={setDateRange}
-        assignee={assigneeFilter} onAssignee={() => {}} assignees={uniqueAssignees} />
       <div className="da-cards-scroll">
         {devGroups.length === 0 && (
           <div className="da-empty" style={{ gridColumn: '1 / -1' }}>
@@ -568,26 +608,25 @@ function DeveloperCardsView({ timelines, onOpenDetail, assigneeFilter }: {
 
 // ─── View 3 — Transition Log ──────────────────────────────────────────────────
 
-function TransitionLogView({ transitions, onOpenDetail, assigneeFilter }: {
+function TransitionLogView({ transitions, onOpenDetail, assigneeFilter, dateRange, sinceMs, untilMs }: {
   transitions: TimeTrackingRow[]
   onOpenDetail: (id: string) => void
   assigneeFilter: string
+  dateRange: DateRange
+  sinceMs: number
+  untilMs: number
 }) {
-  const [dateRange, setDateRange] = usePersistedState<DateRange>(PERSIST.DEV_ACTIVITY_DATE, 'Today', { validate: [...DATE_OPTS] })
   const [groupBy, setGroupBy] = useState<'Flat' | 'Assignee' | 'State'>('Flat')
   const [hoveredRow, setHoveredRow] = useState<number | null>(null)
 
-  const uniqueAssignees = useMemo(() => [...new Set(transitions.map(t => t.assignee))].sort(), [transitions])
-
-  // Client-side date filter
+  // Client-side date filter using resolved ms from parent (handles Custom range too)
   const filtered = useMemo(() => {
-    const { sinceMs, untilMs } = getDateRange(dateRange)
     const base = assigneeFilter ? transitions.filter(t => t.assignee === assigneeFilter) : transitions
     return base.filter(t => {
       const ms = new Date(t.transitioned_at).getTime()
       return ms >= sinceMs && ms <= untilMs
     }).sort((a, b) => new Date(b.transitioned_at).getTime() - new Date(a.transitioned_at).getTime())
-  }, [transitions, dateRange, assigneeFilter])
+  }, [transitions, sinceMs, untilMs, assigneeFilter])
 
   const backCount = filtered.filter(t => isBackwardTransition(t.from_state, t.to_state)).length
   const fwdCount  = filtered.length - backCount
@@ -604,20 +643,21 @@ function TransitionLogView({ transitions, onOpenDetail, assigneeFilter }: {
     URL.revokeObjectURL(url)
   }
 
-  // Group data
-  function getGrouped() {
+  type GroupedItem = { label: string; items: TimeTrackingRow[]; accent: string }
+
+  const grouped = useMemo<GroupedItem[] | null>(() => {
     if (groupBy === 'Assignee') {
-      const g: Record<string, { label: string; items: TimeTrackingRow[]; accent: string }> = {}
+      const g: Record<string, GroupedItem> = {}
       for (const t of filtered) {
-        if (!g[t.assignee]) g[t.assignee] = { label: t.assignee, items: [], accent: devColor(t.assignee) }
+        if (!g[t.assignee]) g[t.assignee] = { label: t.assignee || '(unassigned)', items: [], accent: devColor(t.assignee) }
         g[t.assignee].items.push(t)
       }
       return Object.values(g)
     }
     if (groupBy === 'State') {
-      const g: Record<string, { label: string; items: TimeTrackingRow[]; accent: string }> = {}
+      const g: Record<string, GroupedItem> = {}
       for (const t of filtered) {
-        const key = t.to_state
+        const key = t.to_state || '(unknown)'
         if (!g[key]) { const cfg = stateCfg(key); g[key] = { label: `→ ${key}`, items: [], accent: cfg.color } }
         g[key].items.push(t)
       }
@@ -628,9 +668,10 @@ function TransitionLogView({ transitions, onOpenDetail, assigneeFilter }: {
       })
     }
     return null
-  }
+  }, [filtered, groupBy])
 
-  function getFlatWithDividers(): Array<{ type: 'divider'; label: string } | { type: 'row'; t: TimeTrackingRow; idx: number }> {
+  const flat = useMemo<Array<{ type: 'divider'; label: string } | { type: 'row'; t: TimeTrackingRow; idx: number }> | null>(() => {
+    if (groupBy !== 'Flat') return null
     const out: Array<{ type: 'divider'; label: string } | { type: 'row'; t: TimeTrackingRow; idx: number }> = []
     let lastDay = ''
     filtered.forEach((t, idx) => {
@@ -643,7 +684,7 @@ function TransitionLogView({ transitions, onOpenDetail, assigneeFilter }: {
       out.push({ type: 'row', t, idx })
     })
     return out
-  }
+  }, [filtered, groupBy])
 
   const ColHeader = () => (
     <div className="da-log-col-header">
@@ -683,13 +724,10 @@ function TransitionLogView({ transitions, onOpenDetail, assigneeFilter }: {
     )
   }
 
-  const grouped = getGrouped()
-  const flat = grouped ? null : getFlatWithDividers()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <DaFilterBar dateRange={dateRange} onDateRange={setDateRange}
-        assignee={assigneeFilter} onAssignee={() => {}} assignees={uniqueAssignees}>
+      <div className="da-view-controls">
         <div className="da-group-toggle-row">
           {([['Flat', 'Flat'], ['Group by Assignee', 'Assignee'], ['Group by State', 'State']] as const).map(([label, key]) => (
             <button key={key} className={`da-group-toggle-btn${groupBy === key ? ' active' : ''}`}
@@ -701,7 +739,7 @@ function TransitionLogView({ transitions, onOpenDetail, assigneeFilter }: {
         <button className="da-export-btn" onClick={handleExport}>
           <Download size={12} /> Export CSV
         </button>
-      </DaFilterBar>
+      </div>
 
       <div className="da-log-legend">
         {[['Forward progress', '#4ade80'], ['Backward / bounce', '#f59e0b']].map(([l, c]) => (
@@ -752,17 +790,15 @@ function TransitionLogView({ transitions, onOpenDetail, assigneeFilter }: {
 
 // ─── View 4 — Lifecycle Heatmap ──────────────────────────────────────────────
 
-function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter }: {
+function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter, dateRange }: {
   timelines: IssueTimeline[]
   onOpenDetail: (id: string) => void
   assigneeFilter: string
+  dateRange: DateRange
 }) {
-  const [dateRange, setDateRange] = usePersistedState<DateRange>(PERSIST.DEV_ACTIVITY_DATE, 'Today', { validate: [...DATE_OPTS] })
   const [selectedDev, setSelectedDev] = useState<string | null>(null)
   const [sort, setSort] = useState<'Total Time' | 'Bounce Count' | 'Assignee'>('Total Time')
   const [hoveredCell, setHoveredCell] = useState<{ ticketId: string; state: string } | null>(null)
-
-  const uniqueAssignees = useMemo(() => [...new Set(timelines.map(t => t.assignee))].sort(), [timelines])
 
   const devGroups = useMemo(() => {
     const map = new Map<string, IssueTimeline[]>()
@@ -817,20 +853,17 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      <DaFilterBar dateRange={dateRange} onDateRange={setDateRange}
-        assignee={assigneeFilter} onAssignee={() => {}} assignees={uniqueAssignees}>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <CustomDropdown
-            value={sort}
-            onChange={v => setSort(v as typeof sort)}
-            options={[
-              { value: 'Total Time',   label: 'Total Time' },
-              { value: 'Bounce Count', label: 'Bounce Count' },
-              { value: 'Assignee',     label: 'Assignee' },
-            ]}
-          />
-        </div>
-      </DaFilterBar>
+      <div className="da-view-controls">
+        <CustomDropdown
+          value={sort}
+          onChange={v => setSort(v as typeof sort)}
+          options={[
+            { value: 'Total Time',   label: 'Total Time' },
+            { value: 'Bounce Count', label: 'Bounce Count' },
+            { value: 'Assignee',     label: 'Assignee' },
+          ]}
+        />
+      </div>
 
       <div className="da-heatmap-body">
         {/* Left panel */}
@@ -934,9 +967,6 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter }: {
                             {fmtH(hours)}
                           </span>
                         )}
-                        {isCurrent && !ticket.is_live === false && (
-                          <span className="da-heatmap-live-dot" />
-                        )}
                         {ticket.is_live && isCurrent && (
                           <span className="da-heatmap-live-dot" />
                         )}
@@ -981,6 +1011,267 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter }: {
   )
 }
 
+// ─── Dev Report View ─────────────────────────────────────────────────────────
+
+interface CompletionRecord {
+  issueId: string
+  summary: string
+  completedState: string
+  journey: JourneyStep[]
+  totalHours: number
+  bounceCount: number
+  completedAt: string
+}
+
+const DR_DONE_STATES = ['dev', 'stage', 'prod', 'mobile done', 'deployed', 'verified', 'done', 'closed']
+function drIsDone(state: string): boolean {
+  const lc = state.toLowerCase()
+  return DR_DONE_STATES.some(d => lc === d || lc.includes(d))
+}
+
+function DevReportView({ onOpenDetail, ytBaseUrl }: {
+  onOpenDetail: (id: string) => void
+  ytBaseUrl: string
+}) {
+  const [allDevs, setAllDevs] = useState<string[]>([])
+  const [selectedDevs, setSelectedDevs] = useState<string[]>([])
+  const [drDateRange, setDrDateRange] = useState<DateRange>('Yesterday')
+  const [drCustomFrom, setDrCustomFrom] = useState('')
+  const [drCustomTo, setDrCustomTo] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [reportData, setReportData] = useState<Record<string, CompletionRecord[]> | null>(null)
+
+  useEffect(() => {
+    const now = Date.now()
+    api.getIssueTimelines(now - 30 * 86400000, now)
+      .then(res => {
+        const tls = (res as any)?.data as IssueTimeline[] ?? []
+        const devs = [...new Set(tls.map(t => t.assignee).filter(Boolean))].sort()
+        setAllDevs(devs)
+      })
+      .catch(() => {})
+  }, [])
+
+  const { sinceMs, untilMs } = useMemo(
+    () => getDateRange(drDateRange, drCustomFrom, drCustomTo),
+    [drDateRange, drCustomFrom, drCustomTo],
+  )
+
+  const canGenerate = selectedDevs.length > 0
+    && (drDateRange !== 'Custom' || (!!drCustomFrom && !!drCustomTo && drCustomFrom <= drCustomTo))
+
+  const toggleDev = (dev: string) =>
+    setSelectedDevs(prev => prev.includes(dev) ? prev.filter(d => d !== dev) : [...prev, dev])
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      const res = await api.getIssueTimelines(sinceMs, untilMs)
+      const tls = (res as any)?.data as IssueTimeline[] ?? []
+      const filtered = tls.filter(t => selectedDevs.includes(t.assignee))
+      const byDev: Record<string, CompletionRecord[]> = {}
+      for (const tl of filtered) {
+        const dev = tl.assignee || 'Unknown'
+        for (const stint of tl.stints ?? []) {
+          if (!stint.exited_to || !drIsDone(stint.exited_to)) continue
+          if (!stint.exited_at) continue
+          const exitMs = new Date(stint.exited_at).getTime()
+          if (exitMs < sinceMs || exitMs > untilMs) continue
+          if (!byDev[dev]) byDev[dev] = []
+          byDev[dev].push({
+            issueId: tl.issue_id,
+            summary: tl.issue_summary || tl.issue_id,
+            completedState: stint.exited_to,
+            journey: buildJourney(tl.stints, tl.is_live),
+            totalHours: tl.total_hours ?? 0,
+            bounceCount: tl.moved_back_count ?? 0,
+            completedAt: stint.exited_at,
+          })
+        }
+      }
+      setReportData(byDev)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const rangeLabel = drDateRange === 'Custom' ? `${drCustomFrom} → ${drCustomTo}` : drDateRange
+
+  if (reportData !== null) {
+    const devEntries = Object.entries(reportData)
+    const totalCompleted = devEntries.reduce((s, [, recs]) => s + recs.length, 0)
+    const totalHours = devEntries.reduce((s, [, recs]) => s + recs.reduce((h, r) => h + r.totalHours, 0), 0)
+    const totalBounced = devEntries.reduce((s, [, recs]) => s + recs.filter(r => r.bounceCount > 0).length, 0)
+
+    return (
+      <div className="dr-results">
+        <div className="dr-results-header">
+          <div>
+            <div className="dr-results-title">Completion Report — {rangeLabel}</div>
+            <div className="dr-results-meta">{selectedDevs.join(', ')}</div>
+          </div>
+          <button className="dr-new-query-btn" onClick={() => setReportData(null)}>← New Query</button>
+        </div>
+
+        <div className="dr-stats-strip">
+          {[
+            { val: totalCompleted, lbl: 'Tickets Done' },
+            { val: devEntries.length, lbl: 'Developers' },
+            { val: `${Math.round(totalHours * 10) / 10}h`, lbl: 'Hours Worked' },
+            { val: totalBounced, lbl: 'Bounced' },
+          ].map(s => (
+            <div key={s.lbl} className="dr-stat-chip">
+              <span className="dr-stat-val">{s.val}</span>
+              <span className="dr-stat-lbl">{s.lbl}</span>
+            </div>
+          ))}
+        </div>
+
+        {totalCompleted === 0 && (
+          <div className="dr-empty">
+            <div className="dr-empty-icon">🔍</div>
+            <div className="dr-empty-msg">No tickets completed in this period</div>
+            <div className="dr-empty-sub">Try a wider date range or different developers</div>
+          </div>
+        )}
+
+        {devEntries.map(([dev, records]) => {
+          const color = devColor(dev)
+          return (
+            <div key={dev} className="dr-dev-section">
+              <div className="dr-dev-header">
+                <div className="dr-dev-avatar" style={{ background: `linear-gradient(135deg, ${color}, ${color}99)` }}>
+                  {devInitials(dev)}
+                </div>
+                <span className="dr-dev-name">{dev}</span>
+                <span className="dr-dev-count">{records.length} completed</span>
+              </div>
+              <div className="dr-table-wrap">
+                <table className="dr-table">
+                  <thead>
+                    <tr>
+                      <th>Ticket</th>
+                      <th>Summary</th>
+                      <th>Completed To</th>
+                      <th>Journey</th>
+                      <th style={{ textAlign: 'right' }}>Hours</th>
+                      <th style={{ textAlign: 'right' }}>Bounces</th>
+                      <th style={{ textAlign: 'right' }}>Completed At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {records.map((r, i) => (
+                      <tr key={i}>
+                        <td>
+                          <span className="dr-id-link" onClick={() => onOpenDetail(r.issueId)}>{r.issueId}</span>
+                        </td>
+                        <td style={{ maxWidth: 200 }}>
+                          <span style={{ cursor: 'pointer', color: 'var(--text-primary)', fontSize: 12 }}
+                            onClick={() => onOpenDetail(r.issueId)} title={r.summary}>
+                            {r.summary.length > 55 ? r.summary.slice(0, 55) + '…' : r.summary}
+                          </span>
+                        </td>
+                        <td><DaStateBadge state={r.completedState} small /></td>
+                        <td>
+                          <div className="dr-journey">
+                            {r.journey.map((step, ji) => {
+                              const cfg = stateCfg(step.state)
+                              return (
+                                <React.Fragment key={ji}>
+                                  {ji > 0 && <span className="dr-journey-arrow">›</span>}
+                                  <span className="dr-journey-step" style={{ color: cfg.color, background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                                    {step.state}
+                                  </span>
+                                </React.Fragment>
+                              )
+                            })}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{fmtH(r.totalHours)}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          {r.bounceCount > 0
+                            ? <span style={{ color: '#f87171', fontWeight: 600 }}>{r.bounceCount}</span>
+                            : <span style={{ opacity: 0.3 }}>—</span>
+                          }
+                        </td>
+                        <td style={{ textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
+                          {new Date(r.completedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  return (
+    <div className="dr-command-center">
+      <div className="dr-scanline" />
+      <div className="dr-corner dr-corner--tl" />
+      <div className="dr-corner dr-corner--tr" />
+      <div className="dr-corner dr-corner--bl" />
+      <div className="dr-corner dr-corner--br" />
+
+      <div className="dr-panel">
+        <div className="dr-title">
+          <div className="dr-title-main">
+            <span className="dr-title-glyph">◈</span>
+            Dev Report
+          </div>
+          <div className="dr-title-sub">Select developers and a time window — get a full completion audit</div>
+        </div>
+
+        <div className="dr-field">
+          <div className="dr-label">Developers</div>
+          {allDevs.length === 0
+            ? <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loading developers…</div>
+            : (
+              <div className="dr-dev-grid">
+                {allDevs.map(dev => {
+                  const color = devColor(dev)
+                  const selected = selectedDevs.includes(dev)
+                  return (
+                    <button key={dev} className={`dr-dev-pill${selected ? ' selected' : ''}`} onClick={() => toggleDev(dev)}>
+                      <span className="dr-dev-dot" style={{ background: color }} />
+                      {dev}
+                      <span className="dr-dev-check">{selected && <Check size={8} />}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          }
+        </div>
+
+        <div className="dr-field">
+          <div className="dr-label">Time Period</div>
+          <div className="dr-date-row">
+            {DATE_OPTS.map(d => (
+              <button key={d} className={`da-date-pill${drDateRange === d ? ' active' : ''}`} onClick={() => setDrDateRange(d)}>{d}</button>
+            ))}
+          </div>
+          {drDateRange === 'Custom' && (
+            <div className="da-custom-range" style={{ marginTop: 8 }}>
+              <CalendarPicker value={drCustomFrom} onChange={setDrCustomFrom} placeholder="From date" />
+              <span className="da-date-sep">→</span>
+              <CalendarPicker value={drCustomTo} onChange={setDrCustomTo} placeholder="To date" />
+            </div>
+          )}
+        </div>
+
+        <button className="dr-generate-btn" disabled={!canGenerate || generating} onClick={handleGenerate}>
+          {generating ? '◌  Generating…' : '◈  Generate Report'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -988,7 +1279,7 @@ interface Props {
 }
 
 export function DevActivityPage({ initialView }: Props) {
-  const [view, setView] = usePersistedState<ViewId>(PERSIST.DEV_ACTIVITY_VIEW, 'feed', { validate: VIEWS.map(v => v.id) })
+  const [view, setView] = usePersistedState<ViewId>(PERSIST.DEV_ACTIVITY_VIEW, 'feed', { validate: VIEWS.map(v => v.id) as string[] })
   const [sprints, setSprints] = useState<YouTrackSprint[]>([])
   const [activeSprint, setActiveSprint] = useState<YouTrackSprint | null>(null)
   const [sprintDropOpen, setSprintDropOpen] = useState(false)
@@ -998,7 +1289,9 @@ export function DevActivityPage({ initialView }: Props) {
   const [assigneeFilter, setAssigneeFilter] = useState('')
   const [detailIssue, setDetailIssue] = useState<import('../services/api').YouTrackIssue | null>(null)
   const [ytBaseUrl, setYtBaseUrl] = useState('')
-  const [dateRange] = usePersistedState<DateRange>(PERSIST.DEV_ACTIVITY_DATE, 'Today', { validate: [...DATE_OPTS] })
+  const [dateRange, setDateRange] = usePersistedState<DateRange>(PERSIST.DEV_ACTIVITY_DATE, 'Today', { validate: [...DATE_OPTS] })
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo]     = useState('')
 
   const sprintDropRef  = useRef<HTMLDivElement>(null)
   const sprintMenuRef  = useRef<HTMLDivElement>(null)
@@ -1035,13 +1328,22 @@ export function DevActivityPage({ initialView }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  // Resolved ms values — shared with TransitionLogView for client-side filtering
+  const { sinceMs, untilMs } = useMemo(
+    () => getDateRange(dateRange, customFrom, customTo),
+    [dateRange, customFrom, customTo],
+  )
+
   // ── Fetch timeline data ───────────────────────────────────────────────────
   const fetchData = useCallback(async () => {
+    if (!isYouTrack) return
+    // Don't fetch Custom range until both dates are chosen and valid
+    if (dateRange === 'Custom' && (!customFrom || !customTo || customFrom > customTo)) return
     setLoading(true)
     try {
-      const { sinceMs, untilMs } = getDateRange(dateRange)
+      const { sinceMs: sMs, untilMs: uMs } = getDateRange(dateRange, customFrom, customTo)
       const [tlRes, ttRes] = await Promise.allSettled([
-        api.getIssueTimelines(sinceMs, untilMs),
+        api.getIssueTimelines(sMs, uMs),
         activeSprint?.id ? api.getTimeTracking({ sprint_id: activeSprint.id }) : Promise.resolve({ data: [] }),
       ])
       if (tlRes.status === 'fulfilled') {
@@ -1055,7 +1357,7 @@ export function DevActivityPage({ initialView }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [dateRange, activeSprint?.id])
+  }, [dateRange, customFrom, customTo, activeSprint?.id])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -1069,6 +1371,7 @@ export function DevActivityPage({ initialView }: Props) {
   }, [])
 
   const sortedSprints = useMemo(() => [...sprints].sort((a, b) => b.finish - a.finish), [sprints])
+  const uniqueAssignees = useMemo(() => [...new Set(timelines.map(t => t.assignee))].sort(), [timelines])
 
   return (
     <div className="da-page" style={{ padding: '1.25rem 1.75rem', height: 'calc(100vh - var(--header-height))', overflow: 'hidden' }}>
@@ -1133,6 +1436,22 @@ export function DevActivityPage({ initialView }: Props) {
 
       {/* ── Content panel ── */}
       <div className="da-panel" key={view}>
+        {/* Shared filter bar — hidden for Dev Report which has its own controls */}
+        {view !== 'report' && (
+          <DaFilterBar
+            dateRange={dateRange}
+            onDateRange={setDateRange}
+            assignee={assigneeFilter}
+            onAssignee={setAssigneeFilter}
+            assignees={uniqueAssignees}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFrom={setCustomFrom}
+            onCustomTo={setCustomTo}
+            onApplyCustom={fetchData}
+          />
+        )}
+
         {loading && (
           <div className="da-loading">
             <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
@@ -1140,16 +1459,19 @@ export function DevActivityPage({ initialView }: Props) {
           </div>
         )}
         {!loading && view === 'feed' && (
-          <ActivityFeedView timelines={timelines} onOpenDetail={handleOpenDetail} assigneeFilter={assigneeFilter} />
+          <ActivityFeedView timelines={timelines} onOpenDetail={handleOpenDetail} assigneeFilter={assigneeFilter} dateRange={dateRange} />
         )}
         {!loading && view === 'cards' && (
-          <DeveloperCardsView timelines={timelines} onOpenDetail={handleOpenDetail} assigneeFilter={assigneeFilter} />
+          <DeveloperCardsView timelines={timelines} onOpenDetail={handleOpenDetail} assigneeFilter={assigneeFilter} dateRange={dateRange} />
         )}
         {!loading && view === 'log' && (
-          <TransitionLogView transitions={transitions} onOpenDetail={handleOpenDetail} assigneeFilter={assigneeFilter} />
+          <TransitionLogView transitions={transitions} onOpenDetail={handleOpenDetail} assigneeFilter={assigneeFilter} dateRange={dateRange} sinceMs={sinceMs} untilMs={untilMs} />
         )}
         {!loading && view === 'heatmap' && (
-          <LifecycleHeatmapView timelines={timelines} onOpenDetail={handleOpenDetail} assigneeFilter={assigneeFilter} />
+          <LifecycleHeatmapView timelines={timelines} onOpenDetail={handleOpenDetail} assigneeFilter={assigneeFilter} dateRange={dateRange} />
+        )}
+        {view === 'report' && (
+          <DevReportView onOpenDetail={handleOpenDetail} ytBaseUrl={ytBaseUrl} />
         )}
       </div>
 

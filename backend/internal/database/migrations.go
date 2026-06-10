@@ -290,6 +290,8 @@ func RunMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_issue_state_log_issue_id ON issue_state_log(issue_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_issue_state_log_transitioned_at ON issue_state_log(transitioned_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_issue_state_log_to_state ON issue_state_log(to_state)`,
+		`CREATE INDEX IF NOT EXISTS idx_issue_state_log_to_state_lower ON issue_state_log(LOWER(to_state))`,
+		`CREATE INDEX IF NOT EXISTS idx_issue_state_log_from_state_lower ON issue_state_log(LOWER(from_state))`,
 		`CREATE INDEX IF NOT EXISTS idx_pm_reports_date ON pm_reports(date)`,
 
 		// bot_configs table — stores PM-editable bot prompts
