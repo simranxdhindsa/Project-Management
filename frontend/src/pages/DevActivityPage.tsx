@@ -33,11 +33,11 @@ function stateCfg(state: string): StateConfig {
 }
 
 const VIEWS = [
+  { id: 'report',  label: 'Dev Report',       desc: 'Completion analytics' },
   { id: 'feed',    label: 'Activity Feed',    desc: 'Per-assignee accordion' },
   { id: 'cards',   label: 'Developer Cards',  desc: 'Bento grid with metrics' },
   { id: 'log',     label: 'Transition Log',   desc: 'Audit table, exportable' },
   { id: 'heatmap', label: 'Lifecycle Heatmap',desc: 'State coverage grid' },
-  { id: 'report',  label: 'Dev Report',       desc: 'Completion analytics' },
 ] as const
 type ViewId = typeof VIEWS[number]['id']
 
@@ -1276,7 +1276,7 @@ interface Props {
 }
 
 export function DevActivityPage({ initialView }: Props) {
-  const [view, setView] = usePersistedState<ViewId>(PERSIST.DEV_ACTIVITY_VIEW, 'feed', { validate: VIEWS.map(v => v.id) as string[] })
+  const [view, setView] = usePersistedState<ViewId>(PERSIST.DEV_ACTIVITY_VIEW, 'report', { validate: VIEWS.map(v => v.id) as string[] })
   const [sprints, setSprints] = useState<YouTrackSprint[]>([])
   const [activeSprint, setActiveSprint] = useState<YouTrackSprint | null>(null)
   const [sprintDropOpen, setSprintDropOpen] = useState(false)
