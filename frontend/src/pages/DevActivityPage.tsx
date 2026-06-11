@@ -118,11 +118,14 @@ function buildJourney(stints: IssueStint[], isLive: boolean): JourneyStep[] {
   return steps
 }
 
+// DEV_DONE_STATES: developer completed their work. Stage/Prod are QA pipeline — not "dev done" yet.
+const DEV_DONE_STATES = ['dev', 'mobile done', 'done', 'deployed', 'closed']
+
 interface DevStats { total: number; done: number; active: number; blocked: number; bounced: number; hoursWorked: number }
 function getDevStats(timelines: IssueTimeline[]): DevStats {
   const done = timelines.filter(t => {
     const s = getCurrentState(t).toLowerCase()
-    return ['dev', 'done', 'stage', 'prod', 'mobile done', 'deployed', 'closed'].some(k => s.includes(k))
+    return DEV_DONE_STATES.some(k => s.includes(k))
   }).length
   const active = timelines.filter(t => t.is_live).length
   const blocked = timelines.filter(t => getCurrentState(t).toLowerCase() === 'blocked').length
@@ -142,6 +145,8 @@ function devInitials(name: string): string {
 }
 
 function isBackwardTransition(from: string, to: string): boolean {
+  // Blocked is a side-lane state — moving out of it (to In Progress, To Do, etc.) is never a regression
+  if (from.toLowerCase() === 'blocked') return false
   const fromIdx = WORKFLOW_ORDER.findIndex(s => from.toLowerCase().includes(s.toLowerCase()))
   const toIdx   = WORKFLOW_ORDER.findIndex(s => to.toLowerCase().includes(s.toLowerCase()))
   if (fromIdx === -1 || toIdx === -1) return false
@@ -195,9 +200,13 @@ function DaTicketId({ id, href }: { id: string; href?: string }) {
 }
 
 function DaPriDot({ priority }: { priority: string }) {
+  // Don't render a dot when priority is the generic fallback — it adds no information
+  if (!priority || priority === 'Other' || priority === 'Normal' || priority === 'Medium') return null
   const c = priority === 'Critical' ? '#ef4444'
           : priority === 'Major'    ? '#f59e0b'
-          : priority === 'Normal'   ? 'var(--color-primary)'
+          : priority === 'P0'       ? '#ef4444'
+          : priority === 'P1'       ? '#f59e0b'
+          : priority === 'P2'       ? 'var(--color-primary)'
           : '#94a3b8'
   return <span className="da-pri-dot" style={{ background: c, boxShadow: `0 0 4px ${c}` }} title={priority} />
 }
@@ -231,13 +240,13 @@ function DaJourneyChain({ steps }: { steps: JourneyStep[] }) {
 
 function DaSummaryBar({ timelines }: { timelines: IssueTimeline[] }) {
   const total   = timelines.length
-  const done    = timelines.filter(t => { const s = getCurrentState(t).toLowerCase(); return ['dev','done','stage','prod','mobile done','deployed'].some(k => s.includes(k)) }).length
+  const done    = timelines.filter(t => { const s = getCurrentState(t).toLowerCase(); return DEV_DONE_STATES.some(k => s.includes(k)) }).length
   const active  = timelines.filter(t => t.is_live).length
   const blocked = timelines.filter(t => getCurrentState(t).toLowerCase() === 'blocked').length
   const bounced = timelines.filter(t => (t.moved_back_count ?? 0) > 0).length
   const chips = [
-    { label: 'Touched',  value: total,   color: 'rgba(255,255,255,0.85)', icon: '🎯' },
-    { label: 'Done',     value: done,    color: '#4ade80',                icon: '✅' },
+    { label: 'Touched',   value: total,   color: 'rgba(255,255,255,0.85)', icon: '🎯' },
+    { label: 'Dev Done',  value: done,    color: '#4ade80',                icon: '✅' },
     { label: 'Active',   value: active,  color: 'var(--color-primary-light)', icon: '🔄' },
     { label: 'Blocked',  value: blocked, color: '#f87171',                icon: '⛔' },
     { label: 'Bounced',  value: bounced, color: '#fb923c',                icon: '↩' },
@@ -332,9 +341,10 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter, dateRange }
   const [openDevs, setOpenDevs] = useState<Record<string, boolean>>({})
   const [expandedTicket, setExpandedTicket] = useState<string | null>(null)
 
-  // Group by assignee
+  // Group by assignee — exclude 0-stint YT-enriched issues that have no state log data
   const devGroups = useMemo(() => {
-    const filtered = assigneeFilter ? timelines.filter(t => t.assignee === assigneeFilter) : timelines
+    const withActivity = timelines.filter(t => (t.stints?.length ?? 0) > 0 || t.is_live)
+    const filtered = assigneeFilter ? withActivity.filter(t => t.assignee === assigneeFilter) : withActivity
     const map = new Map<string, IssueTimeline[]>()
     for (const t of filtered) {
       if (!map.has(t.assignee)) map.set(t.assignee, [])
@@ -389,7 +399,7 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter, dateRange }
                 <span className="da-dev-name">{devName}</span>
                 <div className="da-dev-stats">
                   {[
-                    { v: stats.done,    c: '#4ade80', l: 'done'    },
+                    { v: stats.done,    c: '#4ade80', l: 'dev done' },
                     { v: stats.active,  c: 'var(--color-primary-light)', l: 'active'  },
                     { v: stats.blocked, c: '#f87171', l: 'blocked' },
                     { v: stats.bounced, c: '#fb923c', l: 'bounced' },
@@ -500,7 +510,8 @@ function DeveloperCardsView({ timelines, onOpenDetail, assigneeFilter, dateRange
   const [expandedDev, setExpandedDev] = useState<string | null>(null)
 
   const devGroups = useMemo(() => {
-    const filtered = assigneeFilter ? timelines.filter(t => t.assignee === assigneeFilter) : timelines
+    const withActivity = timelines.filter(t => (t.stints?.length ?? 0) > 0 || t.is_live)
+    const filtered = assigneeFilter ? withActivity.filter(t => t.assignee === assigneeFilter) : withActivity
     const map = new Map<string, IssueTimeline[]>()
     for (const t of filtered) {
       if (!map.has(t.assignee)) map.set(t.assignee, [])
@@ -548,10 +559,10 @@ function DeveloperCardsView({ timelines, onOpenDetail, assigneeFilter, dateRange
 
               <div className="da-card-kpis">
                 {[
-                  { label: 'Done',    value: stats.done,    color: '#4ade80', icon: '✅' },
-                  { label: 'Active',  value: stats.active,  color: 'var(--color-primary-light)', icon: '🔄' },
-                  { label: 'Blocked', value: stats.blocked, color: '#f87171', icon: '⛔' },
-                  { label: 'Bounced', value: stats.bounced, color: '#fb923c', icon: '↩' },
+                  { label: 'Dev Done', value: stats.done,    color: '#4ade80', icon: '✅' },
+                  { label: 'Active',   value: stats.active,  color: 'var(--color-primary-light)', icon: '🔄' },
+                  { label: 'Blocked',  value: stats.blocked, color: '#f87171', icon: '⛔' },
+                  { label: 'Bounced',  value: stats.bounced, color: '#fb923c', icon: '↩' },
                 ].map(c => (
                   <div key={c.label} className="da-card-kpi">
                     <span className="da-card-kpi-icon">{c.icon}</span>
@@ -813,9 +824,10 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter, dateRan
   }, [timelines])
 
   const filteredTickets = useMemo(() => {
+    const withActivity = timelines.filter(t => (t.stints?.length ?? 0) > 0 || t.is_live)
     const byDev = (selectedDev || assigneeFilter)
-      ? timelines.filter(t => t.assignee === (selectedDev || assigneeFilter))
-      : timelines
+      ? withActivity.filter(t => t.assignee === (selectedDev || assigneeFilter))
+      : withActivity
     return [...byDev].sort((a, b) => {
       if (sort === 'Total Time') return (b.total_hours ?? 0) - (a.total_hours ?? 0)
       if (sort === 'Bounce Count') return (b.moved_back_count ?? 0) - (a.moved_back_count ?? 0)
@@ -823,28 +835,27 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter, dateRan
     })
   }, [timelines, selectedDev, assigneeFilter, sort])
 
-  // For heatmap cells: "In Progress" = total stint hours; current state = highlighted
-  function getCellHours(t: IssueTimeline, state: string): number | null {
-    const stintStates = ['In Progress']
-    if (stintStates.some(s => state.toLowerCase().includes(s.toLowerCase()))) {
-      return t.total_hours || null
+  // For heatmap cells: In Progress = actual hours (from stints); other states = presence only (no fake hours)
+  function getCellData(t: IssueTimeline, state: string): { hours: number | null; isPresent: boolean } {
+    if (state.toLowerCase().includes('in progress')) {
+      const h = t.total_hours || null
+      return { hours: h, isPresent: !!h }
     }
-    // Check if this state appears in the journey
     const stints = t.stints ?? []
-    if (state === getCurrentState(t)) return null // current state, no duration yet
+    const isCurrent = getCurrentState(t).toLowerCase().includes(state.toLowerCase())
     const appearsInJourney = stints.some(s => s.exited_to?.toLowerCase().includes(state.toLowerCase()))
-    return appearsInJourney ? 1 : null // presence marker
+    return { hours: null, isPresent: isCurrent || appearsInJourney }
   }
 
   const maxH = Math.max(...timelines.map(t => t.total_hours ?? 0), 1)
 
-  // Bottleneck: cumulative hours per state
+  // Bottleneck: cumulative In Progress hours per state (presence-only states contribute 0)
   const bottleneck = useMemo(() => {
     const totals: Record<string, number> = {}
     for (const state of HEATMAP_STATES) {
       totals[state] = timelines.reduce((sum, t) => {
-        const h = getCellHours(t, state)
-        return sum + (h ?? 0)
+        const { hours } = getCellData(t, state)
+        return sum + (hours ?? 0)
       }, 0)
     }
     return totals
@@ -951,32 +962,35 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter, dateRan
 
                   {/* State cells */}
                   {HEATMAP_STATES.map(state => {
-                    const hours = getCellHours(ticket, state)
+                    const { hours, isPresent } = getCellData(ticket, state)
                     const isCurrent = getCurrentState(ticket).toLowerCase().includes(state.toLowerCase())
                     const colors = hours != null && hours > 0 ? heatColor(hours, maxH) : null
                     const isHov = hoveredCell?.ticketId === ticket.issue_id && hoveredCell?.state === state
                     return (
-                      <div key={state} className={`da-heatmap-cell${colors ? ' has-data' : ''}`}
+                      <div key={state} className={`da-heatmap-cell${colors ? ' has-data' : isPresent ? ' is-present' : ''}`}
                         style={{
                           background: colors ? colors.bg : 'transparent',
-                          border: colors ? `1px solid ${colors.border}` : '1px dashed rgba(255,255,255,0.1)',
+                          border: colors ? `1px solid ${colors.border}` : isPresent ? `1px solid ${stateCfg(state).color}44` : '1px dashed rgba(255,255,255,0.1)',
                           boxShadow: isCurrent ? `0 0 8px ${stateCfg(state).color}55` : 'none',
                         }}
                         onMouseEnter={() => setHoveredCell({ ticketId: ticket.issue_id, state })}
                         onMouseLeave={() => setHoveredCell(null)}
-                        onClick={() => { if (colors) onOpenDetail(ticket.issue_id) }}>
+                        onClick={() => { if (colors || isPresent) onOpenDetail(ticket.issue_id) }}>
                         {colors && (
                           <span className="da-heatmap-cell-dur" style={{ color: colors.text }}>
                             {fmtH(hours)}
                           </span>
                         )}
+                        {!colors && isPresent && (
+                          <span className="da-heatmap-cell-dot" style={{ background: stateCfg(state).color }} />
+                        )}
                         {ticket.is_live && isCurrent && (
                           <span className="da-heatmap-live-dot" />
                         )}
-                        {isHov && colors && (
+                        {isHov && (colors || isPresent) && (
                           <div className="da-heatmap-tooltip">
                             <div className="da-heatmap-tooltip-state" style={{ color: stateCfg(state).color }}>{state}</div>
-                            <div className="da-heatmap-tooltip-info">{fmtH(hours)} · {ticket.issue_id}</div>
+                            <div className="da-heatmap-tooltip-info">{hours != null ? fmtH(hours) : 'visited'} · {ticket.issue_id}</div>
                           </div>
                         )}
                       </div>
@@ -1356,7 +1370,7 @@ export function DevActivityPage({ initialView }: Props) {
       const { sinceMs: sMs, untilMs: uMs } = getDateRange(dateRange, customFrom, customTo)
       const [tlRes, ttRes] = await Promise.allSettled([
         api.getIssueTimelines(sMs, uMs),
-        activeSprint?.id ? api.getTimeTracking({ sprint_id: activeSprint.id }) : Promise.resolve({ data: [] }),
+        activeSprint?.id ? api.getTimeTracking({ sprint_id: activeSprint.id }) : api.getTimeTracking({}),
       ])
       if (tlRes.status === 'fulfilled') {
         const data = (tlRes.value as any)?.data as IssueTimeline[] ?? []

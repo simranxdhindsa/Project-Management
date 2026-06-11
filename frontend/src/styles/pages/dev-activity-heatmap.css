@@ -238,8 +238,17 @@
   transition: background 130ms;
 }
 
-.da-heatmap-cell.has-data {
+.da-heatmap-cell.has-data,
+.da-heatmap-cell.is-present {
   cursor: pointer;
+}
+
+.da-heatmap-cell-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  opacity: 0.7;
+  flex-shrink: 0;
 }
 
 .da-heatmap-cell-dur {
