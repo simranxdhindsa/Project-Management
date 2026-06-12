@@ -2639,6 +2639,158 @@ func (h *ReportHandler) GetSprintQASummary(w http.ResponseWriter, r *http.Reques
 	sendJSON(w, http.StatusOK, Response{Success: true, Data: result})
 }
 
+// ─── Sprint Radar handlers ────────────────────────────────────────────────────
+
+// GetSprintRadar returns tier-classified sprint issues and active alerts.
+// GET /api/reports/sprint-radar?since=<ms>&until=<ms>
+func (h *ReportHandler) GetSprintRadar(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+
+	q := r.URL.Query()
+	var since, until *time.Time
+	if s := q.Get("since"); s != "" {
+		if ms, err := strconv.ParseInt(s, 10, 64); err == nil {
+			t := time.UnixMilli(ms)
+			since = &t
+		}
+	}
+	if u := q.Get("until"); u != "" {
+		if ms, err := strconv.ParseInt(u, 10, 64); err == nil {
+			t := time.UnixMilli(ms)
+			until = &t
+		}
+	}
+
+	issues, err := h.reportRepo.GetSprintRadarIssues(r.Context(), since, until)
+	if err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: err.Error()})
+		return
+	}
+
+	alerts, err := h.reportRepo.GetSprintAlerts(r.Context(), user.ID)
+	if err != nil {
+		alerts = []map[string]interface{}{}
+	}
+
+	// Build tier buckets and health stats
+	type health struct {
+		CriticalTotal int      `json:"critical_total"`
+		CriticalDone  int      `json:"critical_done"`
+		UrgentTotal   int      `json:"urgent_total"`
+		UrgentDone    int      `json:"urgent_done"`
+		NormalTotal   int      `json:"normal_total"`
+		NormalDone    int      `json:"normal_done"`
+		AtRisk        []string `json:"at_risk"`
+	}
+
+	var tier1, tier2, tier3, tier4, regressions []database.RadarIssue
+	h24ago := time.Now().Add(-24 * time.Hour)
+	stats := health{}
+
+	for _, ri := range issues {
+		switch ri.Tier {
+		case 1:
+			tier1 = append(tier1, ri)
+			stats.CriticalTotal++
+			if ri.IsDone {
+				stats.CriticalDone++
+			} else if ri.StateEnteredAt.Before(h24ago) {
+				stats.AtRisk = append(stats.AtRisk, ri.IssueID)
+			}
+		case 2:
+			tier2 = append(tier2, ri)
+			stats.UrgentTotal++
+			if ri.IsDone {
+				stats.UrgentDone++
+			} else if ri.StateEnteredAt.Before(h24ago) {
+				stats.AtRisk = append(stats.AtRisk, ri.IssueID)
+			}
+		case 3:
+			tier3 = append(tier3, ri)
+		case 0:
+			regressions = append(regressions, ri)
+		default:
+			tier4 = append(tier4, ri)
+			stats.NormalTotal++
+			if ri.IsDone {
+				stats.NormalDone++
+			}
+		}
+	}
+
+	if tier1 == nil {
+		tier1 = []database.RadarIssue{}
+	}
+	if tier2 == nil {
+		tier2 = []database.RadarIssue{}
+	}
+	if tier3 == nil {
+		tier3 = []database.RadarIssue{}
+	}
+	if tier4 == nil {
+		tier4 = []database.RadarIssue{}
+	}
+	if regressions == nil {
+		regressions = []database.RadarIssue{}
+	}
+	if stats.AtRisk == nil {
+		stats.AtRisk = []string{}
+	}
+
+	sendJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data: map[string]interface{}{
+			"tier1":       tier1,
+			"tier2":       tier2,
+			"tier3":       tier3,
+			"tier4":       tier4,
+			"regressions": regressions,
+			"health":      stats,
+			"alerts":      alerts,
+		},
+	})
+}
+
+// DismissSprintAlert dismisses a single sprint alert.
+// POST /api/reports/sprint-alerts/{id}/dismiss
+func (h *ReportHandler) DismissSprintAlert(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+	vars := mux.Vars(r)
+	id, err := strconv.Atoi(vars["id"])
+	if err != nil {
+		sendJSON(w, http.StatusBadRequest, Response{Success: false, Message: "invalid alert id"})
+		return
+	}
+	if err := h.reportRepo.DismissSprintAlert(r.Context(), user.ID, id); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: err.Error()})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true})
+}
+
+// DismissAllSprintAlerts dismisses all active alerts for the current user.
+// POST /api/reports/sprint-alerts/dismiss-all
+func (h *ReportHandler) DismissAllSprintAlerts(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUserFromContext(r)
+	if user == nil {
+		sendJSON(w, http.StatusUnauthorized, Response{Success: false, Message: "Unauthorized"})
+		return
+	}
+	if err := h.reportRepo.DismissAllSprintAlerts(r.Context(), user.ID); err != nil {
+		sendJSON(w, http.StatusInternalServerError, Response{Success: false, Message: err.Error()})
+		return
+	}
+	sendJSON(w, http.StatusOK, Response{Success: true})
+}
+
 // ResetStateLog deletes all rows from issue_state_log so tracking starts fresh.
 // After this, only real webhook events will populate the table.
 // DELETE /api/reports/reset-state-log

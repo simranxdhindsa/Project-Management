@@ -409,6 +409,9 @@ func main() {
 	reportRoutes.HandleFunc("/blocker-sla/config", reportHandler.SaveEscalationConfig).Methods("POST")
 	reportRoutes.HandleFunc("/releases", reportHandler.GetReleases).Methods("GET")
 	reportRoutes.HandleFunc("/dependencies", reportHandler.GetIssueDependencies).Methods("GET")
+	reportRoutes.HandleFunc("/sprint-radar", reportHandler.GetSprintRadar).Methods("GET")
+	reportRoutes.HandleFunc("/sprint-alerts/dismiss-all", reportHandler.DismissAllSprintAlerts).Methods("POST")
+	reportRoutes.HandleFunc("/sprint-alerts/{id}/dismiss", reportHandler.DismissSprintAlert).Methods("POST")
 
 	// DayTrack routes (protected)
 	dayTrackHandler := handlers.NewDayTrackHandler()

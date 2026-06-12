@@ -1376,6 +1376,22 @@ class ApiService {
     })
   }
 
+  async getSprintRadar(sinceMs?: number, untilMs?: number) {
+    const params = new URLSearchParams()
+    if (sinceMs) params.set('since', String(sinceMs))
+    if (untilMs) params.set('until', String(untilMs))
+    const qs = params.toString()
+    return this.request<SprintRadarData>(`/reports/sprint-radar${qs ? `?${qs}` : ''}`)
+  }
+
+  async dismissSprintAlert(alertId: number) {
+    return this.request<void>(`/reports/sprint-alerts/${alertId}/dismiss`, { method: 'POST' })
+  }
+
+  async dismissAllSprintAlerts() {
+    return this.request<void>('/reports/sprint-alerts/dismiss-all', { method: 'POST' })
+  }
+
   async undismissAlert(issueID: string) {
     return this.request<void>(`/reports/alerts/dismiss/${encodeURIComponent(issueID)}`, { method: 'DELETE' })
   }
@@ -2266,6 +2282,7 @@ export interface IssueTimeline {
   issue_summary: string
   assignee: string
   priority: string
+  issue_type: string
   pinned: boolean
   total_stints: number
   total_hours: number
@@ -2753,6 +2770,56 @@ export interface PersonUpdate {
   raw_text: string
   sections: UpdateSection[]
   is_owner: boolean
+}
+
+// ── Sprint Pulse / Radar ──────────────────────────────────────────────────────
+
+export interface RadarIssue {
+  issue_id: string
+  issue_summary: string
+  assignee: string
+  priority: string
+  issue_type: string
+  current_state: string
+  state_entered_at: string
+  hours_in_state: number
+  is_done: boolean
+  tier: number  // 0=Regression 1=Critical 2=Urgent 3=Scheduled 4=Normal
+}
+
+export interface SprintAlert {
+  id: number
+  issue_id: string
+  issue_summary: string
+  tier: number
+  priority: string
+  issue_type: string
+  current_state: string
+  assignee: string
+  hours_in_state: number
+  message: string
+  created_at: string
+  slack_notified: boolean
+}
+
+export interface SprintHealthStats {
+  critical_total: number
+  critical_done: number
+  urgent_total: number
+  urgent_done: number
+  normal_total: number
+  normal_done: number
+  at_risk: string[]
+}
+
+export interface SprintRadarData {
+  tier1: RadarIssue[]
+  tier2: RadarIssue[]
+  tier3: RadarIssue[]
+  tier4: RadarIssue[]
+  regressions: RadarIssue[]
+  health: SprintHealthStats
+  alerts: SprintAlert[]
 }
 
 export const standupApi = {

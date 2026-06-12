@@ -1031,6 +1031,27 @@ type_name: MUST exactly match one value from the available types list. REQUIRED.
 assignee_login: Use login from the users list only if a person's name appears in the input. Otherwise "".
 sprint_id: ID of the most recent non-completed sprint from the sprints list. Otherwise "".$$
 WHERE bot_type = 'ticket_parser'`,
+
+		// Sprint Pulse: SLA alert tracking per user+issue+tier
+		`CREATE TABLE IF NOT EXISTS sprint_alerts (
+			id              SERIAL PRIMARY KEY,
+			user_id         VARCHAR(255) NOT NULL,
+			issue_id        VARCHAR(255) NOT NULL,
+			issue_summary   TEXT NOT NULL DEFAULT '',
+			tier            INTEGER NOT NULL,
+			priority        VARCHAR(50) NOT NULL DEFAULT '',
+			issue_type      VARCHAR(50) NOT NULL DEFAULT '',
+			current_state   VARCHAR(100) NOT NULL DEFAULT '',
+			assignee        VARCHAR(255) NOT NULL DEFAULT '',
+			hours_in_state  FLOAT NOT NULL DEFAULT 0,
+			message         TEXT NOT NULL DEFAULT '',
+			created_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			dismissed_at    TIMESTAMP WITH TIME ZONE,
+			slack_notified  BOOLEAN NOT NULL DEFAULT FALSE,
+			UNIQUE(user_id, issue_id, tier)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sprint_alerts_user_id ON sprint_alerts(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sprint_alerts_active ON sprint_alerts(user_id, dismissed_at) WHERE dismissed_at IS NULL`,
 	}
 
 	for i, migration := range migrations {
