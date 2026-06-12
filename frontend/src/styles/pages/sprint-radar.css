@@ -359,6 +359,28 @@
 
 [data-theme="light"] .sr-issue-id { color: #4f46e5; }
 
+/* button-reset + clickable overrides */
+.sr-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.sr-link:hover { text-decoration-style: solid; }
+
+.sr-title-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.sr-title-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
 .sr-issue-summary {
   flex: 1;
   font-size: 12px;
@@ -605,7 +627,10 @@
   border: 1px solid rgba(245,158,11,0.2);
   border-radius: 4px;
   padding: 2px 7px;
+  cursor: pointer;
+  transition: background 0.12s;
 }
+.sr-at-risk-id:hover { background: rgba(245,158,11,0.2); text-decoration: underline; text-underline-offset: 2px; }
 
 /* summary breakdown */
 

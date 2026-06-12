@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ChevronDown, Check, RefreshCw, GitBranch,
-  BarChart2, Zap, Target, Activity, X, GitMerge,
+  BarChart2, Zap, Target, Activity, X, GitMerge, Radar,
 } from 'lucide-react'
 import api from '@/services/api'
 import type {
@@ -11,7 +11,7 @@ import type {
   FeatureGroup, PriorityTag,
 } from '@/services/api'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
-import { VelocityTab, BurndownTab } from '@/components/PMFeatureTabs'
+import { SprintPulseView } from './SprintRadarPage'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '@/components/HoverCard'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import '../styles/pages/dashboard.css'
@@ -21,14 +21,13 @@ import '../styles/pages/dashboard.css'
 const SPRINT_ID_KEY   = 'pm_active_sprint_id'
 const SPRINT_NAME_KEY = 'pm_active_sprint_name'
 
-type DesignMode = 'velocity' | 'bento' | 'ops' | 'sprint-velocity' | 'burndown'
+type DesignMode = 'velocity' | 'bento' | 'ops' | 'sprint-pulse'
 
 const DESIGN_MODES: { id: DesignMode; label: string; icon: typeof Activity }[] = [
-  { id: 'velocity',        label: 'Velocity',        icon: Activity },
-  { id: 'bento',           label: 'Bento Grid',      icon: BarChart2 },
-  { id: 'ops',             label: 'Ops Command',     icon: Zap },
-  { id: 'sprint-velocity', label: 'Sprint Velocity', icon: Target },
-  { id: 'burndown',        label: 'Burndown',        icon: GitMerge },
+  { id: 'velocity',     label: 'Velocity',     icon: Activity },
+  { id: 'bento',        label: 'Bento Grid',   icon: BarChart2 },
+  { id: 'ops',          label: 'Ops Command',  icon: Zap },
+  { id: 'sprint-pulse', label: 'Sprint Pulse', icon: Radar },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -2263,19 +2262,26 @@ export function SprintDashboardPage() {
         </div>
       )}
 
-      {/* Skeleton views while loading */}
-      {loading && (
+      {/* Skeleton views while loading board data */}
+      {loading && designMode !== 'sprint-pulse' && (
         <div className="db-content">
-          {designMode === 'velocity'        && <SkeletonVelocity />}
-          {designMode === 'bento'           && <SkeletonBento />}
-          {designMode === 'ops'             && <SkeletonOps />}
-          {designMode === 'sprint-velocity' && <SkeletonVelocity />}
-          {designMode === 'burndown'        && <SkeletonVelocity />}
+          {designMode === 'velocity' && <SkeletonVelocity />}
+          {designMode === 'bento'    && <SkeletonBento />}
+          {designMode === 'ops'      && <SkeletonOps />}
         </div>
       )}
 
-      {/* Design views */}
-      {!loading && boardData && (
+      {/* Sprint Pulse — loads its own data, doesn't need boardData */}
+      {designMode === 'sprint-pulse' && (
+        <SprintPulseView
+          activeSprint={activeSprint}
+          onTitleClick={openIssueDetail}
+          onIdClick={openInYt}
+        />
+      )}
+
+      {/* Board design views */}
+      {!loading && boardData && designMode !== 'sprint-pulse' && (
         <div className="db-content">
           {designMode === 'velocity' && (
             <Design1
@@ -2306,16 +2312,6 @@ export function SprintDashboardPage() {
               onIdClick={openInYt}
               sprintId={activeSprint?.id}
             />
-          )}
-          {designMode === 'sprint-velocity' && (
-            <div style={{ padding: '0 4px' }}>
-              <VelocityTab hideControls />
-            </div>
-          )}
-          {designMode === 'burndown' && (
-            <div style={{ padding: '0 4px' }}>
-              <BurndownTab sprints={sprints} activeSprint={activeSprint} />
-            </div>
           )}
         </div>
       )}

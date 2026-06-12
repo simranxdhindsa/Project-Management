@@ -50,7 +50,6 @@ import {
   Activity,
   Zap,
   Palette,
-  Radar,
 } from 'lucide-react'
 import { PMAssistantTab } from './PMReportsPage'
 import { SprintDashboardPage } from './SprintDashboardPage'
@@ -61,7 +60,6 @@ import { DailyOpsPage } from './DailyOpsTab'
 import { BotConfigPage } from './BotConfigPage'
 import { AIAnalysisPage } from './AIAnalysisPage'
 import { DevActivityPage } from './DevActivityPage'
-import { SprintRadarPage } from './SprintRadarPage'
 import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
 import { SlackIntelligencePage } from './SlackIntelligencePage'
@@ -73,10 +71,10 @@ import { applyUserTheme } from '../utils/themeUtils'
 import { RightPanel } from '../components/notifications/RightPanel'
 import type { LocalNotification } from '../components/notifications/RightPanel'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme' | 'sprint-radar'
+type Page = 'dashboard' | 'board' | 'list' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations', 'sprint-radar']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -161,7 +159,6 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'activity': 'activity',
   'daytrack': 'daytrack',
   'theme': 'theme',
-  'sprint-radar': 'sprint-radar',
 }
 
 const PM_REPORTS_TABS = ['tracking', 'daily', 'assignees', 'dailyops', 'deployment'] as const
@@ -209,7 +206,7 @@ export default function Dashboard() {
     const path = location.pathname
     if (path === '/' || path === '') {
       const last = localStorage.getItem(PERSIST.LAST_PAGE) as Page | null
-      const valid: Page[] = ['board', 'list', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'dev-activity', 'integrations', 'settings', 'bots', 'theme', 'sprint-radar']
+      const valid: Page[] = ['board', 'list', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'dev-activity', 'integrations', 'settings', 'bots', 'theme']
       if (last && valid.includes(last)) {
         navigate(`/${last}`, { replace: true })
       }
@@ -287,7 +284,6 @@ export default function Dashboard() {
       'activity':       'Activity',
       'daytrack':       'DayTrack',
       'theme':          'Theme Customizer',
-      'sprint-radar':   'Sprint Pulse',
     }
     const title = PAGE_TITLES[currentPage] || 'Velocity'
     document.title = currentPage === 'dashboard' ? 'Velocity' : `${title} | Velocity`
@@ -661,13 +657,6 @@ export default function Dashboard() {
               <span>Dev Activity</span>
             </button>
             <button
-              className={`sidebar-nav-item ${currentPage === 'sprint-radar' ? 'active' : ''}`}
-              onClick={() => setCurrentPage('sprint-radar')}
-            >
-              <Radar size={20} />
-              <span>Sprint Pulse</span>
-            </button>
-            <button
               className={`sidebar-nav-item ${currentPage === 'pm-reports' ? 'active' : ''}`}
               onClick={() => setCurrentPage('pm-reports')}
             >
@@ -779,7 +768,6 @@ export default function Dashboard() {
             {currentPage === 'activity' && 'Activity'}
             {currentPage === 'daytrack' && 'DayTrack'}
             {currentPage === 'theme' && 'Theme'}
-            {currentPage === 'sprint-radar' && 'Sprint Pulse'}
           </h1>
         </div>
         <div className="header-center">
@@ -895,11 +883,6 @@ export default function Dashboard() {
         {mountedTabs.has('dev-activity') && (
           <div className={currentPage !== 'dev-activity' ? 'dash-tab-hidden' : undefined}>
             <DevActivityPage />
-          </div>
-        )}
-        {mountedTabs.has('sprint-radar') && (
-          <div className={currentPage !== 'sprint-radar' ? 'dash-tab-hidden' : undefined}>
-            <SprintRadarPage />
           </div>
         )}
         {mountedTabs.has('integrations') && (
