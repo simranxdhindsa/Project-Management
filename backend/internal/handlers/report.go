@@ -2028,10 +2028,11 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 				avatarURL = proxyBase + url.QueryEscape(base64.StdEncoding.EncodeToString([]byte(avatarURL)))
 			}
 		}
-		issueType := ""
+		typeFieldName := "Type"
 		if wfCfg != nil && wfCfg.HotfixRules.TypeFieldName != "" {
-			issueType = youtrack.GetCustomFieldValue(issue, wfCfg.HotfixRules.TypeFieldName)
+			typeFieldName = wfCfg.HotfixRules.TypeFieldName
 		}
+		issueType := youtrack.GetCustomFieldValue(issue, typeFieldName)
 
 		// Extract reporter / created_by
 		createdBy := ""
@@ -2217,19 +2218,6 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 					closedMover = mover
 				}
 
-				// ── Hotfix: active → deployed/verified directly (no dev_done before) ──
-				if fromRole == "active" && (toRole == "deployed" || toRole == "verified") {
-					devDoneHit := false
-					for _, prev := range logs {
-						if prev.TransitionedAt.Before(entry.TransitionedAt) && getStateRole(prev.ToState, wfCfg.ColumnHierarchy) == "dev_done" {
-							devDoneHit = true
-							break
-						}
-					}
-					if !devDoneHit {
-						isHotfix = true
-					}
-				}
 			}
 
 			// Ongoing stint: if ticket is currently in active state, account for time since stintStart
@@ -2249,13 +2237,9 @@ func (h *ReportHandler) GetSprintBoardStatus(w http.ResponseWriter, r *http.Requ
 			if len(verifiedSlots) >= 3 { verifiedOnProd = verifiedSlots[2] }
 			if verifiedOnProd == "" { verifiedOnProd = closedMover }
 
-			// Also check issue_type field for hotfix
-			if wfCfg.HotfixRules.TypeFieldName != "" {
-				for _, hv := range wfCfg.HotfixRules.HotfixValues {
-					if strings.EqualFold(issueType, hv) {
-						isHotfix = true
-					}
-				}
+			// is_hotfix is derived solely from the Type custom field
+			if strings.EqualFold(issueType, "Hotfix") {
+				isHotfix = true
 			}
 
 			// Cycle time: first active → first done (or now if still in progress)

@@ -1,16 +1,43 @@
-import { useState, useEffect, useCallback } from 'react'
-import { AlertTriangle, AlertCircle, CheckCircle2, Clock, RefreshCw, X, ChevronDown, ChevronRight, Zap } from 'lucide-react'
-import api from '@/services/api'
-import type { RadarIssue, SprintAlert, SprintHealthStats, SprintRadarData, YouTrackSprint } from '@/services/api'
+import { useState, useMemo } from 'react'
+import {
+  AlertTriangle, AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Zap, Clock,
+} from 'lucide-react'
+import type { SprintBoardStatusResponse, SprintBoardIssue, YouTrackSprint } from '@/services/api'
+import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import '@/styles/pages/sprint-radar.css'
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-function fmtHours(h: number): string {
+const DONE_ROLES = new Set(['dev_done', 'verified', 'deployed', 'closed'])
+const SLA_HOURS: Record<number, number> = { 1: 1, 2: 24 }
+
+// ── Pure helpers ──────────────────────────────────────────────────────────────
+
+function classifyTier(priority: string, issueType: string, isHotfix: boolean): number {
+  if (isHotfix) return 1
+  const p = priority.toLowerCase()
+  if (p === 'p0' || p === 'a0' || p === 'critical') return 1
+  const t = issueType.toLowerCase()
+  if (t === 'regression' || t.includes('regression')) return 0
+  if (p === 'p1' || p === 'a1' || p === 'major') return 2
+  if (p === 'p2' || p === 'a2') return 3
+  return 4
+}
+
+function priorityDotColor(priority: string, isHotfix: boolean): string {
+  if (isHotfix) return 'var(--color-danger)'
+  const p = priority.toLowerCase()
+  if (p === 'p0' || p === 'a0' || p === 'critical') return 'var(--color-danger)'
+  if (p === 'p1' || p === 'a1' || p === 'major') return 'var(--color-warning)'
+  if (p === 'p2' || p === 'a2') return 'var(--color-primary)'
+  return 'transparent'
+}
+
+function fmtH(h: number): string {
   if (h < 1) return `${Math.round(h * 60)}m`
   const d = Math.floor(h / 24)
-  const rem = h % 24
-  if (d > 0) return `${d}d ${Math.floor(rem)}h`
+  const hr = h % 24
+  if (d > 0) return `${d}d ${Math.floor(hr)}h`
   return `${Math.floor(h)}h ${Math.round((h % 1) * 60)}m`
 }
 
@@ -19,115 +46,128 @@ function fmtAge(h: number): string {
   return `${Math.floor(h / 24)}d`
 }
 
-const SLA: Record<number, number> = { 1: 1, 2: 24 }
+function ageClass(h: number): string {
+  if (h > 7 * 24) return 'sp-age-red'
+  if (h > 3 * 24) return 'sp-age-amber'
+  return 'sp-age-green'
+}
 
 function slaBreach(tier: number, h: number): boolean {
-  return SLA[tier] != null && h >= SLA[tier]
+  return SLA_HOURS[tier] != null && h >= SLA_HOURS[tier]
 }
 
 function slaRatio(tier: number, h: number): number {
-  return SLA[tier] != null ? Math.min(h / SLA[tier], 1) : 0
+  return SLA_HOURS[tier] != null ? Math.min(h / SLA_HOURS[tier], 1) : 0
 }
 
-function ageClass(h: number): string {
-  if (h > 7 * 24) return 'sr-age-red'
-  if (h > 3 * 24) return 'sr-age-amber'
-  return 'sr-age-green'
+function initials(name: string): string {
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
 }
 
-function typeBadgeClass(t: string): string {
-  const l = t.toLowerCase()
-  if (l === 'hotfix') return 'sr-type-hotfix'
-  if (l === 'regression') return 'sr-type-regression'
-  if (l === 'bug') return 'sr-type-bug'
-  if (l === 'feature') return 'sr-type-feature'
-  return 'sr-type-other'
+// ── Extended issue type ───────────────────────────────────────────────────────
+
+interface PulseIssue extends SprintBoardIssue {
+  tier: number
+  isDone: boolean
+  colRole: string
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function TypeBadge({ issueType }: { issueType: string }) {
-  if (!issueType) return null
-  const label = issueType.charAt(0).toUpperCase() + issueType.slice(1)
-  return <span className={`sr-type-badge ${typeBadgeClass(issueType)}`}>{label}</span>
+function PriorityDot({ color }: { color: string }) {
+  return <span className="sp-dot" style={{ background: color }} />
 }
 
-function SLATimer({ hours, tier, isDone }: { hours: number; tier: number; isDone: boolean }) {
-  if (isDone) return <span className="sr-sla-done">✓ done</span>
+function AssigneeAvatar({ name }: { name: string }) {
+  if (!name) return null
+  return <span className="sp-avatar">{initials(name)}</span>
+}
+
+function StateChip({ state, role }: { state: string; role: string }) {
+  const cls = role === 'active' ? 'sp-state-active'
+    : role === 'blocked' ? 'sp-state-blocked'
+    : DONE_ROLES.has(role) ? 'sp-state-done'
+    : 'sp-state-default'
+  return <span className={`sp-state ${cls}`}>{state}</span>
+}
+
+function SLABadge({ hours, tier, isDone }: { hours: number; tier: number; isDone: boolean }) {
+  if (isDone || !SLA_HOURS[tier]) return null
   const ratio = slaRatio(tier, hours)
   const breached = slaBreach(tier, hours)
-  const cls = breached ? 'sr-sla-breached' : ratio > 0.7 ? 'sr-sla-warn' : 'sr-sla-ok'
+  const cls = breached ? 'sp-sla-breach' : ratio > 0.7 ? 'sp-sla-warn' : 'sp-sla-ok'
   return (
-    <span className={`sr-sla-timer ${cls}`}>
-      <Clock size={10} />
-      {fmtHours(hours)}{breached && ' ⚠'}
+    <span className={`sp-sla ${cls}`}>
+      <Clock size={9} />
+      {fmtH(hours)}{breached && ' ⚠'}
     </span>
   )
 }
 
+function TypeBadge({ type, isHotfix }: { type: string; isHotfix: boolean }) {
+  if (isHotfix) return <span className="sp-tag sp-tag-hotfix">HOTFIX</span>
+  const t = type.toLowerCase()
+  if (t === 'regression') return <span className="sp-tag sp-tag-regression">REGRESSION</span>
+  if (t === 'bug') return <span className="sp-tag sp-tag-bug">BUG</span>
+  return null
+}
+
 interface IssueRowProps {
-  ri: RadarIssue
+  iss: PulseIssue
   onIdClick: (id: string, e: React.MouseEvent) => void
   onTitleClick: (id: string, e?: React.MouseEvent) => void
 }
 
-function IssueRow({ ri, onIdClick, onTitleClick }: IssueRowProps) {
-  const breached = !ri.is_done && slaBreach(ri.tier, ri.hours_in_state)
+function IssueRow({ iss, onIdClick, onTitleClick }: IssueRowProps) {
+  const dot = priorityDotColor(iss.priority, iss.is_hotfix)
+  const breached = !iss.isDone && slaBreach(iss.tier, iss.hours_in_state)
   return (
-    <div className={`sr-issue-row${breached ? ' sr-row-breach' : ''}`}>
-      <button
-        className="sr-issue-id sr-link"
-        onClick={e => onIdClick(ri.issue_id, e)}
-        title={`Open ${ri.issue_id} in YouTrack`}
-      >
-        {ri.issue_id}
+    <div className={`sp-issue-row${breached ? ' sp-row-breach' : ''}`}>
+      <PriorityDot color={dot} />
+      <button className="sp-id" onClick={e => onIdClick(iss.idReadable, e)}>{iss.idReadable}</button>
+      <TypeBadge type={iss.issue_type} isHotfix={iss.is_hotfix} />
+      <button className="sp-summary" onClick={e => onTitleClick(iss.idReadable, e)}>
+        {iss.summary}
       </button>
-      {ri.issue_type && <TypeBadge issueType={ri.issue_type} />}
-      <button
-        className="sr-issue-summary sr-title-link"
-        onClick={e => onTitleClick(ri.issue_id, e)}
-        title="Open issue details"
-      >
-        {ri.issue_summary}
-      </button>
-      <div className="sr-issue-meta">
-        <span className="sr-state">{ri.current_state}</span>
-        {ri.assignee && <span className="sr-assignee">{ri.assignee.split(' ')[0]}</span>}
-        <SLATimer hours={ri.hours_in_state} tier={ri.tier} isDone={ri.is_done} />
+      <div className="sp-meta">
+        <StateChip state={iss.current_state} role={iss.colRole} />
+        <AssigneeAvatar name={iss.assignee} />
+        <SLABadge hours={iss.hours_in_state} tier={iss.tier} isDone={iss.isDone} />
       </div>
     </div>
   )
 }
 
-interface TierSectionProps {
+interface TierBlockProps {
   title: string
   tier: number
-  issues: RadarIssue[]
+  issues: PulseIssue[]
   defaultOpen?: boolean
   onIdClick: (id: string, e: React.MouseEvent) => void
   onTitleClick: (id: string, e?: React.MouseEvent) => void
 }
 
-function TierSection({ title, tier, issues, defaultOpen = true, onIdClick, onTitleClick }: TierSectionProps) {
+function TierBlock({ title, tier, issues, defaultOpen = true, onIdClick, onTitleClick }: TierBlockProps) {
   const [open, setOpen] = useState(defaultOpen)
-  const breachedCount = issues.filter(r => !r.is_done && slaBreach(tier, r.hours_in_state)).length
-  const doneCount = issues.filter(r => r.is_done).length
-  const tierCls = tier === 1 ? 'sr-tier-critical' : tier === 2 ? 'sr-tier-urgent' : 'sr-tier-scheduled'
+  const active = issues.filter(i => !i.isDone)
+  const done = issues.filter(i => i.isDone)
+  const breached = active.filter(i => slaBreach(tier, i.hours_in_state))
+  const borderCls = tier === 1 ? 'sp-t1' : tier === 2 ? 'sp-t2' : tier === 3 ? 'sp-t3' : 'sp-t4'
 
   return (
-    <div className={`sr-tier-section ${tierCls}`}>
-      <button className="sr-tier-header" onClick={() => setOpen(o => !o)}>
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <span className="sr-tier-title">{title}</span>
-        <span className="sr-tier-count">{issues.length}</span>
-        {breachedCount > 0 && <span className="sr-breach-pill">{breachedCount} breached</span>}
-        {doneCount > 0 && <span className="sr-done-pill">{doneCount} done</span>}
+    <div className={`sp-tier ${borderCls}`}>
+      <button className="sp-tier-hd" onClick={() => setOpen(o => !o)}>
+        <span className="sp-tier-chevron">{open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
+        <span className="sp-tier-name">{title}</span>
+        <span className="sp-tier-active">{active.length} active</span>
+        {done.length > 0 && <span className="sp-tier-done">{done.length} done</span>}
+        {breached.length > 0 && <span className="sp-tier-breach">{breached.length} ⚠ SLA</span>}
       </button>
       {open && (
-        <div className="sr-tier-body">
+        <div className="sp-tier-body">
           {issues.length === 0
-            ? <span className="sr-empty">No issues in this tier</span>
-            : issues.map(ri => <IssueRow key={ri.issue_id} ri={ri} onIdClick={onIdClick} onTitleClick={onTitleClick} />)
+            ? <p className="sp-empty">No issues in this tier</p>
+            : issues.map(i => <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} />)
           }
         </div>
       )}
@@ -138,267 +178,232 @@ function TierSection({ title, tier, issues, defaultOpen = true, onIdClick, onTit
 function HealthBar({ label, done, total, color }: { label: string; done: number; total: number; color: string }) {
   const pct = total > 0 ? (done / total) * 100 : 0
   return (
-    <div className="sr-health-row">
-      <span className="sr-health-label">{label}</span>
-      <div className="sr-health-track">
-        <div className="sr-health-fill" style={{ width: `${pct}%`, background: color }} />
+    <div className="sp-hbar">
+      <span className="sp-hbar-label">{label}</span>
+      <div className="sp-hbar-track">
+        <div className="sp-hbar-fill" style={{ width: `${pct}%`, background: color }} />
       </div>
-      <span className="sr-health-frac" style={{ color }}>{done}<span className="sr-health-sep">/</span>{total}</span>
+      <span className="sp-hbar-frac" style={{ color }}>{done}<span className="sp-hbar-sep">/</span>{total}</span>
     </div>
   )
 }
 
-function AlertItem({ alert, onDismiss }: { alert: SprintAlert; onDismiss: (id: number) => void }) {
-  return (
-    <div className={`sr-alert-item ${alert.tier === 1 ? 'sr-alert-critical' : 'sr-alert-urgent'}`}>
-      <div className="sr-alert-body">
-        <span className="sr-alert-id">{alert.issue_id}</span>
-        <span className="sr-alert-msg">{alert.message}</span>
-      </div>
-      <button className="sr-alert-dismiss" onClick={() => onDismiss(alert.id)} title="Dismiss"><X size={12} /></button>
-    </div>
-  )
-}
-
-interface RegressionRowProps {
-  ri: RadarIssue
-  onIdClick: (id: string, e: React.MouseEvent) => void
-  onTitleClick: (id: string, e?: React.MouseEvent) => void
-}
-
-function RegressionRow({ ri, onIdClick, onTitleClick }: RegressionRowProps) {
-  return (
-    <div className="sr-reg-row">
-      <button className="sr-issue-id sr-link" onClick={e => onIdClick(ri.issue_id, e)}>{ri.issue_id}</button>
-      <span className={`sr-reg-age ${ageClass(ri.hours_in_state)}`}>{fmtAge(ri.hours_in_state)}</span>
-      <span className="sr-state">{ri.current_state}</span>
-      <span className="sr-assignee">{ri.assignee || '—'}</span>
-      {ri.priority && <span className="sr-priority-tag">{ri.priority}</span>}
-      <button className="sr-issue-summary sr-title-link sr-reg-summary" onClick={e => onTitleClick(ri.issue_id, e)}>
-        {ri.issue_summary}
-      </button>
-    </div>
-  )
-}
-
-// ── Main view (rendered inside SprintDashboardPage) ───────────────────────────
+// ── Main view ──────────────────────────────────────────────────────────────────
 
 export interface SprintPulseViewProps {
   activeSprint: YouTrackSprint | null
+  boardData: SprintBoardStatusResponse | null
+  boardLoading: boolean
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
 }
 
-export function SprintPulseView({ activeSprint, onTitleClick, onIdClick }: SprintPulseViewProps) {
-  const [data, setData] = useState<SprintRadarData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
-  const [showAlerts, setShowAlerts] = useState(true)
-  const [tier4Open, setTier4Open] = useState(false)
-  const [regsOpen, setRegsOpen] = useState(true)
+export function SprintPulseView({ activeSprint, boardData, boardLoading, onTitleClick, onIdClick }: SprintPulseViewProps) {
+  const { config: wfConfig } = useWorkflowConfig()
+  const [regOpen, setRegOpen] = useState(true)
+  const [t4Open, setT4Open] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      const since = activeSprint ? activeSprint.start : Date.now() - 30 * 24 * 60 * 60 * 1000
-      const until = activeSprint ? activeSprint.finish : undefined
-      const res = await api.getSprintRadar(since, until)
-      if (res?.data) {
-        setData(res.data)
-        setLastRefresh(new Date())
+  // Build role lookup from workflow config
+  const roleMap = useMemo(() => {
+    const m = new Map<string, string>()
+    wfConfig?.column_hierarchy?.forEach(col => {
+      m.set(col.state.toLowerCase(), col.role)
+      col.aliases?.forEach(a => m.set(a.toLowerCase(), col.role))
+    })
+    return m
+  }, [wfConfig])
+
+  // Build PulseIssue list from board data
+  const allIssues = useMemo((): PulseIssue[] => {
+    if (!boardData) return []
+    const out: PulseIssue[] = []
+    for (const col of boardData.columns) {
+      const colRole = roleMap.get(col.name.toLowerCase()) ?? ''
+      const isDone = DONE_ROLES.has(colRole)
+      for (const iss of col.issues) {
+        out.push({ ...iss, tier: classifyTier(iss.priority, iss.issue_type, iss.is_hotfix), isDone, colRole })
       }
-    } catch (e) {
-      console.error('[SprintPulse] load failed', e)
-    } finally {
-      setLoading(false)
     }
-  }, [activeSprint])
+    return out
+  }, [boardData, roleMap])
 
-  useEffect(() => {
-    setLoading(true)
-    load()
-  }, [load])
+  const tier1 = useMemo(() => allIssues.filter(i => i.tier === 1), [allIssues])
+  const tier2 = useMemo(() => allIssues.filter(i => i.tier === 2), [allIssues])
+  const tier3 = useMemo(() => allIssues.filter(i => i.tier === 3), [allIssues])
+  const tier4 = useMemo(() => allIssues.filter(i => i.tier === 4), [allIssues])
+  const regs  = useMemo(() => allIssues.filter(i => i.tier === 0).sort((a, b) => b.hours_in_state - a.hours_in_state), [allIssues])
 
-  // re-fetch every 5 min while mounted
-  useEffect(() => {
-    const t = setInterval(load, 5 * 60 * 1000)
-    return () => clearInterval(t)
-  }, [load])
+  const totalDone = allIssues.filter(i => i.isDone).length
+  const totalAll  = allIssues.length
+  const pct = totalAll > 0 ? Math.round((totalDone / totalAll) * 100) : 0
 
-  const handleDismiss = async (alertId: number) => {
-    await api.dismissSprintAlert(alertId)
-    setData(d => d ? { ...d, alerts: d.alerts.filter(a => a.id !== alertId) } : d)
-  }
+  const t1Breached = tier1.filter(i => !i.isDone && slaBreach(1, i.hours_in_state))
+  const t2Breached = tier2.filter(i => !i.isDone && slaBreach(2, i.hours_in_state))
+  const atRisk = allIssues.filter(i => i.is_delayed && !i.isDone)
 
-  const handleDismissAll = async () => {
-    await api.dismissAllSprintAlerts()
-    setData(d => d ? { ...d, alerts: [] } : d)
-  }
-
-  if (loading) {
+  if (!activeSprint) {
     return (
-      <div className="sr-loading">
-        <div className="sr-loading-spinner" />
-        Loading Sprint Pulse{activeSprint ? ` — ${activeSprint.name}` : ''}…
+      <div className="sp-no-sprint">
+        <Zap size={28} />
+        <p>Select a sprint to view Sprint Pulse</p>
       </div>
     )
   }
 
-  if (!data) {
-    return <div className="sr-empty-state">No sprint data available. Run an import first.</div>
+  if (boardLoading || !boardData) {
+    return (
+      <div className="sp-loading">
+        <div className="sp-spinner" />
+        Loading Sprint Pulse — {activeSprint.name}…
+      </div>
+    )
   }
 
-  const { tier1, tier2, tier3, tier4, regressions, alerts } = data
-  const h = data.health as SprintHealthStats
-  const activeAlerts = alerts.filter(a => a.tier === 1 || a.tier === 2)
-
-  const criticalBreached = tier1.filter(r => !r.is_done && slaBreach(1, r.hours_in_state)).length
-  const urgentBreached   = tier2.filter(r => !r.is_done && slaBreach(2, r.hours_in_state)).length
-
-  const totalDone = h.critical_done + h.urgent_done + h.normal_done
-  const totalAll  = h.critical_total + h.urgent_total + h.normal_total
-  const sprintPct = totalAll > 0 ? Math.round((totalDone / totalAll) * 100) : 0
-
   return (
-    <div className="sr-page">
+    <div className="sp-page">
 
-      {/* Alert strip */}
-      <div className="sr-alert-strip">
-        <div className="sr-strip-pills">
-          {criticalBreached > 0 && (
-            <span className="sr-strip-pill sr-pill-critical">
-              <AlertTriangle size={13} /> {criticalBreached} CRITICAL breached
-            </span>
+      {/* ── Status strip ─────────────────────────────── */}
+      <div className="sp-strip">
+        <div className="sp-strip-left">
+          {t1Breached.length > 0 && (
+            <span className="sp-pill sp-pill-crit"><AlertTriangle size={12} /> {t1Breached.length} CRITICAL SLA breached</span>
           )}
-          {urgentBreached > 0 && (
-            <span className="sr-strip-pill sr-pill-urgent">
-              <AlertCircle size={13} /> {urgentBreached} URGENT stalled
-            </span>
+          {t2Breached.length > 0 && (
+            <span className="sp-pill sp-pill-urg"><AlertCircle size={12} /> {t2Breached.length} urgent SLA stalled</span>
           )}
-          {criticalBreached === 0 && urgentBreached === 0 && (
-            <span className="sr-strip-pill sr-pill-ok">
-              <CheckCircle2 size={13} /> All SLAs on track
-            </span>
+          {t1Breached.length === 0 && t2Breached.length === 0 && (
+            <span className="sp-pill sp-pill-ok"><CheckCircle2 size={12} /> All SLAs on track</span>
           )}
-          <span className="sr-strip-pill sr-pill-neutral">
-            <Zap size={12} /> Sprint {sprintPct}% done
-          </span>
+          {atRisk.length > 0 && (
+            <span className="sp-pill sp-pill-delay"><AlertTriangle size={12} /> {atRisk.length} delayed</span>
+          )}
         </div>
-        <div className="sr-strip-actions">
-          <span className="sr-last-refresh">
-            {lastRefresh.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-          </span>
-          <button className="sr-refresh-btn" onClick={load} title="Refresh now"><RefreshCw size={13} /></button>
+        <div className="sp-strip-right">
+          <span className="sp-sprint-name">{activeSprint.name}</span>
+          <span className="sp-pct">{pct}% done</span>
+          <span className="sp-total">{totalDone}/{totalAll}</span>
         </div>
       </div>
 
-      {/* In-app alerts */}
-      {activeAlerts.length > 0 && showAlerts && (
-        <div className="sr-alerts-panel">
-          <div className="sr-alerts-header">
-            <span className="sr-alerts-title">Active Alerts ({activeAlerts.length})</span>
-            <div className="sr-alerts-actions">
-              <button className="sr-dismiss-all" onClick={handleDismissAll}>Dismiss all</button>
-              <button className="sr-collapse-alerts" onClick={() => setShowAlerts(false)}><X size={12} /></button>
-            </div>
-          </div>
-          {activeAlerts.map(a => <AlertItem key={a.id} alert={a} onDismiss={handleDismiss} />)}
-        </div>
-      )}
-      {activeAlerts.length > 0 && !showAlerts && (
-        <button className="sr-show-alerts-btn" onClick={() => setShowAlerts(true)}>
-          <AlertTriangle size={13} /> {activeAlerts.length} active alert{activeAlerts.length > 1 ? 's' : ''} hidden
-        </button>
-      )}
+      {/* ── Main grid ─────────────────────────────────── */}
+      <div className="sp-grid">
 
-      {/* 2-col grid */}
-      <div className="sr-main-grid">
+        {/* Left: tiers */}
+        <div className="sp-tiers">
+          <TierBlock title="CRITICAL / HOTFIX" tier={1} issues={tier1} defaultOpen onIdClick={onIdClick} onTitleClick={onTitleClick} />
+          <TierBlock title="URGENT" tier={2} issues={tier2} defaultOpen onIdClick={onIdClick} onTitleClick={onTitleClick} />
+          <TierBlock title="SCHEDULED" tier={3} issues={tier3} defaultOpen={false} onIdClick={onIdClick} onTitleClick={onTitleClick} />
 
-        <div className="sr-left">
-          <TierSection title="CRITICAL" tier={1} issues={tier1} defaultOpen onIdClick={onIdClick} onTitleClick={onTitleClick} />
-          <TierSection title="URGENT" tier={2} issues={tier2} defaultOpen onIdClick={onIdClick} onTitleClick={onTitleClick} />
-          <TierSection title="SCHEDULED" tier={3} issues={tier3} defaultOpen={false} onIdClick={onIdClick} onTitleClick={onTitleClick} />
-
-          <div className="sr-tier-section sr-tier-normal">
-            <button className="sr-tier-header" onClick={() => setTier4Open(o => !o)}>
-              {tier4Open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <span className="sr-tier-title">NORMAL</span>
-              <span className="sr-tier-count">{tier4.length}</span>
-              <span className="sr-done-pill">{tier4.filter(r => r.is_done).length} done</span>
+          {/* Tier 4 — collapsed by default */}
+          <div className="sp-tier sp-t4">
+            <button className="sp-tier-hd" onClick={() => setT4Open(o => !o)}>
+              <span className="sp-tier-chevron">{t4Open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
+              <span className="sp-tier-name">NORMAL</span>
+              <span className="sp-tier-active">{tier4.filter(i => !i.isDone).length} active</span>
+              <span className="sp-tier-done">{tier4.filter(i => i.isDone).length} done</span>
             </button>
-            {tier4Open && (
-              <div className="sr-tier-body">
-                {tier4.length === 0
-                  ? <span className="sr-empty">No normal-priority issues</span>
-                  : tier4.map(ri => <IssueRow key={ri.issue_id} ri={ri} onIdClick={onIdClick} onTitleClick={onTitleClick} />)}
+            {t4Open && (
+              <div className="sp-tier-body">
+                {tier4.map(i => <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} />)}
               </div>
             )}
           </div>
         </div>
 
-        <div className="sr-right">
-          <div className="sr-health-card">
-            <div className="sr-card-title">Sprint Health</div>
-            <div className="sr-health-bars">
-              <HealthBar label="Critical" done={h.critical_done} total={h.critical_total} color="var(--color-danger)" />
-              <HealthBar label="Urgent"   done={h.urgent_done}   total={h.urgent_total}   color="var(--color-warning)" />
-              <HealthBar label="Normal"   done={h.normal_done}   total={h.normal_total}   color="var(--color-success)" />
+        {/* Right: health panel */}
+        <div className="sp-panel">
+          <div className="sp-card">
+            <div className="sp-card-title">Sprint Health</div>
+            <div className="sp-hbars">
+              <HealthBar
+                label="Critical"
+                done={tier1.filter(i => i.isDone).length}
+                total={tier1.length}
+                color="var(--color-danger)"
+              />
+              <HealthBar
+                label="Urgent"
+                done={tier2.filter(i => i.isDone).length}
+                total={tier2.length}
+                color="var(--color-warning)"
+              />
+              <HealthBar
+                label="Normal"
+                done={tier4.filter(i => i.isDone).length}
+                total={tier4.length}
+                color="var(--color-success)"
+              />
             </div>
-            <div className="sr-health-total">
-              <span>{totalDone} / {totalAll} delivered</span>
-              <span className="sr-health-pct">{sprintPct}%</span>
+            <div className="sp-health-footer">
+              <span className="sp-health-label">{totalDone} / {totalAll} delivered</span>
+              <span className="sp-health-pct">{pct}%</span>
             </div>
           </div>
 
-          {h.at_risk.length > 0 && (
-            <div className="sr-at-risk-card">
-              <div className="sr-card-title">⚠ At Risk — no movement in 24h</div>
-              <div className="sr-at-risk-list">
-                {h.at_risk.map(id => (
-                  <button key={id} className="sr-at-risk-id" onClick={e => onIdClick(id, e)}>{id}</button>
+          {atRisk.length > 0 && (
+            <div className="sp-card sp-card-risk">
+              <div className="sp-card-title">⚠ Delayed</div>
+              <div className="sp-risk-list">
+                {atRisk.slice(0, 8).map(i => (
+                  <button key={i.idReadable} className="sp-risk-id" onClick={e => onIdClick(i.idReadable, e)}>
+                    {i.idReadable}
+                  </button>
                 ))}
+                {atRisk.length > 8 && <span className="sp-risk-more">+{atRisk.length - 8} more</span>}
               </div>
             </div>
           )}
 
-          <div className="sr-summary-card">
-            <div className="sr-card-title">Priority Breakdown</div>
-            {[
-              { label: 'Critical / Hotfix', count: tier1.length, cls: 'sr-summary-critical' },
-              { label: 'Urgent (P1/A1)',    count: tier2.length, cls: 'sr-summary-urgent' },
-              { label: 'Scheduled (P2/A2)', count: tier3.length, cls: 'sr-summary-scheduled' },
-              { label: 'Normal',            count: tier4.length, cls: 'sr-summary-normal' },
-              { label: 'Regressions',       count: regressions.length, cls: 'sr-summary-regression' },
-            ].map(row => (
-              <div key={row.label} className="sr-summary-row">
-                <span className={`sr-summary-dot ${row.cls}`} />
-                <span className="sr-summary-label">{row.label}</span>
-                <span className="sr-summary-num">{row.count}</span>
+          <div className="sp-card">
+            <div className="sp-card-title">Breakdown</div>
+            {([
+              { label: 'Critical / Hotfix', n: tier1.length, color: 'var(--color-danger)' },
+              { label: 'Urgent (P1/A1)',    n: tier2.length, color: 'var(--color-warning)' },
+              { label: 'Scheduled (P2/A2)', n: tier3.length, color: 'var(--color-primary)' },
+              { label: 'Normal',            n: tier4.length, color: 'var(--text-muted)' },
+              { label: 'Regressions',       n: regs.length,  color: 'var(--color-warning)' },
+            ] as const).map(r => (
+              <div key={r.label} className="sp-bk-row">
+                <span className="sp-bk-dot" style={{ background: r.color }} />
+                <span className="sp-bk-label">{r.label}</span>
+                <span className="sp-bk-n">{r.n}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Regression table */}
-      <div className="sr-reg-section">
-        <button className="sr-reg-header" onClick={() => setRegsOpen(o => !o)}>
-          {regsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          <span className="sr-reg-title">REGRESSIONS</span>
-          <span className="sr-tier-count">{regressions.length}</span>
-          <span className="sr-reg-sub">oldest first</span>
+      {/* ── Regressions ──────────────────────────────── */}
+      <div className="sp-reg-wrap">
+        <button className="sp-reg-hd" onClick={() => setRegOpen(o => !o)}>
+          {regOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span className="sp-reg-title">REGRESSIONS</span>
+          <span className="sp-tier-active">{regs.filter(i => !i.isDone).length} active</span>
+          {regs.filter(i => i.isDone).length > 0 && (
+            <span className="sp-tier-done">{regs.filter(i => i.isDone).length} done</span>
+          )}
+          <span className="sp-reg-sub">sorted by age — oldest first</span>
         </button>
-        {regsOpen && (
-          <div className="sr-reg-body">
-            {regressions.length === 0 ? (
-              <span className="sr-empty">No regressions tracked</span>
+        {regOpen && (
+          <div className="sp-tier-body">
+            {regs.length === 0 ? (
+              <p className="sp-empty">No regressions in this sprint</p>
             ) : (
               <>
-                <div className="sr-reg-cols">
+                <div className="sp-reg-cols">
                   <span>ID</span><span>Age</span><span>State</span>
                   <span>Assignee</span><span>Priority</span><span>Summary</span>
                 </div>
-                {[...regressions].sort((a, b) => b.hours_in_state - a.hours_in_state)
-                  .map(ri => <RegressionRow key={ri.issue_id} ri={ri} onIdClick={onIdClick} onTitleClick={onTitleClick} />)}
+                {regs.map(i => (
+                  <div key={i.idReadable} className="sp-reg-row">
+                    <button className="sp-id" onClick={e => onIdClick(i.idReadable, e)}>{i.idReadable}</button>
+                    <span className={`sp-reg-age ${ageClass(i.hours_in_state)}`}>{fmtAge(i.hours_in_state)}</span>
+                    <StateChip state={i.current_state} role={i.colRole} />
+                    {i.assignee ? <AssigneeAvatar name={i.assignee} /> : <span className="sp-assignee-none">—</span>}
+                    <span className="sp-priority-tag">{i.priority || '—'}</span>
+                    <button className="sp-summary" onClick={e => onTitleClick(i.idReadable, e)}>{i.summary}</button>
+                  </div>
+                ))}
               </>
             )}
           </div>

@@ -2275,6 +2275,8 @@ export function SprintDashboardPage() {
       {designMode === 'sprint-pulse' && (
         <SprintPulseView
           activeSprint={activeSprint}
+          boardData={boardData}
+          boardLoading={loading}
           onTitleClick={openIssueDetail}
           onIdClick={openInYt}
         />
