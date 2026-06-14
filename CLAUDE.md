@@ -21,7 +21,14 @@ npm run lint
 
 ## Workflow Rule
 
-After every task, output a short commit message (don't run git commit). Plain one-liner, no prefixes.
+After every task, output a short commit message (don't run git commit). One-liner prefixed with the change type:
+
+`FEATURE:` — new page, tab, or capability  
+`ENHANCEMENT:` — improvement to existing feature  
+`BUG:` — bug fix  
+`REFACTOR:` — code restructure with no behaviour change  
+`STYLE:` — UI/CSS only change  
+`CHORE:` — config, tooling, dependency update
 
 **Documentation rule:** When implementing a significant new feature or fixing something with non-obvious context, ask whether it should be noted in CLAUDE.md (if it's a pattern/rule) or in the relevant `docs/features/*.md` file (if it's feature-specific detail). Don't silently skip it and don't add it without asking.
 
@@ -182,6 +189,22 @@ One CSS file per subtab/view + one shared base file. Never put all subtab styles
 - `index.css` — global shared classes
 
 When adding a new multi-subtab page: `<page>-base.css` + one `<page>-<subtab>.css` per view. Import all in the page component and in `index.css`.
+
+### 6 — Shared Components First
+
+**Before writing any UI pattern inline, check `frontend/src/components/` for an existing shared component.**
+
+If the same UI pattern is needed in 2+ places, extract it into a shared component — never copy-paste the same JSX block. Examples of shared components already in use:
+
+| Component | What it encapsulates |
+|---|---|
+| `SprintControlsBar` | `db-controls` bar — left mode dropdown + sprint selector + children slot |
+| `CustomDropdown` | `pm-custom-dropdown` pattern with outside-click |
+| `HoverCard` | Portal hover overlay |
+| `IssueDetailPanel` | YouTrack issue detail slide-in |
+| `CalendarView` | Date-range calendar |
+
+**Rule:** If you find yourself copying a block of JSX from one page to another, stop — extract a component instead and use it in both places. The first duplication is the signal to extract; the second is too late.
 
 ---
 
