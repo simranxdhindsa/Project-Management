@@ -1,17 +1,21 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import {
+  DndContext, DragOverlay, closestCenter,
+  KeyboardSensor, PointerSensor, useSensor, useSensors,
+  useDraggable, useDroppable,
+} from '@dnd-kit/core'
+import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import api from '@/services/api'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import HoverCard from '@/components/HoverCard'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 import { SprintControlsBar } from '@/components/SprintControlsBar'
-import { KanbanBoard } from '@/components/board/KanbanBoard'
 import type { ModeOption } from '@/components/SprintControlsBar'
 import type {
   YouTrackSprint,
   SprintBoardStatusResponse,
   SprintBoardIssue,
   WorkflowConfig,
-  YouTrackIssue,
 } from '@/services/api'
 import { updatePMIssueState } from '@/services/pmDataService'
 import {
@@ -206,9 +210,10 @@ function IssueCard({
   showStage?: boolean
 }) {
   const danger = dangerLevel(iss)
+  const canPulse = danger === 2 && !iss.isDone && iss.colRole !== 'backlog'
   return (
     <HoverCard content={buildHoverContent(iss)} delay={250}>
-      <div className={`spl-card${iss.isDone ? ' spl-card--done' : ''}${danger === 2 ? ' spl-card--crit' : danger === 1 ? ' spl-card--warn' : ''}`}>
+      <div className={`spl-card${iss.isDone ? ' spl-card--done' : ''}${danger === 2 ? ' spl-card--crit' : danger === 1 ? ' spl-card--warn' : ''}${canPulse ? ' spl-card--pulse' : ''}`}>
         <div className="spl-card-top">
           <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
           <IssueTypePill type={iss.issue_type} />
@@ -239,90 +244,172 @@ function IssueCard({
   )
 }
 
-// ─── View A — Real Kanban (shared KanbanBoard component) ─────────────────────
+// ─── View A — Swimlane Kanban ─────────────────────────────────────────────────
 
-function toYTIssue(iss: PulseIssue): YouTrackIssue {
-  return {
-    id:         iss.id,
-    idReadable: iss.idReadable,
-    summary:    iss.summary,
-    description: '',
-    status:     iss.current_state,
-    priority:   iss.priority,
-    type:       iss.issue_type,
-    assignee:   iss.assignee
-      ? { login: iss.assignee, fullName: iss.assignee, avatarUrl: iss.avatarUrl || '' }
-      : undefined,
-    created: 0,
-    updated: 0,
-  }
+const TIER_DEFS: { tier: number; label: string }[] = [
+  { tier: 0, label: 'Regression' },
+  { tier: 1, label: 'Critical / Hotfix' },
+  { tier: 2, label: 'Urgent' },
+  { tier: 3, label: 'Scheduled' },
+  { tier: 4, label: 'Normal' },
+]
+
+function SwimDraggableCard({
+  iss, wfConfig, onTitleClick, onIdClick,
+}: {
+  iss:          PulseIssue
+  wfConfig:     WorkflowConfig | null
+  onTitleClick: (id: string, e?: React.MouseEvent) => void
+  onIdClick:    (id: string, e: React.MouseEvent) => void
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: iss.id })
+  return (
+    <div
+      ref={setNodeRef}
+      className={`spl-swim-drag${isDragging ? ' spl-swim-drag--ghost' : ''}`}
+      {...attributes}
+      {...listeners}
+    >
+      <IssueCard iss={iss} wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
+    </div>
+  )
 }
 
-function PulseKanbanView({
-  allIssues, boardData, roleMap, onTitleClick, onIdClick,
+function SwimDroppableCell({ id, children }: { id: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id })
+  return (
+    <div ref={setNodeRef} className={`spl-swim-cell${isOver ? ' spl-swim-cell--over' : ''}`}>
+      {children}
+    </div>
+  )
+}
+
+function PulseSwimKanban({
+  allIssues, boardData, roleMap, wfConfig, onTitleClick, onIdClick,
 }: {
   allIssues:    PulseIssue[]
   boardData:    SprintBoardStatusResponse
   roleMap:      Map<string, string>
+  wfConfig:     WorkflowConfig | null
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick:    (id: string, e: React.MouseEvent) => void
 }) {
-  const [localIssues, setLocalIssues] = useState<YouTrackIssue[]>(() => allIssues.map(toYTIssue))
+  const [stateOverrides, setStateOverrides] = useState<Record<string, string>>({})
+  const [activeId, setActiveId] = useState<string | null>(null)
 
-  useEffect(() => { setLocalIssues(allIssues.map(toYTIssue)) }, [allIssues])
-
-  const avatarMap = useMemo(() => {
-    const m: Record<string, string> = {}
-    for (const iss of allIssues) {
-      if (iss.assignee && iss.avatarUrl) m[iss.assignee] = iss.avatarUrl
-    }
-    return m
-  }, [allIssues])
-
-  const pulseMap = useMemo(() => {
-    const m: Record<string, PulseIssue> = {}
-    for (const iss of allIssues) m[iss.id] = iss
-    return m
-  }, [allIssues])
+  useEffect(() => { setStateOverrides({}) }, [boardData])
 
   const columns = useMemo(() => boardData.columns.map(c => c.name), [boardData])
 
-  const getColumnIssues = useCallback((col: string): YouTrackIssue[] => {
-    const colIssues = localIssues.filter(i => i.status === col)
-    return [...colIssues].sort((a, b) => {
-      const pa = pulseMap[a.id], pb = pulseMap[b.id]
-      if (!pa || !pb) return 0
-      if (pa.tier !== pb.tier) return pa.tier - pb.tier
-      return dangerLevel(pb) - dangerLevel(pa)
-    })
-  }, [localIssues, pulseMap])
+  const activeTiers = useMemo(
+    () => TIER_DEFS.filter(t => allIssues.some(i => i.tier === t.tier)),
+    [allIssues],
+  )
 
-  const handleIssueMove = useCallback((issueId: string, newState: string) => {
-    setLocalIssues(prev => prev.map(i => i.id === issueId ? { ...i, status: newState } : i))
-    updatePMIssueState(issueId, newState)
+  const getEffectiveState = useCallback(
+    (iss: PulseIssue) => stateOverrides[iss.id] || iss.current_state,
+    [stateOverrides],
+  )
+
+  const getCellIssues = useCallback((tier: number, col: string): PulseIssue[] => {
+    const colRole = roleMap.get(col.toLowerCase()) || ''
+    const isDoneCol = DONE_ROLES.has(colRole)
+    return allIssues
+      .filter(i => i.tier === tier && getEffectiveState(i) === col)
+      .map(i => ({ ...i, current_state: col, colRole, isDone: isDoneCol, stageGroup: mapStage(colRole) }))
+      .sort((a, b) => dangerLevel(b) - dangerLevel(a))
+  }, [allIssues, getEffectiveState, roleMap])
+
+  const activeIss = useMemo(
+    () => activeId ? (allIssues.find(i => i.id === activeId) ?? null) : null,
+    [activeId, allIssues],
+  )
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor),
+  )
+
+  const handleDragStart = useCallback((e: DragStartEvent) => {
+    setActiveId(e.active.id as string)
   }, [])
 
-  const getExtraClass = useCallback((issue: YouTrackIssue): string => {
-    const pi = pulseMap[issue.id]
-    if (!pi) return ''
-    const currentRole = roleMap.get(issue.status.toLowerCase()) || ''
-    if (currentRole === 'backlog' || DONE_ROLES.has(currentRole)) return ''
-    const danger = dangerLevel(pi)
-    if (danger === 2) return 'spl-card--crit spl-card--pulse'
-    if (danger === 1) return 'spl-card--warn'
-    return ''
-  }, [pulseMap, roleMap])
+  const handleDragEnd = useCallback((e: DragEndEvent) => {
+    const { active, over } = e
+    setActiveId(null)
+    if (!over) return
+    const colonIdx = (over.id as string).indexOf(':')
+    const newCol = colonIdx >= 0 ? (over.id as string).slice(colonIdx + 1) : (over.id as string)
+    const issueId = active.id as string
+    const iss = allIssues.find(i => i.id === issueId)
+    if (!iss || getEffectiveState(iss) === newCol) return
+    setStateOverrides(prev => ({ ...prev, [issueId]: newCol }))
+    updatePMIssueState(issueId, newCol)
+  }, [allIssues, getEffectiveState])
 
   return (
-    <KanbanBoard
-      issues={localIssues}
-      columns={columns}
-      avatarMap={avatarMap}
-      getColumnIssues={getColumnIssues}
-      onIssueMove={handleIssueMove}
-      onIssueClick={(issue) => onTitleClick(issue.idReadable || issue.id)}
-      getExtraClass={getExtraClass}
-    />
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="spl-swim-kanban">
+        {/* Column header row */}
+        <div className="spl-swim-hdr-row">
+          <div className="spl-swim-hdr-tier-spacer" />
+          {columns.map(col => (
+            <div key={col} className="spl-swim-hdr-col">{col}</div>
+          ))}
+        </div>
+
+        {/* Tier swimlane rows */}
+        {activeTiers.map(({ tier, label }) => {
+          const breachCount = allIssues.filter(i => {
+            if (i.tier !== tier) return false
+            const role = roleMap.get(getEffectiveState(i).toLowerCase()) || ''
+            return !DONE_ROLES.has(role) && role !== 'backlog' && dangerLevel(i) >= 2
+          }).length
+          const totalInTier = allIssues.filter(i => i.tier === tier).length
+          return (
+            <div key={tier} className={`spl-swim-tier-row ${tierCssClass(tier)}`}>
+              {/* Sticky left header */}
+              <div className="spl-swim-tier-hd">
+                <span className="spl-swim-tier-name">{label}</span>
+                <span className="spl-swim-tier-cnt">{totalInTier}</span>
+                {breachCount > 0 && (
+                  <span className="spl-tier-col-breach">⚠ {breachCount}</span>
+                )}
+              </div>
+
+              {/* State column cells */}
+              {columns.map(col => (
+                <SwimDroppableCell key={col} id={`${tier}:${col}`}>
+                  {getCellIssues(tier, col).map(iss => (
+                    <SwimDraggableCard
+                      key={iss.id}
+                      iss={iss}
+                      wfConfig={wfConfig}
+                      onTitleClick={onTitleClick}
+                      onIdClick={onIdClick}
+                    />
+                  ))}
+                </SwimDroppableCell>
+              ))}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Floating drag overlay */}
+      <DragOverlay dropAnimation={null}>
+        {activeIss && (
+          <div style={{ opacity: 0.92, transform: 'rotate(1.5deg)', width: 205, boxShadow: '0 16px 40px rgba(0,0,0,0.4)' }}>
+            <IssueCard iss={activeIss} wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
+          </div>
+        )}
+      </DragOverlay>
+    </DndContext>
   )
 }
 
@@ -930,10 +1017,11 @@ export function SprintPulsePage() {
         {!loading && boardData && (
           <>
             {viewMode === 'a' && (
-              <PulseKanbanView
+              <PulseSwimKanban
                 allIssues={allIssues}
                 boardData={boardData}
                 roleMap={roleMap}
+                wfConfig={wfConfig}
                 onTitleClick={openIssueDetail}
                 onIdClick={openInYt}
               />
