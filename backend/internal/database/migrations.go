@@ -1052,6 +1052,7 @@ WHERE bot_type = 'ticket_parser'`,
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sprint_alerts_user_id ON sprint_alerts(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sprint_alerts_active ON sprint_alerts(user_id, dismissed_at) WHERE dismissed_at IS NULL`,
+		`ALTER TABLE users ADD COLUMN IF NOT EXISTS changelog_seen_at TIMESTAMP WITH TIME ZONE`,
 	}
 
 	for i, migration := range migrations {

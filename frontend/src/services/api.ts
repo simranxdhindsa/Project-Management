@@ -1202,6 +1202,15 @@ class ApiService {
     return this.request('/notifications/clear-all', { method: 'DELETE' })
   }
 
+  // Changelog endpoints
+  async getChangelogStatus() {
+    return this.request<ChangelogStatus>('/changelog/status')
+  }
+
+  async markChangelogSeen() {
+    return this.request('/changelog/seen', { method: 'PATCH' })
+  }
+
   // Activity endpoints
   async getActivity(limit?: number, offset?: number) {
     const params = new URLSearchParams()
@@ -2032,6 +2041,20 @@ export interface CalendarData {
   year: string
   month: string
   days: Record<string, { status: string; count: string }>
+}
+
+export interface ChangelogEntry {
+  date: string
+  features: string[]
+  enhancements: string[]
+  bugs: string[]
+  refactors: string[]
+}
+
+export interface ChangelogStatus {
+  has_new: boolean
+  latest_date: string
+  entries: ChangelogEntry[]
 }
 
 export interface Notification {

@@ -71,6 +71,8 @@ import { ThemeSettingsPage } from './ThemeSettingsPage'
 import { applyUserTheme } from '../utils/themeUtils'
 import { RightPanel } from '../components/notifications/RightPanel'
 import type { LocalNotification } from '../components/notifications/RightPanel'
+import ChangelogPanel from '../components/changelog/ChangelogPanel'
+import type { ChangelogEntry } from '../services/api'
 
 type Page = 'dashboard' | 'board' | 'list' | 'sprint-pulse' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme'
 
@@ -230,6 +232,17 @@ export default function Dashboard() {
 
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifAnchorRect, setNotifAnchorRect] = useState<DOMRect | null>(null)
+  const [showChangelog, setShowChangelog] = useState(false)
+  const [changelogAnchorRect, setChangelogAnchorRect] = useState<DOMRect | null>(null)
+  const [hasNewChangelog, setHasNewChangelog] = useState(false)
+  const [changelogEntries, setChangelogEntries] = useState<ChangelogEntry[]>([])
+
+  useEffect(() => {
+    api.getChangelogStatus().then(res => {
+      setHasNewChangelog(res.has_new)
+      setChangelogEntries(res.entries)
+    }).catch(() => {})
+  }, [])
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return localStorage.getItem('theme') !== 'light'
   })
@@ -795,6 +808,28 @@ export default function Dashboard() {
             onChange={setDarkMode}
             label="Dark Mode"
           />
+          <div className="changelog-btn-wrap">
+            <button
+              className="changelog-btn"
+              aria-label="What's New"
+              onClick={(e) => {
+                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect()
+                setChangelogAnchorRect(rect)
+                setShowChangelog(o => !o)
+                if (hasNewChangelog) setHasNewChangelog(false)
+              }}
+            >
+              <Sparkles size={18} />
+              {hasNewChangelog && <span className="changelog-dot" />}
+            </button>
+            {showChangelog && changelogAnchorRect && (
+              <ChangelogPanel
+                anchorRect={changelogAnchorRect}
+                entries={changelogEntries}
+                onClose={() => setShowChangelog(false)}
+              />
+            )}
+          </div>
           <div className="notification-bell-container">
             <button
               data-np-bell

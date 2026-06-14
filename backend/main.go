@@ -223,6 +223,13 @@ func main() {
 	taskYouTrackRoutes.Use(middleware.AuthMiddleware)
 	taskYouTrackRoutes.HandleFunc("/sync", youtrackHandler.SyncTaskToYouTrack).Methods("POST")
 
+	// Changelog handler
+	changelogHandler := handlers.NewChangelogHandler()
+	changelogRoutes := api.PathPrefix("/changelog").Subrouter()
+	changelogRoutes.Use(middleware.AuthMiddleware)
+	changelogRoutes.HandleFunc("/status", changelogHandler.GetStatus).Methods("GET")
+	changelogRoutes.HandleFunc("/seen", changelogHandler.MarkSeen).Methods("PATCH")
+
 	// Notification handler must be created before Slack handler (Slack needs it for SSE broadcast)
 	notifHandler := handlers.NewNotificationHandler(sseHub)
 	notifRoutes := api.PathPrefix("/notifications").Subrouter()

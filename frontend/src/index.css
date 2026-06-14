@@ -54,6 +54,7 @@
 @import "./styles/pages/dev-activity-heatmap.css";
 @import "./styles/pages/dev-activity-report.css";
 
+@import "./styles/pages/changelog.css";
 @import "./styles/pages/theme-customizer.css";
 @import "./styles/pages/theme-settings.css";
 @import "./styles/pages/sprint-radar.css";
