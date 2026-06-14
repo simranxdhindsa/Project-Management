@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronDown, Check, RefreshCw, GitBranch,
+  ChevronDown, RefreshCw,
   BarChart2, Zap, Target, Activity, X, GitMerge, Radar,
 } from 'lucide-react'
 import api from '@/services/api'
@@ -11,6 +11,8 @@ import type {
   FeatureGroup, PriorityTag,
 } from '@/services/api'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
+import { SprintControlsBar } from '@/components/SprintControlsBar'
+import type { ModeOption } from '@/components/SprintControlsBar'
 import { SprintPulseView } from './SprintRadarPage'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '@/components/HoverCard'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
@@ -23,7 +25,7 @@ const SPRINT_NAME_KEY = 'pm_active_sprint_name'
 
 type DesignMode = 'velocity' | 'bento' | 'ops' | 'sprint-pulse'
 
-const DESIGN_MODES: { id: DesignMode; label: string; icon: typeof Activity }[] = [
+const DESIGN_MODES: ModeOption[] = [
   { id: 'velocity',     label: 'Velocity',     icon: Activity },
   { id: 'bento',        label: 'Bento Grid',   icon: BarChart2 },
   { id: 'ops',          label: 'Ops Command',  icon: Zap },
@@ -1885,21 +1887,14 @@ function Design3({
 
 export function SprintDashboardPage() {
   const [designMode, setDesignMode] = useState<DesignMode>('velocity')
-  const [designOpen, setDesignOpen] = useState(false)
   const [sprints, setSprints]       = useState<YouTrackSprint[]>([])
   const [activeSprint, setActiveSprint] = useState<YouTrackSprint | null>(null)
-  const [sprintOpen, setSprintOpen] = useState(false)
   const [boardData, setBoardData]   = useState<SprintBoardStatusResponse | null>(null)
   const [loading, setLoading]       = useState(false)
   const [kpiDrawer, setKpiDrawer]   = useState<DbKpiDrawer>(null)
   const [ytDetailIssue, setYtDetailIssue] = useState<YouTrackIssue | null>(null)
   const [ytDetailLoading, setYtDetailLoading] = useState(false)
   const [ytBaseUrl, setYtBaseUrl]   = useState('')
-
-  const designRef     = useRef<HTMLDivElement>(null)
-  const sprintRef     = useRef<HTMLDivElement>(null)
-  const designMenuRef = useRef<HTMLDivElement>(null)
-  const sprintMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     api.getYouTrackIntegration().then(res => {
@@ -1949,121 +1944,23 @@ export function SprintDashboardPage() {
     }).catch(() => {}).finally(() => setLoading(false))
   }, [activeSprint?.id])
 
-  useEffect(() => {
-    function onDown(e: MouseEvent) {
-      const t = e.target as Node
-      if (designOpen && !designRef.current?.contains(t) && !designMenuRef.current?.contains(t)) setDesignOpen(false)
-      if (sprintOpen && !sprintRef.current?.contains(t) && !sprintMenuRef.current?.contains(t)) setSprintOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [designOpen, sprintOpen])
-
   function handleSprintChange(s: YouTrackSprint) {
     setActiveSprint(s)
-    setSprintOpen(false)
     localStorage.setItem(SPRINT_ID_KEY,   s.id)
     localStorage.setItem(SPRINT_NAME_KEY, s.name)
   }
 
-  const sortedSprints = [...sprints].sort((a, b) => b.finish - a.finish)
-  const currentDesign = DESIGN_MODES.find(d => d.id === designMode)!
-
   return (
     <div className="db-page">
       {/* Controls bar */}
-      <div className="db-controls">
-        <div ref={designRef} className="db-design-selector">
-          <button
-            className="pm-custom-dropdown-trigger db-design-btn"
-            onClick={() => setDesignOpen(o => !o)}
-          >
-            <currentDesign.icon size={13} />
-            {currentDesign.label}
-            <ChevronDown size={11} style={{ opacity: 0.5 }} />
-          </button>
-          {designOpen && createPortal(
-            <div
-              ref={designMenuRef}
-              className="pm-custom-dropdown-menu"
-              style={{
-                position: 'fixed',
-                top:  (designRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
-                left: designRef.current?.getBoundingClientRect().left ?? 0,
-                minWidth: 180,
-                zIndex: 9999,
-              }}
-            >
-              {DESIGN_MODES.map(d => (
-                <button
-                  key={d.id}
-                  className={`pm-dropdown-item${designMode === d.id ? ' active' : ''}`}
-                  onClick={() => { setDesignMode(d.id); setDesignOpen(false) }}
-                >
-                  <span style={{ width: 13, display: 'inline-flex', alignItems: 'center' }}>
-                    {designMode === d.id && <Check size={12} />}
-                  </span>
-                  <d.icon size={12} style={{ marginRight: 6 }} />
-                  {d.label}
-                </button>
-              ))}
-            </div>,
-            document.body
-          )}
-        </div>
-
-        <div className="db-controls-spacer" />
-
-        {/* Sprint selector */}
-        <div ref={sprintRef} className="db-sprint-selector">
-          <button
-            className="pm-custom-dropdown-trigger"
-            onClick={() => setSprintOpen(o => !o)}
-          >
-            <GitBranch size={13} />
-            {activeSprint
-              ? <>{activeSprint.name}<span className="db-sprint-dates">{fmtSprintDate(activeSprint.start)}–{fmtSprintDate(activeSprint.finish)}</span></>
-              : <span>Select sprint</span>
-            }
-            <ChevronDown size={11} style={{ opacity: 0.5 }} />
-          </button>
-          {sprintOpen && createPortal(
-            <div
-              ref={sprintMenuRef}
-              className="pm-custom-dropdown-menu"
-              style={{
-                position: 'fixed',
-                top:   (sprintRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
-                right: window.innerWidth - (sprintRef.current?.getBoundingClientRect().right ?? 0),
-                minWidth: 240,
-                zIndex: 9999,
-              }}
-            >
-              {sortedSprints.length === 0 && (
-                <div style={{ padding: '9px 14px', fontSize: 13, opacity: 0.5 }}>No sprints found</div>
-              )}
-              {sortedSprints.map(s => (
-                <button
-                  key={s.id}
-                  className={`pm-dropdown-item${activeSprint?.id === s.id ? ' active' : ''}`}
-                  onClick={() => handleSprintChange(s)}
-                  style={{ opacity: s.isCompleted ? 0.6 : 1 }}
-                >
-                  <span style={{ width: 13, display: 'inline-flex', alignItems: 'center' }}>
-                    {activeSprint?.id === s.id && <Check size={12} />}
-                  </span>
-                  <span style={{ flex: 1 }}>{s.name}</span>
-                  <span style={{ fontSize: 11, opacity: 0.55, marginLeft: 8 }}>
-                    {fmtSprintDate(s.start)}–{fmtSprintDate(s.finish)}
-                  </span>
-                  {s.isCompleted && <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 4 }}>✓</span>}
-                </button>
-              ))}
-            </div>,
-            document.body
-          )}
-        </div>
-      </div>
+      <SprintControlsBar
+        modes={DESIGN_MODES}
+        activeMode={designMode}
+        onModeChange={(id) => setDesignMode(id as DesignMode)}
+        sprints={sprints}
+        activeSprint={activeSprint}
+        onSprintChange={handleSprintChange}
+      />
 
       {/* KPI bar — shown when data is loaded or loading */}
       {loading && <SkeletonKpiBar />}

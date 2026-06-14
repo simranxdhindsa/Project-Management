@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { createPortal } from 'react-dom'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import api from '@/services/api'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import HoverCard from '@/components/HoverCard'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
+import { SprintControlsBar } from '@/components/SprintControlsBar'
+import type { ModeOption } from '@/components/SprintControlsBar'
 import type {
   YouTrackSprint,
   SprintBoardStatusResponse,
@@ -13,7 +14,7 @@ import type {
 } from '@/services/api'
 import {
   GitBranch, ChevronDown, RefreshCw, Zap, ChevronRight,
-  LayoutGrid, AlignLeft, BarChart2, Layers, Check,
+  LayoutGrid, AlignLeft, BarChart2, Layers,
 } from 'lucide-react'
 import '@/styles/pages/sprint-pulse.css'
 
@@ -648,11 +649,11 @@ function View4({ tierGroups, wfConfig, onTitleClick, onIdClick }: ViewProps) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-const VIEW_TABS: { id: ViewMode; label: string; icon: React.ReactNode }[] = [
-  { id: 'a', label: 'Kanban',      icon: <LayoutGrid size={13} /> },
-  { id: 'c', label: 'Focus',       icon: <Layers size={13} /> },
-  { id: '1', label: 'Signal',      icon: <AlignLeft size={13} /> },
-  { id: '4', label: 'Pulse Board', icon: <BarChart2 size={13} /> },
+const VIEW_MODES: ModeOption[] = [
+  { id: 'a', label: 'Kanban',      icon: LayoutGrid },
+  { id: 'c', label: 'Focus',       icon: Layers },
+  { id: '1', label: 'Signal',      icon: AlignLeft },
+  { id: '4', label: 'Pulse Board', icon: BarChart2 },
 ]
 
 export function SprintPulsePage() {
@@ -660,8 +661,6 @@ export function SprintPulsePage() {
 
   const [sprints,           setSprints]          = useState<YouTrackSprint[]>([])
   const [activeSprint,      setActiveSprint]      = useState<YouTrackSprint | null>(null)
-  const [sprintOpen,        setSprintOpen]        = useState(false)
-  const [viewOpen,          setViewOpen]          = useState(false)
   const [boardData,         setBoardData]         = useState<SprintBoardStatusResponse | null>(null)
   const [loading,           setLoading]           = useState(false)
   const [viewMode,          setViewMode]          = useState<ViewMode>('a')
@@ -669,10 +668,6 @@ export function SprintPulsePage() {
   const [ytDetailLoading,   setYtDetailLoading]   = useState(false)
   const [ytBaseUrl,         setYtBaseUrl]         = useState('')
 
-  const sprintRef     = useRef<HTMLDivElement>(null)
-  const sprintMenuRef = useRef<HTMLDivElement>(null)
-  const viewRef       = useRef<HTMLDivElement>(null)
-  const viewMenuRef   = useRef<HTMLDivElement>(null)
 
   // Fetch YouTrack base URL
   useEffect(() => {
@@ -717,8 +712,6 @@ export function SprintPulsePage() {
     localStorage.setItem(SPRINT_NAME_KEY, s.name)
   }, [])
 
-  const sortedSprints = [...sprints].sort((a, b) => b.finish - a.finish)
-  const currentView   = VIEW_TABS.find(v => v.id === viewMode)!
 
   const openIssueDetail = useCallback(async (idReadable: string, e?: React.MouseEvent) => {
     e?.stopPropagation()
@@ -794,125 +787,29 @@ export function SprintPulsePage() {
     [activeSprint],
   )
 
-  // Outside-click — close both dropdowns (same pattern as SprintDashboardPage)
-  useEffect(() => {
-    function onDown(e: MouseEvent) {
-      const t = e.target as Node
-      if (sprintOpen && !sprintRef.current?.contains(t) && !sprintMenuRef.current?.contains(t)) setSprintOpen(false)
-      if (viewOpen   && !viewRef.current?.contains(t)   && !viewMenuRef.current?.contains(t))   setViewOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [sprintOpen, viewOpen])
 
   return (
     <div className="db-page">
 
-      {/* ── Controls bar — identical pattern to SprintDashboardPage ── */}
-      <div className="db-controls">
-
-        {/* Left: view mode selector */}
-        <div ref={viewRef} className="db-design-selector">
-          <button
-            className="pm-custom-dropdown-trigger db-design-btn"
-            onClick={() => setViewOpen(o => !o)}
-          >
-            {currentView.icon}
-            {currentView.label}
-            <ChevronDown size={11} style={{ opacity: 0.5 }} />
-          </button>
-          {viewOpen && createPortal(
-            <div
-              ref={viewMenuRef}
-              className="pm-custom-dropdown-menu"
-              style={{
-                position: 'fixed',
-                top:  (viewRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
-                left: viewRef.current?.getBoundingClientRect().left ?? 0,
-                minWidth: 180,
-                zIndex: 9999,
-              }}
-            >
-              {VIEW_TABS.map(v => (
-                <button
-                  key={v.id}
-                  className={`pm-dropdown-item${viewMode === v.id ? ' active' : ''}`}
-                  onClick={() => { setViewMode(v.id); setViewOpen(false) }}
-                >
-                  <span style={{ width: 13, display: 'inline-flex', alignItems: 'center' }}>
-                    {viewMode === v.id && <Check size={12} />}
-                  </span>
-                  {v.icon}
-                  <span style={{ marginLeft: 6 }}>{v.label}</span>
-                </button>
-              ))}
-            </div>,
-            document.body
-          )}
-        </div>
-
-        <div className="db-controls-spacer" />
-
+      {/* ── Controls bar — shared SprintControlsBar component ── */}
+      <SprintControlsBar
+        modes={VIEW_MODES}
+        activeMode={viewMode}
+        onModeChange={(id) => setViewMode(id as ViewMode)}
+        sprints={sprints}
+        activeSprint={activeSprint}
+        onSprintChange={handleSprintSelect}
+      >
         <button
           className="pm-custom-dropdown-trigger"
-          style={{ gap: 5, fontSize: 12 }}
+          style={{ gap: 5 }}
           disabled={loading || !activeSprint}
           onClick={() => activeSprint && fetchBoardData(activeSprint)}
           title="Refresh"
         >
           <RefreshCw size={12} className={loading ? 'spl-spin' : ''} />
         </button>
-
-        {/* Right: sprint selector — exact same as SprintDashboardPage */}
-        <div ref={sprintRef} className="db-sprint-selector">
-          <button
-            className="pm-custom-dropdown-trigger"
-            onClick={() => setSprintOpen(o => !o)}
-          >
-            <GitBranch size={13} />
-            {activeSprint
-              ? <>{activeSprint.name}<span className="db-sprint-dates">{fmtSprintDate(activeSprint.start)}–{fmtSprintDate(activeSprint.finish)}</span></>
-              : <span>Select sprint</span>
-            }
-            <ChevronDown size={11} style={{ opacity: 0.5 }} />
-          </button>
-          {sprintOpen && createPortal(
-            <div
-              ref={sprintMenuRef}
-              className="pm-custom-dropdown-menu"
-              style={{
-                position: 'fixed',
-                top:   (sprintRef.current?.getBoundingClientRect().bottom ?? 0) + 4,
-                right: window.innerWidth - (sprintRef.current?.getBoundingClientRect().right ?? 0),
-                minWidth: 240,
-                zIndex: 9999,
-              }}
-            >
-              {sortedSprints.length === 0 && (
-                <div style={{ padding: '9px 14px', fontSize: 13, opacity: 0.5 }}>No sprints found</div>
-              )}
-              {sortedSprints.map(s => (
-                <button
-                  key={s.id}
-                  className={`pm-dropdown-item${activeSprint?.id === s.id ? ' active' : ''}`}
-                  onClick={() => handleSprintSelect(s)}
-                  style={{ opacity: s.isCompleted ? 0.6 : 1 }}
-                >
-                  <span style={{ width: 13, display: 'inline-flex', alignItems: 'center' }}>
-                    {activeSprint?.id === s.id && <Check size={12} />}
-                  </span>
-                  <span style={{ flex: 1 }}>{s.name}</span>
-                  <span style={{ fontSize: 11, opacity: 0.55, marginLeft: 8 }}>
-                    {fmtSprintDate(s.start)}–{fmtSprintDate(s.finish)}
-                  </span>
-                  {s.isCompleted && <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 4 }}>✓</span>}
-                </button>
-              ))}
-            </div>,
-            document.body
-          )}
-        </div>
-      </div>
+      </SprintControlsBar>
 
       {/* ── Scrollable content ── */}
       <div className="db-content spl-content">
