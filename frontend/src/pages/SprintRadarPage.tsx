@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react'
 import {
-  AlertTriangle, AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Zap, Clock,
+  AlertTriangle, AlertCircle, CheckCircle2, ChevronDown, ChevronRight, Zap,
 } from 'lucide-react'
-import type { SprintBoardStatusResponse, SprintBoardIssue, YouTrackSprint } from '@/services/api'
+import type { SprintBoardStatusResponse, SprintBoardIssue, YouTrackSprint, PriorityTag } from '@/services/api'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
+import HoverCard, { HCRow, HCDivider, HCBadge } from '@/components/HoverCard'
 import '@/styles/pages/sprint-radar.css'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -11,7 +12,7 @@ import '@/styles/pages/sprint-radar.css'
 const DONE_ROLES = new Set(['dev_done', 'verified', 'deployed', 'closed'])
 const SLA_HOURS: Record<number, number> = { 1: 1, 2: 24 }
 
-// ── Pure helpers ──────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function classifyTier(priority: string, issueType: string, isHotfix: boolean): number {
   if (isHotfix) return 1
@@ -24,47 +25,56 @@ function classifyTier(priority: string, issueType: string, isHotfix: boolean): n
   return 4
 }
 
-function priorityDotColor(priority: string, isHotfix: boolean): string {
-  if (isHotfix) return 'var(--color-danger)'
-  const p = priority.toLowerCase()
-  if (p === 'p0' || p === 'a0' || p === 'critical') return 'var(--color-danger)'
-  if (p === 'p1' || p === 'a1' || p === 'major') return 'var(--color-warning)'
-  if (p === 'p2' || p === 'a2') return 'var(--color-primary)'
-  return 'transparent'
-}
-
-function fmtH(h: number): string {
-  if (h < 1) return `${Math.round(h * 60)}m`
+function fmtHours(h: number): string {
+  if (!h || h <= 0) return '—'
   const d = Math.floor(h / 24)
-  const hr = h % 24
-  if (d > 0) return `${d}d ${Math.floor(hr)}h`
-  return `${Math.floor(h)}h ${Math.round((h % 1) * 60)}m`
-}
-
-function fmtAge(h: number): string {
-  if (h < 24) return `${Math.floor(h)}h`
-  return `${Math.floor(h / 24)}d`
-}
-
-function ageClass(h: number): string {
-  if (h > 7 * 24) return 'sp-age-red'
-  if (h > 3 * 24) return 'sp-age-amber'
-  return 'sp-age-green'
+  const hr = Math.round(h % 24)
+  if (d > 0 && hr > 0) return `${d}d ${hr}h`
+  if (d > 0) return `${d}d`
+  return `${hr}h`
 }
 
 function slaBreach(tier: number, h: number): boolean {
   return SLA_HOURS[tier] != null && h >= SLA_HOURS[tier]
 }
 
-function slaRatio(tier: number, h: number): number {
-  return SLA_HOURS[tier] != null ? Math.min(h / SLA_HOURS[tier], 1) : 0
+function urgencyClass(iss: SprintBoardIssue): string {
+  if (iss.overdue_level === 'deadline') return 'db-urgency--deadline'
+  if (iss.overdue_level === 'sprint' || iss.overdue_level === 'sla') return 'db-urgency--risk'
+  if (iss.bounce_count > 0) return 'db-urgency--bounced'
+  return ''
 }
 
-function initials(name: string): string {
-  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+function getPriColorFromTags(priority: string, tags: PriorityTag[]): string | null {
+  if (!tags?.length || !priority) return null
+  const p = priority.toLowerCase()
+  const tag = tags.find(t =>
+    t.prefixes?.some(px => px.toLowerCase() === p) ||
+    t.yt_mappings?.some(m => m.toLowerCase() === p) ||
+    t.label?.toLowerCase() === p
+  )
+  return tag?.color ?? null
 }
 
-// ── Extended issue type ───────────────────────────────────────────────────────
+function getPriClass(priority: string): string {
+  const p = (priority || '').toLowerCase()
+  if (p === 'a1' || p === 'p0' || p === 'critical') return 'db-pri--critical'
+  if (p === 'a2' || p === 'p1' || p === 'high')     return 'db-pri--high'
+  if (p === 'a3' || p === 'p2' || p === 'medium' || p === 'normal') return 'db-pri--medium'
+  return 'db-pri--low'
+}
+
+function categorizeIssue(issueType: string): 'feature' | 'bug' | 'task' | 'other' {
+  const t = (issueType || '').toLowerCase().trim()
+  if (!t) return 'other'
+  if (t.includes('feature') || t.includes('story') || t.includes('epic')) return 'feature'
+  if (t.includes('bug') || t.includes('defect') || t.includes('hotfix') || t.includes('regression')) return 'bug'
+  if (t.includes('task') || t.includes('enhancement') || t.includes('improvement') ||
+      t.includes('chore') || t.includes('tech debt') || t.includes('techdebt')) return 'task'
+  return 'other'
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface PulseIssue extends SprintBoardIssue {
   tier: number
@@ -72,71 +82,146 @@ interface PulseIssue extends SprintBoardIssue {
   colRole: string
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Sub-components — same visual language as SprintDashboardPage ──────────────
 
-function PriorityDot({ color }: { color: string }) {
-  return <span className="sp-dot" style={{ background: color }} />
+function DBAvatar({ name, url, size = 16 }: { name: string; url?: string; size?: number }) {
+  const initials = (name || '?').split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2)
+  if (url) {
+    return (
+      <img
+        src={url} alt={name} className="db-avatar"
+        style={{ width: size, height: size }}
+        onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+      />
+    )
+  }
+  return (
+    <div
+      className="db-avatar db-avatar--initials"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
+    >
+      {initials}
+    </div>
+  )
 }
 
-function AssigneeAvatar({ name }: { name: string }) {
-  if (!name) return null
-  return <span className="sp-avatar">{initials(name)}</span>
+function PriPill({ priority, tags }: { priority: string; tags?: PriorityTag[] }) {
+  if (!priority) return null
+  const color = tags ? getPriColorFromTags(priority, tags) : null
+  if (color) {
+    return (
+      <span className="db-pri-pill" style={{ background: color + '26', color, border: `1px solid ${color}44` }}>
+        {priority}
+      </span>
+    )
+  }
+  return <span className={`db-pri-pill ${getPriClass(priority)}`}>{priority}</span>
 }
 
-function StateChip({ state, role }: { state: string; role: string }) {
-  const cls = role === 'active' ? 'sp-state-active'
-    : role === 'blocked' ? 'sp-state-blocked'
-    : DONE_ROLES.has(role) ? 'sp-state-done'
-    : 'sp-state-default'
-  return <span className={`sp-state ${cls}`}>{state}</span>
+function IssueTypePill({ issueType }: { issueType?: string }) {
+  if (!issueType) return null
+  const cat = categorizeIssue(issueType)
+  const label = issueType.length > 10 ? issueType.slice(0, 10) + '…' : issueType
+  return <span className={`db-type-pill db-type-pill--${cat}`} title={issueType}>{label}</span>
 }
 
 function SLABadge({ hours, tier, isDone }: { hours: number; tier: number; isDone: boolean }) {
   if (isDone || !SLA_HOURS[tier]) return null
-  const ratio = slaRatio(tier, hours)
-  const breached = slaBreach(tier, hours)
-  const cls = breached ? 'sp-sla-breach' : ratio > 0.7 ? 'sp-sla-warn' : 'sp-sla-ok'
+  const breach = slaBreach(tier, hours)
+  const ratio = Math.min(hours / SLA_HOURS[tier], 1)
+  const cls = breach ? 'sp-sla-breach' : ratio > 0.7 ? 'sp-sla-warn' : 'sp-sla-ok'
+  return <span className={`sp-sla ${cls}`}>{fmtHours(hours)}{breach && ' ⚠'}</span>
+}
+
+// ── Issue hover card ──────────────────────────────────────────────────────────
+
+function issueHover(iss: PulseIssue) {
+  const hasVerif = iss.verified_on_dev || iss.verified_on_stage || iss.verified_on_prod
   return (
-    <span className={`sp-sla ${cls}`}>
-      <Clock size={9} />
-      {fmtH(hours)}{breached && ' ⚠'}
-    </span>
+    <div>
+      <div className="hc-title">{iss.idReadable}</div>
+      <div className="hc-subtitle">{iss.summary}</div>
+      <HCDivider />
+      <HCRow label="State"    value={iss.current_state || '—'} />
+      {iss.hours_in_state > 0 && (
+        <HCRow
+          label="In state" value={fmtHours(iss.hours_in_state)}
+          accent={iss.overdue_level === 'deadline' ? 'danger' : iss.is_delayed ? 'warn' : undefined}
+        />
+      )}
+      {iss.cycle_time_hours > 0 && <HCRow label="Cycle"    value={fmtHours(iss.cycle_time_hours)} />}
+      {iss.bounce_count > 0     && <HCRow label="Bounces"  value={`${iss.bounce_count}×`} accent="warn" />}
+      {iss.assignee              && <HCRow label="Assignee" value={iss.assignee} />}
+      {iss.priority              && <HCRow label="Priority" value={iss.priority} />}
+      {hasVerif && (
+        <>
+          <HCDivider />
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {iss.verified_on_dev   && <HCBadge label="DEV✓" variant="dev" />}
+            {iss.verified_on_stage && <HCBadge label="STG✓" variant="stg" />}
+            {iss.verified_on_prod  && <HCBadge label="PRD✓" variant="prd" />}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
-function TypeBadge({ type, isHotfix }: { type: string; isHotfix: boolean }) {
-  if (isHotfix) return <span className="sp-tag sp-tag-hotfix">HOTFIX</span>
-  const t = type.toLowerCase()
-  if (t === 'regression') return <span className="sp-tag sp-tag-regression">REGRESSION</span>
-  if (t === 'bug') return <span className="sp-tag sp-tag-bug">BUG</span>
-  return null
-}
+// ── Issue card — matches db-mc-focus-card from the other 3 dashboard views ────
 
 interface IssueRowProps {
   iss: PulseIssue
   onIdClick: (id: string, e: React.MouseEvent) => void
   onTitleClick: (id: string, e?: React.MouseEvent) => void
+  priorityTags?: PriorityTag[]
+  dim?: boolean
 }
 
-function IssueRow({ iss, onIdClick, onTitleClick }: IssueRowProps) {
-  const dot = priorityDotColor(iss.priority, iss.is_hotfix)
-  const breached = !iss.isDone && slaBreach(iss.tier, iss.hours_in_state)
+function IssueRow({ iss, onIdClick, onTitleClick, priorityTags, dim }: IssueRowProps) {
   return (
-    <div className={`sp-issue-row${breached ? ' sp-row-breach' : ''}`}>
-      <PriorityDot color={dot} />
-      <button className="sp-id" onClick={e => onIdClick(iss.idReadable, e)}>{iss.idReadable}</button>
-      <TypeBadge type={iss.issue_type} isHotfix={iss.is_hotfix} />
-      <button className="sp-summary" onClick={e => onTitleClick(iss.idReadable, e)}>
-        {iss.summary}
-      </button>
-      <div className="sp-meta">
-        <StateChip state={iss.current_state} role={iss.colRole} />
-        <AssigneeAvatar name={iss.assignee} />
-        <SLABadge hours={iss.hours_in_state} tier={iss.tier} isDone={iss.isDone} />
+    <HoverCard content={issueHover(iss)} maxWidth={270} delay={300}>
+      <div className={`db-mc-focus-card ${urgencyClass(iss)}${dim ? ' sp-row-dim' : ''}`}>
+        <div className="db-mc-focus-top">
+          <PriPill priority={iss.priority} tags={priorityTags} />
+          <IssueTypePill issueType={iss.issue_type} />
+          <span
+            className="db-ticket-id db-ticket-id--link"
+            onClick={e => onIdClick(iss.idReadable, e)}
+            title={`Open ${iss.idReadable} in YouTrack`}
+          >{iss.idReadable}</span>
+          {iss.bounce_count > 0 && <span className="db-bounce-chip">↩{iss.bounce_count}</span>}
+          <span className="db-ticket-state" style={{ marginLeft: 'auto' }}>{iss.current_state}</span>
+          <SLABadge hours={iss.hours_in_state} tier={iss.tier} isDone={iss.isDone} />
+        </div>
+        <div
+          className="db-mc-focus-title db-ticket-title--link"
+          onClick={e => onTitleClick(iss.idReadable, e)}
+        >{iss.summary}</div>
+        <div className="db-mc-focus-footer">
+          <DBAvatar name={iss.assignee || '?'} url={iss.avatarUrl} size={16} />
+          <span className="db-mc-focus-assignee">{iss.assignee?.split(' ')[0] || 'Unassigned'}</span>
+          {iss.hours_in_state > 0 && (
+            <span
+              className="db-mc-focus-time"
+              style={{ color: iss.overdue_level === 'deadline' ? 'var(--color-danger)' : undefined }}
+            >
+              {fmtHours(iss.hours_in_state)} in state
+            </span>
+          )}
+          {(iss.verified_on_dev || iss.verified_on_stage || iss.verified_on_prod) && (
+            <div className="db-verif-badges">
+              {iss.verified_on_dev   && <span className="db-verif-badge db-verif-badge--dev" title={`DEV: ${iss.verified_on_dev}`}>DEV✓</span>}
+              {iss.verified_on_stage && <span className="db-verif-badge db-verif-badge--stg" title={`STG: ${iss.verified_on_stage}`}>STG✓</span>}
+              {iss.verified_on_prod  && <span className="db-verif-badge db-verif-badge--prd" title={`PRD: ${iss.verified_on_prod}`}>PRD✓</span>}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </HoverCard>
   )
 }
+
+// ── Tier block — shows only active issues; done are collapsed under a toggle ──
 
 interface TierBlockProps {
   title: string
@@ -145,12 +230,15 @@ interface TierBlockProps {
   defaultOpen?: boolean
   onIdClick: (id: string, e: React.MouseEvent) => void
   onTitleClick: (id: string, e?: React.MouseEvent) => void
+  priorityTags?: PriorityTag[]
 }
 
-function TierBlock({ title, tier, issues, defaultOpen = true, onIdClick, onTitleClick }: TierBlockProps) {
-  const [open, setOpen] = useState(defaultOpen)
-  const active = issues.filter(i => !i.isDone)
-  const done = issues.filter(i => i.isDone)
+function TierBlock({ title, tier, issues, defaultOpen = true, onIdClick, onTitleClick, priorityTags }: TierBlockProps) {
+  const [open, setOpen]     = useState(defaultOpen)
+  const [doneOpen, setDoneOpen] = useState(false)
+
+  const active   = issues.filter(i => !i.isDone)
+  const done     = issues.filter(i => i.isDone)
   const breached = active.filter(i => slaBreach(tier, i.hours_in_state))
   const borderCls = tier === 1 ? 'sp-t1' : tier === 2 ? 'sp-t2' : tier === 3 ? 'sp-t3' : 'sp-t4'
 
@@ -165,15 +253,34 @@ function TierBlock({ title, tier, issues, defaultOpen = true, onIdClick, onTitle
       </button>
       {open && (
         <div className="sp-tier-body">
-          {issues.length === 0
-            ? <p className="sp-empty">No issues in this tier</p>
-            : issues.map(i => <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} />)
-          }
+          {active.length === 0 && done.length === 0 && (
+            <p className="sp-empty">No issues in this tier</p>
+          )}
+          {active.length === 0 && done.length > 0 && (
+            <p className="sp-empty sp-empty-ok">✓ All {done.length} delivered</p>
+          )}
+          {active.map(i => (
+            <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} priorityTags={priorityTags} />
+          ))}
+          {done.length > 0 && active.length > 0 && (
+            <button
+              className="sp-done-toggle"
+              onClick={e => { e.stopPropagation(); setDoneOpen(o => !o) }}
+            >
+              {doneOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              {done.length} done
+            </button>
+          )}
+          {doneOpen && done.map(i => (
+            <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} priorityTags={priorityTags} dim />
+          ))}
         </div>
       )}
     </div>
   )
 }
+
+// ── Health bar (right panel) ──────────────────────────────────────────────────
 
 function HealthBar({ label, done, total, color }: { label: string; done: number; total: number; color: string }) {
   const pct = total > 0 ? (done / total) * 100 : 0
@@ -188,7 +295,7 @@ function HealthBar({ label, done, total, color }: { label: string; done: number;
   )
 }
 
-// ── Main view ──────────────────────────────────────────────────────────────────
+// ── Props + main view ─────────────────────────────────────────────────────────
 
 export interface SprintPulseViewProps {
   activeSprint: YouTrackSprint | null
@@ -200,26 +307,27 @@ export interface SprintPulseViewProps {
 
 export function SprintPulseView({ activeSprint, boardData, boardLoading, onTitleClick, onIdClick }: SprintPulseViewProps) {
   const { config: wfConfig } = useWorkflowConfig()
-  const [regOpen, setRegOpen] = useState(true)
-  const [t4Open, setT4Open] = useState(false)
+  const [regOpen,    setRegOpen]    = useState(true)
+  const [t4Open,     setT4Open]     = useState(false)
+  const [t4DoneOpen, setT4DoneOpen] = useState(false)
 
-  // Build role lookup from workflow config
+  const priorityTags = wfConfig?.priority_tags
+
   const roleMap = useMemo(() => {
     const m = new Map<string, string>()
     wfConfig?.column_hierarchy?.forEach(col => {
       m.set(col.state.toLowerCase(), col.role)
-      col.aliases?.forEach(a => m.set(a.toLowerCase(), col.role))
+      col.aliases?.forEach((a: string) => m.set(a.toLowerCase(), col.role))
     })
     return m
   }, [wfConfig])
 
-  // Build PulseIssue list from board data
   const allIssues = useMemo((): PulseIssue[] => {
     if (!boardData) return []
     const out: PulseIssue[] = []
     for (const col of boardData.columns) {
       const colRole = roleMap.get(col.name.toLowerCase()) ?? ''
-      const isDone = DONE_ROLES.has(colRole)
+      const isDone  = DONE_ROLES.has(colRole)
       for (const iss of col.issues) {
         out.push({ ...iss, tier: classifyTier(iss.priority, iss.issue_type, iss.is_hotfix), isDone, colRole })
       }
@@ -239,7 +347,10 @@ export function SprintPulseView({ activeSprint, boardData, boardLoading, onTitle
 
   const t1Breached = tier1.filter(i => !i.isDone && slaBreach(1, i.hours_in_state))
   const t2Breached = tier2.filter(i => !i.isDone && slaBreach(2, i.hours_in_state))
-  const atRisk = allIssues.filter(i => i.is_delayed && !i.isDone)
+  const atRisk     = allIssues.filter(i => i.is_delayed && !i.isDone)
+
+  const t4Active = tier4.filter(i => !i.isDone)
+  const t4Done   = tier4.filter(i => i.isDone)
 
   if (!activeSprint) {
     return (
@@ -262,7 +373,7 @@ export function SprintPulseView({ activeSprint, boardData, boardLoading, onTitle
   return (
     <div className="sp-page">
 
-      {/* ── Status strip ─────────────────────────────── */}
+      {/* Status strip */}
       <div className="sp-strip">
         <div className="sp-strip-left">
           {t1Breached.length > 0 && (
@@ -280,59 +391,98 @@ export function SprintPulseView({ activeSprint, boardData, boardLoading, onTitle
         </div>
         <div className="sp-strip-right">
           <span className="sp-sprint-name">{activeSprint.name}</span>
-          <span className="sp-pct">{pct}% done</span>
+          <span className="sp-pct">{pct}%</span>
           <span className="sp-total">{totalDone}/{totalAll}</span>
         </div>
       </div>
 
-      {/* ── Main grid ─────────────────────────────────── */}
+      {/* Main layout */}
       <div className="sp-grid">
 
-        {/* Left: tiers */}
+        {/* Left: tier accordion */}
         <div className="sp-tiers">
-          <TierBlock title="CRITICAL / HOTFIX" tier={1} issues={tier1} defaultOpen onIdClick={onIdClick} onTitleClick={onTitleClick} />
-          <TierBlock title="URGENT" tier={2} issues={tier2} defaultOpen onIdClick={onIdClick} onTitleClick={onTitleClick} />
-          <TierBlock title="SCHEDULED" tier={3} issues={tier3} defaultOpen={false} onIdClick={onIdClick} onTitleClick={onTitleClick} />
+          <TierBlock
+            title="CRITICAL / HOTFIX" tier={1} issues={tier1} defaultOpen
+            onIdClick={onIdClick} onTitleClick={onTitleClick} priorityTags={priorityTags}
+          />
+          <TierBlock
+            title="URGENT (P1 / A1)" tier={2} issues={tier2} defaultOpen
+            onIdClick={onIdClick} onTitleClick={onTitleClick} priorityTags={priorityTags}
+          />
+          <TierBlock
+            title="SCHEDULED (P2 / A2)" tier={3} issues={tier3} defaultOpen={false}
+            onIdClick={onIdClick} onTitleClick={onTitleClick} priorityTags={priorityTags}
+          />
 
-          {/* Tier 4 — collapsed by default */}
+          {/* Tier 4 — Normal, collapsed by default */}
           <div className="sp-tier sp-t4">
             <button className="sp-tier-hd" onClick={() => setT4Open(o => !o)}>
               <span className="sp-tier-chevron">{t4Open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
               <span className="sp-tier-name">NORMAL</span>
-              <span className="sp-tier-active">{tier4.filter(i => !i.isDone).length} active</span>
-              <span className="sp-tier-done">{tier4.filter(i => i.isDone).length} done</span>
+              <span className="sp-tier-active">{t4Active.length} active</span>
+              {t4Done.length > 0 && <span className="sp-tier-done">{t4Done.length} done</span>}
             </button>
             {t4Open && (
               <div className="sp-tier-body">
-                {tier4.map(i => <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} />)}
+                {t4Active.length === 0 && t4Done.length === 0 && <p className="sp-empty">No issues</p>}
+                {t4Active.length === 0 && t4Done.length > 0  && <p className="sp-empty sp-empty-ok">✓ All {t4Done.length} delivered</p>}
+                {t4Active.map(i => (
+                  <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} priorityTags={priorityTags} />
+                ))}
+                {t4Done.length > 0 && t4Active.length > 0 && (
+                  <>
+                    <button className="sp-done-toggle" onClick={() => setT4DoneOpen(o => !o)}>
+                      {t4DoneOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                      {t4Done.length} done
+                    </button>
+                    {t4DoneOpen && t4Done.map(i => (
+                      <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} priorityTags={priorityTags} dim />
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </div>
+
+          {/* Regressions */}
+          {regs.length > 0 && (
+            <div className="sp-reg-wrap">
+              <button className="sp-reg-hd" onClick={() => setRegOpen(o => !o)}>
+                {regOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                <span className="sp-reg-title">REGRESSIONS</span>
+                <span className="sp-tier-active">{regs.filter(i => !i.isDone).length} active</span>
+                {regs.filter(i => i.isDone).length > 0 && (
+                  <span className="sp-tier-done">{regs.filter(i => i.isDone).length} done</span>
+                )}
+                <span className="sp-reg-sub">oldest first</span>
+              </button>
+              {regOpen && (
+                <div className="sp-tier-body">
+                  {regs.filter(i => !i.isDone).map(i => (
+                    <IssueRow key={i.idReadable} iss={i} onIdClick={onIdClick} onTitleClick={onTitleClick} priorityTags={priorityTags} />
+                  ))}
+                  {regs.filter(i => !i.isDone).length === 0 && (
+                    <p className="sp-empty sp-empty-ok">✓ No active regressions</p>
+                  )}
+                  {regs.filter(i => i.isDone).length > 0 && (
+                    <p className="sp-empty" style={{ marginTop: 2 }}>
+                      + {regs.filter(i => i.isDone).length} resolved
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Right: health panel */}
+        {/* Right: health summary panel */}
         <div className="sp-panel">
           <div className="sp-card">
             <div className="sp-card-title">Sprint Health</div>
             <div className="sp-hbars">
-              <HealthBar
-                label="Critical"
-                done={tier1.filter(i => i.isDone).length}
-                total={tier1.length}
-                color="var(--color-danger)"
-              />
-              <HealthBar
-                label="Urgent"
-                done={tier2.filter(i => i.isDone).length}
-                total={tier2.length}
-                color="var(--color-warning)"
-              />
-              <HealthBar
-                label="Normal"
-                done={tier4.filter(i => i.isDone).length}
-                total={tier4.length}
-                color="var(--color-success)"
-              />
+              <HealthBar label="Critical" done={tier1.filter(i => i.isDone).length} total={tier1.length} color="var(--color-danger)" />
+              <HealthBar label="Urgent"   done={tier2.filter(i => i.isDone).length} total={tier2.length} color="var(--color-warning)" />
+              <HealthBar label="Normal"   done={tier4.filter(i => i.isDone).length} total={tier4.length} color="var(--color-success)" />
             </div>
             <div className="sp-health-footer">
               <span className="sp-health-label">{totalDone} / {totalAll} delivered</span>
@@ -357,59 +507,22 @@ export function SprintPulseView({ activeSprint, boardData, boardLoading, onTitle
           <div className="sp-card">
             <div className="sp-card-title">Breakdown</div>
             {([
-              { label: 'Critical / Hotfix', n: tier1.length, color: 'var(--color-danger)' },
-              { label: 'Urgent (P1/A1)',    n: tier2.length, color: 'var(--color-warning)' },
-              { label: 'Scheduled (P2/A2)', n: tier3.length, color: 'var(--color-primary)' },
-              { label: 'Normal',            n: tier4.length, color: 'var(--text-muted)' },
-              { label: 'Regressions',       n: regs.length,  color: 'var(--color-warning)' },
-            ] as const).map(r => (
+              { label: 'Critical / Hotfix', active: tier1.filter(i => !i.isDone).length, total: tier1.length, color: 'var(--color-danger)' },
+              { label: 'Urgent (P1/A1)',    active: tier2.filter(i => !i.isDone).length, total: tier2.length, color: 'var(--color-warning)' },
+              { label: 'Scheduled',         active: tier3.filter(i => !i.isDone).length, total: tier3.length, color: 'var(--color-primary)' },
+              { label: 'Normal',            active: t4Active.length,                     total: tier4.length, color: 'var(--text-muted)' },
+              { label: 'Regressions',       active: regs.filter(i => !i.isDone).length,  total: regs.length,  color: 'var(--color-warning)' },
+            ] as const).filter(r => r.total > 0).map(r => (
               <div key={r.label} className="sp-bk-row">
                 <span className="sp-bk-dot" style={{ background: r.color }} />
                 <span className="sp-bk-label">{r.label}</span>
-                <span className="sp-bk-n">{r.n}</span>
+                <span className="sp-bk-active">{r.active}</span>
+                <span className="sp-bk-n" style={{ color: r.color }}>{r.total}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
-
-      {/* ── Regressions ──────────────────────────────── */}
-      <div className="sp-reg-wrap">
-        <button className="sp-reg-hd" onClick={() => setRegOpen(o => !o)}>
-          {regOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          <span className="sp-reg-title">REGRESSIONS</span>
-          <span className="sp-tier-active">{regs.filter(i => !i.isDone).length} active</span>
-          {regs.filter(i => i.isDone).length > 0 && (
-            <span className="sp-tier-done">{regs.filter(i => i.isDone).length} done</span>
-          )}
-          <span className="sp-reg-sub">sorted by age — oldest first</span>
-        </button>
-        {regOpen && (
-          <div className="sp-tier-body">
-            {regs.length === 0 ? (
-              <p className="sp-empty">No regressions in this sprint</p>
-            ) : (
-              <>
-                <div className="sp-reg-cols">
-                  <span>ID</span><span>Age</span><span>State</span>
-                  <span>Assignee</span><span>Priority</span><span>Summary</span>
-                </div>
-                {regs.map(i => (
-                  <div key={i.idReadable} className="sp-reg-row">
-                    <button className="sp-id" onClick={e => onIdClick(i.idReadable, e)}>{i.idReadable}</button>
-                    <span className={`sp-reg-age ${ageClass(i.hours_in_state)}`}>{fmtAge(i.hours_in_state)}</span>
-                    <StateChip state={i.current_state} role={i.colRole} />
-                    {i.assignee ? <AssigneeAvatar name={i.assignee} /> : <span className="sp-assignee-none">—</span>}
-                    <span className="sp-priority-tag">{i.priority || '—'}</span>
-                    <button className="sp-summary" onClick={e => onTitleClick(i.idReadable, e)}>{i.summary}</button>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
     </div>
   )
 }

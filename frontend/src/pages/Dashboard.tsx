@@ -62,6 +62,7 @@ import { AIAnalysisPage } from './AIAnalysisPage'
 import { DevActivityPage } from './DevActivityPage'
 import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
+import { SprintPulsePage } from './SprintPulsePage'
 import { SlackIntelligencePage } from './SlackIntelligencePage'
 import { ActivityPage } from './ActivityPage'
 import { DayTrackPage } from './DayTrackPage'
@@ -71,10 +72,10 @@ import { applyUserTheme } from '../utils/themeUtils'
 import { RightPanel } from '../components/notifications/RightPanel'
 import type { LocalNotification } from '../components/notifications/RightPanel'
 
-type Page = 'dashboard' | 'board' | 'list' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme'
+type Page = 'dashboard' | 'board' | 'list' | 'sprint-pulse' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'sprint-pulse', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -145,6 +146,7 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'dashboard': 'dashboard',
   'board': 'board',
   'list': 'list',
+  'sprint-pulse': 'sprint-pulse',
   'daily-ops': 'daily-ops',
   'calendar': 'calendar',
   'reports': 'reports',
@@ -206,7 +208,7 @@ export default function Dashboard() {
     const path = location.pathname
     if (path === '/' || path === '') {
       const last = localStorage.getItem(PERSIST.LAST_PAGE) as Page | null
-      const valid: Page[] = ['board', 'list', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'dev-activity', 'integrations', 'settings', 'bots', 'theme']
+      const valid: Page[] = ['board', 'list', 'sprint-pulse', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'dev-activity', 'integrations', 'settings', 'bots', 'theme']
       if (last && valid.includes(last)) {
         navigate(`/${last}`, { replace: true })
       }
@@ -269,6 +271,7 @@ export default function Dashboard() {
       'dashboard':      'Dashboard',
       'board':          'Board View',
       'list':           'List View',
+      'sprint-pulse':   'Sprint Pulse',
       'daily-ops':      'DailyOps',
       'dev-activity':   'Dev Activity',
       'calendar':       'Calendar',
@@ -610,6 +613,13 @@ export default function Dashboard() {
               <span>List View</span>
             </button>
             <button
+              className={`sidebar-nav-item ${currentPage === 'sprint-pulse' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('sprint-pulse')}
+            >
+              <Zap size={20} />
+              <span>Sprint Pulse</span>
+            </button>
+            <button
               className={`sidebar-nav-item ${currentPage === 'daily-ops' ? 'active' : ''}`}
               onClick={() => setCurrentPage('daily-ops')}
             >
@@ -755,6 +765,7 @@ export default function Dashboard() {
             {currentPage === 'dashboard' && 'Dashboard'}
             {currentPage === 'board' && 'Board View'}
             {currentPage === 'list' && 'List View'}
+            {currentPage === 'sprint-pulse' && 'Sprint Pulse'}
             {currentPage === 'daily-ops' && 'DailyOps'}
             {currentPage === 'calendar' && 'Calendar'}
             {currentPage === 'ai-analysis' && 'AI Task Analysis'}
@@ -841,6 +852,11 @@ export default function Dashboard() {
         {mountedTabs.has('list') && (
           <div className={currentPage !== 'list' ? 'dash-tab-hidden' : undefined}>
             <ListViewPage />
+          </div>
+        )}
+        {mountedTabs.has('sprint-pulse') && (
+          <div className={currentPage !== 'sprint-pulse' ? 'dash-tab-hidden' : undefined}>
+            <SprintPulsePage />
           </div>
         )}
         {mountedTabs.has('daily-ops') && (

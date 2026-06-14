@@ -57,6 +57,7 @@
 @import "./styles/pages/theme-customizer.css";
 @import "./styles/pages/theme-settings.css";
 @import "./styles/pages/sprint-radar.css";
+@import "./styles/pages/sprint-pulse.css";
 
 /* ── Shared component overlays ── */
 @import "./styles/components/hover-card.css";

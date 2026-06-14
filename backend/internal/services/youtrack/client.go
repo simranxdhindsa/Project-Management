@@ -1401,6 +1401,26 @@ func (c *Client) UploadAttachment(ctx context.Context, issueID, filename, mimeTy
 	return nil
 }
 
+// flexBool unmarshals JSON booleans and the integers 0/1 (YouTrack sometimes sends numbers).
+type flexBool bool
+
+func (f *flexBool) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	switch s {
+	case "true":
+		*f = true
+	case "false", "null":
+		*f = false
+	case "1":
+		*f = true
+	case "0":
+		*f = false
+	default:
+		return fmt.Errorf("cannot unmarshal %s into flexBool", s)
+	}
+	return nil
+}
+
 // IssueLink represents a linked issue returned by GetIssueLinks / GetAllIssueLinks.
 type IssueLink struct {
 	IDReadable string `json:"id_readable"`
@@ -1426,10 +1446,10 @@ func (c *Client) GetIssueLinks(ctx context.Context, issueID string) ([]IssueLink
 			Name string `json:"name"`
 		} `json:"linkType"`
 		TrimmedIssues []struct {
-			ID         string `json:"id"`
-			IDReadable string `json:"idReadable"`
-			Summary    string `json:"summary"`
-			Resolved   bool   `json:"resolved"`
+			ID         string   `json:"id"`
+			IDReadable string   `json:"idReadable"`
+			Summary    string   `json:"summary"`
+			Resolved   flexBool `json:"resolved"`
 			Fields     []struct {
 				Type  string          `json:"$type"`
 				Value json.RawMessage `json:"value"`
@@ -1466,7 +1486,7 @@ func (c *Client) GetIssueLinks(ctx context.Context, issueID string) ([]IssueLink
 				IDReadable: issue.IDReadable,
 				Summary:    issue.Summary,
 				State:      state,
-				Resolved:   issue.Resolved,
+				Resolved:   bool(issue.Resolved),
 			})
 		}
 	}
@@ -1490,10 +1510,10 @@ func (c *Client) GetAllIssueLinks(ctx context.Context, issueID string) ([]IssueL
 			TargetToSource string `json:"targetToSource"`
 		} `json:"linkType"`
 		TrimmedIssues []struct {
-			ID         string `json:"id"`
-			IDReadable string `json:"idReadable"`
-			Summary    string `json:"summary"`
-			Resolved   bool   `json:"resolved"`
+			ID         string   `json:"id"`
+			IDReadable string   `json:"idReadable"`
+			Summary    string   `json:"summary"`
+			Resolved   flexBool `json:"resolved"`
 			Fields     []struct {
 				Type  string          `json:"$type"`
 				Value json.RawMessage `json:"value"`
@@ -1527,7 +1547,7 @@ func (c *Client) GetAllIssueLinks(ctx context.Context, issueID string) ([]IssueL
 				IDReadable: issue.IDReadable,
 				Summary:    issue.Summary,
 				State:      state,
-				Resolved:   issue.Resolved,
+				Resolved:   bool(issue.Resolved),
 				LinkType:   linkTypeName,
 				Direction:  dir,
 			})
