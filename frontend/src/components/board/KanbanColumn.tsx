@@ -20,12 +20,13 @@ interface KanbanColumnProps {
   issues: YouTrackIssue[]
   avatarMap: Record<string, string>
   onIssueClick?: (issue: YouTrackIssue) => void
+  getExtraClass?: (issue: YouTrackIssue) => string
   hasMore?: boolean
   isLoadingMore?: boolean
   onLoadMore?: () => void
 }
 
-export function KanbanColumn({ id, title, issues, avatarMap, onIssueClick, hasMore, isLoadingMore, onLoadMore }: KanbanColumnProps) {
+export function KanbanColumn({ id, title, issues, avatarMap, onIssueClick, getExtraClass, hasMore, isLoadingMore, onLoadMore }: KanbanColumnProps) {
   const { isOver, setNodeRef } = useDroppable({ id })
   const issueIds = issues.map(i => i.id)
   const { color } = getColumnMeta(title)
@@ -71,6 +72,7 @@ export function KanbanColumn({ id, title, issues, avatarMap, onIssueClick, hasMo
                 key={issue.id}
                 issue={issue}
                 avatarMap={avatarMap}
+                extraClass={getExtraClass?.(issue)}
                 onClick={() => onIssueClick?.(issue)}
               />
             ))

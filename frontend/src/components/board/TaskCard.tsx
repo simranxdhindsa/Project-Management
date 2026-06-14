@@ -6,6 +6,7 @@ interface TaskCardProps {
   issue: YouTrackIssue
   avatarMap: Record<string, string>
   isDragging?: boolean
+  extraClass?: string
   onClick?: () => void
 }
 
@@ -47,7 +48,7 @@ function cardHoverContent(issue: YouTrackIssue) {
   )
 }
 
-export function TaskCard({ issue, avatarMap, isDragging, onClick }: TaskCardProps) {
+export function TaskCard({ issue, avatarMap, isDragging, extraClass, onClick }: TaskCardProps) {
   const priorityCls = getPriorityClass(issue.priority || '')
   const { label: statusLabel, cls: statusCls } = getStatusBadge(issue.status || '')
   const assigneeName = issue.assignee?.fullName || issue.assignee?.login || ''
@@ -56,7 +57,7 @@ export function TaskCard({ issue, avatarMap, isDragging, onClick }: TaskCardProp
   return (
     <HoverCard content={cardHoverContent(issue)} maxWidth={280}>
       <div
-        className={`task-card ${priorityCls} ${isDragging ? 'dragging' : ''}`}
+        className={`task-card ${priorityCls} ${isDragging ? 'dragging' : ''} ${extraClass || ''}`}
         onClick={onClick}
       >
         {/* Attachment count — top-right corner */}

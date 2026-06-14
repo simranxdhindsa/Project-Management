@@ -6,10 +6,11 @@ import type { YouTrackIssue } from '../../services/api'
 interface SortableTaskCardProps {
   issue: YouTrackIssue
   avatarMap: Record<string, string>
+  extraClass?: string
   onClick?: () => void
 }
 
-export function SortableTaskCard({ issue, avatarMap, onClick }: SortableTaskCardProps) {
+export function SortableTaskCard({ issue, avatarMap, extraClass, onClick }: SortableTaskCardProps) {
   const {
     attributes,
     listeners,
@@ -30,6 +31,7 @@ export function SortableTaskCard({ issue, avatarMap, onClick }: SortableTaskCard
         issue={issue}
         avatarMap={avatarMap}
         isDragging={isDragging}
+        extraClass={extraClass}
         onClick={onClick}
       />
     </div>

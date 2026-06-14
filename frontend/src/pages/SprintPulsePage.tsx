@@ -4,6 +4,7 @@ import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import HoverCard from '@/components/HoverCard'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 import { SprintControlsBar } from '@/components/SprintControlsBar'
+import { KanbanBoard } from '@/components/board/KanbanBoard'
 import type { ModeOption } from '@/components/SprintControlsBar'
 import type {
   YouTrackSprint,
@@ -12,8 +13,9 @@ import type {
   WorkflowConfig,
   YouTrackIssue,
 } from '@/services/api'
+import { updatePMIssueState } from '@/services/pmDataService'
 import {
-  GitBranch, ChevronDown, RefreshCw, Zap, ChevronRight,
+  GitBranch, RefreshCw, ChevronRight,
   LayoutGrid, AlignLeft, BarChart2, Layers,
 } from 'lucide-react'
 import '@/styles/pages/sprint-pulse.css'
@@ -237,73 +239,90 @@ function IssueCard({
   )
 }
 
-// ─── TierColumn (used by ViewA) ───────────────────────────────────────────────
+// ─── View A — Real Kanban (shared KanbanBoard component) ─────────────────────
 
-function TierColumn({
-  tier, issues, wfConfig, onTitleClick, onIdClick,
-}: {
-  tier: number
-  issues: PulseIssue[]
-  wfConfig: WorkflowConfig | null
-  onTitleClick: (id: string, e?: React.MouseEvent) => void
-  onIdClick: (id: string, e: React.MouseEvent) => void
-}) {
-  const [showDone, setShowDone] = useState(false)
-  const active = issues.filter(i => !i.isDone)
-  const done   = issues.filter(i => i.isDone)
-  const breachCount = active.filter(i => dangerLevel(i) === 2).length
-
-  return (
-    <div className={`spl-tier-col ${tierCssClass(tier)}`}>
-      <div className="spl-tier-col-hd">
-        <span className="spl-tier-col-name">{tierLabel(tier)}</span>
-        <span className="spl-tier-col-cnt">{active.length}</span>
-        {breachCount > 0 && <span className="spl-tier-col-breach">⚠ {breachCount}</span>}
-        {done.length > 0 && <span className="spl-tier-col-done">{done.length} done</span>}
-      </div>
-      <div className="spl-tier-col-body">
-        {active.length === 0 && (
-          <p className="spl-empty spl-empty-ok">✓ All clear</p>
-        )}
-        {active.map(iss => (
-          <IssueCard
-            key={iss.id}
-            iss={iss}
-            wfConfig={wfConfig}
-            onTitleClick={onTitleClick}
-            onIdClick={onIdClick}
-          />
-        ))}
-        {done.length > 0 && (
-          <button className="spl-done-toggle" onClick={() => setShowDone(v => !v)}>
-            {showDone ? '↑ Hide done' : `↓ ${done.length} done`}
-          </button>
-        )}
-        {showDone && done.map(iss => (
-          <IssueCard
-            key={iss.id}
-            iss={iss}
-            wfConfig={wfConfig}
-            onTitleClick={onTitleClick}
-            onIdClick={onIdClick}
-          />
-        ))}
-      </div>
-    </div>
-  )
+function toYTIssue(iss: PulseIssue): YouTrackIssue {
+  return {
+    id:         iss.id,
+    idReadable: iss.idReadable,
+    summary:    iss.summary,
+    description: '',
+    status:     iss.current_state,
+    priority:   iss.priority,
+    type:       iss.issue_type,
+    assignee:   iss.assignee
+      ? { login: iss.assignee, fullName: iss.assignee, avatarUrl: iss.avatarUrl || '' }
+      : undefined,
+    created: 0,
+    updated: 0,
+  }
 }
 
-// ─── View A — Kanban ──────────────────────────────────────────────────────────
+function PulseKanbanView({
+  allIssues, boardData, roleMap, onTitleClick, onIdClick,
+}: {
+  allIssues:    PulseIssue[]
+  boardData:    SprintBoardStatusResponse
+  roleMap:      Map<string, string>
+  onTitleClick: (id: string, e?: React.MouseEvent) => void
+  onIdClick:    (id: string, e: React.MouseEvent) => void
+}) {
+  const [localIssues, setLocalIssues] = useState<YouTrackIssue[]>(() => allIssues.map(toYTIssue))
 
-function ViewA({ tierGroups, wfConfig, onTitleClick, onIdClick }: ViewProps) {
+  useEffect(() => { setLocalIssues(allIssues.map(toYTIssue)) }, [allIssues])
+
+  const avatarMap = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const iss of allIssues) {
+      if (iss.assignee && iss.avatarUrl) m[iss.assignee] = iss.avatarUrl
+    }
+    return m
+  }, [allIssues])
+
+  const pulseMap = useMemo(() => {
+    const m: Record<string, PulseIssue> = {}
+    for (const iss of allIssues) m[iss.id] = iss
+    return m
+  }, [allIssues])
+
+  const columns = useMemo(() => boardData.columns.map(c => c.name), [boardData])
+
+  const getColumnIssues = useCallback((col: string): YouTrackIssue[] => {
+    const colIssues = localIssues.filter(i => i.status === col)
+    return [...colIssues].sort((a, b) => {
+      const pa = pulseMap[a.id], pb = pulseMap[b.id]
+      if (!pa || !pb) return 0
+      if (pa.tier !== pb.tier) return pa.tier - pb.tier
+      return dangerLevel(pb) - dangerLevel(pa)
+    })
+  }, [localIssues, pulseMap])
+
+  const handleIssueMove = useCallback((issueId: string, newState: string) => {
+    setLocalIssues(prev => prev.map(i => i.id === issueId ? { ...i, status: newState } : i))
+    updatePMIssueState(issueId, newState)
+  }, [])
+
+  const getExtraClass = useCallback((issue: YouTrackIssue): string => {
+    const pi = pulseMap[issue.id]
+    if (!pi) return ''
+    const currentRole = roleMap.get(issue.status.toLowerCase()) || ''
+    if (currentRole === 'backlog' || DONE_ROLES.has(currentRole)) return ''
+    const danger = dangerLevel(pi)
+    if (danger === 2) return 'spl-card--crit spl-card--pulse'
+    if (danger === 1) return 'spl-card--warn'
+    return ''
+  }, [pulseMap, roleMap])
+
   return (
-    <div className="spl-kanban">
-      <TierColumn tier={1}  issues={tierGroups.t1}  wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
-      <TierColumn tier={2}  issues={tierGroups.t2}  wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
-      <TierColumn tier={3}  issues={tierGroups.t3}  wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
-      <TierColumn tier={4}  issues={tierGroups.t4}  wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
-      <TierColumn tier={0}  issues={tierGroups.reg} wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
-    </div>
+    <KanbanBoard
+      issues={localIssues}
+      columns={columns}
+      avatarMap={avatarMap}
+      getColumnIssues={getColumnIssues}
+      onIssueMove={handleIssueMove}
+      onIssueClick={(issue) => onTitleClick(issue.idReadable || issue.id)}
+      getExtraClass={getExtraClass}
+    />
   )
 }
 
@@ -707,7 +726,6 @@ export function SprintPulsePage() {
 
   const handleSprintSelect = useCallback((s: YouTrackSprint) => {
     setActiveSprint(s)
-    setSprintOpen(false)
     localStorage.setItem(SPRINT_ID_KEY,   s.id)
     localStorage.setItem(SPRINT_NAME_KEY, s.name)
   }, [])
@@ -912,9 +930,10 @@ export function SprintPulsePage() {
         {!loading && boardData && (
           <>
             {viewMode === 'a' && (
-              <ViewA
-                tierGroups={tierGroups}
-                wfConfig={wfConfig}
+              <PulseKanbanView
+                allIssues={allIssues}
+                boardData={boardData}
+                roleMap={roleMap}
                 onTitleClick={openIssueDetail}
                 onIdClick={openInYt}
               />

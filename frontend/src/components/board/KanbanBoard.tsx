@@ -22,12 +22,13 @@ interface KanbanBoardProps {
   getColumnIssues: (col: string) => YouTrackIssue[]
   onIssueMove: (issueId: string, newState: string) => void
   onIssueClick?: (issue: YouTrackIssue) => void
+  getExtraClass?: (issue: YouTrackIssue) => string
   colPagination?: Record<string, ColPaginationState>
   onLoadMore?: (col: string) => void
 }
 
 export function KanbanBoard({
-  issues, columns, avatarMap, getColumnIssues, onIssueMove, onIssueClick, colPagination, onLoadMore,
+  issues, columns, avatarMap, getColumnIssues, onIssueMove, onIssueClick, getExtraClass, colPagination, onLoadMore,
 }: KanbanBoardProps) {
   const [activeIssue, setActiveIssue] = useState<YouTrackIssue | null>(null)
 
@@ -95,6 +96,7 @@ export function KanbanBoard({
               issues={getColumnIssues(col)}
               avatarMap={avatarMap}
               onIssueClick={onIssueClick}
+              getExtraClass={getExtraClass}
               hasMore={pg?.hasMore}
               isLoadingMore={pg?.loading}
               onLoadMore={onLoadMore ? () => onLoadMore(col) : undefined}
