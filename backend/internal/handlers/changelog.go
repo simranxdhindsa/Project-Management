@@ -71,11 +71,13 @@ func (h *ChangelogHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	latestDate := ""
 	if len(entries) > 0 {
 		latestDate = entries[0].Date
-		parsed, err := time.Parse("2006-01-02", latestDate)
-		if err == nil {
-			if seenAt == nil || parsed.After(*seenAt) {
-				hasNew = true
-			}
+		if seenAt == nil {
+			hasNew = true
+		} else {
+			// Compare date strings only — avoids false negatives when seen_at
+			// timestamp is later in the same day as the latest entry date.
+			seenDay := seenAt.UTC().Format("2006-01-02")
+			hasNew = latestDate > seenDay
 		}
 	}
 
@@ -85,6 +87,22 @@ func (h *ChangelogHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		LatestDate: latestDate,
 		Entries:    entries,
 	})
+}
+
+// ResetSeen clears the user's seen state so the dot reappears (dev/testing use).
+func (h *ChangelogHandler) ResetSeen(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserID(r.Context())
+	if userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	_, err := database.GetPool().Exec(r.Context(),
+		`UPDATE users SET changelog_seen_at = NULL WHERE id = $1`, userID)
+	if err != nil {
+		http.Error(w, "failed to reset seen state", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // MarkSeen records that the current user has seen the changelog now.

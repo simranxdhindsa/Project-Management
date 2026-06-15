@@ -4,6 +4,17 @@ All notable changes to Velocity are listed here. Most recent entries appear firs
 
 ---
 
+## 2026-06-14
+
+### Features
+- In-app changelog / What's New panel with per-user seen state and pulsing indicator
+
+### Enhancements
+- Automated CHANGELOG.md updates via commit-msg git hook — no manual changelog entries needed
+- CLAUDE.md theming table updated to reference correct CSS variable names
+
+---
+
 ## 2026-06-11
 
 ### Features

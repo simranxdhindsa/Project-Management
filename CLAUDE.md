@@ -165,14 +165,34 @@ Tabs stay mounted via `.dash-tab-hidden` CSS (session keep-alive). `usePersisted
 
 ### 4 — Theming
 
-Every component must work in both dark (default) and light mode. Use CSS variables or `[data-theme="light"]` overrides — never hardcoded colours that only work in one theme.
+Every component must work in both dark (default) and light mode. Always use CSS variables — **never hardcode hex values**. All variables are defined in `frontend/src/styles/tokens.css`.
 
 ```css
-.my-class { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.8); }
-[data-theme="light"] .my-class { background: rgba(241,245,249,0.9); color: #1e293b; }
+.my-class { background: var(--bg-surface); color: var(--text-primary); }
+[data-theme="light"] .my-class { background: var(--bg-elevated); color: var(--text-primary); }
 ```
 
-Light-mode palette: surface `#fff` / `rgba(241,245,249,0.9)`, text `#1e293b`, muted `#94a3b8`, border `rgba(99,102,241,0.12–0.2)`, accent `#4f46e5`, danger `#dc2626`, warning `#d97706`, success `#16a34a`.
+**Use these variables — never the raw hex:**
+
+| Role | Variable | Notes |
+|------|----------|-------|
+| Accent / primary | `var(--color-primary)` | User-customisable — never hardcode |
+| Accent hover | `var(--color-primary-hover)` | |
+| Accent light | `var(--color-primary-light)` | |
+| Accent for rgba() | `var(--color-primary-rgb)` | Use as `rgba(var(--color-primary-rgb), 0.15)` |
+| Page background | `var(--bg-base)` | Darkest layer |
+| Panel / surface | `var(--bg-surface)` | Sidebars, panels |
+| Card / elevated | `var(--bg-elevated)` | Cards, dropdowns |
+| Card glass tint | `var(--bg-card)` | `rgba(255,255,255,0.04)` tint over bg |
+| Primary text | `var(--text-primary)` | |
+| Secondary text | `var(--text-secondary)` | |
+| Muted / label text | `var(--text-muted)` | |
+| Danger | `var(--color-danger)` | Use `var(--color-danger-muted)` for bg tints |
+| Warning | `var(--color-warning)` | Use `var(--color-warning-muted)` for bg tints |
+| Success | `var(--color-success)` | Use `var(--color-success-muted)` for bg tints |
+| Border | `var(--border-color)` | |
+| Subtle border | `var(--border-subtle)` | |
+| Glow / shadow | `var(--shadow-glow)` | Primary accent glow |
 
 No `style={{}}` for colours/layout — CSS files only.
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Sparkles, Zap, Bug, Wrench } from 'lucide-react'
+import { X, Sparkles, Star, Zap, Bug, Wrench } from 'lucide-react'
 import type { ChangelogEntry } from '../../services/api'
 import api from '../../services/api'
 
@@ -11,7 +11,7 @@ interface Props {
 }
 
 const SECTIONS = [
-  { key: 'features'     as const, label: 'Features',     Icon: Sparkles, cls: 'cl-sec--feature'  },
+  { key: 'features'     as const, label: 'Features',     Icon: Star,     cls: 'cl-sec--feature'  },
   { key: 'enhancements' as const, label: 'Enhancements', Icon: Zap,      cls: 'cl-sec--enhance'  },
   { key: 'bugs'         as const, label: 'Bug Fixes',    Icon: Bug,      cls: 'cl-sec--bug'      },
   { key: 'refactors'    as const, label: 'Refactors',    Icon: Wrench,   cls: 'cl-sec--refactor' },
@@ -20,12 +20,10 @@ const SECTIONS = [
 export default function ChangelogPanel({ anchorRect, entries, onClose }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
-  // Mark seen immediately on mount
   useEffect(() => {
     api.markChangelogSeen().catch(() => {})
   }, [])
 
-  // Outside-click to close
   useEffect(() => {
     function handle(e: MouseEvent) {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
@@ -48,11 +46,11 @@ export default function ChangelogPanel({ anchorRect, entries, onClose }: Props) 
       {/* Header */}
       <div className="cl-panel-header">
         <div className="cl-panel-title">
-          <Sparkles size={15} />
+          <Sparkles size={14} />
           What's New
         </div>
         <button className="cl-panel-close" onClick={onClose} aria-label="Close">
-          <X size={15} />
+          <X size={14} />
         </button>
       </div>
 
@@ -61,9 +59,15 @@ export default function ChangelogPanel({ anchorRect, entries, onClose }: Props) 
         {entries.length === 0 && (
           <p className="cl-empty">No changelog entries yet.</p>
         )}
-        {entries.map(entry => (
+        {entries.map((entry, idx) => (
           <div key={entry.date} className="cl-entry">
-            <div className="cl-entry-date">{formatDate(entry.date)}</div>
+            {/* Date heading + badge */}
+            <div className="cl-entry-meta">
+              <span className="cl-entry-date">{formatDate(entry.date)}</span>
+              {idx === 0 && <span className="cl-badge">Latest</span>}
+            </div>
+
+            {/* Sections */}
             {SECTIONS.map(({ key, label, Icon, cls }) => {
               const items = entry[key]
               if (!items?.length) return null
@@ -71,7 +75,7 @@ export default function ChangelogPanel({ anchorRect, entries, onClose }: Props) 
                 <div key={key} className="cl-section">
                   <div className={`cl-section-header ${cls}`}>
                     <span className={`cl-section-icon ${cls}`}>
-                      <Icon size={11} />
+                      <Icon size={10} />
                     </span>
                     {label}
                   </div>

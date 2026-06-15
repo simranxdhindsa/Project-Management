@@ -229,6 +229,7 @@ func main() {
 	changelogRoutes.Use(middleware.AuthMiddleware)
 	changelogRoutes.HandleFunc("/status", changelogHandler.GetStatus).Methods("GET")
 	changelogRoutes.HandleFunc("/seen", changelogHandler.MarkSeen).Methods("PATCH")
+	changelogRoutes.HandleFunc("/seen/reset", changelogHandler.ResetSeen).Methods("PATCH")
 
 	// Notification handler must be created before Slack handler (Slack needs it for SSE broadcast)
 	notifHandler := handlers.NewNotificationHandler(sseHub)
