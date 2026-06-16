@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import api from '@/services/api'
 import type { NotificationItem } from '@/services/api'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 
 type Filter = 'all' | 'unread' | 'task' | 'slack' | 'system'
 
@@ -318,6 +319,9 @@ export function ActivityPage() {
       {/* Feed */}
       {loading ? <SkeletonFeed /> : filtered.length === 0 ? (
         <div className="act2-empty">
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+            <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+          </div>
           <div className="act2-empty-icon"><Bell size={28} strokeWidth={1.3} /></div>
           <p className="act2-empty-title">No activity{filter !== 'all' ? ` for "${filter}"` : ''}</p>
           <p className="act2-empty-sub">Task updates, Slack scans, and AI events appear here.</p>

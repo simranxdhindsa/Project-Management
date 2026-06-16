@@ -9,6 +9,7 @@ import {
   CheckCircle2, Clock, Save,
 } from 'lucide-react'
 import api from '../services/api'
+import { SprintScanLoader } from './brand/VelocityLoaders'
 import type {
   CapacityRow, DependencyLink, BlockerSLAItem, EscalationConfig,
   YouTrackSprint,
@@ -27,7 +28,11 @@ function EmptyState({ icon: Icon, text }: { icon: React.ElementType; text: strin
 }
 
 function Spinner() {
-  return <div className="pmf-spinner"><RefreshCw size={20} className="spin" /></div>
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+      <SprintScanLoader size={40} />
+    </div>
+  )
 }
 
 function useAsync<T>(fn: () => Promise<T>, deps: React.DependencyList) {

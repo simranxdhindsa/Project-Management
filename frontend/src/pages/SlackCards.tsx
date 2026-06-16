@@ -3,6 +3,7 @@ import {
   RefreshCw, CheckCircle, Clock, Hash, MessageSquare, Moon,
   ChevronDown, Star, Clipboard, Send, ExternalLink,
 } from 'lucide-react'
+import { SprintScanLoader } from '@/components/brand/VelocityLoaders'
 import api from '../services/api'
 import type { SlackMention, SlackThread } from '../services/api'
 
@@ -448,7 +449,7 @@ export function EmptyState({ icon: Icon, text, sub }: { icon: React.ElementType;
 export function LoadingState() {
   return (
     <div className="si2-empty">
-      <RefreshCw size={20} className="spin" />
+      <SprintScanLoader size={48} />
       <p>Loading…</p>
     </div>
   )

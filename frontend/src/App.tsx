@@ -1,5 +1,6 @@
 import { BrowserRouter, useLocation } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, Suspense } from 'react'
+import { SvgVDrawLoader } from '@/components/brand/VelocityLoaders'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { VelocityDataProvider } from '@/contexts/VelocityDataContext'
 import { GatewayErrorProvider, useGatewayError, GatewayError } from '@/contexts/GatewayErrorContext'
@@ -55,7 +56,13 @@ function App() {
     <BrowserRouter>
       <GatewayErrorProvider>
         <AuthProvider>
-          <AppContent />
+          <Suspense fallback={
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--color-background,#020617)' }}>
+              <SvgVDrawLoader size={128} />
+            </div>
+          }>
+            <AppContent />
+          </Suspense>
         </AuthProvider>
       </GatewayErrorProvider>
     </BrowserRouter>

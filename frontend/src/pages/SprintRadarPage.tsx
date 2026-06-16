@@ -5,6 +5,7 @@ import {
 import type { SprintBoardStatusResponse, SprintBoardIssue, YouTrackSprint, PriorityTag } from '@/services/api'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import HoverCard, { HCRow, HCDivider, HCBadge } from '@/components/HoverCard'
+import { SprintScanLoader } from '@/components/brand/VelocityLoaders'
 import '@/styles/pages/sprint-radar.css'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -364,7 +365,7 @@ export function SprintPulseView({ activeSprint, boardData, boardLoading, onTitle
   if (boardLoading || !boardData) {
     return (
       <div className="sp-loading">
-        <div className="sp-spinner" />
+        <SprintScanLoader size={48} />
         Loading Sprint Pulse — {activeSprint.name}…
       </div>
     )

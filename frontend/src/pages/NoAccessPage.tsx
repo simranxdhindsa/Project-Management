@@ -1,4 +1,5 @@
 import { ShieldX, Mail, RotateCcw, KanbanSquare } from 'lucide-react'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 
 interface NoAccessPageProps {
   message?: string
@@ -25,6 +26,11 @@ export default function NoAccessPage({ message = '', onReset }: NoAccessPageProp
         <div className="nap-wordmark">
           <KanbanSquare size={18} />
           <span>Velocity</span>
+        </div>
+
+        {/* Logo */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+          <VelocityLogo variant="icon" size="xl" mark="quantum" showStatusDot={false} style={{ opacity: 0.3 }} />
         </div>
 
         {/* Icon */}

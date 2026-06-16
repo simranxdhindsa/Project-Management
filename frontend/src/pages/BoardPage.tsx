@@ -4,6 +4,8 @@ import {
   AlertTriangle, ArrowDownUp, ArrowUpNarrowWide, ArrowDownNarrowWide,
   ExternalLink, Loader2, Filter, LayoutDashboard, CalendarDays,
 } from 'lucide-react'
+import { SprintScanLoader, QuantumOrbitLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import { KanbanBoard } from '../components/board'
 import api, { getYouTrackAvatarMap } from '../services/api'
 import type { YouTrackIssue, YouTrackSprint } from '../services/api'
@@ -559,6 +561,9 @@ export function BoardPage() {
       {/* ── Board ──────────────────────────────────────────────────────────── */}
       {columns.length === 0 ? (
         <div className="pm-empty-state">
+          <div style={{ display:'flex', justifyContent:'center', marginBottom:'12px' }}>
+            <VelocityLogo variant="icon" size="md" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+          </div>
           <Filter size={40} />
           <p>No columns found. Make sure YouTrack is configured in Settings.</p>
         </div>

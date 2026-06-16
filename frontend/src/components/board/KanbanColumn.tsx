@@ -3,6 +3,7 @@ import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { SortableTaskCard } from './SortableTaskCard'
 import type { YouTrackIssue } from '../../services/api'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 
 function getColumnMeta(title: string): { color: string } {
   const t = title.toLowerCase()
@@ -63,9 +64,12 @@ export function KanbanColumn({ id, title, issues, avatarMap, onIssueClick, getEx
       <div className="kanban-column-body" ref={bodyRef}>
         <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
           {issues.length === 0 ? (
-            <p className="text-muted" style={{ padding: '1rem', textAlign: 'center', fontSize: '0.85rem' }}>
-              No issues
-            </p>
+            <div style={{ padding: '1rem', textAlign: 'center' }}>
+              <div style={{ display:'flex', justifyContent:'center', marginBottom:'12px' }}>
+                <VelocityLogo variant="icon" size="md" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+              </div>
+              <p className="text-muted" style={{ fontSize: '0.85rem', margin: 0 }}>No issues</p>
+            </div>
           ) : (
             issues.map(issue => (
               <SortableTaskCard

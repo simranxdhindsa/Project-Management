@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { VelocityBarsLoader, QuantumOrbitLoader, SprintScanLoader, SvgSprintScanLoader, SvgVelocityBarsLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import { usePersistedState, PERSIST } from '@/hooks/usePersistedState'
 import HoverCard, { HCRow, HCBar, HCDivider, HCBadge } from '../components/HoverCard'
 import DeploymentProjectBrowser from '../components/deployment/DeploymentProjectBrowser'
@@ -543,6 +545,9 @@ export function PMAssistantTab() {
       <div className="pm-chat-messages">
         {messages.length === 0 && (
           <div className="pm-chat-empty">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
             <MessageSquare size={48} />
             <h3>PM Assistant</h3>
             <p>Ask about overdue tickets, regressions, workload, or anything about your project.</p>
@@ -576,23 +581,16 @@ export function PMAssistantTab() {
           </div>
         ))}
 
-        {loading && (() => {
-          const phrase = THINKING_PHRASES[thinkingIdx]
-          const PhIcon = phrase.Icon
-          return (
-            <div className="pm-chat-message pm-chat-assistant">
-              <div className="pm-chat-avatar"><Bot size={16} /></div>
-              <div className="pm-chat-bubble pm-chat-loading">
-                <span className={`pm-thinking-icon pm-ti-${phrase.key}${thinkingVisible ? ' pm-thinking-visible' : ''}`}>
-                  <PhIcon size={15} />
-                </span>
-                <span className={`pm-thinking-text${thinkingVisible ? ' pm-thinking-visible' : ''}`}>
-                  {phrase.text}
-                </span>
+        {loading && (
+          <div className="pm-chat-message pm-chat-assistant">
+            <div className="pm-chat-avatar"><Bot size={16} /></div>
+            <div className="pm-chat-bubble pm-chat-loading">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0' }}>
+                <QuantumOrbitLoader size={36} />
               </div>
             </div>
-          )
-        })()}
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
       </div>
@@ -1249,6 +1247,9 @@ function DailyReportTab({ sprintId, sprintName }: {
               if (hasAnyForDate) {
                 return (
                   <div className="pm-report-empty pm-report-scope-missing">
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                      <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                    </div>
                     <FileText size={40} />
                     <p>No <strong>{reportScope === 'full' ? 'full' : 'summary'} report</strong> generated for this {mode === 'weekly' ? 'week' : 'date'}.</p>
                     {hasSiblingScope && (
@@ -1262,6 +1263,9 @@ function DailyReportTab({ sprintId, sprintName }: {
               }
               return (
                 <div className="pm-report-empty">
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                    <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                  </div>
                   <FileText size={40} />
                   {mode === 'daily'
                     ? <p>Select a date and click <strong>Generate Report</strong> to create today's Slack-style PM report.</p>
@@ -1425,7 +1429,12 @@ function AssigneeStatsTab({ sprintId }: { sprintId?: string }) {
         )
       })()
       : stats.length === 0 ? (
-        <div className="pm-empty-state"><Users size={40} /><p>No assignee data yet. Stats populate from webhook events or after a Backfill.</p></div>
+        <div className="pm-empty-state">
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+            <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+          </div>
+          <Users size={40} /><p>No assignee data yet. Stats populate from webhook events or after a Backfill.</p>
+        </div>
       ) : (
         <div className="pm-card-list glass-card">
           <div className="pm-list-summary">
@@ -1823,15 +1832,16 @@ function IssueTransitionInline({
   return (
     <div className="pm-tracking-expand-area">
       {loading ? (
-        <div className="pm-tracking-timeline-list">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="pm-tracking-timeline-entry">
-              {sk(80, 11)}{sk(60, 11)}{sk(60, 11)}{sk('30%', 11)}{sk(50, 11)}
-            </div>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0' }}>
+          <QuantumOrbitLoader size={40} />
         </div>
       ) : logs.length === 0 ? (
-        <p className="pm-tracking-expand-empty">No transition history found in state log.</p>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+            <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+          </div>
+          <p className="pm-tracking-expand-empty">No transition history found in state log.</p>
+        </div>
       ) : (
         <div className="pm-tracking-timeline-list">
           {logs.map((entry, i) => {
@@ -2811,7 +2821,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
             {/* ── In Progress ── */}
             {kpiDrawer === 'in-progress' && (
               allInProgressIssues.length === 0
-                ? <div className="pm-kpi-drawer-empty">No tickets in progress.</div>
+                ? <div className="pm-kpi-drawer-empty"><div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}><VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} /></div>No tickets in progress.</div>
                 : allInProgressIssues.map(issue => (
                   <div key={issue.id} className="pm-kpi-drawer-row">
                     <span className="pm-kpi-drawer-id pm-tracking-issue-id--link"
@@ -2838,7 +2848,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
             {/* ── Blocked ── */}
             {kpiDrawer === 'blocked' && (
               allBlockedIssues.length === 0
-                ? <div className="pm-kpi-drawer-empty">No blocked tickets right now.</div>
+                ? <div className="pm-kpi-drawer-empty"><div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}><VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} /></div>No blocked tickets right now.</div>
                 : allBlockedIssues.map(issue => (
                   <div key={issue.id} className="pm-kpi-drawer-row">
                     <span className="pm-kpi-drawer-id pm-tracking-issue-id--link"
@@ -2862,7 +2872,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
             {/* ── Bounced ── */}
             {kpiDrawer === 'bounced' && (
               allBouncedIssues.length === 0
-                ? <div className="pm-kpi-drawer-empty">No bounced tickets.</div>
+                ? <div className="pm-kpi-drawer-empty"><div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}><VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} /></div>No bounced tickets.</div>
                 : allBouncedIssues.map(issue => (
                   <div key={issue.id} className="pm-kpi-drawer-row">
                     <span className="pm-kpi-drawer-id pm-tracking-issue-id--link"
@@ -2972,7 +2982,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
                       ))}
                     </>
                   )}
-                  {atRisk.length === 0 && <div className="pm-kpi-drawer-empty">No at-risk tickets.</div>}
+                  {atRisk.length === 0 && <div className="pm-kpi-drawer-empty"><div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}><VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} /></div>No at-risk tickets.</div>}
                 </div>
               )
             })()}
@@ -2985,13 +2995,23 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
       {statusMsg && <div className="pm-report-status">{statusMsg}</div>}
 
       {!sprintId && (
-        <div className="pm-empty-state"><Activity size={36} /><p>Select a sprint to view board status</p></div>
+        <div className="pm-empty-state">
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+            <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+          </div>
+          <Activity size={36} /><p>Select a sprint to view board status</p>
+        </div>
       )}
 
       {sprintId && loading && trackingSkeleton}
 
       {sprintId && !loading && filteredColumns.length === 0 && !error && (
-        <div className="pm-empty-state"><Activity size={36} /><p>No issues found for this sprint.</p></div>
+        <div className="pm-empty-state">
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+            <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+          </div>
+          <Activity size={36} /><p>No issues found for this sprint.</p>
+        </div>
       )}
 
       {/* ── Column view ── */}
@@ -3947,6 +3967,9 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
               {/* Rows */}
               {displayIssues.length === 0 && (
                 <div className="pm-qa-empty">
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                    <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                  </div>
                   <ShieldCheck size={28} style={{ opacity: 0.2 }} />
                   <span>No tickets match the current filter</span>
                 </div>

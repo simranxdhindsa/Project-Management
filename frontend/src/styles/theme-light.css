@@ -4,6 +4,13 @@
    ============================================================ */
 
 [data-theme="light"] {
+  /* Brand tokens */
+  --color-primary-end:  #8b5cf6;
+  --color-accent-cyan:  #a5f3fc;
+  --color-background:   #f8fafc;
+  --color-surface:      #f1f5f9;
+  --color-text-primary: #0f172a;
+
   /* Background */
   --bg-base:     #f8fafc;
   --bg-surface:  #f1f5f9;

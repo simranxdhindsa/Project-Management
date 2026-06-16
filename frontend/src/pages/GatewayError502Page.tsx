@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { KanbanSquare, RefreshCw, Wifi } from 'lucide-react'
 import { useGatewayError } from '@/contexts/GatewayErrorContext'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 
 const DEPLOY_MESSAGES = [
   'Deploying something new — hang tight.',
@@ -112,6 +113,10 @@ export default function GatewayError502Page() {
         <div className="g5-wordmark">
           <KanbanSquare size={18} />
           <span>Velocity</span>
+        </div>
+
+        <div style={{ display:'flex', justifyContent:'center', marginBottom:'24px' }}>
+          <VelocityLogo variant="icon" size="xl" mark="quantum" showStatusDot={false} style={{ opacity: 0.3 }} />
         </div>
 
         <div className="g5-icon-wrap">

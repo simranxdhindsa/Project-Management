@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown, GitBranch, Check, Download, Loader2 } from 'lucide-react'
+import { ChevronDown, GitBranch, Check, Download } from 'lucide-react'
+import { VelocityBarsLoader, SprintScanLoader, SvgVelocityBarsLoader, SvgSprintScanLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import { usePersistedState, PERSIST } from '@/hooks/usePersistedState'
 import api from '../services/api'
 import { getActiveSource } from '../services/pmDataService'
@@ -381,6 +383,9 @@ function ActivityFeedView({ timelines, onOpenDetail, assigneeFilter, dateRange }
       <div className="da-feed-scroll">
         {devGroups.length === 0 && (
           <div className="da-empty">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
             <span className="da-empty-icon">📭</span>
             <span className="da-empty-text">No activity found for this date range</span>
           </div>
@@ -525,6 +530,9 @@ function DeveloperCardsView({ timelines, onOpenDetail, assigneeFilter, dateRange
       <div className="da-cards-scroll">
         {devGroups.length === 0 && (
           <div className="da-empty" style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
             <span className="da-empty-icon">📭</span>
             <span className="da-empty-text">No activity found for this date range</span>
           </div>
@@ -771,6 +779,9 @@ function TransitionLogView({ transitions, onOpenDetail, assigneeFilter, dateRang
         <ColHeader />
         {filtered.length === 0 && (
           <div className="da-empty">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
             <span className="da-empty-icon">📋</span>
             <span className="da-empty-text">No transitions in this date range</span>
           </div>
@@ -941,6 +952,9 @@ function LifecycleHeatmapView({ timelines, onOpenDetail, assigneeFilter, dateRan
             <div className="da-heatmap-grid-body">
               {filteredTickets.length === 0 && (
                 <div className="da-empty">
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                    <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                  </div>
                   <span className="da-empty-icon">📊</span>
                   <span className="da-empty-text">No tickets to display</span>
                 </div>
@@ -1123,6 +1137,14 @@ function DevReportView({ onOpenDetail, ytBaseUrl }: {
 
   const rangeLabel = drDateRange === 'Custom' ? `${drCustomFrom} → ${drCustomTo}` : drDateRange
 
+  if (generating) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0' }}>
+        <SvgSprintScanLoader size={128} />
+      </div>
+    )
+  }
+
   if (reportData !== null) {
     const devEntries = Object.entries(reportData)
     const totalCompleted = devEntries.reduce((s, [, recs]) => s + recs.length, 0)
@@ -1155,6 +1177,9 @@ function DevReportView({ onOpenDetail, ytBaseUrl }: {
 
         {totalCompleted === 0 && (
           <div className="dr-empty">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
             <div className="dr-empty-icon">🔍</div>
             <div className="dr-empty-msg">No tickets completed in this period</div>
             <div className="dr-empty-sub">Try a wider date range or different developers</div>
@@ -1479,9 +1504,8 @@ export function DevActivityPage({ initialView }: Props) {
         )}
 
         {loading && view !== 'report' && (
-          <div className="da-loading">
-            <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
-            Loading activity data…
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0' }}>
+            <SvgVelocityBarsLoader size={128} />
           </div>
         )}
         {!loading && view === 'feed' && (

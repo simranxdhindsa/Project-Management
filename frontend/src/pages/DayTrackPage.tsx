@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback, memo } from 'react'
 import { createPortal } from 'react-dom'
 import { dayTrackApi, api, type DayTrackEntry, type DayTrackPlanned, type DayTrackSlackConfig, type DayTrackKWRule, DEFAULT_KEYWORD_RULES } from '../services/api'
 import { CalendarPicker } from '../components/CalendarPicker'
+import { SprintScanLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import '../styles/pages/daytrack.css'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -1885,7 +1887,9 @@ ${aiSummaryBlock}
             </div>
 
             {loading ? (
-              <div className="dt-empty">Loading…</div>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:'48px 0' }}>
+                <SprintScanLoader size={48} />
+              </div>
             ) : (
               <div className="dt-table-wrap">
                 <table className="dt-table">
@@ -1899,6 +1903,9 @@ ${aiSummaryBlock}
                     {parentEntries.length === 0 ? (
                       <tr><td colSpan={7}>
                         <div className="dt-empty">
+                          <div style={{ display:'flex', justifyContent:'center', marginBottom:'16px' }}>
+                            <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                          </div>
                           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/>
                             <path d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
                           </svg>
@@ -2036,6 +2043,9 @@ ${aiSummaryBlock}
                   {planned.length === 0 ? (
                     <tr><td colSpan={6}>
                       <div className="dt-empty">
+                        <div style={{ display:'flex', justifyContent:'center', marginBottom:'16px' }}>
+                          <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                        </div>
                         <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/>
                           <path d="M16 2v4M8 2v4M3 10h18"/>
                         </svg>
@@ -2171,7 +2181,9 @@ ${aiSummaryBlock}
             </div>
 
             {slackCfgLoading ? (
-              <div className="dt-empty">Loading config…</div>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:'48px 0' }}>
+                <SprintScanLoader size={40} />
+              </div>
             ) : slackCfg ? (
               <>
                 <div className="dt-settings-section-label">Slack Auto-Log</div>

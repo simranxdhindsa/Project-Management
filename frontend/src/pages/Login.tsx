@@ -2,6 +2,8 @@ import { useEffect, useCallback, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { KanbanSquare, CheckCircle, Zap, Shield, Sun, Moon } from 'lucide-react'
 import IsoTicketCard from '@/components/IsoTicketCard'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
+import { QuantumOrbitLoader } from '@/components/brand/VelocityLoaders'
 
 // Declare Google global type
 declare global {
@@ -62,6 +64,7 @@ export default function Login() {
   )
 
   useEffect(() => {
+    document.title = 'Velocity — Command · Precision · Flow'
     // Load Google Sign-In script
     const script = document.createElement('script')
     script.src = 'https://accounts.google.com/gsi/client'
@@ -146,7 +149,12 @@ export default function Login() {
         {/* Logo and Title */}
         <div className="login-header">
           <div className="login-logo animate-float">
-            <KanbanSquare size={48} />
+            <VelocityLogo
+              variant="icon"
+              size="xl"
+              mark="glitch"
+              showStatusDot={false}
+            />
           </div>
           <h1 className="login-title text-gradient">Velocity</h1>
           <p className="login-subtitle">
@@ -211,7 +219,7 @@ export default function Login() {
               </form>
             ) : isLoading ? (
               <div className="loading-container">
-                <div className="loading-spinner"></div>
+                <QuantumOrbitLoader size={48} />
                 <span className="loading-text">Signing in...</span>
               </div>
             ) : GOOGLE_CLIENT_ID ? (

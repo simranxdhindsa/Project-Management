@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { SprintScanLoader, SvgSprintScanLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import api from '../services/api'
 import type { WorkflowConfig, PriorityTag, ColumnState, HotfixRules, ReportConfig, DeveloperSubsystemConfig, YouTrackUser } from '../services/api'
 import { getActiveSource, loadActiveSourceFromDB, setActiveSource } from '../services/pmDataService'
@@ -830,7 +832,9 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
 
   if (loading) return (
     <div className="int-page">
-      <div className="int-loading"><div className="loading-spinner" /><p>Loading…</p></div>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:'40px 0' }}>
+        <SprintScanLoader size={48} />
+      </div>
     </div>
   )
 
@@ -960,9 +964,14 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
           {(!ytConfigured || showYtForm) && (
             <form onSubmit={handleSaveYt} className="int-form">
               {!ytConfigured && (
-                <p className="int-help-text">
-                  Enter your YouTrack credentials. They are stored securely in the database and never exposed to other users.
-                </p>
+                <>
+                  <div style={{ display:'flex', justifyContent:'center', marginBottom:'16px' }}>
+                    <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                  </div>
+                  <p className="int-help-text">
+                    Enter your YouTrack credentials. They are stored securely in the database and never exposed to other users.
+                  </p>
+                </>
               )}
               <div className="int-field">
                 <label>Base URL</label>
@@ -1263,6 +1272,9 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
             </>
           ) : (
             <>
+              <div style={{ display:'flex', justifyContent:'center', marginBottom:'16px' }}>
+                <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+              </div>
               <form onSubmit={handleConnectSlack} className="int-form int-connect-form">
                 <p className="int-help-text">
                   Enter your Slack Bot Token to connect. Required scopes:{' '}
@@ -1324,6 +1336,12 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
                 : <span className="int-badge int-badge-gray">Loading…</span>}
             </div>
           </div>
+
+          {!workflowConfig && (
+            <div style={{ display:'flex', justifyContent:'center', marginBottom:'16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
+          )}
 
           {workflowConfig && (
             <>
@@ -1800,7 +1818,13 @@ function DevelopersTab() {
     }
   }
 
-  if (loading) return <div className="int-content"><div className="int-loading">Loading developers…</div></div>
+  if (loading) return (
+    <div className="int-content">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', padding:'40px 0' }}>
+        <SprintScanLoader size={48} />
+      </div>
+    </div>
+  )
 
   return (
     <div className="int-content">
@@ -1819,7 +1843,12 @@ function DevelopersTab() {
       {error && <div className="int-error-banner">{error}</div>}
 
       {subsystems.length === 0 ? (
-        <div className="dev-cfg-empty">No subsystems found — connect YouTrack first.</div>
+        <div className="dev-cfg-empty">
+          <div style={{ display:'flex', justifyContent:'center', marginBottom:'16px' }}>
+            <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+          </div>
+          No subsystems found — connect YouTrack first.
+        </div>
       ) : (
         <div className="dev-cfg-wrap">
           <div className="dev-cfg-table">

@@ -11,6 +11,8 @@ import { getActiveSource } from '../services/pmDataService'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '../components/HoverCard'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import { useSprintsCache } from '@/contexts/VelocityDataContext'
+import { SprintScanLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 
 interface Props {
   onBlockersChange: (ids: Set<string>) => void
@@ -377,6 +379,9 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
 
         {!loading && devStats.length === 0 && (
           <div className="do-loading">
+            <div style={{ display:'flex', justifyContent:'center', marginBottom:'16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
             {sprintId ? 'No developer data found for this sprint' : 'Select a sprint to see developer load'}
           </div>
         )}

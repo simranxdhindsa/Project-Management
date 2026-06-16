@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, Sparkles, Star, Zap, Bug, Wrench } from 'lucide-react'
 import type { ChangelogEntry } from '../../services/api'
 import api from '../../services/api'
+import { VelocityLogo } from '../brand/VelocityLogo'
 
 interface Props {
   anchorRect: DOMRect
@@ -57,7 +58,12 @@ export default function ChangelogPanel({ anchorRect, entries, onClose }: Props) 
       {/* Body */}
       <div className="cl-panel-body">
         {entries.length === 0 && (
-          <p className="cl-empty">No changelog entries yet.</p>
+          <div className="cl-empty">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
+              <VelocityLogo variant="icon" size="md" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
+            <p>No changelog entries yet.</p>
+          </div>
         )}
         {entries.map((entry, idx) => (
           <div key={entry.date} className="cl-entry">

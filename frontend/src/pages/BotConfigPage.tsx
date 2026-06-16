@@ -16,6 +16,8 @@ import {
 } from 'lucide-react'
 import api from '../services/api'
 import type { BotConfig, BotVariable } from '../services/api'
+import { SprintScanLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 
 // ====== Bot cons pool (randomly attached to each card) ======
 const BOT_CONS = [
@@ -559,8 +561,9 @@ export function BotConfigPage() {
     return (
       <div className="bot-config-page">
         <div className="daily-loading">
-          <div className="loading-spinner" />
-          <p>Loading bot configurations...</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 0' }}>
+            <SprintScanLoader size={48} />
+          </div>
         </div>
       </div>
     )
@@ -583,6 +586,9 @@ export function BotConfigPage() {
 
       {bots.length === 0 ? (
         <div className="daily-empty-state glass-card">
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+            <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+          </div>
           <Bot size={48} />
           <h3>No Bots Configured</h3>
           <p>Create a bot from a template or build your own custom bot.</p>

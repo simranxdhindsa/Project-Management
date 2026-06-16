@@ -84,6 +84,11 @@ function buildThemeCssVars(accent: string, bg: string, textColor: string, mode: 
 
   const accentVars = `
   --color-primary: ${accent};
+  --color-primary-end: ${lighten(hueShift(accent, 20), 0.12)};
+  --color-accent-cyan: #a5f3fc;
+  --color-background: ${bg};
+  --color-surface: ${mode === 'dark' ? lighten(bg, 0.04) : darken(bg, 0.02)};
+  --color-text-primary: ${textColor};
   --color-primary-hover: ${darken(accent, 0.12)};
   --color-primary-light: ${lighten(accent, 0.18)};
   --color-primary-deep: ${darken(accent, 0.30)};

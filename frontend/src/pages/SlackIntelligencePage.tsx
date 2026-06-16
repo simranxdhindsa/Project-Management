@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   RefreshCw, CheckCircle, Clock, X, MessageSquare, Search, Zap,
 } from 'lucide-react'
+import { TerminalLoader, SprintScanLoader, SvgTerminalLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import api from '../services/api'
 import type { SlackMention, SlackThread, ReminderItem } from '../services/api'
 import { SlackIcon, MentionCard, ThreadCard, isSnoozed, cleanSlackText, timeAgo } from './SlackCards'
@@ -342,9 +344,14 @@ export function SlackIntelligencePage({
 
         {tab === 'inbox' && (
           loading
-            ? <div className="si2-empty"><RefreshCw size={20} className="spin" /><p>Loading…</p></div>
+            ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+                <SvgTerminalLoader size={128} />
+              </div>
             : visibleMentions.length === 0
               ? <div className="si2-empty">
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                    <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                  </div>
                   <CheckCircle size={36} />
                   <p>Inbox zero — no unread @mentions</p>
                   <p className="si2-empty-sub">Click Scan Now to check for new mentions.</p>
@@ -367,9 +374,16 @@ export function SlackIntelligencePage({
 
         {tab === 'threads' && (
           loading
-            ? <div className="si2-empty"><RefreshCw size={20} className="spin" /><p>Loading…</p></div>
+            ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+                <SvgTerminalLoader size={128} />
+              </div>
             : visibleThreads.length === 0
-              ? <div className="si2-empty"><MessageSquare size={36} /><p>No unanswered threads</p></div>
+              ? <div className="si2-empty">
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                    <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+                  </div>
+                  <MessageSquare size={36} /><p>No unanswered threads</p>
+                </div>
               : <div className="si2-card-list">
                   {visibleThreads.map(t => (
                     <ThreadCard
@@ -386,15 +400,19 @@ export function SlackIntelligencePage({
         )}
 
         {tab === 'reminders' && (
-          <RemindersTabContent
-            remindersAll={remindersAll}
-            savedTemplates={savedTemplates}
-            onAddTemplate={handleAddTemplate}
-            onDeleteTemplate={handleDeleteTemplate}
-            onDismiss={async id => { await api.dismissReminder(id).catch(() => {}); setRemindersAll(prev => prev.filter(r => r.id !== id)) }}
-            onDelete={async id => { await api.deleteReminder(id).catch(() => {}); setRemindersAll(prev => prev.filter(r => r.id !== id)) }}
-            onQuickAdd={handleQuickAdd}
-          />
+          loading
+            ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+                <SprintScanLoader size={48} />
+              </div>
+            : <RemindersTabContent
+                remindersAll={remindersAll}
+                savedTemplates={savedTemplates}
+                onAddTemplate={handleAddTemplate}
+                onDeleteTemplate={handleDeleteTemplate}
+                onDismiss={async id => { await api.dismissReminder(id).catch(() => {}); setRemindersAll(prev => prev.filter(r => r.id !== id)) }}
+                onDelete={async id => { await api.deleteReminder(id).catch(() => {}); setRemindersAll(prev => prev.filter(r => r.id !== id)) }}
+                onQuickAdd={handleQuickAdd}
+              />
         )}
 
         {tab === 'pulse' && <SprintPulseTab onOpenPMAssistant={onOpenPMAssistant} ytBaseUrl={ytBaseUrl} />}
@@ -402,14 +420,18 @@ export function SlackIntelligencePage({
         {tab === 'saved' && <SavedItemsTab slackTeamId={slackTeamId} />}
 
         {tab === 'settings' && (
-          <SettingsTabContent
-            monitorChannelId={monitorChannelId}
-            monitorChannelName={monitorChannelName}
-            lastScan={lastScan}
-            onSaveChannel={handleSaveChannel}
-            onChannelIdChange={setMonitorChannelId}
-            onChannelNameChange={setMonitorChannelName}
-          />
+          loading
+            ? <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+                <SprintScanLoader size={48} />
+              </div>
+            : <SettingsTabContent
+                monitorChannelId={monitorChannelId}
+                monitorChannelName={monitorChannelName}
+                lastScan={lastScan}
+                onSaveChannel={handleSaveChannel}
+                onChannelIdChange={setMonitorChannelId}
+                onChannelNameChange={setMonitorChannelName}
+              />
         )}
       </div>
 

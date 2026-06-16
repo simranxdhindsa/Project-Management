@@ -51,6 +51,8 @@ import {
   Zap,
   Palette,
 } from 'lucide-react'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
+import { SprintScanLoader, SvgSprintScanLoader } from '@/components/brand/VelocityLoaders'
 import { PMAssistantTab } from './PMReportsPage'
 import { SprintDashboardPage } from './SprintDashboardPage'
 import { IntegrationsPage } from './IntegrationsPage'
@@ -280,29 +282,26 @@ export default function Dashboard() {
   }, [user])
 
   useEffect(() => {
-    const PAGE_TITLES: Record<string, string> = {
-      'dashboard':      'Dashboard',
-      'board':          'Board View',
-      'list':           'List View',
-      'sprint-pulse':   'Sprint Pulse',
-      'daily-ops':      'DailyOps',
-      'dev-activity':   'Dev Activity',
-      'calendar':       'Calendar',
-      'reports':        'Reports',
-      'ai-analysis':    'AI Analysis',
-      'pm-reports':     'PM Reports',
-      'bots':           'Bot Config',
-      'team':           'Team',
-      'settings':       'Settings',
-      'integrations':   'Integrations',
-      'reminders':      'Reminders',
-      'slack':          'Slack Intelligence',
-      'activity':       'Activity',
-      'daytrack':       'DayTrack',
-      'theme':          'Theme Customizer',
+    const titles: Record<string, string> = {
+      dashboard: 'Overview — Velocity',
+      board: 'Sprint Board — Velocity',
+      list: 'List View — Velocity',
+      'sprint-pulse': 'Sprint Pulse — Velocity',
+      'daily-ops': 'Daily Ops — Velocity',
+      daytrack: 'DayTrack — Velocity',
+      activity: 'Activity — Velocity',
+      calendar: 'Calendar — Velocity',
+      'ai-analysis': 'AI Analysis — Velocity',
+      'dev-activity': 'Dev Activity — Velocity',
+      'pm-reports': 'PM Reports — Velocity',
+      slack: 'Slack Intelligence — Velocity',
+      integrations: 'Integrations — Velocity',
+      team: 'Team — Velocity',
+      settings: 'Settings — Velocity',
+      bots: 'Bot Config — Velocity',
+      theme: 'Theme — Velocity',
     }
-    const title = PAGE_TITLES[currentPage] || 'Velocity'
-    document.title = currentPage === 'dashboard' ? 'Velocity' : `${title} | Velocity`
+    document.title = titles[currentPage] || 'Velocity'
   }, [currentPage])
 
   // YouTrack state
@@ -595,10 +594,7 @@ export default function Dashboard() {
       {/* Sidebar */}
       <aside className="sidebar animate-slide-in-left">
         <div className="sidebar-logo">
-          <div className="logo-icon">
-            <KanbanSquare size={24} />
-          </div>
-          <span className="logo-text text-gradient">Velocity</span>
+          <VelocityLogo variant="sidebar" size="sm" showStatusDot={true} mark="glitch" />
         </div>
 
         <nav className="sidebar-nav">
@@ -876,6 +872,11 @@ export default function Dashboard() {
         {/* Keep-alive tabs: mount on first visit, hide (not unmount) when inactive */}
         {mountedTabs.has('dashboard') && (
           <div className={currentPage !== 'dashboard' ? 'dash-tab-hidden' : undefined}>
+            {ytLoading && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '200px' }}>
+                <SvgSprintScanLoader size={128} />
+              </div>
+            )}
             <SprintDashboardPage />
           </div>
         )}

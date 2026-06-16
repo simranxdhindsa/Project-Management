@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   X, Bold, Italic, Strikethrough, Code, Link2, List, MoreHorizontal,
-  ChevronDown, Loader2, Check, Eye, FileCode2, Paperclip, Type, Hash,
+  ChevronDown, Check, Eye, FileCode2, Paperclip, Type, Hash,
   Sparkles, AlertCircle, Pencil,
 } from 'lucide-react'
 import { marked } from 'marked'
@@ -10,6 +10,7 @@ import type { YouTrackUser, YouTrackState, DeveloperSubsystemConfig, YouTrackIss
 import MicButton from './MicButton'
 import { IssueDetailPanel } from './IssueDetailPanel'
 import { useYouTrackBaseUrl } from '../hooks/useYouTrackBaseUrl'
+import { QuantumOrbitLoader } from './brand/VelocityLoaders'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -522,7 +523,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
                   title="Fill all fields with AI"
                 >
                   {aiLoading
-                    ? <Loader2 size={13} className="animate-spin" />
+                    ? <QuantumOrbitLoader size={16} />
                     : <Sparkles size={13} />
                   }
                   {aiLoading ? 'Analysing…' : 'AI Fill'}
@@ -582,7 +583,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
             ) : createdIssueId ? (
               <>
                 <button className="ci-btn-create" onClick={handleUpdate} disabled={creating}>
-                  {creating ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><Check size={13} /> Save</>}
+                  {creating ? <><QuantumOrbitLoader size={16} /> Saving…</> : <><Check size={13} /> Save</>}
                 </button>
                 <button className="ci-btn-cancel" onClick={() => { setIsViewMode(true); setDescMode('visual') }}>Cancel</button>
               </>
@@ -590,7 +591,7 @@ export default function CreateIssueModal({ onClose, onCreated }: CreateIssueModa
               <>
                 <button className="ci-btn-create" onClick={handleCreate} disabled={!canCreate}>
                   {created ? <><Check size={14} /> Created</>
-                   : creating ? <><Loader2 size={14} className="animate-spin" /> Creating…</>
+                   : creating ? <><QuantumOrbitLoader size={16} /> Creating…</>
                    : 'Create'}
                 </button>
                 <button className="ci-btn-cancel" onClick={onClose}>Cancel</button>

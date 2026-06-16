@@ -5,6 +5,8 @@ import {
   Settings, Zap, Plus, X, Trash2, Calendar, AlertTriangle,
   Sparkles, Bookmark, ExternalLink,
 } from 'lucide-react'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
+import { SprintScanLoader } from '@/components/brand/VelocityLoaders'
 import api from '../services/api'
 import type { ReminderItem, SlackMention } from '../services/api'
 import { AvatarFallback, cleanSlackText, timeAgo } from './SlackCards'
@@ -203,11 +205,14 @@ export function SavedItemsTab({ slackTeamId }: { slackTeamId: string }) {
   }
 
   if (loading) return (
-    <div className="si2-empty"><RefreshCw size={20} className="spin" /><p>Loading saved…</p></div>
+    <div className="si2-empty" style={{ padding: '24px 0' }}><SprintScanLoader size={40} /></div>
   )
 
   if (items.length === 0) return (
     <div className="si2-empty">
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+        <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+      </div>
       <Bookmark size={36} />
       <p>No pinned messages</p>
       <p className="si2-empty-sub">Pin any mention using the bookmark icon on the card — it shows up here.</p>
@@ -385,7 +390,12 @@ export function RemindersTabContent({
 
       {subTab === 'Upcoming' && (
         upcomingReminders.length === 0
-          ? <div className="si2-empty"><Clock size={32} /><p>No upcoming reminders</p></div>
+          ? <div className="si2-empty">
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+              </div>
+              <Clock size={32} /><p>No upcoming reminders</p>
+            </div>
           : <div className="si2-card-list">
             {upcomingReminders.map(r => (
               <div key={r.id} className="si2-card si2-reminder-card">
@@ -417,7 +427,12 @@ export function RemindersTabContent({
 
       {subTab === 'Sent' && (
         sentReminders.length === 0
-          ? <div className="si2-empty"><CheckCircle size={32} /><p>No sent reminders</p></div>
+          ? <div className="si2-empty">
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+              </div>
+              <CheckCircle size={32} /><p>No sent reminders</p>
+            </div>
           : <div className="si2-card-list">
             {sentReminders.map(r => (
               <div key={r.id} className="si2-card si2-card--done si2-reminder-card">
@@ -446,7 +461,12 @@ export function RemindersTabContent({
 
       {subTab === 'Auto-alerts' && (
         autoReminders.length === 0
-          ? <div className="si2-empty"><Bell size={32} /><p>No auto-alerts</p><p className="si2-empty-sub">Scheduler-generated alerts appear here</p></div>
+          ? <div className="si2-empty">
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+              </div>
+              <Bell size={32} /><p>No auto-alerts</p><p className="si2-empty-sub">Scheduler-generated alerts appear here</p>
+            </div>
           : <div className="si2-card-list">
             {autoReminders.map(r => (
               <div key={r.id} className={`si2-card si2-reminder-card${r.status === 'sent' ? ' si2-card--done' : ''}`}>

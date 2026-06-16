@@ -22,6 +22,8 @@ import {
   GitBranch, RefreshCw, ChevronRight,
   LayoutGrid, AlignLeft, BarChart2, Layers,
 } from 'lucide-react'
+import { VelocityBarsLoader, SprintScanLoader, SvgVelocityBarsLoader } from '@/components/brand/VelocityLoaders'
+import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import '@/styles/pages/sprint-pulse.css'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -497,7 +499,12 @@ function ViewC({ tierGroups, stageCounts, wfConfig, onTitleClick, onIdClick }: V
           <span className="spl-feed-hd-sub">{allIssues.length} active issues · sorted by urgency</span>
         </div>
         {allIssues.length === 0 && (
-          <div className="spl-feed-empty">✓ No active issues</div>
+          <div className="spl-feed-empty">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
+            ✓ No active issues
+          </div>
         )}
         {allIssues.map(iss => (
           <IssueCard
@@ -1002,14 +1009,16 @@ export function SprintPulsePage() {
         {/* ── States ── */}
         {!activeSprint && !loading && (
           <div className="sp-no-sprint">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
             <GitBranch size={24} />
             <span>Select a sprint to load Sprint Pulse</span>
           </div>
         )}
         {loading && (
-          <div className="sp-loading">
-            <div className="sp-spinner" />
-            <span>Loading sprint data…</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 0' }}>
+            <SvgVelocityBarsLoader size={128} />
           </div>
         )}
 
