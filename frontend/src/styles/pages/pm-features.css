@@ -392,3 +392,24 @@
 [data-theme="light"] .pmf-cfg-panel { background: rgba(241,245,249,0.7); border-color: rgba(99,102,241,0.12); }
 [data-theme="light"] .pmf-issue-summary { color: #334155; }
 [data-theme="light"] .pmf-dep-summary { color: #334155; }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Header actions: wrap */
+  .pmf-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .pmf-header-actions { flex-wrap: wrap; gap: 0.375rem; }
+
+  /* KPI row: horizontal scroll on mobile */
+  .pmf-kpi-row {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .pmf-kpi-row::-webkit-scrollbar { display: none; }
+  .pmf-kpi { flex-shrink: 0; }
+
+  /* Table: horizontal scroll */
+  .pmf-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .pmf-table { min-width: 480px; }
+}

@@ -139,3 +139,13 @@
   background: rgba(241,245,249,1);
   border-color: rgba(99,102,241,0.5);
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Disable hover lift on touch — prevents sticky states */
+  .btn-primary:hover { transform: none; }
+  .btn-secondary:hover { transform: none; }
+  /* Minimum touch target */
+  .btn-sm { min-height: 36px; }
+  .btn-md { min-height: 40px; }
+}

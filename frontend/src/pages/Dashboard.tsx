@@ -50,6 +50,7 @@ import {
   Activity,
   Zap,
   Palette,
+  Menu,
 } from 'lucide-react'
 import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import { SprintScanLoader, SvgSprintScanLoader } from '@/components/brand/VelocityLoaders'
@@ -231,6 +232,17 @@ export default function Dashboard() {
       return next
     })
   }, [currentPage])
+
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  // Close sidebar on mobile whenever page changes (nav click)
+  useEffect(() => { setSidebarOpen(false) }, [currentPage])
+
+  // Lock body scroll when sidebar is open on mobile
+  useEffect(() => {
+    document.body.classList.toggle('sidebar-open', sidebarOpen)
+    return () => { document.body.classList.remove('sidebar-open') }
+  }, [sidebarOpen])
 
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifAnchorRect, setNotifAnchorRect] = useState<DOMRect | null>(null)
@@ -591,8 +603,11 @@ export default function Dashboard() {
 
   return (
     <div className="app-container">
+      {/* Mobile sidebar overlay */}
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+
       {/* Sidebar */}
-      <aside className="sidebar animate-slide-in-left">
+      <aside className={`sidebar animate-slide-in-left${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-logo">
           <VelocityLogo variant="sidebar" size="sm" showStatusDot={true} mark="glitch" />
         </div>
@@ -770,6 +785,9 @@ export default function Dashboard() {
       {/* Header */}
       <header className="header animate-fade-in-down">
         <div className="header-left">
+          <button className="hamburger-btn" onClick={() => setSidebarOpen(o => !o)} aria-label="Toggle menu">
+            <Menu size={20} />
+          </button>
           <h1 className="header-title">
             {currentPage === 'dashboard' && 'Dashboard'}
             {currentPage === 'board' && 'Board View'}

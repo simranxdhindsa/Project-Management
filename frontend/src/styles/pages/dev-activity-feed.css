@@ -283,3 +283,10 @@
 }
 
 /* ────────────────────────────────────────────────────────────
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  .da-feed-scroll { padding: 0 10px 16px; }
+  .da-dev-section-hd { flex-wrap: wrap; gap: 0.375rem; }
+  .da-commit-row { flex-wrap: wrap; gap: 4px; }
+}

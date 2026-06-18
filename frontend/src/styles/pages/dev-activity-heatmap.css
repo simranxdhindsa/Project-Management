@@ -375,3 +375,20 @@
   flex-shrink: 0;
 }
 
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Stack sidebar and main panel vertically */
+  .da-heatmap-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .da-heatmap-left {
+    border-right: none;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  /* Heatmap grid: horizontal scroll */
+  .da-heatmap-grid-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}

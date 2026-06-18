@@ -1,4 +1,10 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
+// Dynamically resolve the API host so the app works on both localhost (desktop)
+// and any LAN IP (mobile testing) without changing env files.
+const API_URL = (() => {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL
+  const { hostname } = window.location
+  return `http://${hostname}:8080/api`
+})()
 
 export class GatewayError extends Error {
   status: number

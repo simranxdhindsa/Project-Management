@@ -2375,3 +2375,81 @@
   .avw-image   { transition: none; }
   .avw-video-controls { transition: none; }
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Generic modals — bottom sheet */
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal-content, .modal {
+    max-width: 100%;
+    width: 100%;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    max-height: 92vh;
+    margin: 0;
+  }
+  .modal-body { padding: 1rem; }
+  .modal-footer { padding: 0.875rem 1rem; }
+  .modal-header { padding: 1rem 1.25rem; }
+
+  /* ── Create Issue modal (ci-*) ── */
+  .ci-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  /* Modal: single scrollable column — don't try to scroll sections independently */
+  .ci-modal {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+    flex-direction: column;
+    overflow-y: auto;           /* whole modal scrolls as one */
+    overflow-x: hidden;
+  }
+  .ci-left {
+    padding: 1rem 1rem 0.75rem;
+    border-right: none;
+    border-bottom: 1px solid var(--glass-border);
+    overflow: visible;          /* don't clip — parent scrolls */
+    min-height: 0;
+  }
+  /* Left body: natural height, no inner scroll */
+  .ci-left-body {
+    overflow: visible;
+    min-height: 0;
+    max-height: none;
+  }
+  .ci-sidebar {
+    width: 100%;
+    overflow: visible;          /* parent modal scrolls */
+    max-height: none;
+    padding: 0.75rem 1rem 1.5rem;
+  }
+
+  /* ── Create Issue modal v2 (ci2-*) ── */
+  .ci2-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .ci2-modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92dvh;
+    border-radius: 16px 16px 0 0;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .ci2-left {
+    overflow: visible;
+    border-right: none;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .ci2-right, .ci2-sidebar {
+    width: 100% !important;
+    overflow: visible;
+    padding: 0.75rem 1rem 1.5rem;
+  }
+}

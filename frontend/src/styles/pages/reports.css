@@ -909,3 +909,16 @@ a.drt-report-id:hover { color: #a5b4fc; text-decoration: underline; }
 [data-theme="light"] .drt-date-pill { border-color: rgba(99,102,241,0.15); color: #94a3b8; }
 [data-theme="light"] .drt-date-pill:hover { background: rgba(99,102,241,0.06); color: #475569; }
 [data-theme="light"] .drt-date-pill.active { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.35); color: #4f46e5; }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Sprint report ticket panel: horizontal scroll */
+  .drt-ticket-panel { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .drt-ticket-row { min-width: 480px; }
+
+  /* Date filter pills: wrap */
+  .drt-date-filter { flex-wrap: wrap; gap: 4px; }
+
+  /* Sprint badge: tighter */
+  .drt-sprint-badge { font-size: 11px; padding: 4px 8px; }
+}

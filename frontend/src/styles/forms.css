@@ -129,4 +129,19 @@ select.form-input { cursor: pointer; }
 .remember-me-label { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-top: 0.5rem; }
 .remember-me-checkbox { width: 16px; height: 16px; accent-color: var(--color-primary); cursor: pointer; }
 .remember-me-text { font-size: 0.875rem; color: var(--text-secondary); user-select: none; }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Form rows: stack on mobile */
+  .form-row, .form-grid-2 {
+    grid-template-columns: 1fr !important;
+    flex-direction: column;
+  }
+  /* Full-width inputs and buttons */
+  .form-actions {
+    flex-direction: column-reverse;
+    gap: 0.5rem;
+  }
+  .form-actions .btn { width: 100%; justify-content: center; }
+}
 .remember-me-label:hover .remember-me-text { color: var(--text-primary); }

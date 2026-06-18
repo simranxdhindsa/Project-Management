@@ -195,3 +195,37 @@
   color: var(--text-secondary);
   line-height: 1.5;
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Kanban board: horizontal scroll instead of cramped columns */
+  .kanban-board {
+    flex-direction: row !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 1rem;
+    scroll-snap-type: x mandatory;
+    gap: 0.75rem;
+  }
+  .kanban-column {
+    min-width: 280px;
+    flex-shrink: 0;
+    scroll-snap-align: start;
+  }
+  /* Board header: stack or scroll */
+  .board-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .board-filter-bar {
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+  /* Sprint controls bar */
+  .db-controls {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px;
+  }
+}

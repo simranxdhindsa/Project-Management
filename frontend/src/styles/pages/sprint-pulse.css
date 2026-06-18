@@ -932,4 +932,21 @@
   text-align: center;
   transition: background 0.1s;
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Sprint Pulse: horizontal scroll for the swimlane board */
+  .spl-content { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .spl-swim-kanban { min-width: 640px; }
+
+  /* Pipeline stages: horizontal scroll */
+  .spl-pipe-stages { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
+  .spl-pipe-stage { flex-shrink: 0; }
+
+  /* Header row: tighten */
+  .spl-swim-hdr-row { position: sticky; top: 0; z-index: 2; }
+
+  /* Cards in cells: tighter */
+  .spl-card { padding: 6px 8px; }
+}
 .spl-sw-more:hover { background: rgba(99,102,241,0.15); }

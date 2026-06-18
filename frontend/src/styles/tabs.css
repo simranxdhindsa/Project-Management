@@ -132,3 +132,32 @@
 @media (max-width: 768px) {
   .report-tabs { flex-wrap: nowrap; justify-content: flex-start; }
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* All pill-style tab bars: scroll horizontally */
+  .tabs, .pm-tab-bar, .si-tabs, .report-tabs, .int-tabs, .wc-tabs {
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar,
+  .pm-tab-bar::-webkit-scrollbar,
+  .si-tabs::-webkit-scrollbar,
+  .report-tabs::-webkit-scrollbar,
+  .int-tabs::-webkit-scrollbar,
+  .wc-tabs::-webkit-scrollbar { display: none; }
+  /* Don't shrink tabs */
+  .tab, .pm-tab-btn, .si-tab, .int-tab, .wc-tab { flex-shrink: 0; }
+  /* PM mode/scope toggles: smaller on mobile */
+  .pm-report-mode-toggle, .pm-report-scope-toggle {
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+  .pm-mode-btn, .pm-scope-btn {
+    padding: 0.22rem 0.5rem;
+    font-size: 0.73rem;
+  }
+}

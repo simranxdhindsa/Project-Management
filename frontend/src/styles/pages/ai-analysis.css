@@ -1090,3 +1090,20 @@
   gap: 0.5rem;
   margin-top: 0.35rem;
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Input grid: single column on mobile */
+  .ai-input-grid { grid-template-columns: 1fr; gap: 1rem; }
+
+  /* Input section: tighter padding */
+  .ai-input-section { padding: 1rem; }
+
+  /* Header actions: stack */
+  .ai-analysis-page .header-right {
+    width: 100%;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .ai-analysis-page .header-right .btn { width: 100%; justify-content: center; }
+}

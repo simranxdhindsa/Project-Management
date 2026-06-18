@@ -4634,4 +4634,38 @@
 [data-theme="light"] .pm-qa-verif-pending-icon { color: #d97706; }
 [data-theme="light"] .pm-qa-expand-row { background: #f8fafc; border-color: #e2e6ee; }
 [data-theme="light"] .pm-qa-no-data-title { color: #334155; }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Tab bar: tighten padding */
+  .pm-tab-bar { padding: 0.375rem 0.375rem 0; }
+
+  /* Filter bar: wrap on narrow screens */
+  .pm-filter-bar {
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* KPI row: 2-column grid on mobile (already 3-col at 1100px) */
+  .pm-tracking-kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
+  /* Ticket list rows: horizontal scroll */
+  .tt-card-list { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tt-col-header, .tt-issue { min-width: 520px; }
+
+  /* Chat input bar: stack on mobile */
+  .pm-chat-input-bar {
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .pm-chat-input { font-size: 16px; }
+
+  /* Dropdowns: prevent viewport overflow */
+  .pm-custom-dropdown-menu {
+    max-height: 50vh;
+    overflow-y: auto;
+  }
+}
 [data-theme="light"] .pm-qa-no-data-hint  { color: #64748b; }

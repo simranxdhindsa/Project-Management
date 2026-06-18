@@ -249,3 +249,12 @@
   border-color: rgba(var(--color-primary-rgb),0.2);
   color: var(--color-primary);
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Calendar coming-soon card: tighter on mobile */
+  .cal-soon-wrap { padding: 1rem; }
+  .cal-soon-card { padding: 1.5rem 1.25rem; }
+  /* Hide floating tiles on small screens to reduce clutter */
+  .cal-soon-tile { display: none; }
+}

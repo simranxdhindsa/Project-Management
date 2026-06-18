@@ -1288,3 +1288,21 @@
   .si2-pulse-grid { grid-template-columns: 1fr; }
   .si2-controls { flex-direction: column; align-items: stretch; }
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Page: tighter padding */
+  .si2-page { padding: 0.75rem 0.875rem 1.5rem; }
+
+  /* Header: stack on narrow screens */
+  .si2-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .si2-header-right { width: 100%; justify-content: flex-end; }
+
+  /* KPI row: horizontal scroll */
+  .si2-kpi-row { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-wrap: nowrap; }
+  .si2-kpi-row::-webkit-scrollbar { display: none; }
+  .si2-kpi-card { flex-shrink: 0; min-width: 120px; }
+
+  /* Tab bar: already has overflow-x:auto */
+  .si2-tab { flex-shrink: 0; }
+}

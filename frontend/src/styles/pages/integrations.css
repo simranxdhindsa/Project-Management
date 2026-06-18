@@ -1527,3 +1527,26 @@
 [data-theme="light"] .wc-advanced-content {
   border-top-color: rgba(0,0,0,0.08);
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Page: tighter padding */
+  .int-page { padding: 1rem; }
+
+  /* Tab bar: scroll */
+  .int-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .int-tabs::-webkit-scrollbar { display: none; }
+  .int-tab { flex-shrink: 0; }
+
+  /* Content area: reduce padding */
+  .int-content { padding: 1rem; }
+
+  /* Action rows: stack buttons */
+  .int-actions { flex-direction: column; gap: 0.5rem; }
+  .int-actions .btn { width: 100%; justify-content: center; }
+}

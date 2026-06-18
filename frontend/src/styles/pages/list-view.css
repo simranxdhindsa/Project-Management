@@ -406,3 +406,14 @@
   border-color: rgba(0,0,0,0.12);
   color: #64748b;
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Narrow the fixed columns so table fits on mobile */
+  :root {
+    --lv-grid: 1fr 100px 70px 70px 80px 60px;
+  }
+  /* Ensure the table card allows horizontal scroll if needed */
+  .lv-table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .lv-col-header, .lv-row { min-width: 480px; }
+}

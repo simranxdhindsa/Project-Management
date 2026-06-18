@@ -485,3 +485,19 @@
 .dr-empty-icon { font-size: 36px; opacity: 0.45; }
 .dr-empty-msg  { font-size: 14px; color: var(--text-secondary); }
 .dr-empty-sub  { font-size: 12px; }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Skeuomorphic report panel: fill viewport on mobile */
+  .dr-command-center { max-width: 100%; padding: 14px 12px; }
+  .dr-panel { padding: 14px 12px; }
+
+  /* Developer selection grid: 2 columns on mobile */
+  .dr-dev-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* Results: reduce padding */
+  .dr-results { padding: 12px; }
+
+  /* Date row: stack on mobile */
+  .dr-date-row { flex-direction: column; gap: 0.5rem; }
+}

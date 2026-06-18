@@ -1722,4 +1722,16 @@
   margin-left: 3px;
 }
 
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Daily Ops scroll area: reduce padding */
+  .do-scroll { padding: 0.4rem 0.5rem 1.5rem; }
+  /* Dev cards: already auto-fill — just tighten gap */
+  .do-dev-grid { gap: 0.5rem; }
+  .do-dev-card { padding: 10px; }
+  /* Post-standup form: allow full-width inputs */
+  .do-post-form { flex-direction: column; gap: 0.5rem; }
+  .do-post-btn { width: 100%; justify-content: center; }
+}
+
 [data-theme="light"] .do-sprint-trigger { background: #ffffff; }

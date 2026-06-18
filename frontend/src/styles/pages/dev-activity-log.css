@@ -299,3 +299,11 @@
 }
 
 /* ────────────────────────────────────────────────────────────
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Log body: horizontal scroll for wide rows */
+  .da-log-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .da-log-row { min-width: 520px; }
+  .da-log-legend { flex-wrap: wrap; gap: 8px; }
+}

@@ -416,13 +416,88 @@
   transform: translateY(-1px);
 }
 
+/* ── Hamburger button — shown only on mobile ─────────────────── */
+.hamburger-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.hamburger-btn:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+
+/* ── Sidebar overlay backdrop (mobile) ──────────────────────── */
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  z-index: 999;
+  animation: fadeIn 150ms ease;
+}
+
 /* ── Responsive ───────────────────────────────────────────── */
 @media (max-width: 768px) {
+  /* Sidebar: hidden by default, slides in when .open */
   .sidebar {
     transform: translateX(-100%);
     z-index: 1000;
+    width: 260px;
+    overflow-y: auto;
   }
   .sidebar.open { transform: translateX(0); }
-  .header      { left: 0; }
-  .main-content { margin-left: 0; }
+
+  /* Header: full width, 3-col → simple left/center/right */
+  .header {
+    left: 0;
+    padding: 0 0.875rem;
+    grid-template-columns: auto 1fr auto;
+    gap: 0.5rem;
+  }
+
+  /* Show hamburger */
+  .hamburger-btn { display: flex; }
+
+  /* Hide desktop-only header items */
+  .header-center { display: none; }
+
+  /* Compress header-actions — keep bell + new-task, hide toggle & changelog */
+  .jelly-switch-container { display: none !important; }
+  .changelog-btn-wrap { display: none !important; }
+
+  /* Main content: no left margin, tighter padding */
+  .main-content {
+    margin-left: 0;
+    padding: 1rem;
+  }
+
+  /* Title smaller */
+  .header-title { font-size: 0.95rem; }
+
+  /* Stat carousel hidden */
+  .stat-carousel { display: none !important; }
+
+  /* New Task button: keep icon, hide label on very small screens */
+  .btn-new-task span { display: none; }
+  .btn-new-task { padding: 0.5rem; min-width: 36px; justify-content: center; }
+}
+
+/* Very small screens: further compress */
+@media (max-width: 480px) {
+  .main-content { padding: 0.75rem; }
+  .header { padding: 0 0.625rem; }
+}
+
+/* Tablet adjustments (769px–1024px) */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .main-content { padding: 1.25rem; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }

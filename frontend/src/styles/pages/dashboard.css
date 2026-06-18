@@ -1195,4 +1195,25 @@
 [data-theme="light"] .db-oc-feed-divider { background: rgba(248,250,252,0.97); border-color: rgba(99,102,241,0.1); }
 [data-theme="light"] .db-oc-blocked-banner { background: rgba(239,68,68,0.03); }
 [data-theme="light"] .db-mc-dev-header:hover { background: rgba(99,102,241,0.04); }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Controls bar: wrap on mobile */
+  .db-controls {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  /* KPI bar is already scrollable; just tighten padding */
+  .db-kpi-bar { padding: 0 10px; }
+
+  /* Bento grid: single column */
+  .db-bento-grid, .db-bento-row {
+    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+}
 [data-theme="light"] .db-ticket-state { background: rgba(99,102,241,0.07); color: #475569; }

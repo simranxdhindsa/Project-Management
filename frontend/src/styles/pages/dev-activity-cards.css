@@ -223,4 +223,16 @@
   background: rgba(var(--color-primary-rgb),0.07);
 }
 
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Dev cards grid: smaller min-width so cards fit on phone */
+  .da-cards-scroll {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    padding: 10px 12px;
+    gap: 10px;
+  }
+  /* Ticket rows: allow horizontal scroll if content overflows */
+  .da-ticket-row { flex-wrap: wrap; gap: 4px; }
+}
+
 /* ────────────────────────────────────────────────────────────

@@ -23,3 +23,10 @@
 .users-table .table-row:hover { background: rgba(255,255,255,0.04); }
 .users-table tr:last-child td { border-bottom: none; }
 .users-table tr:hover td { background: rgba(255,255,255,0.04); }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  .table-container { border-radius: var(--radius-md); }
+  .table th, .table td { padding: 0.625rem 0.75rem; font-size: 0.8rem; }
+  .users-table th, .users-table td { padding: 0.625rem 0.75rem; }
+}

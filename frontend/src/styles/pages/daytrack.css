@@ -1517,3 +1517,65 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ── Mobile responsive ─────────────────────────────────── */
+@media (max-width: 768px) {
+  .dt-page { padding: 0 0 40px; }
+
+  /* Header: stack left/right vertically */
+  .dt-header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .dt-header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .dt-header-stats { gap: 6px; }
+  .dt-stat-pill { font-size: 11px; padding: 3px 9px; }
+
+  /* Main grid already stacks at 900px — just tighten gap */
+  .dt-grid { gap: 10px; }
+  .dt-card { padding: 14px; }
+
+  /* Form rows: single column on mobile */
+  .dt-row2 { grid-template-columns: 1fr; gap: 8px; }
+
+  /* Settings modal: single column */
+  .dt-settings-two-col { grid-template-columns: 1fr; }
+
+  /* Keyword rule rows: stack on mobile */
+  .dt-kw-rule-row {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 4px;
+  }
+  .dt-kw-rule-row > :last-child { grid-column: 1 / -1; justify-self: end; }
+
+  /* Edit / settings modal: bottom sheet */
+  .dt-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .dt-modal {
+    max-width: 100%;
+    border-radius: 16px 16px 0 0;
+    padding: 18px 16px 24px;
+    max-height: 92dvh;
+    overflow-y: auto;
+  }
+  .dt-modal-footer { flex-wrap: wrap; }
+
+  /* Table: horizontal scroll (already has min-width: 580px) */
+  .dt-table-wrap { border-radius: var(--radius-md); }
+
+  /* Toast: full width on mobile */
+  .dt-toast-container { right: 12px; left: 12px; bottom: 16px; }
+  .dt-toast { min-width: unset; width: 100%; }
+
+  /* Summary actions: wrap */
+  .dt-summary-actions { gap: 6px; }
+  .dt-summary-grid { grid-template-columns: repeat(2, 1fr); }
+}
