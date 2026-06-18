@@ -116,17 +116,31 @@ Every PM feature derives column roles from the live workflow config — never ha
 - Load with `useWorkflowConfig()` (`frontend/src/hooks/useWorkflowConfig.ts`)
 - Build a `Map<string, string>` from `wfConfig.column_hierarchy` (lowercased); keyword fallback only when map is empty
 
-| Role | Meaning |
-|---|---|
-| `active` | In Progress |
-| `blocked` | Blocked |
-| `dev_done` | Done / DEV |
-| `verified` | Ready for Stage/Prod |
-| `deployed` | Deployed |
-| `closed` | Fully resolved |
-| `backlog` / `''` | To Do / Queued |
+**Column pipeline (in order):**
 
-Done (`dev_done`, `verified`, `deployed`, `closed`) and blocked tickets **never** count as overdue. Only `active` + `backlog` count.
+| Column | Role | Who acts | Meaning |
+|---|---|---|---|
+| To Do | `''` (backlog) | — | Not started |
+| In Progress | `active` | Developer | Developer currently working |
+| Dev | `dev_done` | Developer | Developer finished; QA to verify on dev |
+| Mobile Done | `dev_done` | Developer | Mobile developer finished |
+| Ready for Stage | `verified` | QA | Verified on dev environment |
+| Stage | `deployed` | DevOps | Code deployed to stage |
+| Ready for PROD | `verified` | QA | Verified on stage environment |
+| PROD | `deployed` | DevOps | Code deployed to prod |
+| Verified | `verified` | QA | Verified on prod environment |
+| Blocked | `blocked` | — | Developer is blocked |
+| Closed | `closed` | — | **Excluded entirely** — ticket closed, no longer needed |
+
+**Role semantics:**
+- `dev_done` — developer action; `since_date` = when developer moved it → use for "Done Today" in dev load views
+- `verified` — QA/PM verified; `since_date` = QA action time (do NOT use for developer "Done Today")
+- `deployed` — DevOps deployed; `since_date` = deploy time (do NOT use for developer "Done Today")
+- `closed` — skip entirely; do not count in done, overdue, or any progress metric
+
+Done (`dev_done`, `verified`, `deployed`) and blocked tickets **never** count as overdue. Only `active` + `backlog` count.
+
+**"Done Today" rule:** Only `dev_done` tickets where `isToday(since_date)`. Tickets in `verified`/`deployed` states have `since_date` updated by QA/DevOps — attributing those to the developer's "done today" would be incorrect.
 
 ### 2 — Dropdown & Calendar Components
 

@@ -21,7 +21,11 @@ interface Props {
 
 // ── Helpers (module-level, never recreated) ────────────────────────────────
 
-const DONE_ROLES   = new Set(['dev_done', 'verified', 'deployed', 'closed'])
+// dev_done  = developer pushed to QA queue (Dev / Mobile Done)
+// verified  = QA verified on an environment (Ready for Stage, Ready for PROD, Verified)
+// deployed  = code deployed to an environment (Stage, PROD)
+// closed    = ticket closed — excluded from all counts per workflow rules
+const DONE_ROLES   = new Set(['dev_done', 'verified', 'deployed'])
 const BLOCKED_ROLE = 'blocked'
 const ACTIVE_ROLE  = 'active'
 
@@ -55,19 +59,24 @@ function getInitials(name: string) {
 }
 
 // Classify a column name into a role using workflow config map, then keyword fallback.
-// Returns the role string or '' for unrecognised columns (backlog/todo).
+// Workflow pipeline: To Do → In Progress → Dev → Ready for Stage → Stage → Ready for PROD
+//                   → PROD → Verified (and Mobile Done for mobile tickets)
+// Closed tickets are excluded entirely from all developer load counts.
 function resolveColRole(colName: string, roleMap: Map<string, string>): string {
   const mapped = roleMap.get(colName.toLowerCase())
   if (mapped) return mapped
   const n = colName.toLowerCase().trim()
   if (n.includes('block')) return BLOCKED_ROLE
-  // Done / completed columns — covers: Dev, Ready for Stage, Stage, Ready for Prod, Prod, Verified, Mobile Done, etc.
-  if (
-    n.includes('done') || n.includes('closed') || n.includes('deployed') || n.includes('verified') ||
-    n.includes('prod') || n.includes('stage') || n.includes('ready for') ||
-    n === 'dev' || n.startsWith('dev ') || n.endsWith(' dev')
-  ) return 'dev_done'
-  // Active / in-progress — only explicit "in progress" variants, not "dev" or "todo"
+  if (n.includes('closed')) return 'closed'
+  // Developer-action states: developer moves ticket here to signal they're done
+  if (n === 'dev' || n.startsWith('dev ') || n.endsWith(' dev') || n === 'mobile done') return 'dev_done'
+  // General "done" not matching explicit dev/mobile done
+  if (n.includes('done')) return 'dev_done'
+  // QA-verified states: ticket has been verified on an environment
+  if (n.includes('ready for') || n === 'verified') return 'verified'
+  // Deployment states: code deployed to stage or prod
+  if (n.includes('stage') || n.includes('prod') || n.includes('deployed')) return 'deployed'
+  // Active: developer currently working
   if (n.includes('in progress') || n.includes('working') || n === 'active' || n.includes('review')) return ACTIVE_ROLE
   return ''  // backlog / to do / open / unknown
 }
@@ -78,6 +87,23 @@ function fmtHoursCompact(h: number): string {
   const hrs = Math.floor(h % 24)
   if (d > 0) return `${d}d ${hrs}h`
   return `${hrs}h`
+}
+
+function fmtSinceTime(since: string): string {
+  if (!since) return ''
+  const d = new Date(since)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function isToday(since: string): boolean {
+  if (!since) return false
+  const d = new Date(since)
+  if (isNaN(d.getTime())) return false
+  const now = new Date()
+  return d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate()
 }
 
 function ticketHoverContent(issue: SprintBoardIssue) {
@@ -112,6 +138,7 @@ interface DevStat {
   name: string
   avatarUrl: string
   doneIssues: SprintBoardIssue[]
+  doneTodayIssues: SprintBoardIssue[]
   activeIssues: SprintBoardIssue[]
   blockedIssues: SprintBoardIssue[]
   queuedIssues: SprintBoardIssue[]
@@ -204,6 +231,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
 
     for (const col of columns) {
       const role = resolveColRole(col.name, columnRoleMap)
+      if (role === 'closed') continue  // closed tickets excluded per workflow rules
       const isDone    = DONE_ROLES.has(role)
       const isBlocked = role === BLOCKED_ROLE
       const isActive  = role === ACTIVE_ROLE
@@ -216,6 +244,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
             name,
             avatarUrl: issue.avatarUrl || '',
             doneIssues: [],
+            doneTodayIssues: [],
             activeIssues: [],
             blockedIssues: [],
             queuedIssues: [],
@@ -227,8 +256,12 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
         }
         const stat = map.get(name)!
 
-        if (isDone)    stat.doneIssues.push(issue)
-        else if (isBlocked) stat.blockedIssues.push(issue)
+        if (isDone) {
+          stat.doneIssues.push(issue)
+          // Done Today = only dev_done (developer pushed to Dev/Mobile Done today).
+          // since_date on verified/deployed tickets reflects QA/devops action time, not dev action time.
+          if (role === 'dev_done' && isToday(issue.since_date)) stat.doneTodayIssues.push(issue)
+        } else if (isBlocked) stat.blockedIssues.push(issue)
         else if (isActive)  stat.activeIssues.push(issue)
         else if (isQueued)  stat.queuedIssues.push(issue)
 
@@ -463,9 +496,44 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                   )}
                 </div>
 
+                {/* Done Today section */}
+                {dev.doneTodayIssues.length > 0 && (
+                  <div className="do-dev-issues do-dev-issues--done-today">
+                    <div className="dl-section-label">
+                      <span>Done Today</span>
+                      <span className="dl-section-count">{dev.doneTodayIssues.length}</span>
+                    </div>
+                    {dev.doneTodayIssues
+                      .slice()
+                      .sort((a, b) => new Date(b.since_date).getTime() - new Date(a.since_date).getTime())
+                      .map(iss => (
+                        <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
+                          <div className="do-dev-issue-row do-dev-issue-row--done">
+                            <span className="dl-done-check">✓</span>
+                            <span className="do-issue-id do-issue-id--link"
+                              onClick={(e) => openInYouTrack(iss.idReadable, e)}>{iss.idReadable}</span>
+                            <span className="do-issue-summary do-issue-summary--clickable"
+                              onClick={(e) => openYtIssue(iss.idReadable, e)}>{iss.summary}</span>
+                            <span className="dl-done-meta">
+                              {fmtSinceTime(iss.since_date)}
+                              {iss.total_active_hours > 0 && (
+                                <span className="dl-done-devtime">· {fmtHoursCompact(iss.total_active_hours)}</span>
+                              )}
+                            </span>
+                          </div>
+                        </HoverCard>
+                      ))
+                    }
+                  </div>
+                )}
+
                 {/* Active issues preview */}
                 {dev.activeIssues.length > 0 && (
                   <div className="do-dev-issues">
+                    <div className="dl-section-label">
+                      <span>In Progress</span>
+                      <span className="dl-section-count dl-section-count--active">{dev.activeIssues.length}</span>
+                    </div>
                     {dev.activeIssues.slice(0, 4).map(iss => (
                       <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
                         <div className={`do-dev-issue-row ${priorityClass(iss.priority)}`}>
@@ -493,6 +561,10 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                 {/* Blocked issues preview */}
                 {dev.blockedIssues.length > 0 && (
                   <div className="do-dev-issues do-dev-issues--blocked">
+                    <div className="dl-section-label">
+                      <span>Blocked</span>
+                      <span className="dl-section-count dl-section-count--blocked">{dev.blockedIssues.length}</span>
+                    </div>
                     {dev.blockedIssues.map(iss => (
                       <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
                         <div className="do-dev-issue-row do-priority-p0">

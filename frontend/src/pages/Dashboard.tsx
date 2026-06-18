@@ -632,7 +632,7 @@ export default function Dashboard() {
               className={`sidebar-nav-item ${currentPage === 'daily-ops' ? 'active' : ''}`}
               onClick={() => setCurrentPage('daily-ops')}
             >
-              <Zap size={20} />
+              <Activity size={20} />
               <span>DailyOps</span>
             </button>
             <button
