@@ -1149,6 +1149,10 @@ export function DayTrackPage() {
       doneBlock += `*${catHeading(cat)}:*\n`
       items.forEach(e => {
         doneBlock += `• ${getName(e)}${e.duration_mins != null ? ` (${minsLabel(e.duration_mins)})` : ''}\n`
+        const subs = subtaskMap.get(e.id) ?? []
+        subs.forEach(s => {
+          doneBlock += `  ◦ ${nameMap.get(s.id) ?? s.name}${s.duration_mins != null ? ` (${minsLabel(s.duration_mins)})` : ''}\n`
+        })
       })
       doneBlock += '\n'
     })
@@ -1442,6 +1446,10 @@ ${aiSummaryBlock}
       doneBlock += `*${catHeading(cat)}:*\n`
       items.forEach(e => {
         doneBlock += `- ${e.name}${e.duration_mins != null ? ` (${minsLabel(e.duration_mins)})` : ''}\n`
+        const subs = subtaskMap.get(e.id) ?? []
+        subs.forEach(s => {
+          doneBlock += `  - ${s.name}${s.duration_mins != null ? ` (${minsLabel(s.duration_mins)})` : ''}\n`
+        })
       })
       doneBlock += '\n'
     })
