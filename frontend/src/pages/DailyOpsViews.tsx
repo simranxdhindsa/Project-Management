@@ -908,3 +908,276 @@ export function OpsViewSnapshot({ devStats }: { devStats: DevStatLike[] }) {
     </div>
   )
 }
+
+// ── Skeleton loaders — one per view ──────────────────────────────────────────
+// Each skeleton mirrors the real card layout (same grid class, same padding/radius).
+// Widths vary by index so the shimmer looks organic, not like a repeating pattern.
+
+const Sk = ({ w, h, r = 6 }: { w: number | string; h: number; r?: number | string }) => (
+  <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+)
+
+function SkHead() {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <Sk w={160} h={22} r={6} />
+      <div style={{ marginTop: 8 }}><Sk w="62%" h={13} r={4} /></div>
+    </div>
+  )
+}
+
+// Widths cycle so consecutive cards look different
+const W = [55, 70, 48, 65, 58, 72] // name bar widths (%)
+const W2 = [75, 55, 80, 62, 70, 50] // summary widths (%)
+
+function SkRings() {
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-grid-rings">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 16, padding: 18, border: `1px solid ${BORDER}`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+            {/* Header row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+              <Sk w={34} h={34} r="50%" />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Sk w={`${W[i % 6]}%`} h={13} r={4} />
+                <Sk w={60} h={9} r={3} />
+              </div>
+            </div>
+            {/* Ring circle placeholder */}
+            <div style={{ position: 'relative', width: 176, height: 176, margin: '18px 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div className="skeleton" style={{ position: 'absolute', inset: 0, borderRadius: '50%', opacity: 0.18 }} />
+              {/* Inner cutout to fake a ring */}
+              <div style={{ width: 138, height: 138, borderRadius: '50%', background: 'var(--bg-surface, #1a1a2e)' }} />
+            </div>
+            {/* Chip row */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <Sk w={72} h={24} r={999} />
+              <Sk w={84} h={24} r={999} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkMission() {
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-grid-mission">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 16, padding: 16, border: `1px solid ${BORDER}` }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <Sk w={32} h={32} r="50%" />
+              <Sk w={`${W[i % 6]}%`} h={14} r={4} />
+            </div>
+            {/* Status + donut row */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16 }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Sk w={36} h={36} r={6} />
+                <Sk w={100} h={20} r={4} />
+                <Sk w={`${W2[i % 6]}%`} h={11} r={3} />
+              </div>
+              {/* Donut circle */}
+              <div style={{ position: 'relative', width: 92, height: 92, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div className="skeleton" style={{ position: 'absolute', inset: 0, borderRadius: '50%', opacity: 0.18 }} />
+                <div style={{ width: 66, height: 66, borderRadius: '50%', background: 'var(--bg-surface, #1a1a2e)' }} />
+              </div>
+            </div>
+            {/* Activity strip */}
+            <div style={{ marginTop: 14, paddingTop: 6 }}>
+              <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end' }}>
+                {[0,1,2].map(j => (
+                  <div key={j} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    <Sk w={30} h={9} r={3} />
+                    <Sk w={11} h={11} r="50%" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkStuck() {
+  const SECTION_ROWS = [3, 2, 2] // DANGER / WARNING / WATCH row counts
+  const SECTION_COLORS = ['rgba(248,113,113,0.25)', 'rgba(251,191,36,0.2)', 'rgba(255,255,255,0.1)']
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-stuck-container">
+        {SECTION_ROWS.map((rows, si) => (
+          <div key={si} style={{ marginBottom: 22 }}>
+            {/* Section header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 11 }}>
+              <Sk w={14} h={14} r={3} />
+              <Sk w={70} h={12} r={4} />
+              <Sk w={90} h={11} r={3} />
+              <div style={{ flex: 1, height: 1, background: BORDER }} />
+            </div>
+            {/* Rows */}
+            {Array.from({ length: rows }).map((_, ri) => (
+              <div key={ri} style={{ position: 'relative', borderRadius: 12, overflow: 'hidden',
+                background: GLASS, border: `1px solid ${BORDER}`, marginBottom: 7 }}>
+                {/* Fill bar */}
+                <div className="skeleton" style={{
+                  position: 'absolute', inset: 0, right: 'auto',
+                  width: `${[65, 40, 80, 52, 70, 35][ri + si * 3 < 6 ? ri + si * 3 : ri]}%`,
+                  background: SECTION_COLORS[si], opacity: 0.6 }} />
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px' }}>
+                  <Sk w={28} h={28} r="50%" />
+                  <Sk w={78} h={12} r={3} />
+                  <Sk w={60} h={12} r={3} />
+                  <Sk w={`${W2[(ri + si) % 6]}%`} h={13} r={3} />
+                  <Sk w={70} h={22} r={7} />
+                  <Sk w={44} h={14} r={3} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkHotfix() {
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-hotfix-container">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 14, padding: '16px 20px', border: `1px solid ${BORDER}` }}>
+            {/* Badge + id + summary */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+              <Sk w={88} h={24} r={999} />
+              <Sk w={64} h={13} r={3} />
+              <Sk w={`${W2[i % 6]}%`} h={14} r={3} />
+            </div>
+            {/* Dev + state + time row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <Sk w={32} h={32} r="50%" />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <Sk w={80} h={12} r={3} />
+                  <Sk w={60} h={12} r={3} />
+                </div>
+              </div>
+              <div style={{ flex: 1 }} />
+              <Sk w={120} h={14} r={3} />
+            </div>
+            {/* Progress bar */}
+            <div style={{ height: 4, borderRadius: 999, background: 'rgba(255,255,255,0.07)', overflow: 'hidden', marginTop: 14 }}>
+              <div className="skeleton" style={{ height: '100%', borderRadius: 999,
+                width: `${[45, 70, 30][i % 3]}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkStrips() {
+  // Segment widths per card — vary so each strip looks unique
+  const SEGS = [
+    [0.18, 0.28, 0.22, 0.16, 0.12],
+    [0.32, 0.20, 0.14, 0.24, 0.06],
+    [0.10, 0.35, 0.18, 0.28, 0.06],
+    [0.22, 0.16, 0.30, 0.20, 0.10],
+    [0.28, 0.24, 0.18, 0.16, 0.12],
+  ]
+  const SEG_COLORS = ['rgba(74,222,128,0.25)','rgba(96,165,250,0.25)','rgba(251,191,36,0.25)','rgba(248,113,113,0.25)','rgba(255,255,255,0.08)']
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-strips-container">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 14, padding: 16, border: `1px solid ${BORDER}` }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <Sk w={30} h={30} r="50%" />
+              <Sk w={`${W[i % 6]}%`} h={14} r={4} />
+              <div style={{ flex: 1 }} />
+              <Sk w={76} h={22} r={999} />
+            </div>
+            {/* Film strip */}
+            <div style={{ display: 'flex', gap: 3, height: 40, borderRadius: 8, overflow: 'hidden' }}>
+              {SEGS[i % SEGS.length].map((grow, j) => (
+                <div key={j} className="skeleton" style={{
+                  flexGrow: grow, flexBasis: 0, minWidth: 24, borderRadius: 5,
+                  background: SEG_COLORS[j % SEG_COLORS.length], opacity: 0.7 }} />
+              ))}
+            </div>
+            {/* Chips row */}
+            <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+              <Sk w={76} h={22} r={999} />
+              <Sk w={88} h={22} r={999} />
+              {i % 2 === 0 && <Sk w={68} h={22} r={999} />}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkSnapshot() {
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-grid-snapshot">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 14, padding: 14, border: `1px solid ${BORDER}` }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
+              <Sk w={30} h={30} r="50%" />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <Sk w={`${W[i % 6]}%`} h={13} r={4} />
+                <Sk w={44} h={9} r={3} />
+              </div>
+            </div>
+            {/* Progress bar */}
+            <div style={{ height: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', overflow: 'hidden', marginBottom: 13 }}>
+              <div className="skeleton" style={{ height: '100%', borderRadius: 999,
+                width: `${[55, 38, 72, 44, 60, 30, 80, 50][i % 8]}%` }} />
+            </div>
+            {/* Dot cluster area */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, minHeight: 54, alignContent: 'flex-start' }}>
+              {Array.from({ length: 3 + (i % 4) }).map((_, di) => (
+                <Sk key={di} w={di < 2 ? 12 : 9} h={di < 2 ? 12 : 9} r="50%" />
+              ))}
+            </div>
+            {/* Done row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 12, paddingTop: 11,
+              borderTop: `1px solid ${BORDER}`, minHeight: 26 }}>
+              {i % 3 !== 2
+                ? Array.from({ length: 1 + (i % 3) }).map((_, ci) => <Sk key={ci} w={16} h={16} r="50%" />)
+                : <Sk w={100} h={11} r={3} />}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function OpsViewSkeleton({ view }: { view: string }) {
+  switch (view) {
+    case 'rings':    return <SkRings />
+    case 'mission':  return <SkMission />
+    case 'stuck':    return <SkStuck />
+    case 'hotfix':   return <SkHotfix />
+    case 'strips':   return <SkStrips />
+    case 'snapshot': return <SkSnapshot />
+    default:         return null
+  }
+}

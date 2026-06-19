@@ -17,6 +17,7 @@ import { usePersistedState, PERSIST } from '../hooks/usePersistedState'
 import {
   OpsViewRings, OpsViewMission, OpsViewStuck,
   OpsViewHotfix, OpsViewStrips, OpsViewSnapshot,
+  OpsViewSkeleton,
 } from './DailyOpsViews'
 
 interface Props {
@@ -429,8 +430,8 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
           </div>
         )}
 
-        {/* Skeleton while loading */}
-        {loading && (() => {
+        {/* Skeleton while loading — matches the active view layout */}
+        {loading && opsView === 'load' && (() => {
           const sk = (w: number | string, h: number, r = 5) =>
             <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
           return (
@@ -456,6 +457,11 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
             </div>
           )
         })()}
+        {loading && opsView !== 'load' && (
+          <div className="do-design-view-wrap">
+            <OpsViewSkeleton view={opsView} />
+          </div>
+        )}
 
         {opsView === 'load' && !loading && devStats.length === 0 && (
           <div className="do-loading">
