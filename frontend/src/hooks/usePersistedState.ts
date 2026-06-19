@@ -31,6 +31,8 @@ export const PERSIST = {
   DEV_ACTIVITY_VIEW: 'dev_activity_view',
   /** Dev Activity page — date range filter */
   DEV_ACTIVITY_DATE: 'dev_activity_date',
+  /** Daily Ops tab — which design view is active */
+  DAILY_OPS_VIEW: 'daily_ops_view',
 } as const
 
 export type PersistKey = typeof PERSIST[keyof typeof PERSIST]
