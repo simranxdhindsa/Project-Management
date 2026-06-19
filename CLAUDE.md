@@ -224,7 +224,23 @@ One CSS file per subtab/view + one shared base file. Never put all subtab styles
 
 When adding a new multi-subtab page: `<page>-base.css` + one `<page>-<subtab>.css` per view. Import all in the page component and in `index.css`.
 
-### 6 — Shared Components First
+### 6 — Responsive Design (Required)
+
+**Every page and view must work at mobile (375px), tablet (768px), and desktop (1280px).** This is non-negotiable — implement responsive CSS at the same time as the feature, not as a follow-up.
+
+Rules:
+- Use CSS media queries — never conditional rendering based on `window.innerWidth`
+- Move grid/layout styles to CSS classes (not inline `style={{}}`) so media queries can override them
+- At `≤768px`: single-column grids, hide non-essential table columns, make horizontal tab bars scrollable (`flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none`)
+- At `769px–1024px` (tablet): 2-column grids, reduced padding
+- Tab bars with many items: always `flex-wrap: nowrap; overflow-x: auto` so tabs are swipeable, not wrapping
+
+**Checklist before marking a UI task done:**
+- [ ] Desktop (1280px): looks correct
+- [ ] Tablet (768px): 2 columns, no overflow
+- [ ] Mobile (375px): 1 column, tab bar scrollable, no horizontal scroll on page
+
+### 7 — Shared Components First
 
 **Before writing any UI pattern inline, check `frontend/src/components/` for an existing shared component.**
 
@@ -239,6 +255,8 @@ If the same UI pattern is needed in 2+ places, extract it into a shared componen
 | `CalendarView` | Date-range calendar |
 
 **Rule:** If you find yourself copying a block of JSX from one page to another, stop — extract a component instead and use it in both places. The first duplication is the signal to extract; the second is too late.
+
+---
 
 ---
 
@@ -267,6 +285,7 @@ Detailed descriptions of each feature/tab live in `docs/features/`. Read the rel
 | [`docs/features/auth.md`](docs/features/auth.md) | Login flow, dev mode, access control |
 | [`docs/features/pm-reports.md`](docs/features/pm-reports.md) | Tracking tab (12 views), Velocity chart, Burndown chart |
 | [`docs/features/daily-ops.md`](docs/features/daily-ops.md) | Developer Load view |
+| [`docs/features/daily-ops-views.md`](docs/features/daily-ops-views.md) | 6 design views in Daily Ops tab (Health Rings, Mission Control, Stuck Detector, Hotfix Command, Pulse Strips, Snapshot) |
 | [`docs/features/pm-assistant.md`](docs/features/pm-assistant.md) | AI chat, YQL reference |
 | [`docs/features/board.md`](docs/features/board.md) | Kanban board, List view, Sprint Dashboard |
 | [`docs/features/dev-activity.md`](docs/features/dev-activity.md) | Dev Activity page — 5 subtabs, CSS map, skeuomorphic report design |

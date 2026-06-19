@@ -1,0 +1,910 @@
+// DailyOpsViews.tsx — 6 design views for Daily Ops tab
+// Adapted from claude.ai/design — ops-v1 through ops-v6
+import React from 'react'
+import { motion } from 'framer-motion'
+import type { SprintBoardIssue } from '../services/api'
+
+// ── Thresholds ──────────────────────────────────────────────────────────────
+const WATCH  = 8   // hours — muted blue
+const WARN   = 16  // hours — amber
+const DANGER = 48  // hours — red
+
+// ── Color palette ───────────────────────────────────────────────────────────
+const C = {
+  done:    '#4ade80',
+  active:  '#60a5fa',
+  blocked: '#f87171',
+  overdue: '#fbbf24',
+  accent:  '#6366f1',
+} as const
+
+// ── Inline style constants (matching existing CSS vars) ──────────────────────
+const GLASS  = 'rgba(255,255,255,0.05)'
+const BORDER = 'rgba(255,255,255,0.09)'
+
+// ── DevStat mirror (no circular dep with DailyOpsTab) ───────────────────────
+export interface DevStatLike {
+  name: string
+  avatarUrl: string
+  doneIssues: SprintBoardIssue[]
+  doneTodayIssues: SprintBoardIssue[]
+  activeIssues: SprintBoardIssue[]
+  blockedIssues: SprintBoardIssue[]
+  queuedIssues: SprintBoardIssue[]
+  overdueIssues: SprintBoardIssue[]
+  bouncedIssues: SprintBoardIssue[]
+  totalActiveHours: number
+  hotfixCount: number
+}
+
+// ── Internal issue shape ─────────────────────────────────────────────────────
+interface OpsIssue {
+  id: string
+  summary: string
+  hoursInState: number
+  isHotfix: boolean
+  isRegression: boolean
+  since?: string
+  timestamp?: string
+  hoursSpent?: number
+}
+interface OpsDev {
+  name: string
+  initials: string
+  color: string
+  totalActiveHours: number
+  hotfixCount: number
+  doneCount: number
+  doneTodayIssues: OpsIssue[]
+  activeIssues: OpsIssue[]
+  blockedIssues: OpsIssue[]
+  queuedIssues: OpsIssue[]
+}
+interface FlatTicket extends OpsIssue {
+  dev: OpsDev
+  state: 'blocked' | 'overdue' | 'active' | 'done'
+  hours: number
+}
+
+// ── Adapters ─────────────────────────────────────────────────────────────────
+const DEV_COLORS = ['#6366f1','#8b5cf6','#06b6d4','#ec4899','#f59e0b','#10b981']
+function devColor(name: string): string {
+  let h = 0
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0x7fffffff
+  return DEV_COLORS[h % DEV_COLORS.length]
+}
+function devInitials(name: string): string {
+  return name.split(' ').filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join('')
+}
+function fmtSince(sinceDate: string): string {
+  if (!sinceDate) return 'earlier'
+  const d = new Date(sinceDate)
+  if (isNaN(d.getTime())) return 'earlier'
+  const diffH = (Date.now() - d.getTime()) / 3_600_000
+  if (diffH > 30) return 'yesterday'
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+function fmtTimestamp(sinceDate: string): string {
+  if (!sinceDate) return ''
+  const d = new Date(sinceDate)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+function adaptDev(dev: DevStatLike): OpsDev {
+  return {
+    name: dev.name,
+    initials: devInitials(dev.name),
+    color: devColor(dev.name),
+    totalActiveHours: dev.totalActiveHours,
+    hotfixCount: dev.hotfixCount,
+    doneCount: dev.doneIssues.length,
+    doneTodayIssues: dev.doneTodayIssues.map(i => ({
+      id: i.idReadable, summary: i.summary, hoursInState: 0,
+      isHotfix: i.is_hotfix ?? false, isRegression: false,
+      timestamp: fmtTimestamp(i.since_date), hoursSpent: i.total_active_hours ?? 0,
+    })),
+    activeIssues: dev.activeIssues.map(i => ({
+      id: i.idReadable, summary: i.summary, hoursInState: i.hours_in_state ?? 0,
+      isHotfix: i.is_hotfix ?? false, isRegression: false,
+    })),
+    blockedIssues: dev.blockedIssues.map(i => ({
+      id: i.idReadable, summary: i.summary, hoursInState: i.hours_in_state ?? 0,
+      isHotfix: i.is_hotfix ?? false, isRegression: false,
+      since: fmtSince(i.since_date),
+    })),
+    queuedIssues: dev.queuedIssues.map(i => ({
+      id: i.idReadable, summary: i.summary, hoursInState: 0,
+      isHotfix: false, isRegression: false,
+    })),
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function opsOverdue(dev: OpsDev) { return dev.activeIssues.filter(i => i.hoursInState >= WARN) }
+function opsDanger(dev: OpsDev)  { return dev.activeIssues.filter(i => i.hoursInState >= DANGER) }
+function opsTrackedCount(dev: OpsDev) {
+  return dev.doneCount + dev.activeIssues.length + dev.blockedIssues.length + dev.queuedIssues.length
+}
+function opsDonePct(dev: OpsDev) {
+  const t = opsTrackedCount(dev)
+  return t ? Math.round((dev.doneCount / t) * 100) : 0
+}
+function opsTopStuck(dev: OpsDev): OpsIssue | null {
+  return dev.activeIssues.reduce<OpsIssue | null>((m, i) => (!m || i.hoursInState > m.hoursInState) ? i : m, null)
+}
+function opsStatus(dev: OpsDev): { word: string; c: string } {
+  if (dev.blockedIssues.length > 0) return { word: 'CRITICAL', c: C.blocked }
+  if (opsDanger(dev).length)        return { word: 'AT RISK',  c: C.blocked }
+  if (opsOverdue(dev).length)       return { word: 'AT RISK',  c: C.overdue }
+  if (dev.doneTodayIssues.length >= 3) return { word: 'SHIPPING', c: C.done }
+  if (dev.doneTodayIssues.length > 0)  return { word: 'ON TRACK', c: C.done }
+  return { word: 'ON TRACK', c: C.active }
+}
+function opsUrgencyRank(dev: OpsDev) {
+  return dev.blockedIssues.length * 1000 + opsDanger(dev).length * 300 + opsOverdue(dev).length * 80 + dev.activeIssues.length
+}
+function opsFmtHours(h: number): string {
+  if (!h) return '0h'
+  if (h >= 24) { const d = Math.floor(h / 24); const r = Math.round(h - d * 24); return r ? `${d}d ${r}h` : `${d}d` }
+  const hh = Math.floor(h); const mm = Math.round((h - hh) * 60)
+  if (hh === 0) return `${mm}m`
+  return mm ? `${hh}h ${mm}m` : `${hh}h`
+}
+function opsStuckColor(hours: number): string {
+  if (hours >= DANGER) return C.blocked
+  if (hours >= WARN)   return C.overdue
+  return C.active
+}
+function opsFlattenTickets(devs: OpsDev[]): FlatTicket[] {
+  const out: FlatTicket[] = []
+  devs.forEach(dev => {
+    dev.blockedIssues.forEach(b => out.push({ ...b, dev, state: 'blocked', hours: b.hoursInState }))
+    dev.activeIssues.forEach(a => out.push({ ...a, dev, state: a.hoursInState >= WARN ? 'overdue' : 'active', hours: a.hoursInState }))
+    dev.doneTodayIssues.forEach(d => out.push({ ...d, dev, state: 'done', hours: d.hoursSpent ?? 0 }))
+  })
+  return out
+}
+
+// ── Atoms ─────────────────────────────────────────────────────────────────────
+function OpsAvatar({ dev, size = 36, glow }: { dev: OpsDev; size?: number; glow?: string | null }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      background: `linear-gradient(135deg, ${dev.color}, ${dev.color}99)`,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.36, fontWeight: 700, color: '#fff', letterSpacing: '-0.02em',
+      boxShadow: glow ? `0 0 14px ${glow}` : 'none',
+    }}>{dev.initials}</div>
+  )
+}
+
+function OpsHotfixBadge({ count = 1 }: { count?: number }) {
+  return (
+    <motion.span animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+      title={`${count} hotfix`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 13,
+        filter: 'drop-shadow(0 0 5px rgba(239,68,68,0.7))' }}>
+      🔥{count > 1 ? <b style={{ fontSize: 10, color: '#ef4444' }}>{count}</b> : null}
+    </motion.span>
+  )
+}
+
+function opsChipColor(issue: OpsIssue): string {
+  if (issue.isHotfix) return C.blocked
+  if (issue.since != null) return C.blocked
+  if (issue.hoursInState >= DANGER) return C.blocked
+  if (issue.hoursInState >= WARN)   return C.overdue
+  return C.active
+}
+function opsChipTime(issue: OpsIssue): string {
+  if (issue.since != null) return /yesterday|ago/i.test(issue.since) ? '1d+' : `since ${issue.since.replace(/\s*(AM|PM)/i, '')}`
+  if (issue.hoursInState) return opsFmtHours(issue.hoursInState)
+  return ''
+}
+function OpsTicketChip({ issue, animateGlow }: { issue: OpsIssue; animateGlow?: boolean }) {
+  const c = opsChipColor(issue)
+  const danger = issue.isHotfix || issue.since != null || issue.hoursInState >= DANGER
+  return (
+    <motion.span
+      animate={(danger && animateGlow) ? { boxShadow: [`0 0 0px ${c}00`, `0 0 10px ${c}77`, `0 0 0px ${c}00`] } : {}}
+      transition={(danger && animateGlow) ? { duration: 2, repeat: Infinity, ease: 'easeInOut' } : {}}
+      title={issue.summary}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px',
+        borderRadius: 999, background: `${c}1a`, border: `1px solid ${c}55`,
+        fontSize: 11, fontWeight: 700, color: c, whiteSpace: 'nowrap', maxWidth: '100%' }}>
+      <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{issue.id}</span>
+      {issue.isHotfix && <span style={{ fontSize: 9 }}>🔥</span>}
+      {issue.isRegression && !issue.isHotfix && <span style={{ fontSize: 9 }}>↩</span>}
+      <span style={{ opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis' }}>{opsChipTime(issue)}</span>
+    </motion.span>
+  )
+}
+
+function OpsHead({ title, tagline }: { title: string; tagline: string }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em', margin: 0 }}>{title}</h2>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4, marginBottom: 0 }}>{tagline}</p>
+    </div>
+  )
+}
+
+const OPS_STATE_WORD: Record<string, { word: string; c: string }> = {
+  blocked: { word: 'BLOCKED',     c: C.blocked },
+  overdue: { word: 'OVERDUE',     c: C.overdue },
+  active:  { word: 'IN PROGRESS', c: C.active  },
+  done:    { word: 'DONE',        c: C.done    },
+}
+
+// ── View 1: Health Rings ──────────────────────────────────────────────────────
+function OpsRingCard({ dev, index }: { dev: OpsDev; index: number }) {
+  const size = 176, stroke = 13, r = (size - stroke) / 2 - 8, cx = size / 2, cy = size / 2
+  const circ = 2 * Math.PI * r
+  const status    = opsStatus(dev)
+  const donePct   = opsDonePct(dev)
+  const overdue   = opsOverdue(dev)
+  const danger    = opsDanger(dev)
+  const hasBlock  = dev.blockedIssues.length > 0
+  const ringColor = hasBlock ? C.blocked : overdue.length ? C.overdue : C.done
+
+  const gapCount = dev.blockedIssues.length
+  const dashArray = (() => {
+    if (!gapCount) return undefined
+    const visible = circ * (donePct / 100)
+    const gap = 9, seg = Math.max(6, (visible - gap * gapCount) / (gapCount + 1))
+    const parts: number[] = []
+    for (let i = 0; i <= gapCount; i++) { parts.push(seg, gap) }
+    return parts.join(' ')
+  })()
+
+  const dots = overdue.map((o, i) => {
+    const frac = (donePct / 100) * (0.2 + i * 0.18)
+    const ang  = -90 + frac * 360
+    const rad  = (ang * Math.PI) / 180
+    return { x: cx + Math.cos(rad) * r, y: cy + Math.sin(rad) * r, danger: o.hoursInState >= DANGER }
+  })
+
+  const urgent = [
+    ...dev.blockedIssues,
+    ...dev.activeIssues.filter(a => a.hoursInState >= WARN),
+    ...dev.activeIssues.filter(a => a.hoursInState < WARN),
+  ].slice(0, 3)
+
+  return (
+    <motion.div
+      variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.05, duration: 0.8 } } }}
+      animate={hasBlock
+        ? { boxShadow: ['0 0 0px #ef444400', '0 0 18px #ef444466', '0 0 0px #ef444400'] }
+        : undefined}
+      transition={hasBlock ? { duration: 2, repeat: Infinity, ease: 'easeInOut' } : undefined}
+      style={{ background: GLASS, borderRadius: 16, padding: 18, backdropFilter: 'blur(14px)',
+        border: `1px solid ${hasBlock ? C.blocked + '66' : overdue.length ? C.overdue + '55' : BORDER}`,
+        display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+        <OpsAvatar dev={dev} size={34} glow={hasBlock ? C.blocked + '66' : null} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dev.name}</div>
+          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.06em', color: status.c }}>{status.word}</div>
+        </div>
+        {dev.hotfixCount > 0 && <OpsHotfixBadge count={dev.hotfixCount} />}
+      </div>
+
+      <div style={{ position: 'relative', width: size, height: size, marginTop: 18 }}>
+        <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={stroke} />
+          <motion.circle cx={cx} cy={cy} r={r} fill="none" stroke={ringColor} strokeWidth={stroke}
+            strokeLinecap={gapCount ? 'butt' : 'round'}
+            strokeDasharray={dashArray || circ}
+            initial={{ strokeDashoffset: circ }}
+            animate={{ strokeDashoffset: gapCount ? 0 : circ - (circ * donePct) / 100,
+              opacity: hasBlock ? [0.55, 1, 0.55] : 1 }}
+            transition={{ strokeDashoffset: { type: 'spring', bounce: 0.05, duration: 1.2, delay: 0.3 + index * 0.06 },
+              opacity: hasBlock ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {} }}
+            style={{ filter: `drop-shadow(0 0 6px ${ringColor}77)` }} />
+          {dots.map((d, i) => (
+            <motion.circle key={'od' + i} cx={d.x} cy={d.y} r={d.danger ? 6 : 4}
+              fill={d.danger ? '#ef4444' : C.overdue} stroke="var(--bg-base,#0d0d1a)" strokeWidth={2}
+              initial={{ scale: 0 }} animate={{ scale: 1 }}
+              transition={{ delay: 0.9 + i * 0.1, type: 'spring', bounce: 0.4 }}
+              style={{ transformOrigin: `${d.x}px ${d.y}px`,
+                filter: d.danger ? 'drop-shadow(0 0 5px #ef4444)' : 'none' }} />
+          ))}
+        </svg>
+
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+          {hasBlock ? (
+            <>
+              <motion.div animate={{ opacity: [0.55, 1, 0.55], scale: [1, 1.08, 1] }}
+                transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                style={{ fontSize: 38, lineHeight: 1, color: C.blocked, fontWeight: 700,
+                  filter: 'drop-shadow(0 0 12px #ef4444)' }}>⊘</motion.div>
+              <span style={{ fontSize: 14, fontWeight: 800, color: C.blocked, letterSpacing: '0.05em' }}>BLOCKED</span>
+            </>
+          ) : danger.length ? (
+            <>
+              <motion.div animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 3, repeat: Infinity }}
+                style={{ fontSize: 28 }}>⚠️</motion.div>
+              <span style={{ fontSize: 14, fontWeight: 800, color: C.overdue, letterSpacing: '0.05em' }}>OVERDUE</span>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 3 }}>
+                {Array.from({ length: 7 }).map((_, i) => {
+                  const filled = i < Math.round((donePct / 100) * 7)
+                  return (
+                    <motion.span key={i} initial={{ scaleY: 0 }} animate={{ scaleY: 1 }}
+                      transition={{ delay: 0.6 + i * 0.05, type: 'spring', bounce: 0.3 }}
+                      style={{ width: 7, height: 22, borderRadius: 2, transformOrigin: 'bottom',
+                        background: filled ? C.done : 'rgba(255,255,255,0.10)' }} />
+                  )
+                })}
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: C.done, marginTop: 4 }}>on track</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 16, width: '100%', justifyContent: 'center' }}>
+        {urgent.length === 0
+          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>nothing urgent</span>
+          : urgent.map(t => <OpsTicketChip key={t.id} issue={t} animateGlow />)}
+      </div>
+    </motion.div>
+  )
+}
+
+export function OpsViewRings({ devStats }: { devStats: DevStatLike[] }) {
+  const devs = devStats.map(adaptDev)
+  return (
+    <div>
+      <OpsHead title="Health Rings" tagline="Team health in one scan — ring color is the status, gaps are blockers, dots are stuck tickets." />
+      <motion.div className="ops-grid-rings" variants={{ show: { transition: { staggerChildren: 0.08 } } }} initial="hidden" animate="show">
+        {devs.map((dev, i) => <OpsRingCard key={dev.name} dev={dev} index={i} />)}
+      </motion.div>
+    </div>
+  )
+}
+
+// ── View 2: Mission Control ───────────────────────────────────────────────────
+function OpsDonut({ dev, index, size = 92 }: { dev: OpsDev; index: number; size?: number }) {
+  const stroke = 11, r = (size - stroke) / 2, cx = size / 2, cy = size / 2, circ = 2 * Math.PI * r
+  const tracked = opsTrackedCount(dev) || 1
+  const segs = [
+    { n: dev.doneCount,              c: C.done },
+    { n: dev.activeIssues.length,    c: C.active },
+    { n: dev.blockedIssues.length,   c: C.blocked },
+    { n: dev.queuedIssues.length,    c: 'rgba(255,255,255,0.12)' },
+  ]
+  let acc = 0
+  return (
+    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke} />
+      {segs.map((s, i) => {
+        if (!s.n) return null
+        const len = circ * (s.n / tracked)
+        const node = (
+          <motion.circle key={i} cx={cx} cy={cy} r={r} fill="none" stroke={s.c} strokeWidth={stroke}
+            strokeDasharray={`${len} ${circ - len}`}
+            initial={{ strokeDashoffset: circ }} animate={{ strokeDashoffset: -acc }}
+            transition={{ type: 'spring', bounce: 0.05, duration: 1, delay: 0.3 + index * 0.1 + i * 0.08 }} />
+        )
+        acc += len
+        return node
+      })}
+    </svg>
+  )
+}
+
+function OpsActivityStrip({ dev }: { dev: OpsDev }) {
+  const events: { t: string; c: string; kind: string }[] = []
+  dev.doneTodayIssues.forEach(d => events.push({ t: d.timestamp ?? '', c: C.done, kind: 'done' }))
+  dev.blockedIssues.forEach(b => events.push({ t: /yesterday|ago/i.test(b.since ?? '') ? '09:00' : (b.since ?? '09:00'), c: C.blocked, kind: 'blocked' }))
+  dev.activeIssues.slice(0, 3).forEach((_, i) => events.push({ t: ['10:30', '12:10', '14:00'][i], c: C.active, kind: 'active' }))
+  events.sort((a, b) => {
+    const toH = (s: string) => { const m = s.match(/(\d{1,2}):(\d{2})/); return m ? +m[1] + +m[2] / 60 : 9 }
+    return toH(a.t) - toH(b.t)
+  })
+  const shown = events.slice(0, 6)
+  return (
+    <div style={{ position: 'relative', paddingTop: 13, marginTop: 4 }}>
+      <div style={{ position: 'absolute', left: 4, right: 4, top: 19, height: 1.5, background: 'rgba(255,255,255,0.08)' }} />
+      <div style={{ display: 'flex', justifyContent: shown.length > 1 ? 'space-between' : 'flex-start',
+        gap: shown.length > 1 ? 0 : 14, position: 'relative' }}>
+        {shown.length === 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>no transitions today</span>}
+        {shown.map((e, i) => (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{e.t}</span>
+            <motion.span animate={e.kind === 'blocked' ? { opacity: [0.55, 1, 0.55] } : {}}
+              transition={e.kind === 'blocked' ? { duration: 2.5, repeat: Infinity } : {}}
+              style={{ width: 11, height: 11, borderRadius: '50%', background: e.c,
+                border: '2px solid var(--bg-base,#0d0d1a)',
+                boxShadow: e.kind === 'blocked' ? `0 0 7px ${e.c}` : 'none' }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function OpsMissionCard({ dev, index }: { dev: OpsDev; index: number }) {
+  const hasBlock    = dev.blockedIssues.length > 0
+  const danger      = opsDanger(dev)
+  const shippingGlow = !hasBlock && dev.doneTodayIssues.length >= 3
+
+  let zone: { icon: string; word: string; c: string; sub: string; breathe?: boolean; big?: boolean }
+  if (hasBlock) {
+    const b = dev.blockedIssues[0]
+    const sinceTxt = /yesterday|ago/i.test(b.since ?? '') ? 'since yesterday' : `since ${b.since ?? ''}`
+    zone = { icon: '⊘', word: 'BLOCKED', c: C.blocked, sub: sinceTxt, breathe: true }
+  } else if (danger.length) {
+    const o = opsTopStuck(dev)
+    zone = { icon: '⚠️', word: 'STUCK', c: C.overdue, sub: `${opsFmtHours(o?.hoursInState ?? 0)} in progress` }
+  } else if (dev.doneTodayIssues.length > 0) {
+    zone = { icon: '↑', word: 'SHIPPING', c: C.done, sub: `${dev.doneTodayIssues.length} done today`, big: true }
+  } else {
+    zone = { icon: '●', word: 'IN PROGRESS', c: C.active, sub: `${dev.activeIssues.length} active`, big: true }
+  }
+
+  const borderGlow = hasBlock ? C.blocked : danger.length ? C.overdue : shippingGlow ? C.done : C.accent
+
+  return (
+    <motion.div
+      variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.05, duration: 0.8 } } }}
+      animate={hasBlock
+        ? { boxShadow: ['0 0 0px #ef444400', '0 0 20px #ef444466', '0 0 0px #ef444400'] }
+        : danger.length
+          ? { boxShadow: ['0 0 0px #fbbf2400', '0 0 12px #fbbf2455', '0 0 0px #fbbf2400'] }
+          : undefined}
+      transition={hasBlock ? { duration: 2, repeat: Infinity, ease: 'easeInOut' }
+        : danger.length ? { duration: 3, repeat: Infinity, ease: 'easeInOut' } : undefined}
+      style={{ background: GLASS, borderRadius: 16, padding: 16, backdropFilter: 'blur(14px)',
+        border: `1px solid ${borderGlow}55`,
+        boxShadow: shippingGlow ? `0 0 16px ${C.done}22` : `0 0 14px ${borderGlow}14` }}>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <OpsAvatar dev={dev} size={32} glow={hasBlock ? C.blocked + '55' : null} />
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: 'var(--text-primary)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dev.name}</span>
+        {dev.hotfixCount > 0 && <OpsHotfixBadge count={dev.hotfixCount} />}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16 }}>
+        <motion.div animate={zone.breathe ? { opacity: [0.7, 1, 0.7] } : {}}
+          transition={zone.breathe ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {}}
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '6px 0' }}>
+          <motion.div animate={zone.breathe ? { scale: [1, 1.1, 1] } : {}}
+            transition={zone.breathe ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {}}
+            style={{ fontSize: zone.big ? 30 : 34, lineHeight: 1, color: zone.c, fontWeight: 800,
+              filter: `drop-shadow(0 0 10px ${zone.c}66)` }}>{zone.icon}</motion.div>
+          <span style={{ fontSize: 18, fontWeight: 800, color: zone.c, letterSpacing: '0.02em' }}>{zone.word}</span>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 600 }}>{zone.sub}</span>
+        </motion.div>
+        <OpsDonut dev={dev} index={index} />
+      </div>
+
+      <OpsActivityStrip dev={dev} />
+    </motion.div>
+  )
+}
+
+export function OpsViewMission({ devStats }: { devStats: DevStatLike[] }) {
+  const devs = devStats.map(adaptDev)
+  return (
+    <div>
+      <OpsHead title="Mission Control" tagline="Sprint health at mission control — critical cards glow red." />
+      <motion.div className="ops-grid-mission" variants={{ show: { transition: { staggerChildren: 0.08 } } }} initial="hidden" animate="show">
+        {devs.map((dev, i) => <OpsMissionCard key={dev.name} dev={dev} index={i} />)}
+      </motion.div>
+    </div>
+  )
+}
+
+// ── View 3: Stuck Detector ────────────────────────────────────────────────────
+function OpsStuckRow({ t, index, maxHours }: { t: FlatTicket; index: number; maxHours: number }) {
+  const isDanger  = t.hours >= DANGER
+  const isWarning = !isDanger && t.hours >= WARN
+  const fillColor = isDanger ? C.blocked : isWarning ? C.overdue : C.active
+  const fillPct   = Math.max(6, (t.hours / maxHours) * 100)
+  const blocked   = t.state === 'blocked'
+  const stateCfg  = OPS_STATE_WORD[t.state] ?? OPS_STATE_WORD.active
+
+  return (
+    <motion.div
+      variants={{ hidden: { opacity: 0, x: -16 }, show: { opacity: 1, x: 0, transition: { duration: 0.4 } } }}
+      animate={isDanger ? { boxShadow: ['0 0 0px #f8717100', '0 0 14px #f8717155', '0 0 0px #f8717100'] } : undefined}
+      transition={isDanger ? { duration: 2, repeat: Infinity, ease: 'easeInOut' } : undefined}
+      style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', background: GLASS, backdropFilter: 'blur(14px)',
+        border: `1px solid ${isDanger ? 'rgba(248,113,113,0.35)' : isWarning ? 'rgba(251,191,36,0.28)' : BORDER}` }}>
+      <motion.div initial={{ width: 0 }} animate={{ width: `${fillPct}%` }}
+        transition={{ type: 'spring', bounce: 0.05, duration: 1, delay: 0.1 + index * 0.05 }}
+        style={{ position: 'absolute', inset: 0, right: 'auto',
+          background: isDanger
+            ? 'linear-gradient(90deg, rgba(248,113,113,0.22), rgba(248,113,113,0.07))'
+            : isWarning
+              ? 'linear-gradient(90deg, rgba(251,191,36,0.18), rgba(251,191,36,0.05))'
+              : 'linear-gradient(90deg, rgba(96,165,250,0.13), rgba(96,165,250,0.03))',
+          borderRight: `2px solid ${fillColor}66` }} />
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px' }}>
+        <OpsAvatar dev={t.dev} size={28} glow={blocked ? C.blocked + '55' : null} />
+        <span className="ops-stuck-name" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0, width: 78,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.dev.name.split(' ')[0]}</span>
+        <span style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: fillColor, flexShrink: 0 }}>{t.id}</span>
+        <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)', minWidth: 0,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.summary}</span>
+        {t.isHotfix && <span style={{ fontSize: 14, flexShrink: 0 }}>🔥</span>}
+        <motion.span className="ops-stuck-state-badge" animate={blocked ? { opacity: [0.6, 1, 0.6] } : {}}
+          transition={blocked ? { duration: 2.5, repeat: Infinity } : {}}
+          style={{ flexShrink: 0, padding: '3px 9px', borderRadius: 7, fontSize: 10, fontWeight: 800,
+            letterSpacing: '0.03em', background: `${stateCfg.c}1e`, border: `1px solid ${stateCfg.c}55`, color: stateCfg.c }}>
+          {stateCfg.word}
+        </motion.span>
+        <span style={{ flexShrink: 0, fontFamily: 'monospace', fontSize: 14, fontWeight: 800,
+          color: fillColor, width: 64, textAlign: 'right' }}>{opsFmtHours(t.hours)}</span>
+      </div>
+    </motion.div>
+  )
+}
+
+function OpsStuckSection({ icon, label, sub, color, rows, maxHours, startIndex }: {
+  icon: string; label: string; sub: string; color: string; rows: FlatTicket[]; maxHours: number; startIndex: number
+}) {
+  if (!rows.length) return null
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 11 }}>
+        <span style={{ fontSize: 14 }}>{icon}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 800, letterSpacing: '0.06em', color }}>{label}</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>{sub}</span>
+        <span style={{ fontSize: 11, color, fontWeight: 700 }}>· {rows.length}</span>
+        <div style={{ flex: 1, height: 1, background: BORDER }} />
+      </div>
+      <motion.div variants={{ show: { transition: { staggerChildren: 0.06 } } }} initial="hidden" animate="show"
+        style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {rows.map((t, i) => <OpsStuckRow key={t.id + t.dev.name} t={t} index={startIndex + i} maxHours={maxHours} />)}
+      </motion.div>
+    </div>
+  )
+}
+
+export function OpsViewStuck({ devStats }: { devStats: DevStatLike[] }) {
+  const devs = devStats.map(adaptDev)
+  const all = opsFlattenTickets(devs)
+    .filter(t => (t.state === 'active' || t.state === 'overdue' || t.state === 'blocked') && t.hours >= WATCH)
+    .sort((a, b) => b.hours - a.hours)
+
+  const maxHours = all.length ? all[0].hours : 1
+  const danger  = all.filter(t => t.hours >= DANGER)
+  const warning = all.filter(t => t.hours >= WARN && t.hours < DANGER)
+  const watch   = all.filter(t => t.hours >= WATCH && t.hours < WARN)
+
+  return (
+    <div>
+      <OpsHead title="Stuck Detector" tagline="Longest-running tickets first — what's been sitting too long." />
+      {all.length === 0 ? (
+        <motion.div initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: 'spring', bounce: 0.3, duration: 0.8 }}
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            padding: '80px 20px', textAlign: 'center' }}>
+          <svg width="76" height="76" viewBox="0 0 76 76" style={{ marginBottom: 18 }}>
+            <circle cx="38" cy="38" r="35" fill="none" stroke="#4ade80" strokeWidth="3" opacity="0.3" />
+            <motion.path d="M23 39 L34 50 L53 27" fill="none" stroke="#4ade80" strokeWidth="5"
+              strokeLinecap="round" strokeLinejoin="round"
+              initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+              transition={{ duration: 0.7, delay: 0.3, ease: 'easeInOut' }}
+              style={{ filter: 'drop-shadow(0 0 8px #4ade80)' }} />
+          </svg>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#4ade80' }}>No stale tickets — everything is moving</div>
+        </motion.div>
+      ) : (
+        <div className="ops-stuck-container">
+          <OpsStuckSection icon="🚨" label="DANGER" sub="stuck 48h+" color={C.blocked} rows={danger} maxHours={maxHours} startIndex={0} />
+          <OpsStuckSection icon="⚠" label="WARNING" sub="stuck 16–48h" color={C.overdue} rows={warning} maxHours={maxHours} startIndex={danger.length} />
+          <OpsStuckSection icon="◎" label="WATCH" sub="stuck 8–16h" color="var(--text-muted)" rows={watch} maxHours={maxHours} startIndex={danger.length + warning.length} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── View 4: Hotfix & Regression Command ───────────────────────────────────────
+function OpsAllClear() {
+  return (
+    <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: 'spring', bounce: 0.3, duration: 0.8 }}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        padding: '80px 20px', textAlign: 'center' }}>
+      <svg width="86" height="86" viewBox="0 0 86 86" style={{ marginBottom: 20 }}>
+        <circle cx="43" cy="43" r="40" fill="none" stroke="#4ade80" strokeWidth="3" opacity="0.3" />
+        <motion.path d="M26 44 L38 56 L60 31" fill="none" stroke="#4ade80" strokeWidth="5"
+          strokeLinecap="round" strokeLinejoin="round"
+          initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+          transition={{ duration: 0.7, delay: 0.3, ease: 'easeInOut' }}
+          style={{ filter: 'drop-shadow(0 0 8px #4ade80)' }} />
+      </svg>
+      <div style={{ fontSize: 28, fontWeight: 800, color: '#4ade80', letterSpacing: '-0.01em' }}>All Clear</div>
+      <p style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 8 }}>No active hotfixes or regressions this sprint.</p>
+    </motion.div>
+  )
+}
+
+function OpsCriticalCard({ t, index }: { t: FlatTicket; index: number }) {
+  const isReg   = t.isRegression
+  const badge   = isReg ? { txt: '⚠️ REGRESSION', c: '#fbbf24' } : { txt: '🔥 HOTFIX', c: '#ef4444' }
+  const stateCfg = OPS_STATE_WORD[t.state] ?? OPS_STATE_WORD.active
+  const done    = t.state === 'done'
+  const blocked = t.state === 'blocked'
+
+  let timeTxt: string, timeColor: string
+  if (blocked)              { timeTxt = `blocked since ${t.since ?? ''}`; timeColor = C.blocked }
+  else if (t.state === 'overdue') { timeTxt = `${opsFmtHours(t.hours)} in progress`; timeColor = C.overdue }
+  else if (done)            { timeTxt = `✓ done at ${t.timestamp ?? ''}`; timeColor = C.done }
+  else                      { timeTxt = `${opsFmtHours(t.hours)} in progress`; timeColor = C.active }
+
+  const ageDays = t.hours / 24
+  const agePct  = Math.min(100, (ageDays / 3) * 100 + 12)
+  const ageOver = ageDays > 2
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -16 }}
+      animate={done
+        ? { opacity: 0.6, y: 0 }
+        : blocked
+          ? { opacity: 1, y: 0, boxShadow: ['0 0 0px #ef444400', '0 0 18px #ef444455', '0 0 0px #ef444400'] }
+          : { opacity: 1, y: 0 }}
+      transition={blocked
+        ? { y: { duration: 0.5, delay: index * 0.08 }, opacity: { duration: 0.5, delay: index * 0.08 }, boxShadow: { duration: 2, repeat: Infinity, ease: 'easeInOut' } }
+        : { duration: 0.5, delay: index * 0.08 }}
+      style={{ background: GLASS, borderRadius: 14, padding: '16px 20px', backdropFilter: 'blur(14px)',
+        border: `1px solid ${done ? BORDER : blocked ? 'rgba(239,68,68,0.35)' : isReg ? 'rgba(251,191,36,0.3)' : 'rgba(239,68,68,0.25)'}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 800, padding: '4px 10px', borderRadius: 999,
+          background: `${badge.c}1e`, border: `1px solid ${badge.c}66`, color: badge.c, letterSpacing: '0.03em' }}>
+          {badge.txt}
+        </span>
+        <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{t.id}</span>
+        <span style={{ fontSize: 14, fontWeight: 500, color: done ? 'var(--text-muted)' : 'var(--text-primary)',
+          flex: 1, minWidth: 180 }}>{t.summary}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <OpsAvatar dev={t.dev} size={32} glow={blocked ? C.blocked + '55' : null} />
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{t.dev.name}</div>
+            <span style={{ fontSize: 14, fontWeight: 800, color: stateCfg.c, letterSpacing: '0.03em' }}>{stateCfg.word}</span>
+          </div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 14, fontWeight: 700, color: timeColor, fontFamily: 'monospace' }}>{timeTxt}</span>
+      </div>
+      <div style={{ height: 4, borderRadius: 999, background: 'rgba(255,255,255,0.07)', overflow: 'hidden', marginTop: 14 }}>
+        <motion.div initial={{ width: 0 }} animate={{ width: `${agePct}%` }}
+          transition={{ type: 'spring', bounce: 0.05, duration: 1, delay: 0.3 + index * 0.08 }}
+          style={{ height: '100%', borderRadius: 999,
+            background: done ? C.done : ageOver ? C.blocked : C.overdue,
+            boxShadow: ageOver && !done ? `0 0 8px ${C.blocked}` : 'none' }} />
+      </div>
+    </motion.div>
+  )
+}
+
+export function OpsViewHotfix({ devStats }: { devStats: DevStatLike[] }) {
+  const devs = devStats.map(adaptDev)
+  const crit = opsFlattenTickets(devs).filter(t => t.isHotfix || t.isRegression)
+  const rank: Record<string, number> = { blocked: 0, overdue: 1, active: 2, done: 3 }
+  crit.sort((a, b) => (rank[a.state] - rank[b.state]) || (b.hours - a.hours))
+
+  return (
+    <div>
+      <OpsHead title="Hotfix & Regression Command" tagline="Nothing critical ships broken." />
+      {crit.length === 0 ? <OpsAllClear /> : (
+        <div className="ops-hotfix-container">
+          {crit.map((t, i) => <OpsCriticalCard key={t.id + t.dev.name} t={t} index={i} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── View 5: Developer Pulse Strips ────────────────────────────────────────────
+interface Segment { id: string; kind: string; hours: number; c: string; fire?: boolean; reg?: boolean; blocked?: boolean; queued?: boolean; count?: number }
+
+function opsDaySegments(dev: OpsDev): Segment[] {
+  const segs: Segment[] = []
+  dev.doneTodayIssues.forEach(d => segs.push({ id: d.id, kind: 'done', hours: d.hoursSpent ?? 1, c: C.done }))
+  dev.activeIssues.forEach(a => segs.push({ id: a.id, kind: 'active', hours: a.hoursInState, c: opsStuckColor(a.hoursInState), fire: a.isHotfix, reg: a.isRegression }))
+  dev.blockedIssues.forEach(b => segs.push({ id: b.id, kind: 'blocked', hours: b.hoursInState || 2, c: C.blocked, fire: b.isHotfix, blocked: true }))
+  if (dev.queuedIssues.length) segs.push({ id: 'queue', kind: 'queued', hours: 2.5, c: 'rgba(255,255,255,0.14)', queued: true, count: dev.queuedIssues.length })
+  return segs
+}
+
+function OpsStripCard({ dev }: { dev: OpsDev }) {
+  const status = opsStatus(dev)
+  const segs   = opsDaySegments(dev)
+  const totalH = segs.reduce((s, x) => s + Math.max(0.6, x.hours), 0) || 1
+  const urgent = [
+    ...dev.blockedIssues,
+    ...dev.activeIssues.filter(a => a.hoursInState >= WARN),
+    ...dev.activeIssues.filter(a => a.hoursInState < WARN),
+  ].slice(0, 4)
+
+  return (
+    <motion.div
+      variants={{ hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.05, duration: 0.7 } } }}
+      style={{ background: GLASS, borderRadius: 14, padding: 16, backdropFilter: 'blur(14px)',
+        border: `1px solid ${dev.blockedIssues.length ? C.blocked + '44' : BORDER}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <OpsAvatar dev={dev} size={30} glow={dev.blockedIssues.length ? C.blocked + '55' : null} />
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{dev.name}</span>
+        {dev.hotfixCount > 0 && <OpsHotfixBadge count={dev.hotfixCount} />}
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', color: status.c,
+          padding: '3px 10px', borderRadius: 999, background: `${status.c}1a`, border: `1px solid ${status.c}44` }}>
+          {status.word}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 3, height: 40, borderRadius: 8, overflow: 'hidden' }}>
+        {segs.map((seg, i) => {
+          const grow = Math.max(0.6, seg.hours) / totalH
+          return (
+            <motion.div key={seg.id + i}
+              initial={{ scaleX: 0, opacity: 0 }}
+              animate={seg.blocked ? { scaleX: 1, opacity: [0.75, 1, 0.75] } : { scaleX: 1, opacity: seg.kind === 'done' ? 0.7 : 1 }}
+              transition={seg.blocked
+                ? { scaleX: { type: 'spring', bounce: 0.05, duration: 0.8, delay: 0.2 + i * 0.07 }, opacity: { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } }
+                : { type: 'spring', bounce: 0.05, duration: 0.8, delay: 0.2 + i * 0.07 }}
+              title={`${seg.id} · ${opsFmtHours(seg.hours)}${seg.queued ? ` · ${seg.count} queued` : ''}`}
+              style={{ flexGrow: grow, flexBasis: 0, minWidth: seg.queued ? 24 : 30, transformOrigin: 'left center',
+                background: seg.queued
+                  ? 'repeating-linear-gradient(45deg, rgba(255,255,255,0.10), rgba(255,255,255,0.10) 4px, transparent 4px, transparent 8px)'
+                  : seg.kind === 'done'
+                    ? `${seg.c}40`
+                    : `linear-gradient(180deg, ${seg.c}, ${seg.c}bb)`,
+                border: `1px solid ${seg.queued ? 'rgba(255,255,255,0.12)' : seg.c}`,
+                borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                position: 'relative', overflow: 'hidden',
+                boxShadow: seg.blocked ? `0 0 10px ${seg.c}aa` : 'none' }}>
+              {seg.fire && <span style={{ fontSize: 13 }}>🔥</span>}
+              {seg.reg && !seg.fire && <span style={{ fontSize: 12, color: '#fff', fontWeight: 800 }}>↩</span>}
+              {seg.kind === 'done' && !seg.fire && <span style={{ fontSize: 13, color: seg.c, fontWeight: 800 }}>✓</span>}
+              {seg.queued && <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>+{seg.count}</span>}
+            </motion.div>
+          )
+        })}
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+        {urgent.length === 0
+          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>clean day · {dev.queuedIssues.length} queued</span>
+          : urgent.map(t => <OpsTicketChip key={t.id} issue={t} animateGlow />)}
+      </div>
+    </motion.div>
+  )
+}
+
+export function OpsViewStrips({ devStats }: { devStats: DevStatLike[] }) {
+  const devs = [...devStats.map(adaptDev)].sort((a, b) => opsUrgencyRank(b) - opsUrgencyRank(a))
+  return (
+    <div>
+      <OpsHead title="Developer Pulse Strips" tagline="Each person's entire day in one horizontal strip." />
+      <motion.div className="ops-strips-container" variants={{ show: { transition: { staggerChildren: 0.09 } } }} initial="hidden" animate="show">
+        {devs.map(dev => <OpsStripCard key={dev.name} dev={dev} />)}
+      </motion.div>
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '10px 16px', borderRadius: 10, background: GLASS, border: `1px solid ${BORDER}` }}>
+          {([[C.blocked,'blocked / 48h+'],[C.overdue,'stuck 16h+'],[C.active,'active'],[C.done,'done ✓'],['rgba(255,255,255,0.3)','queued']] as [string,string][]).map(([c, l]) => (
+            <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: c, flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>{l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── View 6: Sprint Snapshot Grid ──────────────────────────────────────────────
+function OpsDotCluster({ items, color, baseDelay }: { items: { blocked?: boolean; danger?: boolean }[]; color: string; baseDelay: number }) {
+  if (!items.length) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+      {items.map((it, i) => (
+        <motion.span key={i}
+          initial={{ scale: 0, opacity: 0 }}
+          animate={it.blocked ? { scale: 1, opacity: [0.55, 1, 0.55] } : { scale: 1, opacity: 1 }}
+          transition={it.blocked
+            ? { scale: { delay: baseDelay + i * 0.05, type: 'spring', bounce: 0.4 }, opacity: { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } }
+            : { delay: baseDelay + i * 0.05, type: 'spring', bounce: 0.4 }}
+          style={{ width: it.blocked ? 12 : 9, height: it.blocked ? 12 : 9, borderRadius: '50%',
+            background: color, flexShrink: 0, boxShadow: it.blocked ? `0 0 7px ${color}` : 'none' }} />
+      ))}
+    </div>
+  )
+}
+
+function OpsSnapshotCard({ dev, index }: { dev: OpsDev; index: number }) {
+  const donePct = opsDonePct(dev)
+  const status  = opsStatus(dev)
+  const blocked = dev.blockedIssues.map(() => ({ blocked: true }))
+  const stuck   = dev.activeIssues.filter(a => a.hoursInState >= WARN).map(a => ({ danger: a.hoursInState >= DANGER }))
+  const active  = dev.activeIssues.filter(a => a.hoursInState < WARN).map(() => ({}))
+  const queued  = dev.queuedIssues.map(() => ({}))
+
+  return (
+    <motion.div
+      variants={{ hidden: { opacity: 0, scale: 0.9 }, show: { opacity: 1, scale: 1, transition: { type: 'spring', bounce: 0.2, duration: 0.6 } } }}
+      style={{ position: 'relative', background: GLASS, borderRadius: 14, padding: 14, backdropFilter: 'blur(14px)',
+        border: `1px solid ${dev.blockedIssues.length ? C.blocked + '44' : BORDER}` }}>
+      {dev.hotfixCount > 0 && (
+        <div style={{ position: 'absolute', top: 10, right: 10 }}><OpsHotfixBadge count={dev.hotfixCount} /></div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 11, paddingRight: 22 }}>
+        <OpsAvatar dev={dev} size={30} glow={dev.blockedIssues.length ? C.blocked + '55' : null} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dev.name}</div>
+          <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '0.05em', color: status.c }}>{status.word}</div>
+        </div>
+      </div>
+
+      <div style={{ width: '100%', height: 7, borderRadius: 999, overflow: 'hidden',
+        background: 'rgba(255,255,255,0.07)', marginBottom: 12 }}>
+        <motion.div initial={{ width: 0 }} animate={{ width: `${donePct}%` }}
+          transition={{ type: 'spring', bounce: 0.05, duration: 1, delay: 0.2 + index * 0.05 }}
+          style={{ height: '100%', background: C.done }} />
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, minHeight: 54 }}>
+        <OpsDotCluster items={blocked} color={C.blocked} baseDelay={0.4 + index * 0.05} />
+        <OpsDotCluster items={stuck}   color={C.overdue} baseDelay={0.5 + index * 0.05} />
+        <OpsDotCluster items={active}  color={C.active}  baseDelay={0.6 + index * 0.05} />
+        <OpsDotCluster items={queued}  color="rgba(255,255,255,0.28)" baseDelay={0.7 + index * 0.05} />
+        {!blocked.length && !stuck.length && !active.length && !queued.length && (
+          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>no open tickets</span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 12, paddingTop: 11,
+        borderTop: `1px solid ${BORDER}`, minHeight: 26 }}>
+        {dev.doneTodayIssues.length === 0
+          ? <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>nothing shipped today</span>
+          : dev.doneTodayIssues.map((d, i) => (
+            <motion.span key={d.id}
+              initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.7 + index * 0.05 + i * 0.1, type: 'spring', bounce: 0.55 }}
+              title={`${d.id} done ${d.timestamp ?? ''}`}
+              style={{ fontSize: 16, color: C.done, fontWeight: 800,
+                filter: 'drop-shadow(0 0 4px rgba(74,222,128,0.5))' }}>✓</motion.span>
+          ))}
+      </div>
+    </motion.div>
+  )
+}
+
+export function OpsViewSnapshot({ devStats }: { devStats: DevStatLike[] }) {
+  const devs = [...devStats.map(adaptDev)].sort((a, b) => opsUrgencyRank(b) - opsUrgencyRank(a))
+  return (
+    <div>
+      <OpsHead title="Sprint Snapshot Grid" tagline="One screen, full sprint picture — count by eye." />
+      <motion.div className="ops-grid-snapshot" variants={{ show: { transition: { staggerChildren: 0.08 } } }} initial="hidden" animate="show">
+        {devs.map((dev, i) => <OpsSnapshotCard key={dev.name} dev={dev} index={i} />)}
+      </motion.div>
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '10px 16px', borderRadius: 10, background: GLASS, border: `1px solid ${BORDER}` }}>
+          {([[C.blocked,'blocked (pulses)'],[C.overdue,'stuck 16h+'],[C.active,'active'],[C.done,'✓ done today'],['rgba(255,255,255,0.28)','queued']] as [string,string][]).map(([c, l]) => (
+            <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 10, height: 10, borderRadius: '50%', background: c, flexShrink: 0 }} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>{l}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}

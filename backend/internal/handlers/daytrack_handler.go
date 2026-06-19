@@ -644,7 +644,6 @@ func daytracBuildSlackSections(entries []database.DayTrackEntry, displayName str
 		"sign in": true, "sign off": true, "signing in": true, "signing off": true,
 		"time on": true, "time off": true, "time on/off": true,
 		"break": true, "breaks": true,
-		"meeting": true, "meetings": true,
 	}
 
 	sectionMap := map[string][]string{}

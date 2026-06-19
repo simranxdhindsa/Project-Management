@@ -13,6 +13,11 @@ import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import { useSprintsCache } from '@/contexts/VelocityDataContext'
 import { SprintScanLoader } from '@/components/brand/VelocityLoaders'
 import { VelocityLogo } from '@/components/brand/VelocityLogo'
+import { usePersistedState, PERSIST } from '../hooks/usePersistedState'
+import {
+  OpsViewRings, OpsViewMission, OpsViewStuck,
+  OpsViewHotfix, OpsViewStrips, OpsViewSnapshot,
+} from './DailyOpsViews'
 
 interface Props {
   onBlockersChange: (ids: Set<string>) => void
@@ -150,6 +155,17 @@ interface DevStat {
 
 type ChipKey = 'done' | 'active' | 'blocked' | 'bounced' | 'overdue' | 'todo' | null
 
+type OpsViewKey = 'load' | 'rings' | 'mission' | 'stuck' | 'hotfix' | 'strips' | 'snapshot'
+const OPS_VIEWS: { key: OpsViewKey; label: string }[] = [
+  { key: 'load',     label: 'Developer Load' },
+  { key: 'rings',    label: 'Health Rings' },
+  { key: 'mission',  label: 'Mission Control' },
+  { key: 'stuck',    label: 'Stuck Detector' },
+  { key: 'hotfix',   label: 'Hotfix Command' },
+  { key: 'strips',   label: 'Pulse Strips' },
+  { key: 'snapshot', label: 'Snapshot' },
+]
+
 // ── Avatar with initials fallback ──────────────────────────────────────────
 
 function Avatar({ url, name }: { url: string; name: string }) {
@@ -182,6 +198,12 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
   const [ytBaseUrl, setYtBaseUrl] = useState('')
   const [ytDetailIssue, setYtDetailIssue] = useState<YouTrackIssue | null>(null)
   const [ytDetailLoading, setYtDetailLoading] = useState(false)
+
+  const [opsView, setOpsView] = usePersistedState<OpsViewKey>(
+    PERSIST.DAILY_OPS_VIEW,
+    'load',
+    { validate: ['load', 'rings', 'mission', 'stuck', 'hotfix', 'strips', 'snapshot'] },
+  )
 
   // Stable ref so onBlockersChange doesn't force re-renders
   const onBlockersRef = useRef(onBlockersChange)
@@ -335,7 +357,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
         <div className="do-block-header">
           <span className="do-block-title dl-block-title-icon">
             <Users size={12} />
-            Developer Load
+            Daily Ops
           </span>
           <div className="do-block-actions">
             {refreshedAt && <span className="do-ts">Updated {refreshedAt}</span>}
@@ -346,8 +368,21 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
           </div>
         </div>
 
-        {/* Sprint summary bar */}
-        {!loading && devStats.length > 0 && (
+        {/* View tab bar */}
+        <div className="do-view-tabs">
+          {OPS_VIEWS.map(v => (
+            <button
+              key={v.key}
+              className={`do-view-tab${opsView === v.key ? ' do-view-tab--active' : ''}`}
+              onClick={() => setOpsView(v.key)}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Sprint summary bar — load view only */}
+        {opsView === 'load' && !loading && devStats.length > 0 && (
           <div className="dl-summary-bar">
             <div className="dl-summary-pill dl-summary-pill--active">
               <Clock size={10} />
@@ -382,6 +417,18 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
 
         {error && <div className="do-error">{error}</div>}
 
+        {/* Design views (non-load) */}
+        {!loading && opsView !== 'load' && devStats.length > 0 && (
+          <div className="do-design-view-wrap">
+            {opsView === 'rings'    && <OpsViewRings    devStats={devStats} />}
+            {opsView === 'mission'  && <OpsViewMission  devStats={devStats} />}
+            {opsView === 'stuck'    && <OpsViewStuck    devStats={devStats} />}
+            {opsView === 'hotfix'   && <OpsViewHotfix   devStats={devStats} />}
+            {opsView === 'strips'   && <OpsViewStrips   devStats={devStats} />}
+            {opsView === 'snapshot' && <OpsViewSnapshot devStats={devStats} />}
+          </div>
+        )}
+
         {/* Skeleton while loading */}
         {loading && (() => {
           const sk = (w: number | string, h: number, r = 5) =>
@@ -410,7 +457,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
           )
         })()}
 
-        {!loading && devStats.length === 0 && (
+        {opsView === 'load' && !loading && devStats.length === 0 && (
           <div className="do-loading">
             <div style={{ display:'flex', justifyContent:'center', marginBottom:'16px' }}>
               <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
@@ -419,8 +466,8 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
           </div>
         )}
 
-        {/* Developer cards grid — only when not loading */}
-        {!loading && <div className="do-dev-grid">
+        {/* Developer cards grid — load view only */}
+        {opsView === 'load' && !loading && <div className="do-dev-grid">
           {devStats.map(dev => {
             // Overloaded = workload problem: too many in-progress tickets (> 5)
             // Overdue is a separate concern shown via its own chip
