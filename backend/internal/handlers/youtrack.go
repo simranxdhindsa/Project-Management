@@ -60,10 +60,64 @@ func (h *YouTrackHandler) SetNotificationHandler(notifHandler *NotificationHandl
 	h.notifHandler = notifHandler
 }
 
-// getYouTrackClient creates a YouTrack client — checks per-user DB first, then
-// global settings DB, then environment variables as last resort.
+// getYouTrackClient creates a YouTrack client for READ operations.
+// Resolution order: per-user token → admin personal token (fallback for members) →
+// org-level settings → env vars.
 func (h *YouTrackHandler) getYouTrackClient(ctx context.Context) (*youtrack.Client, error) {
 	return h.getYouTrackClientForUser(ctx, middleware.GetUserID(ctx))
+}
+
+// getYouTrackClientForWrite creates a YouTrack client for WRITE operations.
+// It deliberately skips the admin personal-token fallback so that members/viewers
+// cannot mutate YouTrack data using the admin's credentials.
+// Returns nil when only an admin fallback would be available — callers must 403.
+func (h *YouTrackHandler) getYouTrackClientForWrite(ctx context.Context) (*youtrack.Client, error) {
+	userID := middleware.GetUserID(ctx)
+	var baseURL, token, projectID, boardID string
+
+	// 1. Per-user DB integration
+	if userID != "" {
+		if integration, err := h.settingsRepo.GetYouTrackIntegration(ctx, userID); err == nil && integration != nil && integration.Connected {
+			baseURL = integration.BaseURL
+			token = integration.Token
+			projectID = integration.ProjectID
+			boardID = integration.BoardID
+		}
+	}
+
+	// 2. Org-level settings (intentional shared service token — NOT admin's personal token)
+	if baseURL == "" {
+		if settings, err := h.settingsRepo.GetYouTrackSettings(ctx); err == nil && settings != nil && settings.Configured {
+			baseURL = settings.BaseURL
+			token = settings.Token
+			projectID = settings.ProjectID
+			boardID = settings.BoardID
+		}
+	}
+
+	// 3. Environment variables (last resort)
+	if baseURL == "" {
+		baseURL = os.Getenv("YOUTRACK_BASE_URL")
+	}
+	if token == "" {
+		token = os.Getenv("YOUTRACK_TOKEN")
+	}
+	if projectID == "" {
+		projectID = os.Getenv("YOUTRACK_PROJECT_ID")
+	}
+	if boardID == "" {
+		boardID = os.Getenv("YOUTRACK_BOARD_ID")
+	}
+
+	if baseURL == "" || token == "" || projectID == "" {
+		return nil, nil // Not configured — caller must return 403
+	}
+
+	client := youtrack.NewClient(baseURL, token, projectID)
+	if boardID != "" {
+		client.SetBoardID(boardID)
+	}
+	return client, nil
 }
 
 func (h *YouTrackHandler) getYouTrackClientForUser(ctx context.Context, userID string) (*youtrack.Client, error) {
@@ -79,7 +133,8 @@ func (h *YouTrackHandler) getYouTrackClientForUser(ctx context.Context, userID s
 		}
 	}
 
-	// 2. Admin fallback for members/viewers
+	// 2. Admin personal-token fallback for members/viewers (READ-ONLY use).
+	// Write operations must use getYouTrackClientForWrite instead, which skips this.
 	if baseURL == "" {
 		if u := middleware.GetUserFromCtx(ctx); u != nil && (u.Role == models.RoleMember || u.Role == models.RoleViewer) {
 			if adminInteg, err := h.settingsRepo.GetAdminYouTrackIntegration(ctx); err == nil && adminInteg != nil && adminInteg.Connected {
@@ -101,7 +156,7 @@ func (h *YouTrackHandler) getYouTrackClientForUser(ctx context.Context, userID s
 		}
 	}
 
-	// 3. Environment variables (last resort)
+	// 4. Environment variables (last resort)
 	if baseURL == "" {
 		baseURL = os.Getenv("YOUTRACK_BASE_URL")
 	}
@@ -698,9 +753,9 @@ func (h *YouTrackHandler) AddIssueComment(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	client, err := h.getYouTrackClient(r.Context())
+	client, err := h.getYouTrackClientForWrite(r.Context())
 	if err != nil || client == nil {
-		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		http.Error(w, "YouTrack write access requires your personal integration to be configured in Settings → Integrations", http.StatusForbidden)
 		return
 	}
 	issueID := mux.Vars(r)["issue_id"]
@@ -819,9 +874,9 @@ func (h *YouTrackHandler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := h.getYouTrackClient(r.Context())
+	client, err := h.getYouTrackClientForWrite(r.Context())
 	if err != nil || client == nil {
-		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		http.Error(w, "YouTrack write access requires your personal integration to be configured in Settings → Integrations", http.StatusForbidden)
 		return
 	}
 
@@ -935,9 +990,9 @@ func (h *YouTrackHandler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := h.getYouTrackClient(r.Context())
+	client, err := h.getYouTrackClientForWrite(r.Context())
 	if err != nil || client == nil {
-		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		http.Error(w, "YouTrack write access requires your personal integration to be configured in Settings → Integrations", http.StatusForbidden)
 		return
 	}
 
@@ -1032,9 +1087,9 @@ func (h *YouTrackHandler) UpdateIssueState(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	client, err := h.getYouTrackClient(r.Context())
+	client, err := h.getYouTrackClientForWrite(r.Context())
 	if err != nil || client == nil {
-		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		http.Error(w, "YouTrack write access requires your personal integration to be configured in Settings → Integrations", http.StatusForbidden)
 		return
 	}
 
@@ -1185,9 +1240,9 @@ func (h *YouTrackHandler) UploadIssueAttachment(w http.ResponseWriter, r *http.R
 		http.Error(w, "issue_id required", http.StatusBadRequest)
 		return
 	}
-	client, err := h.getYouTrackClient(r.Context())
+	client, err := h.getYouTrackClientForWrite(r.Context())
 	if err != nil || client == nil {
-		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		http.Error(w, "YouTrack write access requires your personal integration to be configured in Settings → Integrations", http.StatusForbidden)
 		return
 	}
 
@@ -1417,9 +1472,9 @@ func (h *YouTrackHandler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	issueID := vars["issue_id"]
 
-	client, err := h.getYouTrackClient(r.Context())
+	client, err := h.getYouTrackClientForWrite(r.Context())
 	if err != nil || client == nil {
-		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		http.Error(w, "YouTrack write access requires your personal integration to be configured in Settings → Integrations", http.StatusForbidden)
 		return
 	}
 
@@ -1907,9 +1962,9 @@ func (h *YouTrackHandler) BulkUpdateStates(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	client, err := h.getYouTrackClient(r.Context())
+	client, err := h.getYouTrackClientForWrite(r.Context())
 	if err != nil || client == nil {
-		http.Error(w, "YouTrack is not configured", http.StatusBadRequest)
+		http.Error(w, "YouTrack write access requires your personal integration to be configured in Settings → Integrations", http.StatusForbidden)
 		return
 	}
 

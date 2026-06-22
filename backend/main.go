@@ -168,9 +168,11 @@ func main() {
 	// Asana webhook endpoint (public - called by Asana)
 	api.HandleFunc("/webhooks/asana", asanaHandler.HandleWebhook).Methods("POST")
 
-	// SSE hub for real-time updates
+	// SSE hub for real-time updates (auth required — unauthed access leaks team events)
 	sseHub := handlers.NewSSEHub()
-	api.HandleFunc("/events", sseHub.HandleEvents).Methods("GET")
+	sseRoutes := api.PathPrefix("/events").Subrouter()
+	sseRoutes.Use(middleware.AuthMiddleware)
+	sseRoutes.HandleFunc("", sseHub.HandleEvents).Methods("GET")
 
 	// YouTrack routes (protected)
 	youtrackHandler := handlers.NewYouTrackHandler(sseHub)
@@ -323,12 +325,15 @@ func main() {
 	dailyTaskRoutes.HandleFunc("/next-day/reorder", dailyTaskHandler.ReorderNextDayTasks).Methods("PATCH")
 	dailyTaskRoutes.HandleFunc("/next-day/{date}/slack-format", dailyTaskHandler.GetFormattedSlackMessage).Methods("GET")
 
-	// Developer-subsystem config routes (protected)
+	// Developer-subsystem config routes — read: any auth user; write: manager or above
 	devConfigHandler := handlers.NewDeveloperConfigHandler()
 	devConfigRoutes := api.PathPrefix("/developer-config").Subrouter()
 	devConfigRoutes.Use(middleware.AuthMiddleware)
 	devConfigRoutes.HandleFunc("", devConfigHandler.GetDeveloperConfigs).Methods("GET")
-	devConfigRoutes.HandleFunc("", devConfigHandler.SaveDeveloperConfigs).Methods("POST")
+	devConfigWriteRoutes := api.PathPrefix("/developer-config").Subrouter()
+	devConfigWriteRoutes.Use(middleware.AuthMiddleware)
+	devConfigWriteRoutes.Use(middleware.ManagerOrAbove)
+	devConfigWriteRoutes.HandleFunc("", devConfigHandler.SaveDeveloperConfigs).Methods("POST")
 
 	// Bot Config routes (protected)
 	botConfigHandler := handlers.NewBotConfigHandler()
@@ -392,7 +397,10 @@ func main() {
 	reportRoutes.HandleFunc("/pm-report/{date}/saved", reportHandler.GetSavedReport).Methods("GET")
 	reportRoutes.HandleFunc("/pm-report/{date}", reportHandler.GeneratePMReport).Methods("GET")
 	reportRoutes.HandleFunc("/pm-reports", reportHandler.ListReports).Methods("GET")
-	reportRoutes.HandleFunc("/pm-report/{id}/delete", reportHandler.DeletePMReport).Methods("DELETE")
+	adminReportRoutes := api.PathPrefix("/reports").Subrouter()
+	adminReportRoutes.Use(middleware.AuthMiddleware)
+	adminReportRoutes.Use(middleware.AdminOnly)
+	adminReportRoutes.HandleFunc("/pm-report/{id}/delete", reportHandler.DeletePMReport).Methods("DELETE")
 	reportRoutes.HandleFunc("/assignee-stats", reportHandler.GetAssigneeStats).Methods("GET")
 	reportRoutes.HandleFunc("/time-tracking", reportHandler.GetTimeTracking).Methods("GET")
 	reportRoutes.HandleFunc("/pins", reportHandler.GetPins).Methods("GET")
@@ -462,10 +470,11 @@ func main() {
 	userRoutes.HandleFunc("/{id}/role", updateUserRoleHandler).Methods("PATCH")
 	userRoutes.HandleFunc("/{id}", deleteUserHandler).Methods("DELETE")
 
-	// Whitelist/Access Control routes (protected - admin only)
+	// Whitelist/Access Control routes (admin only)
 	whitelistHandler := handlers.NewWhitelistHandler()
 	whitelistRoutes := api.PathPrefix("/settings/access").Subrouter()
 	whitelistRoutes.Use(middleware.AuthMiddleware)
+	whitelistRoutes.Use(middleware.AdminOnly)
 	whitelistRoutes.HandleFunc("", whitelistHandler.GetWhitelistSettingsHandler).Methods("GET")
 	whitelistRoutes.HandleFunc("/emails", whitelistHandler.GetAllowedEmailsHandler).Methods("GET")
 	whitelistRoutes.HandleFunc("/emails", whitelistHandler.AddAllowedEmailHandler).Methods("POST")

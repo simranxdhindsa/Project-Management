@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback, memo } from 'react'
 import {
   DndContext, DragOverlay, closestCorners,
   KeyboardSensor, PointerSensor, useSensor, useSensors,
@@ -27,54 +27,53 @@ interface KanbanBoardProps {
   onLoadMore?: (col: string) => void
 }
 
-export function KanbanBoard({
+export const KanbanBoard = memo(function KanbanBoard({
   issues, columns, avatarMap, getColumnIssues, onIssueMove, onIssueClick, getExtraClass, colPagination, onLoadMore,
 }: KanbanBoardProps) {
   const [activeIssue, setActiveIssue] = useState<YouTrackIssue | null>(null)
+  // Track hovered column locally — only for CSS highlight, never touches parent state
+  const [hoverCol, setHoverCol] = useState<string | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const handleDragStart = (event: DragStartEvent) => {
+  const handleDragStart = useCallback((event: DragStartEvent) => {
     const found = issues.find(i => i.id === (event.active.id as string))
     if (found) setActiveIssue(found)
-  }
+  }, [issues])
 
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event
-    if (!over) return
-    const activeId = active.id as string
-    const overId = over.id as string
-    const activeIssueItem = issues.find(i => i.id === activeId)
-    if (!activeIssueItem) return
+  // Only update local hover state — never moves data during drag (was the lag source)
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { over } = event
+    if (!over) { setHoverCol(null); return }
+    const col = columns.find(c => c === (over.id as string))
+    setHoverCol(col ?? null)
+  }, [columns])
 
-    const overColumn = columns.find(col => col === overId)
-    if (overColumn && activeIssueItem.status !== overColumn) {
-      onIssueMove(activeId, overColumn)
-      return
-    }
-    const overIssue = issues.find(i => i.id === overId)
-    if (overIssue && overIssue.status !== activeIssueItem.status) {
-      onIssueMove(activeId, overIssue.status)
-    }
-  }
-
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
     const { active, over } = event
     setActiveIssue(null)
+    setHoverCol(null)
     if (!over) return
     const activeId = active.id as string
-    const overId = over.id as string
-    const activeIssueItem = issues.find(i => i.id === activeId)
-    if (!activeIssueItem) return
+    const overId   = over.id as string
+    const dragged  = issues.find(i => i.id === activeId)
+    if (!dragged) return
 
-    const overColumn = columns.find(col => col === overId)
-    if (overColumn && activeIssueItem.status !== overColumn) {
-      onIssueMove(activeId, overColumn)
+    // Dropped on a column header
+    const overCol = columns.find(c => c === overId)
+    if (overCol && dragged.status !== overCol) {
+      onIssueMove(activeId, overCol)
+      return
     }
-  }
+    // Dropped on another card — move to that card's column
+    const overItem = issues.find(i => i.id === overId)
+    if (overItem && overItem.status !== dragged.status) {
+      onIssueMove(activeId, overItem.status)
+    }
+  }, [issues, columns, onIssueMove])
 
   return (
     <DndContext
@@ -84,7 +83,6 @@ export function KanbanBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      {/* Use same .kanban-board class as Dashboard */}
       <div className="kanban-board">
         {columns.map(col => {
           const pg = colPagination?.[col]
@@ -99,7 +97,8 @@ export function KanbanBoard({
               getExtraClass={getExtraClass}
               hasMore={pg?.hasMore}
               isLoadingMore={pg?.loading}
-              onLoadMore={onLoadMore ? () => onLoadMore(col) : undefined}
+              onLoadMore={onLoadMore}
+              isHoverTarget={hoverCol === col}
             />
           )
         })}
@@ -109,10 +108,10 @@ export function KanbanBoard({
         {activeIssue ? (
           <div
             className="task-card priority-medium"
-            style={{ opacity: 0.9, boxShadow: '0 8px 25px rgba(0,0,0,0.3)', transform: 'rotate(3deg)' }}
+            style={{ opacity: 0.9, boxShadow: '0 8px 25px rgba(0,0,0,0.3)', transform: 'rotate(3deg)', pointerEvents: 'none' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-              <span style={{ color: '#8250df', fontSize: '0.75rem', fontWeight: 600 }}>{activeIssue.idReadable || activeIssue.id}</span>
+              <span style={{ color: 'var(--color-primary)', fontSize: '0.75rem', fontWeight: 600 }}>{activeIssue.idReadable || activeIssue.id}</span>
             </div>
             <h4 className="task-title">{activeIssue.summary}</h4>
             <div className="task-meta">
@@ -123,4 +122,4 @@ export function KanbanBoard({
       </DragOverlay>
     </DndContext>
   )
-}
+})

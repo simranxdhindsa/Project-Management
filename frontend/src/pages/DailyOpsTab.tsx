@@ -17,6 +17,8 @@ import { usePersistedState, PERSIST } from '../hooks/usePersistedState'
 import {
   OpsViewRings, OpsViewMission, OpsViewStuck,
   OpsViewHotfix, OpsViewStrips, OpsViewSnapshot,
+  OpsViewSkeleton,
+  type OpsCtx,
 } from './DailyOpsViews'
 
 interface Props {
@@ -234,6 +236,16 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
     finally { setYtDetailLoading(false) }
   }, [ytDetailLoading])
 
+  // No-event variant used by design views
+  const openYtIssueById = useCallback((idReadable: string) => {
+    if (ytDetailLoading || !idReadable) return
+    setYtDetailLoading(true)
+    api.getYouTrackIssue(idReadable)
+      .then(res => setYtDetailIssue((res as any).data as YouTrackIssue))
+      .catch(() => {})
+      .finally(() => setYtDetailLoading(false))
+  }, [ytDetailLoading])
+
   // column name → role (from workflow config + aliases)
   const columnRoleMap = useMemo(() => {
     const m = new Map<string, string>()
@@ -341,6 +353,12 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
   const totalOverdue = devStats.reduce((s, d) => s + d.overdueIssues.length, 0)
   const totalToDo    = devStats.reduce((s, d) => s + d.queuedIssues.length, 0)
 
+  // Context passed into all 6 design views for hover cards + clickable IDs
+  const opsCtx = useMemo<OpsCtx>(() => ({
+    ytBaseUrl: ytBaseUrl.replace(/\/$/, ''),
+    onOpenDetail: openYtIssueById,
+  }), [ytBaseUrl, openYtIssueById])
+
   // Modal state — which dev + which chip is open
   const [chipModal, setChipModal] = useState<{ title: string; issues: SprintBoardIssue[] } | null>(null)
 
@@ -420,17 +438,17 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
         {/* Design views (non-load) */}
         {!loading && opsView !== 'load' && devStats.length > 0 && (
           <div className="do-design-view-wrap">
-            {opsView === 'rings'    && <OpsViewRings    devStats={devStats} />}
-            {opsView === 'mission'  && <OpsViewMission  devStats={devStats} />}
-            {opsView === 'stuck'    && <OpsViewStuck    devStats={devStats} />}
-            {opsView === 'hotfix'   && <OpsViewHotfix   devStats={devStats} />}
-            {opsView === 'strips'   && <OpsViewStrips   devStats={devStats} />}
-            {opsView === 'snapshot' && <OpsViewSnapshot devStats={devStats} />}
+            {opsView === 'rings'    && <OpsViewRings    devStats={devStats} ctx={opsCtx} />}
+            {opsView === 'mission'  && <OpsViewMission  devStats={devStats} ctx={opsCtx} />}
+            {opsView === 'stuck'    && <OpsViewStuck    devStats={devStats} ctx={opsCtx} />}
+            {opsView === 'hotfix'   && <OpsViewHotfix   devStats={devStats} ctx={opsCtx} />}
+            {opsView === 'strips'   && <OpsViewStrips   devStats={devStats} ctx={opsCtx} />}
+            {opsView === 'snapshot' && <OpsViewSnapshot devStats={devStats} ctx={opsCtx} />}
           </div>
         )}
 
-        {/* Skeleton while loading */}
-        {loading && (() => {
+        {/* Skeleton while loading — matches the active view layout */}
+        {loading && opsView === 'load' && (() => {
           const sk = (w: number | string, h: number, r = 5) =>
             <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
           return (
@@ -456,6 +474,11 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
             </div>
           )
         })()}
+        {loading && opsView !== 'load' && (
+          <div className="do-design-view-wrap">
+            <OpsViewSkeleton view={opsView} />
+          </div>
+        )}
 
         {opsView === 'load' && !loading && devStats.length === 0 && (
           <div className="do-loading">

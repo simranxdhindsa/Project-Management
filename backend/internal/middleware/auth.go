@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/dhindsa/project-management/internal/auth"
@@ -38,9 +39,9 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		var user *models.User
 
-		// Check for dev-mode token
-		if strings.HasPrefix(tokenString, "dev-mode-token-") {
-			// Dev mode - bypass JWT validation
+		// Dev-mode bypass — only valid when ENVIRONMENT=development (local only).
+		// Dockerfile sets ENVIRONMENT=production, so this is dead in any deployed build.
+		if os.Getenv("ENVIRONMENT") == "development" && strings.HasPrefix(tokenString, "dev-mode-token-") {
 			user = &models.User{
 				ID:    "08938fa6-27b4-446f-a9aa-b8fe5c7b97c4",
 				Email: "simranjot@apyhub.com",

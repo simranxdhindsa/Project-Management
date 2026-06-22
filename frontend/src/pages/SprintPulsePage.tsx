@@ -20,7 +20,7 @@ import type {
 import { updatePMIssueState } from '@/services/pmDataService'
 import {
   GitBranch, RefreshCw, ChevronRight,
-  LayoutGrid, AlignLeft, BarChart2, Layers,
+  LayoutGrid, AlignLeft, BarChart2, Layers, Tag,
 } from 'lucide-react'
 import { VelocityBarsLoader, SprintScanLoader, SvgVelocityBarsLoader } from '@/components/brand/VelocityLoaders'
 import { VelocityLogo } from '@/components/brand/VelocityLogo'
@@ -32,7 +32,7 @@ const SPRINT_ID_KEY   = 'pm_active_sprint_id'
 const SPRINT_NAME_KEY = 'pm_active_sprint_name'
 const DONE_ROLES      = new Set(['dev_done', 'verified', 'deployed', 'closed'])
 
-type ViewMode = 'a' | 'c' | '1' | '4'
+type ViewMode = 'a' | 'c' | '1' | '4' | 'p'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -415,6 +415,172 @@ function PulseSwimKanban({
   )
 }
 
+// ─── View P — Priority Swimlane Kanban ───────────────────────────────────────
+// Groups rows by the actual priority value fetched from the sprint (fully dynamic,
+// no hardcoded priority names). Order comes from wfConfig.priority_tags if present,
+// with classifyTier as a fallback for unrecognised values.
+
+function PrioritySwimKanban({
+  allIssues, boardData, roleMap, wfConfig, onTitleClick, onIdClick,
+}: {
+  allIssues:    PulseIssue[]
+  boardData:    SprintBoardStatusResponse
+  roleMap:      Map<string, string>
+  wfConfig:     WorkflowConfig | null
+  onTitleClick: (id: string, e?: React.MouseEvent) => void
+  onIdClick:    (id: string, e: React.MouseEvent) => void
+}) {
+  const [stateOverrides, setStateOverrides] = useState<Record<string, string>>({})
+  const [activeId,       setActiveId]       = useState<string | null>(null)
+
+  useEffect(() => { setStateOverrides({}) }, [boardData])
+
+  const columns = useMemo(() => boardData.columns.map(c => c.name), [boardData])
+
+  // Returns a numeric sort key for a priority string.
+  // P-series first (P0, P1, P2…), A-series second (A0, A1…), Normal near bottom,
+  // everything else last. wfConfig is NOT used for ordering — only for colors.
+  const prioritySortKey = useCallback((priority: string): number => {
+    const p = priority.trim()
+    const pMatch = p.match(/^[Pp](\d+)$/)
+    if (pMatch) return parseInt(pMatch[1], 10)
+    const aMatch = p.match(/^[Aa](\d+)$/)
+    if (aMatch) return 1000 + parseInt(aMatch[1], 10)
+    if (p.toLowerCase() === 'normal') return 9000
+    return 9999
+  }, [])
+
+  // Collect unique priority values present in the sprint, sorted by urgency
+  const priorities = useMemo(() => {
+    const seen = new Set<string>()
+    allIssues.forEach(i => { if (i.priority) seen.add(i.priority) })
+    return [...seen].sort((a, b) => prioritySortKey(a) - prioritySortKey(b))
+  }, [allIssues, prioritySortKey])
+
+  // Priority pill color from wfConfig, falling back to text-muted
+  const priorityColor = useCallback((priority: string): string => {
+    const tag = wfConfig?.priority_tags?.find(t =>
+      t.label.toLowerCase() === priority.toLowerCase() ||
+      t.yt_mappings?.some(m => m.toLowerCase() === priority.toLowerCase())
+    )
+    return tag?.color ?? 'var(--text-muted)'
+  }, [wfConfig])
+
+  const getEffectiveState = useCallback(
+    (iss: PulseIssue) => stateOverrides[iss.id] || iss.current_state,
+    [stateOverrides],
+  )
+
+  const getCellIssues = useCallback((priority: string, col: string): PulseIssue[] => {
+    const colRole  = roleMap.get(col.toLowerCase()) || ''
+    const isDoneCol = DONE_ROLES.has(colRole)
+    return allIssues
+      .filter(i => i.priority === priority && getEffectiveState(i) === col)
+      .map(i => ({ ...i, current_state: col, colRole, isDone: isDoneCol, stageGroup: mapStage(colRole) }))
+      .sort((a, b) => dangerLevel(b) - dangerLevel(a))
+  }, [allIssues, getEffectiveState, roleMap])
+
+  const activeIss = useMemo(
+    () => activeId ? (allIssues.find(i => i.id === activeId) ?? null) : null,
+    [activeId, allIssues],
+  )
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor),
+  )
+
+  const handleDragStart = useCallback((e: DragStartEvent) => {
+    setActiveId(e.active.id as string)
+  }, [])
+
+  const handleDragEnd = useCallback((e: DragEndEvent) => {
+    const { active, over } = e
+    setActiveId(null)
+    if (!over) return
+    // id format: "pri:<priority>:<col>" — col is everything after the second colon
+    const overId  = over.id as string
+    const parts   = overId.split(':')
+    // parts[0]='pri', parts[1]=priority, parts[2..]=col (col may contain colons)
+    const newCol  = parts.length >= 3 ? parts.slice(2).join(':') : overId
+    const issueId = active.id as string
+    const iss     = allIssues.find(i => i.id === issueId)
+    if (!iss || getEffectiveState(iss) === newCol) return
+    setStateOverrides(prev => ({ ...prev, [issueId]: newCol }))
+    updatePMIssueState(issueId, newCol)
+  }, [allIssues, getEffectiveState])
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="spl-swim-kanban">
+        {/* Column header row */}
+        <div className="spl-swim-hdr-row">
+          <div className="spl-swim-hdr-tier-spacer" />
+          {columns.map(col => (
+            <div key={col} className="spl-swim-hdr-col">{col}</div>
+          ))}
+        </div>
+
+        {/* One row per unique priority value — fully dynamic */}
+        {priorities.map(priority => {
+          const inPriority  = allIssues.filter(i => i.priority === priority)
+          const activeCount = inPriority.filter(i => !DONE_ROLES.has(i.colRole)).length
+          const breachCount = inPriority.filter(i => !DONE_ROLES.has(i.colRole) && dangerLevel(i) >= 2).length
+          const color       = priorityColor(priority)
+          return (
+            <div
+              key={priority}
+              className="spl-swim-tier-row spl-swim-tier-row--pri"
+              style={{ '--spl-pri-accent': color } as React.CSSProperties}
+            >
+              <div className="spl-swim-tier-hd">
+                <span className="spl-swim-tier-name" style={{ color }}>{priority}</span>
+                <span className="spl-swim-tier-cnt">{activeCount}</span>
+                {breachCount > 0 && <span className="spl-tier-col-breach">⚠ {breachCount}</span>}
+              </div>
+              {columns.map(col => (
+                <SwimDroppableCell key={col} id={`pri:${priority}:${col}`}>
+                  {getCellIssues(priority, col).map(iss => (
+                    <SwimDraggableCard
+                      key={iss.id}
+                      iss={iss}
+                      wfConfig={wfConfig}
+                      onTitleClick={onTitleClick}
+                      onIdClick={onIdClick}
+                    />
+                  ))}
+                </SwimDroppableCell>
+              ))}
+            </div>
+          )
+        })}
+
+        {priorities.length === 0 && (
+          <div className="spl-feed-empty">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+              <VelocityLogo variant="icon" size="lg" mark="chevron" showStatusDot={false} style={{ opacity: 0.25 }} />
+            </div>
+            No issues with priority data found
+          </div>
+        )}
+      </div>
+
+      <DragOverlay dropAnimation={null}>
+        {activeIss && (
+          <div style={{ opacity: 0.92, transform: 'rotate(1.5deg)', width: 205, boxShadow: '0 16px 40px rgba(0,0,0,0.4)' }}>
+            <IssueCard iss={activeIss} wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
+          </div>
+        )}
+      </DragOverlay>
+    </DndContext>
+  )
+}
+
 // ─── View C — Focus (split panel) ────────────────────────────────────────────
 
 function ViewC({ tierGroups, stageCounts, wfConfig, onTitleClick, onIdClick }: ViewProps) {
@@ -764,6 +930,7 @@ function View4({ tierGroups, wfConfig, onTitleClick, onIdClick }: ViewProps) {
 
 const VIEW_MODES: ModeOption[] = [
   { id: 'a', label: 'Kanban',      icon: LayoutGrid },
+  { id: 'p', label: 'Priority',    icon: Tag },
   { id: 'c', label: 'Focus',       icon: Layers },
   { id: '1', label: 'Signal',      icon: AlignLeft },
   { id: '4', label: 'Pulse Board', icon: BarChart2 },
@@ -1027,6 +1194,16 @@ export function SprintPulsePage() {
           <>
             {viewMode === 'a' && (
               <PulseSwimKanban
+                allIssues={allIssues}
+                boardData={boardData}
+                roleMap={roleMap}
+                wfConfig={wfConfig}
+                onTitleClick={openIssueDetail}
+                onIdClick={openInYt}
+              />
+            )}
+            {viewMode === 'p' && (
+              <PrioritySwimKanban
                 allIssues={allIssues}
                 boardData={boardData}
                 roleMap={roleMap}
