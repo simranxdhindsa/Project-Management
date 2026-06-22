@@ -168,9 +168,11 @@ func main() {
 	// Asana webhook endpoint (public - called by Asana)
 	api.HandleFunc("/webhooks/asana", asanaHandler.HandleWebhook).Methods("POST")
 
-	// SSE hub for real-time updates
+	// SSE hub for real-time updates (auth required — unauthed access leaks team events)
 	sseHub := handlers.NewSSEHub()
-	api.HandleFunc("/events", sseHub.HandleEvents).Methods("GET")
+	sseRoutes := api.PathPrefix("/events").Subrouter()
+	sseRoutes.Use(middleware.AuthMiddleware)
+	sseRoutes.HandleFunc("", sseHub.HandleEvents).Methods("GET")
 
 	// YouTrack routes (protected)
 	youtrackHandler := handlers.NewYouTrackHandler(sseHub)

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { TaskCard } from './TaskCard'
@@ -7,10 +8,10 @@ interface SortableTaskCardProps {
   issue: YouTrackIssue
   avatarMap: Record<string, string>
   extraClass?: string
-  onClick?: () => void
+  onIssueClick?: (issue: YouTrackIssue) => void
 }
 
-export function SortableTaskCard({ issue, avatarMap, extraClass, onClick }: SortableTaskCardProps) {
+export const SortableTaskCard = memo(function SortableTaskCard({ issue, avatarMap, extraClass, onIssueClick }: SortableTaskCardProps) {
   const {
     attributes,
     listeners,
@@ -23,6 +24,8 @@ export function SortableTaskCard({ issue, avatarMap, extraClass, onClick }: Sort
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
+    // Promote to own compositor layer only while dragging — avoids layout thrash at rest
+    willChange: isDragging ? 'transform' : undefined,
   }
 
   return (
@@ -32,8 +35,8 @@ export function SortableTaskCard({ issue, avatarMap, extraClass, onClick }: Sort
         avatarMap={avatarMap}
         isDragging={isDragging}
         extraClass={extraClass}
-        onClick={onClick}
+        onClick={onIssueClick ? () => onIssueClick(issue) : undefined}
       />
     </div>
   )
-}
+})
