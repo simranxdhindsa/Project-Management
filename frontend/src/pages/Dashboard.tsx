@@ -53,7 +53,6 @@ import {
   Menu,
 } from 'lucide-react'
 import { VelocityLogo } from '@/components/brand/VelocityLogo'
-import { SprintScanLoader, SvgSprintScanLoader } from '@/components/brand/VelocityLoaders'
 import { PMAssistantTab } from './PMReportsPage'
 import { SprintDashboardPage } from './SprintDashboardPage'
 import { IntegrationsPage } from './IntegrationsPage'
@@ -890,11 +889,6 @@ export default function Dashboard() {
         {/* Keep-alive tabs: mount on first visit, hide (not unmount) when inactive */}
         {mountedTabs.has('dashboard') && (
           <div className={currentPage !== 'dashboard' ? 'dash-tab-hidden' : undefined}>
-            {ytLoading && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '200px' }}>
-                <SvgSprintScanLoader size={128} />
-              </div>
-            )}
             <SprintDashboardPage />
           </div>
         )}
