@@ -3,6 +3,7 @@
 import React from 'react'
 import { motion } from 'framer-motion'
 import type { SprintBoardIssue } from '../services/api'
+import HoverCard, { HCRow, HCDivider, HCBadge } from '../components/HoverCard'
 
 // ── Thresholds ──────────────────────────────────────────────────────────────
 const WATCH  = 8   // hours — muted blue
@@ -21,6 +22,12 @@ const C = {
 // ── Inline style constants (matching existing CSS vars) ──────────────────────
 const GLASS  = 'rgba(255,255,255,0.05)'
 const BORDER = 'rgba(255,255,255,0.09)'
+
+// ── Shared context (ytBaseUrl + detail panel opener) ────────────────────────
+export interface OpsCtx {
+  ytBaseUrl: string
+  onOpenDetail: (idReadable: string) => void
+}
 
 // ── DevStat mirror (no circular dep with DailyOpsTab) ───────────────────────
 export interface DevStatLike {
@@ -180,12 +187,11 @@ function OpsAvatar({ dev, size = 36, glow }: { dev: OpsDev; size?: number; glow?
 
 function OpsHotfixBadge({ count = 1 }: { count?: number }) {
   return (
-    <motion.span animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-      title={`${count} hotfix`}
+    <span title={`${count} hotfix`}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 13,
         filter: 'drop-shadow(0 0 5px rgba(239,68,68,0.7))' }}>
       🔥{count > 1 ? <b style={{ fontSize: 10, color: '#ef4444' }}>{count}</b> : null}
-    </motion.span>
+    </span>
   )
 }
 
@@ -201,23 +207,45 @@ function opsChipTime(issue: OpsIssue): string {
   if (issue.hoursInState) return opsFmtHours(issue.hoursInState)
   return ''
 }
-function OpsTicketChip({ issue, animateGlow }: { issue: OpsIssue; animateGlow?: boolean }) {
+function OpsTicketChip({ issue, animateGlow, ctx, noHover }: { issue: OpsIssue; animateGlow?: boolean; ctx?: OpsCtx; noHover?: boolean }) {
   const c = opsChipColor(issue)
   const danger = issue.isHotfix || issue.since != null || issue.hoursInState >= DANGER
-  return (
+
+  const handleIdClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (ctx?.ytBaseUrl) window.open(`${ctx.ytBaseUrl}/issue/${issue.id}`, '_blank', 'noopener,noreferrer')
+  }
+  const handleSummaryClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    ctx?.onOpenDetail(issue.id)
+  }
+
+  const chip = (
     <motion.span
       animate={(danger && animateGlow) ? { boxShadow: [`0 0 0px ${c}00`, `0 0 10px ${c}77`, `0 0 0px ${c}00`] } : {}}
       transition={(danger && animateGlow) ? { duration: 2, repeat: Infinity, ease: 'easeInOut' } : {}}
-      title={issue.summary}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px',
         borderRadius: 999, background: `${c}1a`, border: `1px solid ${c}55`,
         fontSize: 11, fontWeight: 700, color: c, whiteSpace: 'nowrap', maxWidth: '100%' }}>
-      <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{issue.id}</span>
+      <span
+        onClick={ctx ? handleIdClick : undefined}
+        style={{ fontFamily: 'monospace', fontWeight: 700, cursor: ctx?.ytBaseUrl ? 'pointer' : 'default',
+          textDecoration: ctx?.ytBaseUrl ? 'underline' : 'none', textDecorationColor: `${c}66` }}>
+        {issue.id}
+      </span>
       {issue.isHotfix && <span style={{ fontSize: 9 }}>🔥</span>}
       {issue.isRegression && !issue.isHotfix && <span style={{ fontSize: 9 }}>↩</span>}
-      <span style={{ opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis' }}>{opsChipTime(issue)}</span>
+      <span
+        onClick={ctx ? handleSummaryClick : undefined}
+        style={{ opacity: 0.85, overflow: 'hidden', textOverflow: 'ellipsis',
+          cursor: ctx ? 'pointer' : 'default' }}>
+        {opsChipTime(issue)}
+      </span>
     </motion.span>
   )
+
+  if (!ctx || noHover) return chip
+  return <HoverCard content={<OpsIssueHoverContent issue={issue} />} maxWidth={260}>{chip}</HoverCard>
 }
 
 function OpsHead({ title, tagline }: { title: string; tagline: string }) {
@@ -236,8 +264,79 @@ const OPS_STATE_WORD: Record<string, { word: string; c: string }> = {
   done:    { word: 'DONE',        c: C.done    },
 }
 
+// ── Hover content ─────────────────────────────────────────────────────────────
+function OpsIssueHoverContent({ issue }: { issue: OpsIssue }) {
+  return (
+    <div>
+      <div className="hc-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {issue.id}
+        {issue.isHotfix && <HCBadge label="Hotfix" variant="warn" />}
+        {issue.isRegression && !issue.isHotfix && <HCBadge label="Regression" variant="warn" />}
+      </div>
+      <div className="hc-subtitle">{issue.summary}</div>
+      <HCDivider />
+      {issue.hoursInState > 0 && (
+        <HCRow label="In state" value={opsFmtHours(issue.hoursInState)}
+          accent={issue.hoursInState >= DANGER ? 'danger' : issue.hoursInState >= WARN ? 'warn' : undefined} />
+      )}
+      {issue.since && <HCRow label="Blocked since" value={issue.since} accent="danger" />}
+      {issue.timestamp && <HCRow label="Completed at" value={issue.timestamp} />}
+      {(issue.hoursSpent ?? 0) > 0 && <HCRow label="Dev time" value={opsFmtHours(issue.hoursSpent!)} />}
+    </div>
+  )
+}
+
+function OpsDevHoverContent({ dev }: { dev: OpsDev }) {
+  return (
+    <div>
+      <div className="hc-title">{dev.name}</div>
+      {dev.blockedIssues.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, fontWeight: 800, color: C.blocked, letterSpacing: '0.05em', marginTop: 8, marginBottom: 4 }}>
+            BLOCKED · {dev.blockedIssues.length}
+          </div>
+          {dev.blockedIssues.map(i => (
+            <HCRow key={i.id} label={i.id} value={i.since ? `since ${i.since}` : 'blocked'} accent="danger" />
+          ))}
+          <HCDivider />
+        </>
+      )}
+      {dev.activeIssues.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, fontWeight: 800, color: C.active, letterSpacing: '0.05em', marginTop: 8, marginBottom: 4 }}>
+            IN PROGRESS · {dev.activeIssues.length}
+          </div>
+          {dev.activeIssues.map(i => (
+            <HCRow key={i.id} label={i.id}
+              value={i.hoursInState > 0 ? opsFmtHours(i.hoursInState) : '—'}
+              accent={i.hoursInState >= DANGER ? 'danger' : i.hoursInState >= WARN ? 'warn' : undefined} />
+          ))}
+          <HCDivider />
+        </>
+      )}
+      {dev.doneTodayIssues.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, fontWeight: 800, color: C.done, letterSpacing: '0.05em', marginTop: 8, marginBottom: 4 }}>
+            DONE TODAY · {dev.doneTodayIssues.length}
+          </div>
+          {dev.doneTodayIssues.map(i => (
+            <HCRow key={i.id} label={i.id} value={i.timestamp ?? '✓'} />
+          ))}
+          <HCDivider />
+        </>
+      )}
+      {dev.queuedIssues.length > 0 && (
+        <HCRow label="To Do" value={`${dev.queuedIssues.length} tickets queued`} />
+      )}
+      {dev.totalActiveHours > 0 && (
+        <HCRow label="Total dev time" value={opsFmtHours(dev.totalActiveHours)} />
+      )}
+    </div>
+  )
+}
+
 // ── View 1: Health Rings ──────────────────────────────────────────────────────
-function OpsRingCard({ dev, index }: { dev: OpsDev; index: number }) {
+function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: OpsCtx }) {
   const size = 176, stroke = 13, r = (size - stroke) / 2 - 8, cx = size / 2, cy = size / 2
   const circ = 2 * Math.PI * r
   const status    = opsStatus(dev)
@@ -271,6 +370,7 @@ function OpsRingCard({ dev, index }: { dev: OpsDev; index: number }) {
   ].slice(0, 3)
 
   return (
+    <HoverCard content={<OpsDevHoverContent dev={dev} />} maxWidth={290}>
     <motion.div
       variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.05, duration: 0.8 } } }}
       animate={hasBlock
@@ -279,7 +379,7 @@ function OpsRingCard({ dev, index }: { dev: OpsDev; index: number }) {
       transition={hasBlock ? { duration: 2, repeat: Infinity, ease: 'easeInOut' } : undefined}
       style={{ background: GLASS, borderRadius: 16, padding: 18, backdropFilter: 'blur(14px)',
         border: `1px solid ${hasBlock ? C.blocked + '66' : overdue.length ? C.overdue + '55' : BORDER}`,
-        display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'default' }}>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
         <OpsAvatar dev={dev} size={34} glow={hasBlock ? C.blocked + '66' : null} />
@@ -303,6 +403,7 @@ function OpsRingCard({ dev, index }: { dev: OpsDev; index: number }) {
             transition={{ strokeDashoffset: { type: 'spring', bounce: 0.05, duration: 1.2, delay: 0.3 + index * 0.06 },
               opacity: hasBlock ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {} }}
             style={{ filter: `drop-shadow(0 0 6px ${ringColor}77)` }} />
+          {/* Overdue ticket indicators — dots on the ring arc */}
           {dots.map((d, i) => (
             <motion.circle key={'od' + i} cx={d.x} cy={d.y} r={d.danger ? 6 : 4}
               fill={d.danger ? '#ef4444' : C.overdue} stroke="var(--bg-base,#0d0d1a)" strokeWidth={2}
@@ -317,7 +418,7 @@ function OpsRingCard({ dev, index }: { dev: OpsDev; index: number }) {
           alignItems: 'center', justifyContent: 'center', gap: 5 }}>
           {hasBlock ? (
             <>
-              <motion.div animate={{ opacity: [0.55, 1, 0.55], scale: [1, 1.08, 1] }}
+              <motion.div animate={{ opacity: [0.6, 1, 0.6] }}
                 transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
                 style={{ fontSize: 38, lineHeight: 1, color: C.blocked, fontWeight: 700,
                   filter: 'drop-shadow(0 0 12px #ef4444)' }}>⊘</motion.div>
@@ -325,8 +426,7 @@ function OpsRingCard({ dev, index }: { dev: OpsDev; index: number }) {
             </>
           ) : danger.length ? (
             <>
-              <motion.div animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 3, repeat: Infinity }}
-                style={{ fontSize: 28 }}>⚠️</motion.div>
+              <div style={{ fontSize: 28 }}>⚠️</div>
               <span style={{ fontSize: 14, fontWeight: 800, color: C.overdue, letterSpacing: '0.05em' }}>OVERDUE</span>
             </>
           ) : (
@@ -348,22 +448,37 @@ function OpsRingCard({ dev, index }: { dev: OpsDev; index: number }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 16, width: '100%', justifyContent: 'center' }}>
+      {/* Stats strip — what the ring represents */}
+      <div style={{ display: 'flex', gap: 10, marginTop: 10, width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
+        {hasBlock && (
+          <span style={{ fontSize: 10, fontWeight: 700, color: C.blocked }}>⛔ {dev.blockedIssues.length} blocked</span>
+        )}
+        {overdue.length > 0 && (
+          <span style={{ fontSize: 10, fontWeight: 700, color: C.overdue }}>⚠ {overdue.length} stuck</span>
+        )}
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>▶ {dev.activeIssues.length} active</span>
+        <span style={{ fontSize: 10, color: C.done }}>✓ {dev.doneCount} done</span>
+      </div>
+
+      <div style={{ width: '100%', height: 1, background: BORDER, marginTop: 12, marginBottom: 10 }} />
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, width: '100%', justifyContent: 'center' }}>
         {urgent.length === 0
-          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>nothing urgent</span>
-          : urgent.map(t => <OpsTicketChip key={t.id} issue={t} animateGlow />)}
+          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>nothing urgent · hover for details</span>
+          : urgent.map(t => <OpsTicketChip key={t.id} issue={t} animateGlow ctx={ctx} noHover />)}
       </div>
     </motion.div>
+    </HoverCard>
   )
 }
 
-export function OpsViewRings({ devStats }: { devStats: DevStatLike[] }) {
+export function OpsViewRings({ devStats, ctx }: { devStats: DevStatLike[]; ctx?: OpsCtx }) {
   const devs = devStats.map(adaptDev)
   return (
     <div>
-      <OpsHead title="Health Rings" tagline="Team health in one scan — ring color is the status, gaps are blockers, dots are stuck tickets." />
+      <OpsHead title="Health Rings" tagline="Ring fill = % done · ring color = worst status · hover any card for full ticket breakdown." />
       <motion.div className="ops-grid-rings" variants={{ show: { transition: { staggerChildren: 0.08 } } }} initial="hidden" animate="show">
-        {devs.map((dev, i) => <OpsRingCard key={dev.name} dev={dev} index={i} />)}
+        {devs.map((dev, i) => <OpsRingCard key={dev.name} dev={dev} index={i} ctx={ctx} />)}
       </motion.div>
     </div>
   )
@@ -430,7 +545,7 @@ function OpsActivityStrip({ dev }: { dev: OpsDev }) {
   )
 }
 
-function OpsMissionCard({ dev, index }: { dev: OpsDev; index: number }) {
+function OpsMissionCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: OpsCtx }) {
   const hasBlock    = dev.blockedIssues.length > 0
   const danger      = opsDanger(dev)
   const shippingGlow = !hasBlock && dev.doneTodayIssues.length >= 3
@@ -452,6 +567,7 @@ function OpsMissionCard({ dev, index }: { dev: OpsDev; index: number }) {
   const borderGlow = hasBlock ? C.blocked : danger.length ? C.overdue : shippingGlow ? C.done : C.accent
 
   return (
+    <HoverCard content={<OpsDevHoverContent dev={dev} />} maxWidth={290}>
     <motion.div
       variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.05, duration: 0.8 } } }}
       animate={hasBlock
@@ -462,7 +578,7 @@ function OpsMissionCard({ dev, index }: { dev: OpsDev; index: number }) {
       transition={hasBlock ? { duration: 2, repeat: Infinity, ease: 'easeInOut' }
         : danger.length ? { duration: 3, repeat: Infinity, ease: 'easeInOut' } : undefined}
       style={{ background: GLASS, borderRadius: 16, padding: 16, backdropFilter: 'blur(14px)',
-        border: `1px solid ${borderGlow}55`,
+        border: `1px solid ${borderGlow}55`, cursor: 'default',
         boxShadow: shippingGlow ? `0 0 16px ${C.done}22` : `0 0 14px ${borderGlow}14` }}>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -476,35 +592,43 @@ function OpsMissionCard({ dev, index }: { dev: OpsDev; index: number }) {
         <motion.div animate={zone.breathe ? { opacity: [0.7, 1, 0.7] } : {}}
           transition={zone.breathe ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {}}
           style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '6px 0' }}>
-          <motion.div animate={zone.breathe ? { scale: [1, 1.1, 1] } : {}}
-            transition={zone.breathe ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {}}
-            style={{ fontSize: zone.big ? 30 : 34, lineHeight: 1, color: zone.c, fontWeight: 800,
-              filter: `drop-shadow(0 0 10px ${zone.c}66)` }}>{zone.icon}</motion.div>
+          <div style={{ fontSize: zone.big ? 30 : 34, lineHeight: 1, color: zone.c, fontWeight: 800,
+            filter: `drop-shadow(0 0 10px ${zone.c}66)` }}>{zone.icon}</div>
           <span style={{ fontSize: 18, fontWeight: 800, color: zone.c, letterSpacing: '0.02em' }}>{zone.word}</span>
           <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 600 }}>{zone.sub}</span>
         </motion.div>
-        <OpsDonut dev={dev} index={index} />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+          <OpsDonut dev={dev} index={index} />
+          {/* Donut legend */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 9, fontWeight: 600 }}>
+            {dev.doneCount > 0 && <span style={{ color: C.done }}>✓ {dev.doneCount} done</span>}
+            {dev.activeIssues.length > 0 && <span style={{ color: C.active }}>▶ {dev.activeIssues.length} active</span>}
+            {dev.blockedIssues.length > 0 && <span style={{ color: C.blocked }}>⛔ {dev.blockedIssues.length} blocked</span>}
+            {dev.queuedIssues.length > 0 && <span style={{ color: 'var(--text-muted)' }}>○ {dev.queuedIssues.length} queued</span>}
+          </div>
+        </div>
       </div>
 
       <OpsActivityStrip dev={dev} />
     </motion.div>
+    </HoverCard>
   )
 }
 
-export function OpsViewMission({ devStats }: { devStats: DevStatLike[] }) {
+export function OpsViewMission({ devStats, ctx }: { devStats: DevStatLike[]; ctx?: OpsCtx }) {
   const devs = devStats.map(adaptDev)
   return (
     <div>
-      <OpsHead title="Mission Control" tagline="Sprint health at mission control — critical cards glow red." />
+      <OpsHead title="Mission Control" tagline="Status word = worst issue · donut = done/active/blocked/queued breakdown · hover any card for full ticket list." />
       <motion.div className="ops-grid-mission" variants={{ show: { transition: { staggerChildren: 0.08 } } }} initial="hidden" animate="show">
-        {devs.map((dev, i) => <OpsMissionCard key={dev.name} dev={dev} index={i} />)}
+        {devs.map((dev, i) => <OpsMissionCard key={dev.name} dev={dev} index={i} ctx={ctx} />)}
       </motion.div>
     </div>
   )
 }
 
 // ── View 3: Stuck Detector ────────────────────────────────────────────────────
-function OpsStuckRow({ t, index, maxHours }: { t: FlatTicket; index: number; maxHours: number }) {
+function OpsStuckRow({ t, index, maxHours, ctx }: { t: FlatTicket; index: number; maxHours: number; ctx?: OpsCtx }) {
   const isDanger  = t.hours >= DANGER
   const isWarning = !isDanger && t.hours >= WARN
   const fillColor = isDanger ? C.blocked : isWarning ? C.overdue : C.active
@@ -532,9 +656,20 @@ function OpsStuckRow({ t, index, maxHours }: { t: FlatTicket; index: number; max
         <OpsAvatar dev={t.dev} size={28} glow={blocked ? C.blocked + '55' : null} />
         <span className="ops-stuck-name" style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flexShrink: 0, width: 78,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.dev.name.split(' ')[0]}</span>
-        <span style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: fillColor, flexShrink: 0 }}>{t.id}</span>
-        <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)', minWidth: 0,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.summary}</span>
+        <span
+          onClick={ctx?.ytBaseUrl ? (e) => { e.stopPropagation(); window.open(`${ctx.ytBaseUrl}/issue/${t.id}`, '_blank', 'noopener,noreferrer') } : undefined}
+          style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: fillColor, flexShrink: 0,
+            cursor: ctx?.ytBaseUrl ? 'pointer' : 'default',
+            textDecoration: ctx?.ytBaseUrl ? 'underline' : 'none', textDecorationColor: `${fillColor}66` }}>
+          {t.id}
+        </span>
+        <span
+          onClick={ctx ? (e) => { e.stopPropagation(); ctx.onOpenDetail(t.id) } : undefined}
+          style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)', minWidth: 0,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            cursor: ctx ? 'pointer' : 'default' }}>
+          {t.summary}
+        </span>
         {t.isHotfix && <span style={{ fontSize: 14, flexShrink: 0 }}>🔥</span>}
         <motion.span className="ops-stuck-state-badge" animate={blocked ? { opacity: [0.6, 1, 0.6] } : {}}
           transition={blocked ? { duration: 2.5, repeat: Infinity } : {}}
@@ -549,8 +684,8 @@ function OpsStuckRow({ t, index, maxHours }: { t: FlatTicket; index: number; max
   )
 }
 
-function OpsStuckSection({ icon, label, sub, color, rows, maxHours, startIndex }: {
-  icon: string; label: string; sub: string; color: string; rows: FlatTicket[]; maxHours: number; startIndex: number
+function OpsStuckSection({ icon, label, sub, color, rows, maxHours, startIndex, ctx }: {
+  icon: string; label: string; sub: string; color: string; rows: FlatTicket[]; maxHours: number; startIndex: number; ctx?: OpsCtx
 }) {
   if (!rows.length) return null
   return (
@@ -564,13 +699,13 @@ function OpsStuckSection({ icon, label, sub, color, rows, maxHours, startIndex }
       </div>
       <motion.div variants={{ show: { transition: { staggerChildren: 0.06 } } }} initial="hidden" animate="show"
         style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-        {rows.map((t, i) => <OpsStuckRow key={t.id + t.dev.name} t={t} index={startIndex + i} maxHours={maxHours} />)}
+        {rows.map((t, i) => <OpsStuckRow key={t.id + t.dev.name} t={t} index={startIndex + i} maxHours={maxHours} ctx={ctx} />)}
       </motion.div>
     </div>
   )
 }
 
-export function OpsViewStuck({ devStats }: { devStats: DevStatLike[] }) {
+export function OpsViewStuck({ devStats, ctx }: { devStats: DevStatLike[]; ctx?: OpsCtx }) {
   const devs = devStats.map(adaptDev)
   const all = opsFlattenTickets(devs)
     .filter(t => (t.state === 'active' || t.state === 'overdue' || t.state === 'blocked') && t.hours >= WATCH)
@@ -601,9 +736,9 @@ export function OpsViewStuck({ devStats }: { devStats: DevStatLike[] }) {
         </motion.div>
       ) : (
         <div className="ops-stuck-container">
-          <OpsStuckSection icon="🚨" label="DANGER" sub="stuck 48h+" color={C.blocked} rows={danger} maxHours={maxHours} startIndex={0} />
-          <OpsStuckSection icon="⚠" label="WARNING" sub="stuck 16–48h" color={C.overdue} rows={warning} maxHours={maxHours} startIndex={danger.length} />
-          <OpsStuckSection icon="◎" label="WATCH" sub="stuck 8–16h" color="var(--text-muted)" rows={watch} maxHours={maxHours} startIndex={danger.length + warning.length} />
+          <OpsStuckSection icon="🚨" label="DANGER" sub="stuck 48h+" color={C.blocked} rows={danger} maxHours={maxHours} startIndex={0} ctx={ctx} />
+          <OpsStuckSection icon="⚠" label="WARNING" sub="stuck 16–48h" color={C.overdue} rows={warning} maxHours={maxHours} startIndex={danger.length} ctx={ctx} />
+          <OpsStuckSection icon="◎" label="WATCH" sub="stuck 8–16h" color="var(--text-muted)" rows={watch} maxHours={maxHours} startIndex={danger.length + warning.length} ctx={ctx} />
         </div>
       )}
     </div>
@@ -631,7 +766,7 @@ function OpsAllClear() {
   )
 }
 
-function OpsCriticalCard({ t, index }: { t: FlatTicket; index: number }) {
+function OpsCriticalCard({ t, index, ctx }: { t: FlatTicket; index: number; ctx?: OpsCtx }) {
   const isReg   = t.isRegression
   const badge   = isReg ? { txt: '⚠️ REGRESSION', c: '#fbbf24' } : { txt: '🔥 HOTFIX', c: '#ef4444' }
   const stateCfg = OPS_STATE_WORD[t.state] ?? OPS_STATE_WORD.active
@@ -666,18 +801,30 @@ function OpsCriticalCard({ t, index }: { t: FlatTicket; index: number }) {
           background: `${badge.c}1e`, border: `1px solid ${badge.c}66`, color: badge.c, letterSpacing: '0.03em' }}>
           {badge.txt}
         </span>
-        <span style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>{t.id}</span>
-        <span style={{ fontSize: 14, fontWeight: 500, color: done ? 'var(--text-muted)' : 'var(--text-primary)',
-          flex: 1, minWidth: 180 }}>{t.summary}</span>
+        <span
+          onClick={ctx?.ytBaseUrl ? () => window.open(`${ctx.ytBaseUrl}/issue/${t.id}`, '_blank', 'noopener,noreferrer') : undefined}
+          style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
+            cursor: ctx?.ytBaseUrl ? 'pointer' : 'default',
+            textDecoration: ctx?.ytBaseUrl ? 'underline' : 'none', textDecorationColor: 'rgba(255,255,255,0.3)' }}>
+          {t.id}
+        </span>
+        <span
+          onClick={ctx ? () => ctx.onOpenDetail(t.id) : undefined}
+          style={{ fontSize: 14, fontWeight: 500, color: done ? 'var(--text-muted)' : 'var(--text-primary)',
+            flex: 1, minWidth: 180, cursor: ctx ? 'pointer' : 'default' }}>
+          {t.summary}
+        </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <OpsAvatar dev={t.dev} size={32} glow={blocked ? C.blocked + '55' : null} />
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{t.dev.name}</div>
-            <span style={{ fontSize: 14, fontWeight: 800, color: stateCfg.c, letterSpacing: '0.03em' }}>{stateCfg.word}</span>
+        <HoverCard content={<OpsDevHoverContent dev={t.dev} />} maxWidth={290}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, cursor: 'default' }}>
+            <OpsAvatar dev={t.dev} size={32} glow={blocked ? C.blocked + '55' : null} />
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{t.dev.name}</div>
+              <span style={{ fontSize: 14, fontWeight: 800, color: stateCfg.c, letterSpacing: '0.03em' }}>{stateCfg.word}</span>
+            </div>
           </div>
-        </div>
+        </HoverCard>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 14, fontWeight: 700, color: timeColor, fontFamily: 'monospace' }}>{timeTxt}</span>
       </div>
@@ -692,7 +839,7 @@ function OpsCriticalCard({ t, index }: { t: FlatTicket; index: number }) {
   )
 }
 
-export function OpsViewHotfix({ devStats }: { devStats: DevStatLike[] }) {
+export function OpsViewHotfix({ devStats, ctx }: { devStats: DevStatLike[]; ctx?: OpsCtx }) {
   const devs = devStats.map(adaptDev)
   const crit = opsFlattenTickets(devs).filter(t => t.isHotfix || t.isRegression)
   const rank: Record<string, number> = { blocked: 0, overdue: 1, active: 2, done: 3 }
@@ -703,7 +850,7 @@ export function OpsViewHotfix({ devStats }: { devStats: DevStatLike[] }) {
       <OpsHead title="Hotfix & Regression Command" tagline="Nothing critical ships broken." />
       {crit.length === 0 ? <OpsAllClear /> : (
         <div className="ops-hotfix-container">
-          {crit.map((t, i) => <OpsCriticalCard key={t.id + t.dev.name} t={t} index={i} />)}
+          {crit.map((t, i) => <OpsCriticalCard key={t.id + t.dev.name} t={t} index={i} ctx={ctx} />)}
         </div>
       )}
     </div>
@@ -722,7 +869,7 @@ function opsDaySegments(dev: OpsDev): Segment[] {
   return segs
 }
 
-function OpsStripCard({ dev }: { dev: OpsDev }) {
+function OpsStripCard({ dev, ctx }: { dev: OpsDev; ctx?: OpsCtx }) {
   const status = opsStatus(dev)
   const segs   = opsDaySegments(dev)
   const totalH = segs.reduce((s, x) => s + Math.max(0.6, x.hours), 0) || 1
@@ -733,10 +880,11 @@ function OpsStripCard({ dev }: { dev: OpsDev }) {
   ].slice(0, 4)
 
   return (
+    <HoverCard content={<OpsDevHoverContent dev={dev} />} maxWidth={290}>
     <motion.div
       variants={{ hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.05, duration: 0.7 } } }}
       style={{ background: GLASS, borderRadius: 14, padding: 16, backdropFilter: 'blur(14px)',
-        border: `1px solid ${dev.blockedIssues.length ? C.blocked + '44' : BORDER}` }}>
+        border: `1px solid ${dev.blockedIssues.length ? C.blocked + '44' : BORDER}`, cursor: 'default' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <OpsAvatar dev={dev} size={30} glow={dev.blockedIssues.length ? C.blocked + '55' : null} />
         <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{dev.name}</span>
@@ -748,31 +896,41 @@ function OpsStripCard({ dev }: { dev: OpsDev }) {
         </span>
       </div>
 
-      <div style={{ display: 'flex', gap: 3, height: 40, borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', gap: 3, height: 48, borderRadius: 8, overflow: 'hidden' }}>
         {segs.map((seg, i) => {
           const grow = Math.max(0.6, seg.hours) / totalH
           return (
             <motion.div key={seg.id + i}
               initial={{ scaleX: 0, opacity: 0 }}
-              animate={seg.blocked ? { scaleX: 1, opacity: [0.75, 1, 0.75] } : { scaleX: 1, opacity: seg.kind === 'done' ? 0.7 : 1 }}
+              animate={seg.blocked ? { scaleX: 1, opacity: [0.75, 1, 0.75] } : { scaleX: 1, opacity: seg.kind === 'done' ? 0.75 : 1 }}
               transition={seg.blocked
                 ? { scaleX: { type: 'spring', bounce: 0.05, duration: 0.8, delay: 0.2 + i * 0.07 }, opacity: { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } }
                 : { type: 'spring', bounce: 0.05, duration: 0.8, delay: 0.2 + i * 0.07 }}
               title={`${seg.id} · ${opsFmtHours(seg.hours)}${seg.queued ? ` · ${seg.count} queued` : ''}`}
-              style={{ flexGrow: grow, flexBasis: 0, minWidth: seg.queued ? 24 : 30, transformOrigin: 'left center',
+              style={{ flexGrow: grow, flexBasis: 0, minWidth: seg.queued ? 28 : 36, transformOrigin: 'left center',
                 background: seg.queued
                   ? 'repeating-linear-gradient(45deg, rgba(255,255,255,0.10), rgba(255,255,255,0.10) 4px, transparent 4px, transparent 8px)'
                   : seg.kind === 'done'
-                    ? `${seg.c}40`
-                    : `linear-gradient(180deg, ${seg.c}, ${seg.c}bb)`,
-                border: `1px solid ${seg.queued ? 'rgba(255,255,255,0.12)' : seg.c}`,
-                borderRadius: 5, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    ? `${seg.c}45`
+                    : `linear-gradient(180deg, ${seg.c}dd, ${seg.c}99)`,
+                border: `1px solid ${seg.queued ? 'rgba(255,255,255,0.12)' : seg.c}88`,
+                borderRadius: 5, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
                 position: 'relative', overflow: 'hidden',
                 boxShadow: seg.blocked ? `0 0 10px ${seg.c}aa` : 'none' }}>
-              {seg.fire && <span style={{ fontSize: 13 }}>🔥</span>}
-              {seg.reg && !seg.fire && <span style={{ fontSize: 12, color: '#fff', fontWeight: 800 }}>↩</span>}
-              {seg.kind === 'done' && !seg.fire && <span style={{ fontSize: 13, color: seg.c, fontWeight: 800 }}>✓</span>}
-              {seg.queued && <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.5)', fontWeight: 700 }}>+{seg.count}</span>}
+              {!seg.queued && (
+                <span style={{ fontSize: 8.5, fontWeight: 800, color: '#fff', opacity: 0.9,
+                  lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: '100%',
+                  paddingLeft: 3, paddingRight: 3, textOverflow: 'ellipsis' }}>
+                  {seg.id}
+                </span>
+              )}
+              <span style={{ fontSize: 8, color: '#fff', opacity: 0.65, whiteSpace: 'nowrap' }}>
+                {seg.queued
+                  ? `+${seg.count}`
+                  : opsFmtHours(seg.hours)}
+              </span>
+              {seg.fire && <span style={{ fontSize: 10, position: 'absolute', top: 2, right: 2 }}>🔥</span>}
+              {seg.kind === 'done' && !seg.fire && <span style={{ fontSize: 10, position: 'absolute', top: 2, right: 2, color: seg.c, fontWeight: 800 }}>✓</span>}
             </motion.div>
           )
         })}
@@ -781,30 +939,21 @@ function OpsStripCard({ dev }: { dev: OpsDev }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
         {urgent.length === 0
           ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>clean day · {dev.queuedIssues.length} queued</span>
-          : urgent.map(t => <OpsTicketChip key={t.id} issue={t} animateGlow />)}
+          : urgent.map(t => <OpsTicketChip key={t.id} issue={t} animateGlow ctx={ctx} noHover />)}
       </div>
     </motion.div>
+    </HoverCard>
   )
 }
 
-export function OpsViewStrips({ devStats }: { devStats: DevStatLike[] }) {
+export function OpsViewStrips({ devStats, ctx }: { devStats: DevStatLike[]; ctx?: OpsCtx }) {
   const devs = [...devStats.map(adaptDev)].sort((a, b) => opsUrgencyRank(b) - opsUrgencyRank(a))
   return (
     <div>
-      <OpsHead title="Developer Pulse Strips" tagline="Each person's entire day in one horizontal strip." />
+      <OpsHead title="Developer Pulse Strips" tagline="Each segment = one ticket. ID + time shown inside. Red = blocked, amber = stuck 16h+, blue = active, green = done today." />
       <motion.div className="ops-strips-container" variants={{ show: { transition: { staggerChildren: 0.09 } } }} initial="hidden" animate="show">
-        {devs.map(dev => <OpsStripCard key={dev.name} dev={dev} />)}
+        {devs.map(dev => <OpsStripCard key={dev.name} dev={dev} ctx={ctx} />)}
       </motion.div>
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '10px 16px', borderRadius: 10, background: GLASS, border: `1px solid ${BORDER}` }}>
-          {([[C.blocked,'blocked / 48h+'],[C.overdue,'stuck 16h+'],[C.active,'active'],[C.done,'done ✓'],['rgba(255,255,255,0.3)','queued']] as [string,string][]).map(([c, l]) => (
-            <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: c, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>{l}</span>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
@@ -828,23 +977,53 @@ function OpsDotCluster({ items, color, baseDelay }: { items: { blocked?: boolean
   )
 }
 
-function OpsSnapshotCard({ dev, index }: { dev: OpsDev; index: number }) {
+function OpsSnapshotTicketRow({ label, color, issues, ctx }: {
+  label: string; color: string; issues: OpsIssue[]; ctx?: OpsCtx
+}) {
+  if (!issues.length) return null
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <div style={{ fontSize: 9, fontWeight: 800, color, letterSpacing: '0.05em', marginBottom: 3 }}>
+        {label} · {issues.length}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+        {issues.slice(0, 4).map(t => (
+          <span
+            key={t.id}
+            onClick={ctx?.ytBaseUrl ? () => window.open(`${ctx.ytBaseUrl}/issue/${t.id}`, '_blank', 'noopener,noreferrer') : undefined}
+            title={t.summary}
+            style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 4,
+              background: `${color}18`, border: `1px solid ${color}44`, color,
+              cursor: ctx?.ytBaseUrl ? 'pointer' : 'default', whiteSpace: 'nowrap' }}>
+            {t.id}
+          </span>
+        ))}
+        {issues.length > 4 && (
+          <span style={{ fontSize: 9, color, opacity: 0.7 }}>+{issues.length - 4}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function OpsSnapshotCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: OpsCtx }) {
   const donePct = opsDonePct(dev)
   const status  = opsStatus(dev)
-  const blocked = dev.blockedIssues.map(() => ({ blocked: true }))
-  const stuck   = dev.activeIssues.filter(a => a.hoursInState >= WARN).map(a => ({ danger: a.hoursInState >= DANGER }))
-  const active  = dev.activeIssues.filter(a => a.hoursInState < WARN).map(() => ({}))
-  const queued  = dev.queuedIssues.map(() => ({}))
+  const stuck   = dev.activeIssues.filter(a => a.hoursInState >= WARN)
+  const active  = dev.activeIssues.filter(a => a.hoursInState < WARN)
+  const barColor = dev.blockedIssues.length ? C.blocked : stuck.length ? C.overdue : C.done
 
   return (
+    <HoverCard content={<OpsDevHoverContent dev={dev} />} maxWidth={290}>
     <motion.div
       variants={{ hidden: { opacity: 0, scale: 0.9 }, show: { opacity: 1, scale: 1, transition: { type: 'spring', bounce: 0.2, duration: 0.6 } } }}
       style={{ position: 'relative', background: GLASS, borderRadius: 14, padding: 14, backdropFilter: 'blur(14px)',
-        border: `1px solid ${dev.blockedIssues.length ? C.blocked + '44' : BORDER}` }}>
+        border: `1px solid ${dev.blockedIssues.length ? C.blocked + '44' : BORDER}`, cursor: 'default' }}>
       {dev.hotfixCount > 0 && (
         <div style={{ position: 'absolute', top: 10, right: 10 }}><OpsHotfixBadge count={dev.hotfixCount} /></div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 11, paddingRight: 22 }}>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10, paddingRight: dev.hotfixCount > 0 ? 22 : 0 }}>
         <OpsAvatar dev={dev} size={30} glow={dev.blockedIssues.length ? C.blocked + '55' : null} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)',
@@ -853,58 +1032,342 @@ function OpsSnapshotCard({ dev, index }: { dev: OpsDev; index: number }) {
         </div>
       </div>
 
-      <div style={{ width: '100%', height: 7, borderRadius: 999, overflow: 'hidden',
-        background: 'rgba(255,255,255,0.07)', marginBottom: 12 }}>
-        <motion.div initial={{ width: 0 }} animate={{ width: `${donePct}%` }}
-          transition={{ type: 'spring', bounce: 0.05, duration: 1, delay: 0.2 + index * 0.05 }}
-          style={{ height: '100%', background: C.done }} />
+      {/* Done progress bar with percentage */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+        <div style={{ flex: 1, height: 6, borderRadius: 999, overflow: 'hidden', background: 'rgba(255,255,255,0.07)' }}>
+          <motion.div initial={{ width: 0 }} animate={{ width: `${donePct}%` }}
+            transition={{ type: 'spring', bounce: 0.05, duration: 1, delay: 0.2 + index * 0.05 }}
+            style={{ height: '100%', background: barColor }} />
+        </div>
+        <span style={{ fontSize: 9, fontWeight: 700, color: barColor, flexShrink: 0 }}>{donePct}%</span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, minHeight: 54 }}>
-        <OpsDotCluster items={blocked} color={C.blocked} baseDelay={0.4 + index * 0.05} />
-        <OpsDotCluster items={stuck}   color={C.overdue} baseDelay={0.5 + index * 0.05} />
-        <OpsDotCluster items={active}  color={C.active}  baseDelay={0.6 + index * 0.05} />
-        <OpsDotCluster items={queued}  color="rgba(255,255,255,0.28)" baseDelay={0.7 + index * 0.05} />
-        {!blocked.length && !stuck.length && !active.length && !queued.length && (
+      {/* Ticket sections — labeled with clickable IDs */}
+      <div style={{ minHeight: 52 }}>
+        <OpsSnapshotTicketRow label="BLOCKED" color={C.blocked} issues={dev.blockedIssues} ctx={ctx} />
+        <OpsSnapshotTicketRow label="STUCK" color={C.overdue} issues={stuck} ctx={ctx} />
+        <OpsSnapshotTicketRow label="ACTIVE" color={C.active} issues={active} ctx={ctx} />
+        {dev.queuedIssues.length > 0 && (
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+            ○ {dev.queuedIssues.length} queued
+          </div>
+        )}
+        {!dev.blockedIssues.length && !stuck.length && !active.length && !dev.queuedIssues.length && (
           <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>no open tickets</span>
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 12, paddingTop: 11,
-        borderTop: `1px solid ${BORDER}`, minHeight: 26 }}>
+      {/* Done today */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 10, paddingTop: 9,
+        borderTop: `1px solid ${BORDER}`, minHeight: 24 }}>
         {dev.doneTodayIssues.length === 0
-          ? <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>nothing shipped today</span>
-          : dev.doneTodayIssues.map((d, i) => (
-            <motion.span key={d.id}
-              initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.7 + index * 0.05 + i * 0.1, type: 'spring', bounce: 0.55 }}
-              title={`${d.id} done ${d.timestamp ?? ''}`}
-              style={{ fontSize: 16, color: C.done, fontWeight: 800,
-                filter: 'drop-shadow(0 0 4px rgba(74,222,128,0.5))' }}>✓</motion.span>
-          ))}
+          ? <span style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>nothing shipped today</span>
+          : <>
+              <span style={{ fontSize: 9, color: C.done, fontWeight: 700 }}>DONE TODAY</span>
+              {dev.doneTodayIssues.slice(0, 4).map((d, i) => (
+                <motion.span key={d.id}
+                  initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.7 + index * 0.05 + i * 0.1, type: 'spring', bounce: 0.55 }}
+                  onClick={ctx?.ytBaseUrl ? () => window.open(`${ctx.ytBaseUrl}/issue/${d.id}`, '_blank', 'noopener,noreferrer') : undefined}
+                  title={`${d.id} done at ${d.timestamp ?? ''}`}
+                  style={{ fontSize: 9, fontWeight: 700, padding: '2px 5px', borderRadius: 4,
+                    background: `${C.done}18`, border: `1px solid ${C.done}44`, color: C.done,
+                    cursor: ctx?.ytBaseUrl ? 'pointer' : 'default',
+                    filter: 'drop-shadow(0 0 3px rgba(74,222,128,0.3))' }}>
+                  {d.id}
+                </motion.span>
+              ))}
+              {dev.doneTodayIssues.length > 4 && (
+                <span style={{ fontSize: 9, color: C.done, opacity: 0.7 }}>+{dev.doneTodayIssues.length - 4}</span>
+              )}
+            </>}
       </div>
     </motion.div>
+    </HoverCard>
   )
 }
 
-export function OpsViewSnapshot({ devStats }: { devStats: DevStatLike[] }) {
+export function OpsViewSnapshot({ devStats, ctx }: { devStats: DevStatLike[]; ctx?: OpsCtx }) {
   const devs = [...devStats.map(adaptDev)].sort((a, b) => opsUrgencyRank(b) - opsUrgencyRank(a))
   return (
     <div>
-      <OpsHead title="Sprint Snapshot Grid" tagline="One screen, full sprint picture — count by eye." />
+      <OpsHead title="Sprint Snapshot" tagline="Per-developer ticket breakdown — blocked/stuck/active/queued/done today. Click any ticket ID to open in YouTrack." />
       <motion.div className="ops-grid-snapshot" variants={{ show: { transition: { staggerChildren: 0.08 } } }} initial="hidden" animate="show">
-        {devs.map((dev, i) => <OpsSnapshotCard key={dev.name} dev={dev} index={i} />)}
+        {devs.map((dev, i) => <OpsSnapshotCard key={dev.name} dev={dev} index={i} ctx={ctx} />)}
       </motion.div>
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 18 }}>
-        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '10px 16px', borderRadius: 10, background: GLASS, border: `1px solid ${BORDER}` }}>
-          {([[C.blocked,'blocked (pulses)'],[C.overdue,'stuck 16h+'],[C.active,'active'],[C.done,'✓ done today'],['rgba(255,255,255,0.28)','queued']] as [string,string][]).map(([c, l]) => (
-            <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 10, height: 10, borderRadius: '50%', background: c, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>{l}</span>
+    </div>
+  )
+}
+
+// ── Skeleton loaders — one per view ──────────────────────────────────────────
+// Each skeleton mirrors the real card layout (same grid class, same padding/radius).
+// Widths vary by index so the shimmer looks organic, not like a repeating pattern.
+
+const Sk = ({ w, h, r = 6 }: { w: number | string; h: number; r?: number | string }) => (
+  <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+)
+
+function SkHead() {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <Sk w={160} h={22} r={6} />
+      <div style={{ marginTop: 8 }}><Sk w="62%" h={13} r={4} /></div>
+    </div>
+  )
+}
+
+// Widths cycle so consecutive cards look different
+const W = [55, 70, 48, 65, 58, 72] // name bar widths (%)
+const W2 = [75, 55, 80, 62, 70, 50] // summary widths (%)
+
+function SkRings() {
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-grid-rings">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 16, padding: 18, border: `1px solid ${BORDER}`,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+            {/* Header row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+              <Sk w={34} h={34} r="50%" />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <Sk w={`${W[i % 6]}%`} h={13} r={4} />
+                <Sk w={60} h={9} r={3} />
+              </div>
             </div>
-          ))}
-        </div>
+            {/* Ring circle placeholder */}
+            <div style={{ position: 'relative', width: 176, height: 176, margin: '18px 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div className="skeleton" style={{ position: 'absolute', inset: 0, borderRadius: '50%', opacity: 0.18 }} />
+              {/* Inner cutout to fake a ring */}
+              <div style={{ width: 138, height: 138, borderRadius: '50%', background: 'var(--bg-surface, #1a1a2e)' }} />
+            </div>
+            {/* Chip row */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <Sk w={72} h={24} r={999} />
+              <Sk w={84} h={24} r={999} />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
+}
+
+function SkMission() {
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-grid-mission">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 16, padding: 16, border: `1px solid ${BORDER}` }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <Sk w={32} h={32} r="50%" />
+              <Sk w={`${W[i % 6]}%`} h={14} r={4} />
+            </div>
+            {/* Status + donut row */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16 }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Sk w={36} h={36} r={6} />
+                <Sk w={100} h={20} r={4} />
+                <Sk w={`${W2[i % 6]}%`} h={11} r={3} />
+              </div>
+              {/* Donut circle */}
+              <div style={{ position: 'relative', width: 92, height: 92, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div className="skeleton" style={{ position: 'absolute', inset: 0, borderRadius: '50%', opacity: 0.18 }} />
+                <div style={{ width: 66, height: 66, borderRadius: '50%', background: 'var(--bg-surface, #1a1a2e)' }} />
+              </div>
+            </div>
+            {/* Activity strip */}
+            <div style={{ marginTop: 14, paddingTop: 6 }}>
+              <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end' }}>
+                {[0,1,2].map(j => (
+                  <div key={j} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    <Sk w={30} h={9} r={3} />
+                    <Sk w={11} h={11} r="50%" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkStuck() {
+  const SECTION_ROWS = [3, 2, 2] // DANGER / WARNING / WATCH row counts
+  const SECTION_COLORS = ['rgba(248,113,113,0.25)', 'rgba(251,191,36,0.2)', 'rgba(255,255,255,0.1)']
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-stuck-container">
+        {SECTION_ROWS.map((rows, si) => (
+          <div key={si} style={{ marginBottom: 22 }}>
+            {/* Section header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 11 }}>
+              <Sk w={14} h={14} r={3} />
+              <Sk w={70} h={12} r={4} />
+              <Sk w={90} h={11} r={3} />
+              <div style={{ flex: 1, height: 1, background: BORDER }} />
+            </div>
+            {/* Rows */}
+            {Array.from({ length: rows }).map((_, ri) => (
+              <div key={ri} style={{ position: 'relative', borderRadius: 12, overflow: 'hidden',
+                background: GLASS, border: `1px solid ${BORDER}`, marginBottom: 7 }}>
+                {/* Fill bar */}
+                <div className="skeleton" style={{
+                  position: 'absolute', inset: 0, right: 'auto',
+                  width: `${[65, 40, 80, 52, 70, 35][ri + si * 3 < 6 ? ri + si * 3 : ri]}%`,
+                  background: SECTION_COLORS[si], opacity: 0.6 }} />
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, padding: '11px 16px' }}>
+                  <Sk w={28} h={28} r="50%" />
+                  <Sk w={78} h={12} r={3} />
+                  <Sk w={60} h={12} r={3} />
+                  <Sk w={`${W2[(ri + si) % 6]}%`} h={13} r={3} />
+                  <Sk w={70} h={22} r={7} />
+                  <Sk w={44} h={14} r={3} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkHotfix() {
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-hotfix-container">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 14, padding: '16px 20px', border: `1px solid ${BORDER}` }}>
+            {/* Badge + id + summary */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+              <Sk w={88} h={24} r={999} />
+              <Sk w={64} h={13} r={3} />
+              <Sk w={`${W2[i % 6]}%`} h={14} r={3} />
+            </div>
+            {/* Dev + state + time row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <Sk w={32} h={32} r="50%" />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <Sk w={80} h={12} r={3} />
+                  <Sk w={60} h={12} r={3} />
+                </div>
+              </div>
+              <div style={{ flex: 1 }} />
+              <Sk w={120} h={14} r={3} />
+            </div>
+            {/* Progress bar */}
+            <div style={{ height: 4, borderRadius: 999, background: 'rgba(255,255,255,0.07)', overflow: 'hidden', marginTop: 14 }}>
+              <div className="skeleton" style={{ height: '100%', borderRadius: 999,
+                width: `${[45, 70, 30][i % 3]}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkStrips() {
+  // Segment widths per card — vary so each strip looks unique
+  const SEGS = [
+    [0.18, 0.28, 0.22, 0.16, 0.12],
+    [0.32, 0.20, 0.14, 0.24, 0.06],
+    [0.10, 0.35, 0.18, 0.28, 0.06],
+    [0.22, 0.16, 0.30, 0.20, 0.10],
+    [0.28, 0.24, 0.18, 0.16, 0.12],
+  ]
+  const SEG_COLORS = ['rgba(74,222,128,0.25)','rgba(96,165,250,0.25)','rgba(251,191,36,0.25)','rgba(248,113,113,0.25)','rgba(255,255,255,0.08)']
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-strips-container">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 14, padding: 16, border: `1px solid ${BORDER}` }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <Sk w={30} h={30} r="50%" />
+              <Sk w={`${W[i % 6]}%`} h={14} r={4} />
+              <div style={{ flex: 1 }} />
+              <Sk w={76} h={22} r={999} />
+            </div>
+            {/* Film strip */}
+            <div style={{ display: 'flex', gap: 3, height: 40, borderRadius: 8, overflow: 'hidden' }}>
+              {SEGS[i % SEGS.length].map((grow, j) => (
+                <div key={j} className="skeleton" style={{
+                  flexGrow: grow, flexBasis: 0, minWidth: 24, borderRadius: 5,
+                  background: SEG_COLORS[j % SEG_COLORS.length], opacity: 0.7 }} />
+              ))}
+            </div>
+            {/* Chips row */}
+            <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+              <Sk w={76} h={22} r={999} />
+              <Sk w={88} h={22} r={999} />
+              {i % 2 === 0 && <Sk w={68} h={22} r={999} />}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SkSnapshot() {
+  return (
+    <div>
+      <SkHead />
+      <div className="ops-grid-snapshot">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} style={{ background: GLASS, borderRadius: 14, padding: 14, border: `1px solid ${BORDER}` }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
+              <Sk w={30} h={30} r="50%" />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <Sk w={`${W[i % 6]}%`} h={13} r={4} />
+                <Sk w={44} h={9} r={3} />
+              </div>
+            </div>
+            {/* Progress bar */}
+            <div style={{ height: 7, borderRadius: 999, background: 'rgba(255,255,255,0.07)', overflow: 'hidden', marginBottom: 13 }}>
+              <div className="skeleton" style={{ height: '100%', borderRadius: 999,
+                width: `${[55, 38, 72, 44, 60, 30, 80, 50][i % 8]}%` }} />
+            </div>
+            {/* Dot cluster area */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, minHeight: 54, alignContent: 'flex-start' }}>
+              {Array.from({ length: 3 + (i % 4) }).map((_, di) => (
+                <Sk key={di} w={di < 2 ? 12 : 9} h={di < 2 ? 12 : 9} r="50%" />
+              ))}
+            </div>
+            {/* Done row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 12, paddingTop: 11,
+              borderTop: `1px solid ${BORDER}`, minHeight: 26 }}>
+              {i % 3 !== 2
+                ? Array.from({ length: 1 + (i % 3) }).map((_, ci) => <Sk key={ci} w={16} h={16} r="50%" />)
+                : <Sk w={100} h={11} r={3} />}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function OpsViewSkeleton({ view }: { view: string }) {
+  switch (view) {
+    case 'rings':    return <SkRings />
+    case 'mission':  return <SkMission />
+    case 'stuck':    return <SkStuck />
+    case 'hotfix':   return <SkHotfix />
+    case 'strips':   return <SkStrips />
+    case 'snapshot': return <SkSnapshot />
+    default:         return null
+  }
 }

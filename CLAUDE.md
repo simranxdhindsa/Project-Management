@@ -224,7 +224,52 @@ One CSS file per subtab/view + one shared base file. Never put all subtab styles
 
 When adding a new multi-subtab page: `<page>-base.css` + one `<page>-<subtab>.css` per view. Import all in the page component and in `index.css`.
 
-### 6 — Responsive Design (Required)
+### 6 — Skeleton Loaders (Required)
+
+**Every loading state must have a skeleton that matches the real layout.** Never use a spinner or blank space where cards/lists will appear.
+
+**Rules:**
+- Mirror the real card's padding, border-radius, and inner structure exactly — the skeleton should feel like the content "appearing" rather than replacing a placeholder
+- Use the `.skeleton` CSS class for shimmer animation (defined in `index.css`)
+- Make widths vary per card index so consecutive cards look organic, not identical — use a small lookup array, e.g. `const W = [55, 70, 48, 65, 58, 72]` and index with `W[i % 6]`
+- Use the same CSS grid/layout classes as the real view (e.g. `ops-grid-rings`) so the skeleton occupies the correct space
+- For donut/ring charts: fake a ring with a full circle `skeleton` div + an inner div in `var(--bg-surface)` color for the cutout
+- For progress/fill bars: use a skeleton div at a varying `%` width inside a fixed-height container
+- Export skeletons from the same file as the real components — the skeleton for `OpsViewRings` lives in `DailyOpsViews.tsx`, not a separate file
+- For multi-view pages: one `ViewSkeleton({ view: string })` dispatcher that switches on view key — avoids per-view conditional chains in the parent
+
+**Pattern:**
+```tsx
+const Sk = ({ w, h, r = 6 }: { w: number | string; h: number; r?: number | string }) => (
+  <div className="skeleton" style={{ width: w, height: h, borderRadius: r, flexShrink: 0 }} />
+)
+const W = [55, 70, 48, 65, 58, 72] // vary name bar widths
+
+function SkMyView() {
+  return (
+    <div className="my-grid-class"> {/* same grid class as real view */}
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} style={{ background: GLASS, borderRadius: 16, padding: 18, border: `1px solid ${BORDER}` }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Sk w={34} h={34} r="50%" />          {/* avatar */}
+            <Sk w={`${W[i % 6]}%`} h={13} r={4} /> {/* name */}
+          </div>
+          {/* ... mirror each real element */}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function MyViewSkeleton({ view }: { view: string }) {
+  switch (view) {
+    case 'rings': return <SkRings />
+    // ...
+  }
+}
+```
+
+### 7 — Responsive Design (Required)
 
 **Every page and view must work at mobile (375px), tablet (768px), and desktop (1280px).** This is non-negotiable — implement responsive CSS at the same time as the feature, not as a follow-up.
 

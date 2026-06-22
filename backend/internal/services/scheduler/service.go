@@ -446,16 +446,29 @@ func (s *Service) checkOverdueInProgress(ctx context.Context) {
 			issue.IssueID, issue.IssueSummary, elapsed, threshold, issue.Priority, assigneeStr,
 		)
 
-		notif := &models.Notification{
-			Type:    "warning",
-			Title:   fmt.Sprintf("⏰ Overdue In Progress: %s", issue.IssueID),
-			Message: msg,
+		adminRows, err := database.GetPool().Query(ctx, `SELECT id FROM users WHERE role IN ('admin', 'project_manager')`)
+		if err != nil {
+			log.Printf("[Scheduler] Error finding admin users for overdue alert %s: %v", issue.IssueID, err)
+			continue
 		}
-		if err := s.notifHandler.CreateAndBroadcast(ctx, notif); err != nil {
-			log.Printf("[Scheduler] Error creating overdue notification for %s: %v", issue.IssueID, err)
-		} else {
-			log.Printf("[Scheduler] Overdue alert sent: %s (%.1fh in progress, threshold %.0fh)", issue.IssueID, elapsed, threshold)
+		for adminRows.Next() {
+			var adminID string
+			if err := adminRows.Scan(&adminID); err != nil {
+				continue
+			}
+			notif := &models.Notification{
+				UserID:  adminID,
+				Type:    "warning",
+				Title:   fmt.Sprintf("⏰ Overdue In Progress: %s", issue.IssueID),
+				Message: msg,
+			}
+			if err := s.notifHandler.CreateAndBroadcast(ctx, notif); err != nil {
+				log.Printf("[Scheduler] Error creating overdue notification for %s: %v", issue.IssueID, err)
+			} else {
+				log.Printf("[Scheduler] Overdue alert sent: %s (%.1fh in progress, threshold %.0fh)", issue.IssueID, elapsed, threshold)
+			}
 		}
+		adminRows.Close()
 	}
 }
 
