@@ -187,12 +187,11 @@ function OpsAvatar({ dev, size = 36, glow }: { dev: OpsDev; size?: number; glow?
 
 function OpsHotfixBadge({ count = 1 }: { count?: number }) {
   return (
-    <motion.span animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-      title={`${count} hotfix`}
+    <span title={`${count} hotfix`}
       style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 13,
         filter: 'drop-shadow(0 0 5px rgba(239,68,68,0.7))' }}>
       🔥{count > 1 ? <b style={{ fontSize: 10, color: '#ef4444' }}>{count}</b> : null}
-    </motion.span>
+    </span>
   )
 }
 
@@ -404,13 +403,22 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
             transition={{ strokeDashoffset: { type: 'spring', bounce: 0.05, duration: 1.2, delay: 0.3 + index * 0.06 },
               opacity: hasBlock ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {} }}
             style={{ filter: `drop-shadow(0 0 6px ${ringColor}77)` }} />
+          {/* Overdue ticket indicators — dots on the ring arc */}
+          {dots.map((d, i) => (
+            <motion.circle key={'od' + i} cx={d.x} cy={d.y} r={d.danger ? 6 : 4}
+              fill={d.danger ? '#ef4444' : C.overdue} stroke="var(--bg-base,#0d0d1a)" strokeWidth={2}
+              initial={{ scale: 0 }} animate={{ scale: 1 }}
+              transition={{ delay: 0.9 + i * 0.1, type: 'spring', bounce: 0.4 }}
+              style={{ transformOrigin: `${d.x}px ${d.y}px`,
+                filter: d.danger ? 'drop-shadow(0 0 5px #ef4444)' : 'none' }} />
+          ))}
         </svg>
 
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 5 }}>
           {hasBlock ? (
             <>
-              <motion.div animate={{ opacity: [0.55, 1, 0.55], scale: [1, 1.08, 1] }}
+              <motion.div animate={{ opacity: [0.6, 1, 0.6] }}
                 transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
                 style={{ fontSize: 38, lineHeight: 1, color: C.blocked, fontWeight: 700,
                   filter: 'drop-shadow(0 0 12px #ef4444)' }}>⊘</motion.div>
@@ -418,8 +426,7 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
             </>
           ) : danger.length ? (
             <>
-              <motion.div animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 3, repeat: Infinity }}
-                style={{ fontSize: 28 }}>⚠️</motion.div>
+              <div style={{ fontSize: 28 }}>⚠️</div>
               <span style={{ fontSize: 14, fontWeight: 800, color: C.overdue, letterSpacing: '0.05em' }}>OVERDUE</span>
             </>
           ) : (
@@ -585,10 +592,8 @@ function OpsMissionCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?:
         <motion.div animate={zone.breathe ? { opacity: [0.7, 1, 0.7] } : {}}
           transition={zone.breathe ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {}}
           style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '6px 0' }}>
-          <motion.div animate={zone.breathe ? { scale: [1, 1.1, 1] } : {}}
-            transition={zone.breathe ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {}}
-            style={{ fontSize: zone.big ? 30 : 34, lineHeight: 1, color: zone.c, fontWeight: 800,
-              filter: `drop-shadow(0 0 10px ${zone.c}66)` }}>{zone.icon}</motion.div>
+          <div style={{ fontSize: zone.big ? 30 : 34, lineHeight: 1, color: zone.c, fontWeight: 800,
+            filter: `drop-shadow(0 0 10px ${zone.c}66)` }}>{zone.icon}</div>
           <span style={{ fontSize: 18, fontWeight: 800, color: zone.c, letterSpacing: '0.02em' }}>{zone.word}</span>
           <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 600 }}>{zone.sub}</span>
         </motion.div>
