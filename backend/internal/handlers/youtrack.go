@@ -808,8 +808,13 @@ func (h *YouTrackHandler) ProxyAttachment(w http.ResponseWriter, r *http.Request
 		rawURL = strings.TrimRight(client.GetBaseURL(), "/") + rawURL
 	}
 
-	// Security: only proxy URLs from the configured YouTrack instance
-	if !strings.HasPrefix(rawURL, client.GetBaseURL()) {
+	// Security: only proxy URLs whose host matches the configured YouTrack instance.
+	// String prefix check is NOT sufficient — "http://yt.co.evil.com" passes a prefix
+	// check against "http://yt.co" and leaks the admin token to an attacker's server.
+	parsedRaw, parseErr := url.Parse(rawURL)
+	parsedBase, parseErr2 := url.Parse(client.GetBaseURL())
+	if parseErr != nil || parseErr2 != nil || parsedRaw.Host == "" ||
+		!strings.EqualFold(parsedRaw.Host, parsedBase.Host) || parsedRaw.Scheme != parsedBase.Scheme {
 		http.Error(w, "URL not allowed", http.StatusForbidden)
 		return
 	}
@@ -3107,6 +3112,19 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 // HandleWebhook receives and processes YouTrack webhook events
 // This endpoint does NOT require authentication — called by YouTrack server
 func (h *YouTrackHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
+	// Verify webhook authenticity if a secret is configured.
+	// Set YOUTRACK_WEBHOOK_SECRET to the value you enter in YouTrack → Webhooks → Secret.
+	// YouTrack sends it as a plain Bearer token in the Authorization header.
+	if webhookSecret := os.Getenv("YOUTRACK_WEBHOOK_SECRET"); webhookSecret != "" {
+		authHeader := r.Header.Get("Authorization")
+		expected := "Bearer " + webhookSecret
+		if authHeader != expected {
+			log.Printf("[YouTrack Webhook] Rejected request: bad Authorization header")
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("[YouTrack Webhook] Failed to read body: %v", err)

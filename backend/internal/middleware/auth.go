@@ -21,21 +21,23 @@ const (
 // AuthMiddleware validates JWT token and adds user info to context
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get token from Authorization header
+		// Primary: Authorization header. Fallback: ?token= query param for SSE/EventSource
+		// (browsers cannot set custom headers on EventSource connections).
+		var tokenString string
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
+		if authHeader != "" {
+			parts := strings.Split(authHeader, " ")
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				http.Error(w, `{"success":false,"message":"Invalid authorization format"}`, http.StatusUnauthorized)
+				return
+			}
+			tokenString = parts[1]
+		} else if q := r.URL.Query().Get("token"); q != "" {
+			tokenString = q
+		} else {
 			http.Error(w, `{"success":false,"message":"Authorization header required"}`, http.StatusUnauthorized)
 			return
 		}
-
-		// Check Bearer prefix
-		parts := strings.Split(authHeader, " ")
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			http.Error(w, `{"success":false,"message":"Invalid authorization format"}`, http.StatusUnauthorized)
-			return
-		}
-
-		tokenString := parts[1]
 
 		var user *models.User
 

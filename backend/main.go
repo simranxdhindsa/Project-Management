@@ -539,12 +539,12 @@ func main() {
 	if frontendURL != "" {
 		allowedOrigins = append(allowedOrigins, frontendURL)
 	}
+	isDev := os.Getenv("ENVIRONMENT") == "development"
 	c := cors.New(cors.Options{
 		AllowedOrigins: allowedOrigins,
 		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"Authorization", "Content-Type"},
 		AllowCredentials: true,
-		// Allow any LAN origin (192.168.x.x, 10.x.x.x) for mobile dev testing
 		AllowOriginFunc: func(origin string) bool {
 			if origin == "" {
 				return false
@@ -554,10 +554,15 @@ func main() {
 					return true
 				}
 			}
-			// Allow local network IPs on port 5173 for mobile testing
-			return strings.HasPrefix(origin, "http://192.168.") ||
-				strings.HasPrefix(origin, "http://10.") ||
-				strings.HasPrefix(origin, "http://172.")
+			// LAN IPs only allowed in local development — never in production deploys.
+			// AllowCredentials:true + wildcard LAN would let any page on the company
+			// network make authenticated API calls without user consent.
+			if isDev {
+				return strings.HasPrefix(origin, "http://192.168.") ||
+					strings.HasPrefix(origin, "http://10.") ||
+					strings.HasPrefix(origin, "http://172.")
+			}
+			return false
 		},
 	})
 

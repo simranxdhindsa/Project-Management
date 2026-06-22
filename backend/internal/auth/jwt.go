@@ -2,27 +2,42 @@ package auth
 
 import (
 	"errors"
+	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/dhindsa/project-management/internal/models"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var jwtSecret []byte
+var (
+	jwtSecret []byte
+	jwtOnce   sync.Once
+)
 
-func init() {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		secret = "development-secret-key-change-in-production"
-	}
-	jwtSecret = []byte(secret)
+// getSecret returns the JWT signing key, initializing it lazily on first use.
+// Lazy init is required because godotenv.Load() runs in main.go's init() which
+// fires AFTER sub-package init() functions — so os.Getenv is empty during init().
+func getSecret() []byte {
+	jwtOnce.Do(func() {
+		secret := os.Getenv("JWT_SECRET")
+		if secret == "" {
+			if os.Getenv("ENVIRONMENT") != "development" {
+				log.Fatal("FATAL: JWT_SECRET environment variable must be set in production (min 32 chars)")
+			}
+			// Local development only — Dockerfile sets ENVIRONMENT=production so this never runs in deploys
+			secret = "development-secret-key-change-in-production"
+		}
+		jwtSecret = []byte(secret)
+	})
+	return jwtSecret
 }
 
 // Token duration constants
 const (
-	ShortTokenDuration = 24 * time.Hour       // 1 day for non-remember-me
-	LongTokenDuration  = 30 * 24 * time.Hour  // 30 days for remember-me
+	ShortTokenDuration = 24 * time.Hour      // 1 day for non-remember-me
+	LongTokenDuration  = 30 * 24 * time.Hour // 30 days for remember-me
 )
 
 // CustomClaims extends jwt.RegisteredClaims with user info
@@ -61,7 +76,7 @@ func GenerateTokenWithDuration(user *models.User, rememberMe bool) (string, erro
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	return token.SignedString(getSecret())
 }
 
 // ValidateToken verifies a JWT token and returns the claims
@@ -70,7 +85,7 @@ func ValidateToken(tokenString string) (*CustomClaims, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
-		return jwtSecret, nil
+		return getSecret(), nil
 	})
 
 	if err != nil {
@@ -92,14 +107,12 @@ func RefreshToken(tokenString string) (string, error) {
 		return "", err
 	}
 
-	// Create a new user from claims to generate fresh token
 	user := &models.User{
 		ID:    claims.UserID,
 		Email: claims.Email,
 		Role:  claims.Role,
 	}
 
-	// Preserve the remember_me setting - this resets the 30-day timer
 	return GenerateTokenWithDuration(user, claims.RememberMe)
 }
 
@@ -116,4 +129,3 @@ func GetTokenRemainingTime(tokenString string) (time.Duration, error) {
 
 	return time.Until(claims.ExpiresAt.Time), nil
 }
-

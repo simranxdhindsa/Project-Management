@@ -609,7 +609,7 @@ export default function Dashboard() {
       {/* Sidebar */}
       <aside className={`sidebar animate-slide-in-left${sidebarOpen ? ' open' : ''}`}>
         <div className="sidebar-logo">
-          <VelocityLogo variant="sidebar" size="sm" showStatusDot={true} mark="glitch" />
+          <VelocityLogo variant="sidebar" size="sm" showStatusDot={true} mark="chevron" />
         </div>
 
         <nav className="sidebar-nav">
