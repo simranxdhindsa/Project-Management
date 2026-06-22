@@ -950,7 +950,7 @@ export function OpsViewStrips({ devStats, ctx }: { devStats: DevStatLike[]; ctx?
   const devs = [...devStats.map(adaptDev)].sort((a, b) => opsUrgencyRank(b) - opsUrgencyRank(a))
   return (
     <div>
-      <OpsHead title="Developer Pulse Strips" tagline="Each segment = one ticket. ID + time shown inside. Red = blocked, amber = stuck 16h+, blue = active, green = done today." />
+      <OpsHead title="Developer Pulse Strips" tagline="Each bar segment = one ticket. ID + time shown inside. Hover any card for full breakdown." />
       <motion.div className="ops-strips-container" variants={{ show: { transition: { staggerChildren: 0.09 } } }} initial="hidden" animate="show">
         {devs.map(dev => <OpsStripCard key={dev.name} dev={dev} ctx={ctx} />)}
       </motion.div>

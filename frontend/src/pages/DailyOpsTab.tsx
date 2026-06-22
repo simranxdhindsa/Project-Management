@@ -397,6 +397,22 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
               {v.label}
             </button>
           ))}
+          {opsView === 'strips' && (
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14, paddingLeft: 20, flexShrink: 0 }}>
+              {([
+                ['#f87171', 'Blocked'],
+                ['#fbbf24', 'Stuck 16h+'],
+                ['#60a5fa', 'Active'],
+                ['#4ade80', 'Done today'],
+                ['rgba(255,255,255,0.28)', 'Queued'],
+              ] as [string, string][]).map(([c, label]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 2, background: c, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, whiteSpace: 'nowrap' }}>{label}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Sprint summary bar — load view only */}
