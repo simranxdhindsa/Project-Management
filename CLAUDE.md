@@ -220,6 +220,8 @@ One CSS file per subtab/view + one shared base file. Never put all subtab styles
 - `styles/pages/integrations.css` — Integrations page
 - `styles/pages/pm-features.css` — Velocity + Burndown charts (`.pmf-*`)
 - `styles/pages/dev-activity-base.css` + `dev-activity-{feed,cards,log,heatmap,report}.css` — Dev Activity 5 subtabs
+- `styles/pages/sprint-pulse.css` — Sprint Pulse base (Views A/C/1/4, shared pills/cards, kanban)
+- `styles/pages/sprint-pulse-live.css` — Sprint Pulse Live view (`.slv-*`, counters, animations) — imported by `SprintPulseLive.tsx`
 - `index.css` — global shared classes
 
 When adding a new multi-subtab page: `<page>-base.css` + one `<page>-<subtab>.css` per view. Import all in the page component and in `index.css`.
@@ -285,7 +287,40 @@ Rules:
 - [ ] Tablet (768px): 2 columns, no overflow
 - [ ] Mobile (375px): 1 column, tab bar scrollable, no horizontal scroll on page
 
-### 7 — Shared Components First
+### 7 — File Size Limits
+
+**No single file should exceed 700 lines.** If a file grows past 500 lines, plan a split at the next natural boundary.
+
+**Rules:**
+- TSX pages: extract view components into `<Page>Views.tsx`, `<Page>Live.tsx`, etc.; keep the main `<Page>.tsx` to state + routing only (~300 lines)
+- Shared types + pure helpers (no JSX): extract to `<page>-types.ts` (no React dependency)
+- CSS: one file per view group, not one file per page. Sprint Pulse example: `sprint-pulse.css` (base/views) + `sprint-pulse-live.css` (live view)
+- When a file is split, update the CSS file map in section 5 above
+
+**Sprint Pulse file map (reference):**
+```
+pages/
+  sprint-pulse-types.ts       — types + pure helpers (~100 lines)
+  SprintPulseShared.tsx        — shared mini-components (Avatar, Pills, IssueCard) (~130 lines)
+  SprintPulseKanban.tsx        — View A + View P kanban (~330 lines)
+  SprintPulseOtherViews.tsx    — View C, View 1, View 4 + skeletons (~420 lines)
+  SprintPulseLive.tsx          — Live view + SkLive (~575 lines)
+  SprintPulsePage.tsx          — main page (state, routing) (~340 lines)
+```
+
+### 8 — Memory Leak Prevention
+
+**Never use `motion.div` (framer-motion) per list item in lists with 10+ items.** Each `motion.div` creates an animation state machine, velocity tracker, and RAF subscriber. 50 items × this overhead = hundreds of MB.
+
+**Rules:**
+- **Lists** → use CSS `@keyframes` + `.slv-anim-item:nth-child(n)` stagger (zero JS overhead, browser compositor handles it). Classes `.slv-anim-item` and `.slv-anim-section` are defined in `sprint-pulse-live.css`.
+- **Single elements** (progress bar, badge) → `motion.div` is fine — the overhead is negligible for 1-2 instances.
+- **Never define a component function inside another component's function body** — it recreates the function reference on every render, breaks React reconciliation, and prevents memoisation. Always hoist to module level.
+- **Wrap list-item components in `React.memo`** — prevents re-renders when parent re-renders with same props.
+- **`will-change: transform`** — set only during active drag (`isDragging ? 'transform' : undefined`). Leaving it set at rest forces the browser to hold a compositor layer permanently.
+- **`AnimatePresence`** — use sparingly. For conditional single elements prefer a CSS fade class; `AnimatePresence` on lists of 10+ items is expensive.
+
+### 9 — Shared Components First
 
 **Before writing any UI pattern inline, check `frontend/src/components/` for an existing shared component.**
 
