@@ -356,11 +356,24 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
     return parts.join(' ')
   })()
 
-  const dots = overdue.map((o, i) => {
-    const frac = (donePct / 100) * (0.2 + i * 0.18)
+  // Dots include 8h+ (watch) items too — overdue already has 16h+, add watch separately
+  const watchIssues = dev.activeIssues.filter(a => a.hoursInState >= WATCH && a.hoursInState < WARN)
+  const allDotIssues = [...overdue, ...watchIssues]
+
+  const dots = allDotIssues.map((o, i) => {
+    const frac = 0.08 + i * (0.84 / Math.max(allDotIssues.length, 1))
     const ang  = -90 + frac * 360
     const rad  = (ang * Math.PI) / 180
-    return { x: cx + Math.cos(rad) * r, y: cy + Math.sin(rad) * r, danger: o.hoursInState >= DANGER }
+    const svgX = cx + Math.cos(rad) * r
+    const svgY = cy + Math.sin(rad) * r
+    // Screen coords after CSS rotate(-90deg) around center: sx = svgY, sy = size - svgX
+    return {
+      x: svgX, y: svgY,
+      sx: svgY, sy: size - svgX,
+      danger:  o.hoursInState >= DANGER,
+      warn:    o.hoursInState >= WARN,
+      issue:   o,
+    }
   })
 
   const urgent = [
@@ -403,16 +416,63 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
             transition={{ strokeDashoffset: { type: 'spring', bounce: 0.05, duration: 1.2, delay: 0.3 + index * 0.06 },
               opacity: hasBlock ? { duration: 2.5, repeat: Infinity, ease: 'easeInOut' } : {} }}
             style={{ filter: `drop-shadow(0 0 6px ${ringColor}77)` }} />
-          {/* Overdue ticket indicators — dots on the ring arc */}
-          {dots.map((d, i) => (
-            <motion.circle key={'od' + i} cx={d.x} cy={d.y} r={d.danger ? 6 : 4}
-              fill={d.danger ? '#ef4444' : C.overdue} stroke="var(--bg-base,#0d0d1a)" strokeWidth={2}
-              initial={{ scale: 0 }} animate={{ scale: 1 }}
-              transition={{ delay: 0.9 + i * 0.1, type: 'spring', bounce: 0.4 }}
-              style={{ transformOrigin: `${d.x}px ${d.y}px`,
-                filter: d.danger ? 'drop-shadow(0 0 5px #ef4444)' : 'none' }} />
-          ))}
+          {/* Stuck / watch ticket dots on the ring arc */}
+          {dots.map((d, i) => {
+            const dotR  = d.danger ? 6 : d.warn ? 5 : 4
+            const fill  = d.danger ? '#ef4444' : d.warn ? C.overdue : 'rgba(148,163,184,0.6)'
+            const glow  = d.danger ? 'drop-shadow(0 0 5px #ef4444)' : d.warn ? `drop-shadow(0 0 4px ${C.overdue})` : 'none'
+            return (
+              <motion.circle key={'od' + i} cx={d.x} cy={d.y} r={dotR}
+                fill={fill} stroke="var(--bg-base,#0d0d1a)" strokeWidth={2}
+                initial={{ scale: 0 }} animate={{ scale: 1 }}
+                transition={{ delay: 0.9 + i * 0.1, type: 'spring', bounce: 0.4 }}
+                style={{ transformOrigin: `${d.x}px ${d.y}px`, filter: glow }} />
+            )
+          })}
         </svg>
+
+        {/* Invisible click/hover targets aligned to each dot's screen position */}
+        {dots.map((d, i) => {
+          const hitSize = 22
+          const hoverContent = (
+            <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+              <div style={{ fontWeight: 700, color: d.danger ? '#ef4444' : d.warn ? C.overdue : 'var(--text-muted)', marginBottom: 4 }}>
+                {d.danger ? '🔴 DANGER — 48h+' : d.warn ? '🟡 STUCK — 16h+' : '◎ WATCH — 8h+'}
+              </div>
+              <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>{d.issue.id}</div>
+              <div style={{ color: 'var(--text-secondary)', marginBottom: 4, fontSize: 11 }}>{d.issue.summary}</div>
+              <div style={{ color: 'var(--text-muted)' }}>
+                In this state: <strong style={{ color: d.danger ? '#ef4444' : d.warn ? C.overdue : 'var(--text-primary)' }}>
+                  {opsFmtHours(d.issue.hoursInState)}
+                </strong>
+              </div>
+              {d.issue.hoursSpent && d.issue.hoursSpent > 0 && (
+                <div style={{ color: 'var(--text-muted)' }}>
+                  Total dev time: <strong style={{ color: 'var(--text-primary)' }}>{opsFmtHours(d.issue.hoursSpent)}</strong>
+                </div>
+              )}
+              {ctx && (
+                <div style={{ marginTop: 6, fontSize: 10, color: 'var(--color-primary)' }}>Click to open ticket ↗</div>
+              )}
+            </div>
+          )
+          return (
+            <HoverCard key={'dot-hit-' + i} content={hoverContent} maxWidth={220} delay={180}>
+              <div
+                onClick={(e) => { e.stopPropagation(); ctx?.onOpenDetail(d.issue.id) }}
+                style={{
+                  position: 'absolute',
+                  left: d.sx - hitSize / 2,
+                  top:  d.sy - hitSize / 2,
+                  width: hitSize, height: hitSize,
+                  borderRadius: '50%',
+                  cursor: ctx ? 'pointer' : 'default',
+                  zIndex: 10,
+                }}
+              />
+            </HoverCard>
+          )
+        })}
 
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
           alignItems: 'center', justifyContent: 'center', gap: 5 }}>
@@ -442,7 +502,13 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
                   )
                 })}
               </div>
-              <span style={{ fontSize: 11, fontWeight: 700, color: C.done, marginTop: 4 }}>on track</span>
+              <motion.span
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.0 }}
+                style={{ fontSize: 22, fontWeight: 800, color: C.done, lineHeight: 1, marginTop: 2 }}
+              >
+                {Math.round(donePct)}%
+              </motion.span>
+              <span style={{ fontSize: 9, fontWeight: 700, color: C.done, letterSpacing: '0.06em', marginTop: 1 }}>on track</span>
             </>
           )}
         </div>
@@ -472,11 +538,42 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
   )
 }
 
+const RING_LEGEND: { color: string; fill?: boolean; label: string; sub: string }[] = [
+  { color: '#4ade80', fill: true,  label: 'Ring fill',      sub: '% of sprint done' },
+  { color: '#4ade80', fill: true,  label: 'Green ring',     sub: 'on track' },
+  { color: '#fbbf24', fill: true,  label: 'Amber ring',     sub: 'ticket stuck 16h+' },
+  { color: '#ef4444', fill: true,  label: 'Red ring',       sub: 'developer blocked' },
+  { color: '#ef4444', fill: true,  label: '● Red dot',      sub: 'stuck 48h+ (danger)' },
+  { color: '#fbbf24', fill: true,  label: '● Amber dot',    sub: 'stuck 16h+ (warn)' },
+  { color: 'rgba(148,163,184,0.7)', fill: false, label: '○ Grey dot', sub: 'idle 8h+ (watch)' },
+  { color: 'rgba(255,255,255,0.25)', fill: true, label: 'Ring gap',   sub: 'blocked ticket (one gap each)' },
+]
+
 export function OpsViewRings({ devStats, ctx }: { devStats: DevStatLike[]; ctx?: OpsCtx }) {
   const devs = devStats.map(adaptDev)
   return (
     <div>
-      <OpsHead title="Health Rings" tagline="Ring fill = % done · ring color = worst status · hover any card for full ticket breakdown." />
+      <OpsHead title="Health Rings" tagline="Hover any dot on the ring to see the stuck ticket. Click to open it." />
+
+      {/* Legend strip */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: '6px 18px', marginBottom: 20,
+        padding: '10px 14px', borderRadius: 8,
+        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+      }}>
+        {RING_LEGEND.map(({ color, fill, label, sub }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{
+              width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+              background: fill ? color : 'transparent',
+              border: fill ? 'none' : `2px solid ${color}`,
+            }} />
+            <span style={{ fontSize: 11, color: 'var(--text-primary)', fontWeight: 600 }}>{label}</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>= {sub}</span>
+          </div>
+        ))}
+      </div>
+
       <motion.div className="ops-grid-rings" variants={{ show: { transition: { staggerChildren: 0.08 } } }} initial="hidden" animate="show">
         {devs.map((dev, i) => <OpsRingCard key={dev.name} dev={dev} index={i} ctx={ctx} />)}
       </motion.div>
