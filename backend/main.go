@@ -226,6 +226,14 @@ func main() {
 	taskYouTrackRoutes.Use(middleware.AuthMiddleware)
 	taskYouTrackRoutes.HandleFunc("/sync", youtrackHandler.SyncTaskToYouTrack).Methods("POST")
 
+	// Ignored blocked tickets (park/unpark per user)
+	ignoredBlockedHandler := handlers.NewIgnoredBlockedHandler()
+	ignoredBlockedRoutes := api.PathPrefix("/ignored-blocked").Subrouter()
+	ignoredBlockedRoutes.Use(middleware.AuthMiddleware)
+	ignoredBlockedRoutes.HandleFunc("", ignoredBlockedHandler.GetIgnored).Methods("GET")
+	ignoredBlockedRoutes.HandleFunc("", ignoredBlockedHandler.IgnoreTicket).Methods("POST")
+	ignoredBlockedRoutes.HandleFunc("/{issue_id}", ignoredBlockedHandler.UnignoreTicket).Methods("DELETE")
+
 	// Changelog handler
 	changelogHandler := handlers.NewChangelogHandler()
 	changelogRoutes := api.PathPrefix("/changelog").Subrouter()

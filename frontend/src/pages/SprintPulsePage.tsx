@@ -3,6 +3,7 @@ import api from '@/services/api'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
 import { IssueDetailPanel } from '@/components/IssueDetailPanel'
 import { SprintControlsBar } from '@/components/SprintControlsBar'
+import { useIgnoredBlocked } from '@/contexts/IgnoredBlockedContext'
 import type {
   YouTrackSprint,
   SprintBoardStatusResponse,
@@ -24,6 +25,7 @@ import { VIEW_MODES, ViewLive, SkLive } from './SprintPulseLive'
 
 export function SprintPulsePage() {
   const { config: wfConfig } = useWorkflowConfig()
+  const { ignoredIds } = useIgnoredBlocked()
 
   const [sprints,         setSprints]        = useState<YouTrackSprint[]>([])
   const [activeSprint,    setActiveSprint]    = useState<YouTrackSprint | null>(null)
@@ -118,17 +120,20 @@ export function SprintPulsePage() {
       const colRole = roleMap.get(col.name.toLowerCase()) || ''
       const isDone  = DONE_ROLES.has(colRole)
       for (const iss of col.issues) {
+        const stageGroup = mapStage(colRole)
+        // Skip blocked tickets the user has parked
+        if (stageGroup === 'blocked' && ignoredIds.has(iss.idReadable)) continue
         result.push({
           ...iss,
-          tier:       classifyTier(iss),
+          tier: classifyTier(iss),
           colRole,
-          stageGroup: mapStage(colRole),
+          stageGroup,
           isDone,
         })
       }
     }
     return result
-  }, [boardData, roleMap])
+  }, [boardData, roleMap, ignoredIds])
 
   const stageCounts = useMemo<StageCounts>(() => ({
     active:   allIssues.filter(i => i.stageGroup === 'active').length,

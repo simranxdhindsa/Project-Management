@@ -481,12 +481,34 @@
 
 .slv-attn-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   padding: 4px 0;
   cursor: default;
 }
 .slv-attn-row:hover { background: rgba(255,255,255,0.02); margin: 0 -14px; padding: 4px 14px; border-radius: 4px; }
+.slv-attn-row--parkable { position: relative; }
+
+/* Park button — visible on row hover */
+.slv-park-btn {
+  display: none;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 99px;
+  border: 1px solid rgba(239,68,68,0.3);
+  background: rgba(239,68,68,0.08);
+  color: var(--color-danger);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.slv-park-btn:hover { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.5); }
+.slv-attn-row--parkable:hover .slv-park-btn { display: flex; }
 
 .slv-attn-title {
   font-size: 11px;

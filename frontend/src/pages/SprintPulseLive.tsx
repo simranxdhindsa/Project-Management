@@ -1,11 +1,12 @@
 import React, { useMemo, memo } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import HoverCard from '@/components/HoverCard'
+import { useIgnoredBlocked } from '@/contexts/IgnoredBlockedContext'
 import type { SprintBoardStatusResponse, YouTrackSprint, DeveloperLoad } from '@/services/api'
 import type { ModeOption } from '@/components/SprintControlsBar'
 import {
   Activity, LayoutGrid, Tag, Layers, AlignLeft, BarChart2,
-  CheckCircle2, AlertTriangle, Clock,
+  CheckCircle2, AlertTriangle, Clock, Archive,
 } from 'lucide-react'
 import { fmtHours, dangerLevel, type PulseIssue } from './sprint-pulse-types'
 import { Sk, SK_W } from './SprintPulseShared'
@@ -101,15 +102,24 @@ export const AttentionRow = memo(function AttentionRow({
   iss,
   onTitleClick,
   onIdClick,
+  onPark,
 }: {
   iss: PulseIssue
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
+  onPark?: (id: string) => void
 }) {
   return (
-    <div className="slv-anim-item">
+    <motion.div
+      layout
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.18 }}
+      className="slv-anim-item"
+    >
       <HoverCard content={buildFeedHoverContent(iss)} delay={250}>
-        <div className="slv-attn-row">
+        <div className={`slv-attn-row${onPark ? ' slv-attn-row--parkable' : ''}`}>
           <span
             className="spl-ticket-id"
             style={{ fontSize: 11, flexShrink: 0 }}
@@ -120,9 +130,19 @@ export const AttentionRow = memo(function AttentionRow({
             onClick={(e) => onTitleClick(iss.idReadable, e)}
           >{iss.summary}</span>
           <span className="slv-attn-meta">{fmtHours(iss.hours_in_state)}</span>
+          {onPark && (
+            <button
+              className="slv-park-btn"
+              title="Park this blocked ticket (hide from all views)"
+              onClick={(e) => { e.stopPropagation(); onPark(iss.idReadable) }}
+            >
+              <Archive size={10} />
+              Park
+            </button>
+          )}
         </div>
       </HoverCard>
-    </div>
+    </motion.div>
   )
 })
 
@@ -290,6 +310,7 @@ export const LiveAttention = memo(function LiveAttention({
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
 }) {
+  const { ignoreTicket } = useIgnoredBlocked()
   const blocked    = allIssues.filter(i => i.stageGroup === 'blocked').sort((a, b) => b.hours_in_state - a.hours_in_state)
   const stuck      = allIssues.filter(i => i.stageGroup === 'active' && i.hours_in_state >= 16 && !i.isDone).sort((a, b) => b.hours_in_state - a.hours_in_state)
   const hotfixes   = allIssues.filter(i => i.is_hotfix && !i.isDone)
@@ -314,7 +335,17 @@ export const LiveAttention = memo(function LiveAttention({
       {blocked.length > 0 && (
         <div className="slv-attn-section slv-attn-section--blocked">
           <div className="slv-attn-section-hd">⛔ Blocked now <span className="slv-attn-count">{blocked.length}</span></div>
-          {blocked.map((i) => <AttentionRow key={i.id} iss={i} onTitleClick={onTitleClick} onIdClick={onIdClick} />)}
+          <AnimatePresence initial={false}>
+            {blocked.map((i) => (
+              <AttentionRow
+                key={i.id}
+                iss={i}
+                onTitleClick={onTitleClick}
+                onIdClick={onIdClick}
+                onPark={ignoreTicket}
+              />
+            ))}
+          </AnimatePresence>
         </div>
       )}
       {hotfixes.length > 0 && (

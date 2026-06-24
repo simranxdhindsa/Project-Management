@@ -9,6 +9,7 @@ import {
   Pause,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useIgnoredBlocked } from '@/contexts/IgnoredBlockedContext'
 import api from '@/services/api'
 import type { YouTrackSprint, SprintBoardStatusResponse } from '@/services/api'
 import '@/styles/components/stat-carousel.css'
@@ -48,6 +49,7 @@ function formatCountdown(daysLeft: number, hoursLeft: number): { main: string; s
 
 export function StatCarousel({ onNavigate }: StatCarouselProps) {
   const { user } = useAuth()
+  const { ignoredIds } = useIgnoredBlocked()
   const [index, setIndex] = useState(0)
   const [paused, setPaused] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -126,7 +128,7 @@ export function StatCarousel({ onNavigate }: StatCarouselProps) {
             hoursLeft,
             sprintName,
             sprintFinishMs,
-            blockedCount: summary.blocked_count,
+            blockedCount: Math.max(0, summary.blocked_count - ignoredIds.size),
             completionPct: summary.completion_pct,
             doneIssues: summary.done_issues,
             totalIssues: summary.total_issues,

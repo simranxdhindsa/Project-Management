@@ -1755,6 +1755,22 @@ class ApiService {
     const qs = sprintId ? `?sprint_id=${encodeURIComponent(sprintId)}` : ''
     return this.request<FeatureGroup[]>(`/youtrack/feature-groups${qs}`)
   }
+
+  // ── Ignored blocked tickets ──────────────────────────────────────────────────
+  async getIgnoredBlocked() {
+    return this.request<string[]>('/ignored-blocked')
+  }
+
+  async ignoreBlockedTicket(issueId: string) {
+    return this.request<void>('/ignored-blocked', {
+      method: 'POST',
+      body: JSON.stringify({ issue_id: issueId }),
+    })
+  }
+
+  async unignoreBlockedTicket(issueId: string) {
+    return this.request<void>(`/ignored-blocked/${encodeURIComponent(issueId)}`, { method: 'DELETE' })
+  }
 }
 
 // Types

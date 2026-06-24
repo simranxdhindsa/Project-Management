@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   RefreshCw, CheckCircle, Clock, AlertTriangle, TrendingDown, Users,
-  GitBranch, ChevronDown, Check, X,
+  GitBranch, ChevronDown, Check, X, Archive, RotateCcw,
 } from 'lucide-react'
+import { useIgnoredBlocked } from '@/contexts/IgnoredBlockedContext'
 import { api } from '../services/api'
 import type { SprintBoardColumn, SprintBoardIssue, YouTrackSprint, YouTrackIssue } from '../services/api'
 import { useWorkflowConfig } from '../hooks/useWorkflowConfig'
@@ -193,6 +195,7 @@ function Avatar({ url, name }: { url: string; name: string }) {
 
 export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
   const wfConfig = useWorkflowConfig()
+  const { ignoredIds, ignoredList, ignoreTicket, unignoreTicket, unignoreAll } = useIgnoredBlocked()
   const [columns, setColumns] = useState<SprintBoardColumn[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -295,8 +298,9 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
           // Done Today = only dev_done (developer pushed to Dev/Mobile Done today).
           // since_date on verified/deployed tickets reflects QA/devops action time, not dev action time.
           if (role === 'dev_done' && isToday(issue.since_date)) stat.doneTodayIssues.push(issue)
-        } else if (isBlocked) stat.blockedIssues.push(issue)
-        else if (isActive)  stat.activeIssues.push(issue)
+        } else if (isBlocked) {
+          if (!ignoredIds.has(issue.idReadable)) stat.blockedIssues.push(issue)
+        } else if (isActive)  stat.activeIssues.push(issue)
         else if (isQueued)  stat.queuedIssues.push(issue)
 
         if ((isActive || isQueued) && issue.is_delayed) stat.overdueIssues.push(issue)
@@ -313,7 +317,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
         if (a.blockedIssues.length !== b.blockedIssues.length) return b.blockedIssues.length - a.blockedIssues.length
         return b.activeIssues.length - a.activeIssues.length
       })
-  }, [columns, columnRoleMap])
+  }, [columns, columnRoleMap, ignoredIds])
 
   // Side-effect: notify parent of blocked IDs — kept out of useMemo
   useEffect(() => {
@@ -414,6 +418,48 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
             </div>
           )}
         </div>
+
+        {/* Ignored / parked blocked tickets shelf */}
+        <AnimatePresence>
+          {ignoredList.length > 0 && (
+            <motion.div
+              className="do-ignored-shelf"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.22 }}
+            >
+              <Archive size={12} className="do-ignored-shelf-icon" />
+              <span className="do-ignored-shelf-label">
+                {ignoredList.length} parked
+              </span>
+              <div className="do-ignored-shelf-pills">
+                {ignoredList.slice(0, 8).map(id => (
+                  <motion.button
+                    key={id}
+                    layout
+                    className="do-ignored-pill"
+                    onClick={() => unignoreTicket(id)}
+                    title={`Restore ${id} to blocked view`}
+                    initial={{ opacity: 0, scale: 0.85 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.85 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <RotateCcw size={9} />
+                    {id}
+                  </motion.button>
+                ))}
+                {ignoredList.length > 8 && (
+                  <span className="do-ignored-more">+{ignoredList.length - 8} more</span>
+                )}
+              </div>
+              <button className="do-ignored-restore-all" onClick={unignoreAll}>
+                Restore all
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Sprint summary bar — load view only */}
         {opsView === 'load' && !loading && devStats.length > 0 && (
@@ -644,25 +690,45 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                   </div>
                 )}
 
-                {/* Blocked issues preview */}
+                {/* Blocked issues preview — with Park (×) button on hover */}
                 {dev.blockedIssues.length > 0 && (
                   <div className="do-dev-issues do-dev-issues--blocked">
                     <div className="dl-section-label">
                       <span>Blocked</span>
                       <span className="dl-section-count dl-section-count--blocked">{dev.blockedIssues.length}</span>
                     </div>
-                    {dev.blockedIssues.map(iss => (
-                      <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
-                        <div className="do-dev-issue-row do-priority-p0">
-                          <span className="do-prio-dot do-prio-dot--p0" />
-                          <span className="do-issue-id do-issue-id--link"
-                            onClick={(e) => openInYouTrack(iss.idReadable, e)}>{iss.idReadable}</span>
-                          <span className="do-issue-summary do-issue-summary--clickable"
-                            onClick={(e) => openYtIssue(iss.idReadable, e)}>{iss.summary}</span>
-                          <span className="do-blocker-badge">Blocked</span>
-                        </div>
-                      </HoverCard>
-                    ))}
+                    <AnimatePresence initial={false}>
+                      {dev.blockedIssues.map(iss => (
+                        <motion.div
+                          key={iss.idReadable}
+                          layout
+                          initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                          animate={{ opacity: 1, height: 'auto', marginBottom: 2 }}
+                          exit={{ opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.18 } }}
+                          transition={{ duration: 0.2 }}
+                          className="do-blocked-row-wrap"
+                        >
+                          <HoverCard content={ticketHoverContent(iss)} maxWidth={280}>
+                            <div className="do-dev-issue-row do-priority-p0 do-blocked-parkable">
+                              <span className="do-prio-dot do-prio-dot--p0" />
+                              <span className="do-issue-id do-issue-id--link"
+                                onClick={(e) => openInYouTrack(iss.idReadable, e)}>{iss.idReadable}</span>
+                              <span className="do-issue-summary do-issue-summary--clickable"
+                                onClick={(e) => openYtIssue(iss.idReadable, e)}>{iss.summary}</span>
+                              <span className="do-blocker-badge">Blocked</span>
+                              <button
+                                className="do-park-btn"
+                                title="Park this blocked ticket (hide from all views)"
+                                onClick={(e) => { e.stopPropagation(); ignoreTicket(iss.idReadable) }}
+                              >
+                                <Archive size={11} />
+                                Park
+                              </button>
+                            </div>
+                          </HoverCard>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
                   </div>
                 )}
 

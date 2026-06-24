@@ -3,6 +3,7 @@ import { useEffect, Suspense } from 'react'
 import { SvgVDrawLoader } from '@/components/brand/VelocityLoaders'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { VelocityDataProvider } from '@/contexts/VelocityDataContext'
+import { IgnoredBlockedProvider } from '@/contexts/IgnoredBlockedContext'
 import { GatewayErrorProvider, useGatewayError, GatewayError } from '@/contexts/GatewayErrorContext'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
@@ -46,7 +47,9 @@ function AppContent() {
 
   return isAuthenticated ? (
     <VelocityDataProvider>
-      <Dashboard />
+      <IgnoredBlockedProvider>
+        <Dashboard />
+      </IgnoredBlockedProvider>
     </VelocityDataProvider>
   ) : <Login />
 }

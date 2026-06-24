@@ -1053,6 +1053,16 @@ WHERE bot_type = 'ticket_parser'`,
 		`CREATE INDEX IF NOT EXISTS idx_sprint_alerts_user_id ON sprint_alerts(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sprint_alerts_active ON sprint_alerts(user_id, dismissed_at) WHERE dismissed_at IS NULL`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS changelog_seen_at TIMESTAMP WITH TIME ZONE`,
+
+		// Per-user parked (ignored) blocked tickets — global across all PM views
+		`CREATE TABLE IF NOT EXISTS user_ignored_blocked_tickets (
+			id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+			user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			issue_id   VARCHAR(255) NOT NULL,
+			ignored_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			UNIQUE(user_id, issue_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_uibt_user ON user_ignored_blocked_tickets(user_id)`,
 	}
 
 	for i, migration := range migrations {
