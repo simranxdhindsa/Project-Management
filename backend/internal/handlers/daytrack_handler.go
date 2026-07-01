@@ -639,6 +639,7 @@ func (h *DayTrackHandler) DeleteCategory(w http.ResponseWriter, r *http.Request)
 
 // daytracBuildSlackSections builds structured sections from DayTrack entries for Slack posting.
 // Uses original category names as-is and correctly separates yt-tested entries into "Tickets Tested".
+// Subtasks are rendered as indented nested bullets (◦) under their parent.
 func daytracBuildSlackSections(entries []database.DayTrackEntry, displayName string) PersonUpdate {
 	skipCat := map[string]bool{
 		"sign in": true, "sign off": true, "signing in": true, "signing off": true,
@@ -646,12 +647,20 @@ func daytracBuildSlackSections(entries []database.DayTrackEntry, displayName str
 		"break": true, "breaks": true,
 	}
 
+	// Build parent → subtasks lookup first
+	subtaskMap := map[string][]database.DayTrackEntry{}
+	for _, e := range entries {
+		if e.ParentEntryID != nil && *e.ParentEntryID != "" {
+			subtaskMap[*e.ParentEntryID] = append(subtaskMap[*e.ParentEntryID], e)
+		}
+	}
+
 	sectionMap := map[string][]string{}
 	var order []string
 
 	for _, e := range entries {
 		if e.ParentEntryID != nil && *e.ParentEntryID != "" {
-			continue
+			continue // rendered under parent below
 		}
 		cat := strings.ToLower(strings.TrimSpace(e.Category))
 		if skipCat[cat] {
@@ -669,9 +678,18 @@ func daytracBuildSlackSections(entries []database.DayTrackEntry, displayName str
 		if _, seen := sectionMap[sec]; !seen {
 			order = append(order, sec)
 		}
+
 		item := e.Name
 		if e.Notes != "" {
 			item += " — " + e.Notes
+		}
+		// Append subtasks as indented nested bullets
+		for _, sub := range subtaskMap[e.ID] {
+			subLine := "\n    ◦ " + sub.Name
+			if sub.Notes != "" {
+				subLine += " — " + sub.Notes
+			}
+			item += subLine
 		}
 		sectionMap[sec] = append(sectionMap[sec], item)
 	}
