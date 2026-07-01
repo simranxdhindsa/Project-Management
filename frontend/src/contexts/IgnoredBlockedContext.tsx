@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import api from '@/services/api'
 
 interface IgnoredBlockedCtx {
@@ -48,9 +48,11 @@ export function IgnoredBlockedProvider({ children }: { children: React.ReactNode
     }
   }, [ignoredList])
 
+  const ignoredIds = useMemo(() => new Set(ignoredList), [ignoredList])
+
   return (
     <IgnoredBlockedContext.Provider value={{
-      ignoredIds: new Set(ignoredList),
+      ignoredIds,
       ignoredList,
       ignoreTicket,
       unignoreTicket,
@@ -65,4 +67,8 @@ export function useIgnoredBlocked() {
   const ctx = useContext(IgnoredBlockedContext)
   if (!ctx) throw new Error('useIgnoredBlocked must be used within IgnoredBlockedProvider')
   return ctx
+}
+
+export function useIgnoredBlockedSafe() {
+  return useContext(IgnoredBlockedContext)
 }

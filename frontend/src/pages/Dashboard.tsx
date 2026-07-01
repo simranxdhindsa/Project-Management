@@ -13,6 +13,7 @@ import {
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/contexts/AuthContext'
 import { StatCarousel } from '@/components/StatCarousel'
+import WorldClock from '@/components/WorldClock'
 import { PERSIST } from '@/hooks/usePersistedState'
 import api from '@/services/api'
 import { ConfirmModal } from '@/components/ConfirmModal'
@@ -806,6 +807,7 @@ export default function Dashboard() {
             {currentPage === 'daytrack' && 'DayTrack'}
             {currentPage === 'theme' && 'Theme'}
           </h1>
+          <WorldClock />
         </div>
         <div className="header-center">
           <StatCarousel onNavigate={(target) => {

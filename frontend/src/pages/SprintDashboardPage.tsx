@@ -16,6 +16,7 @@ import type { ModeOption } from '@/components/SprintControlsBar'
 import { SprintPulseView } from './SprintRadarPage'
 import HoverCard, { HCRow, HCDivider, HCBadge, HCBar } from '@/components/HoverCard'
 import { useWorkflowConfig } from '@/hooks/useWorkflowConfig'
+import { useIgnoredBlocked } from '@/contexts/IgnoredBlockedContext'
 import '../styles/pages/dashboard.css'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -956,6 +957,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
   const [showAllAtRisk, setShowAllAtRisk] = useState(false)
   const [showAllDelay, setShowAllDelay] = useState(false)
 
+  const { ignoredIds } = useIgnoredBlocked()
   const { config: wfConfig } = useWorkflowConfig()
   const columnRoleMap = useMemo(() => {
     const m = new Map<string, string>()
@@ -979,7 +981,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
       })
       const d = map.get(key)!
       d.totalActiveHours += iss.total_active_hours
-      if (isBlockedCol(col.name))       { d.blocked.push(iss); d.bounceCount += iss.bounce_count }
+      if (isBlockedCol(col.name))       { if (!ignoredIds.has(iss.idReadable)) { d.blocked.push(iss); d.bounceCount += iss.bounce_count } }
       else if (isDoneCol(col.name))     d.done.push(iss)
       else if (isProgressCol(col.name)) { d.inProgress.push(iss); d.active.push(iss); d.bounceCount += iss.bounce_count }
       else                              { d.queued.push(iss); d.active.push(iss) }
@@ -1224,7 +1226,7 @@ function Design1({ summary, columns, onTitleClick, onIdClick, ytDetailLoading, o
         <div className="db-mc-section-label">Sprint Health</div>
         <div className="db-mc-kpi-grid">
           <KpiChip label="Done"     value={`${summary.done_issues}/${summary.total_issues}`} cls="db-kpi-chip--success" />
-          <KpiChip label="Blocked"  value={summary.blocked_count}  cls="db-kpi-chip--danger" onClick={() => onKpiClick?.('blocked')} />
+          <KpiChip label="Blocked"  value={Math.max(0, summary.blocked_count - ignoredIds.size)}  cls="db-kpi-chip--danger" onClick={() => onKpiClick?.('blocked')} />
           <KpiChip label="Bounced"  value={summary.bounced_count}  cls="db-kpi-chip--warn"   onClick={() => onKpiClick?.('bounced')} />
           <KpiChip label="Overdue"  value={summary.overdue_count}  cls="db-kpi-chip--danger" onClick={() => onKpiClick?.('overdue')} />
         </div>
@@ -1309,6 +1311,7 @@ function SprintDonut({ pct, size = 110 }: { pct: number; size?: number }) {
 }
 
 function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: DesignProps) {
+  const { ignoredIds } = useIgnoredBlocked()
   const allIssues = useMemo(() => columns.flatMap(c => c.issues), [columns])
   const pct = toPct(summary.completion_pct)
   const [showAllNeeds, setShowAllNeeds]   = useState(false)
@@ -1330,6 +1333,7 @@ function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: Design
   const needsAttention = useMemo(() =>
     allIssues
       .filter(i => !isIssueDone(i, columnRoleMap))
+      .filter(i => !(isIssueBlocked(i, columnRoleMap) && ignoredIds.has(i.idReadable)))
       .filter(i =>
         isIssueBlocked(i, columnRoleMap) ||
         !!i.overdue_level ||
@@ -1389,7 +1393,7 @@ function Design2({ summary, columns, onTitleClick, onIdClick, sprintId }: Design
               {summary.sprint_finish_ms > 0 && <Countdown finishMs={summary.sprint_finish_ms} />}
               <SprintTrack pct={pct} />
               <div className="db-bg-kpi-row">
-                <KpiChip label="Blocked"  value={summary.blocked_count}  cls="db-kpi-chip--danger" />
+                <KpiChip label="Blocked"  value={Math.max(0, summary.blocked_count - ignoredIds.size)}  cls="db-kpi-chip--danger" />
                 <KpiChip label="Bounced"  value={summary.bounced_count}  cls="db-kpi-chip--warn" />
                 <KpiChip label="Overdue"  value={summary.overdue_count}  cls="db-kpi-chip--danger" />
                 <KpiChip label="Hotfixes" value={summary.hotfix_count}   cls="db-kpi-chip--info" />
@@ -1601,6 +1605,7 @@ function Design3({
   onIdClick: (id: string, e: React.MouseEvent) => void
   sprintId?: string
 }) {
+  const { ignoredIds } = useIgnoredBlocked()
   const [showAllBounced, setShowAllBounced]     = useState(false)
   const [showAllInProgress, setShowAllInProgress] = useState(false)
   const [showAllAtRisk, setShowAllAtRisk]       = useState(false)
@@ -1620,10 +1625,12 @@ function Design3({
     return m
   }, [wfConfig])
 
-  // Use role-aware blocked detection for accuracy
+  // Use role-aware blocked detection for accuracy; exclude parked tickets
   const blockedIssues = useMemo(() =>
-    columns.filter(c => resolveRole(c.name, columnRoleMap) === 'blocked').flatMap(c => c.issues)
-  , [columns, columnRoleMap])
+    columns.filter(c => resolveRole(c.name, columnRoleMap) === 'blocked')
+      .flatMap(c => c.issues)
+      .filter(i => !ignoredIds.has(i.idReadable))
+  , [columns, columnRoleMap, ignoredIds])
 
   const blockedIds = useMemo(() => {
     const ids = new Set<string>()
@@ -1747,7 +1754,7 @@ function Design3({
         )}
 
         <div className="db-oc-panel-section db-oc-blocked-banner">
-          <div className="db-oc-blocked-count">{summary.blocked_count}</div>
+          <div className="db-oc-blocked-count">{Math.max(0, summary.blocked_count - ignoredIds.size)}</div>
           <div className="db-oc-blocked-label">tickets blocked</div>
         </div>
 
@@ -1895,6 +1902,7 @@ export function SprintDashboardPage() {
   const [ytDetailIssue, setYtDetailIssue] = useState<YouTrackIssue | null>(null)
   const [ytDetailLoading, setYtDetailLoading] = useState(false)
   const [ytBaseUrl, setYtBaseUrl]   = useState('')
+  const { ignoredIds } = useIgnoredBlocked()
 
   useEffect(() => {
     api.getYouTrackIntegration().then(res => {
@@ -1965,7 +1973,12 @@ export function SprintDashboardPage() {
       {/* KPI bar — shown when data is loaded or loading */}
       {loading && <SkeletonKpiBar />}
       {!loading && boardData && (
-        <KpiBar summary={boardData.summary} activeDrawer={kpiDrawer} onKpiClick={setKpiDrawer} columns={boardData.columns} />
+        <KpiBar
+          summary={{ ...boardData.summary, blocked_count: Math.max(0, boardData.summary.blocked_count - ignoredIds.size) }}
+          activeDrawer={kpiDrawer}
+          onKpiClick={setKpiDrawer}
+          columns={boardData.columns}
+        />
       )}
 
       {/* KPI Drawer */}

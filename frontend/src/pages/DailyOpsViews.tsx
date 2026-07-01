@@ -207,7 +207,7 @@ function opsChipTime(issue: OpsIssue): string {
   if (issue.hoursInState) return opsFmtHours(issue.hoursInState)
   return ''
 }
-function OpsTicketChip({ issue, animateGlow, ctx, noHover }: { issue: OpsIssue; animateGlow?: boolean; ctx?: OpsCtx; noHover?: boolean }) {
+function OpsTicketChip({ issue, animateGlow, ctx, noHover, isBlocked }: { issue: OpsIssue; animateGlow?: boolean; ctx?: OpsCtx; noHover?: boolean; isBlocked?: boolean }) {
   const c = opsChipColor(issue)
   const danger = issue.isHotfix || issue.since != null || issue.hoursInState >= DANGER
 
@@ -245,7 +245,11 @@ function OpsTicketChip({ issue, animateGlow, ctx, noHover }: { issue: OpsIssue; 
   )
 
   if (!ctx || noHover) return chip
-  return <HoverCard content={<OpsIssueHoverContent issue={issue} />} maxWidth={260}>{chip}</HoverCard>
+  return (
+    <HoverCard content={<OpsIssueHoverContent issue={issue} />} maxWidth={260} issueId={issue.id} isBlocked={isBlocked} summary={issue.summary}>
+      {chip}
+    </HoverCard>
+  )
 }
 
 function OpsHead({ title, tagline }: { title: string; tagline: string }) {
@@ -376,6 +380,7 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
     }
   })
 
+  const blockedIds = new Set(dev.blockedIssues.map(i => i.id))
   const urgent = [
     ...dev.blockedIssues,
     ...dev.activeIssues.filter(a => a.hoursInState >= WARN),
@@ -383,7 +388,6 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
   ].slice(0, 3)
 
   return (
-    <HoverCard content={<OpsDevHoverContent dev={dev} />} maxWidth={290}>
     <motion.div
       variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', bounce: 0.05, duration: 0.8 } } }}
       animate={hasBlock
@@ -457,7 +461,7 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
             </div>
           )
           return (
-            <HoverCard key={'dot-hit-' + i} content={hoverContent} maxWidth={220} delay={180}>
+            <HoverCard key={'dot-hit-' + i} content={hoverContent} maxWidth={220} delay={180} issueId={d.issue.id} summary={d.issue.summary}>
               <div
                 onClick={(e) => { e.stopPropagation(); ctx?.onOpenDetail(d.issue.id) }}
                 style={{
@@ -530,11 +534,10 @@ function OpsRingCard({ dev, index, ctx }: { dev: OpsDev; index: number; ctx?: Op
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, width: '100%', justifyContent: 'center' }}>
         {urgent.length === 0
-          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>nothing urgent · hover for details</span>
-          : urgent.map(t => <OpsTicketChip key={t.id} issue={t} animateGlow ctx={ctx} noHover />)}
+          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>nothing urgent · hover chips for details</span>
+          : urgent.map(t => <OpsTicketChip key={t.id} issue={t} animateGlow ctx={ctx} isBlocked={blockedIds.has(t.id)} />)}
       </div>
     </motion.div>
-    </HoverCard>
   )
 }
 

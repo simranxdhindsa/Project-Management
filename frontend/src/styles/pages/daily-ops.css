@@ -1854,6 +1854,14 @@
 .do-blocked-parkable {
   align-items: center !important;
   position: relative;
+  overflow: visible;
+}
+.do-blocked-parkable .do-issue-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 0;
 }
 
 .do-park-btn {

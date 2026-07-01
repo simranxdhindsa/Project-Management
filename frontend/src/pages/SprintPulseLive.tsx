@@ -112,13 +112,10 @@ export const AttentionRow = memo(function AttentionRow({
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: 'auto' }}
-      exit={{ opacity: 0, height: 0 }}
+      exit={{ opacity: 0, height: 0, overflow: 'hidden' }}
       transition={{ duration: 0.18 }}
-      className="slv-anim-item"
     >
-      <HoverCard content={buildFeedHoverContent(iss)} delay={250}>
+      <HoverCard content={buildFeedHoverContent(iss)} delay={250} issueId={iss.idReadable} isBlocked={!!onPark} summary={iss.summary}>
         <div className={`slv-attn-row${onPark ? ' slv-attn-row--parkable' : ''}`}>
           <span
             className="spl-ticket-id"
@@ -265,7 +262,7 @@ export const LiveActivityFeed = memo(function LiveActivityFeed({
         const avatarColor = slvDevColor(iss.assignee || '')
         return (
           <div key={iss.id} className="slv-anim-item">
-            <HoverCard content={buildFeedHoverContent(iss)} delay={250}>
+            <HoverCard content={buildFeedHoverContent(iss)} delay={250} issueId={iss.idReadable} summary={iss.summary}>
               <div className={`slv-feed-row${danger === 2 ? ' slv-feed-row--crit' : danger === 1 ? ' slv-feed-row--warn' : ''}`}>
                 <div className="slv-feed-row-left">
                   <div className="slv-feed-avatar" style={{ background: avatarColor }}>

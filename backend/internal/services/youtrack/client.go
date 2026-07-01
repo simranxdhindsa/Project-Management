@@ -1401,7 +1401,9 @@ func (c *Client) UploadAttachment(ctx context.Context, issueID, filename, mimeTy
 	return nil
 }
 
-// flexBool unmarshals JSON booleans and the integers 0/1 (YouTrack sometimes sends numbers).
+// flexBool unmarshals JSON booleans, 0/1, and timestamp integers.
+// YouTrack's "resolved" field is a Unix-ms timestamp when resolved, 0 when not.
+// Any non-zero number is treated as true.
 type flexBool bool
 
 func (f *flexBool) UnmarshalJSON(b []byte) error {
@@ -1411,11 +1413,13 @@ func (f *flexBool) UnmarshalJSON(b []byte) error {
 		*f = true
 	case "false", "null":
 		*f = false
-	case "1":
-		*f = true
-	case "0":
-		*f = false
 	default:
+		// Any numeric value: 0 → false, non-zero (including timestamps) → true
+		var n int64
+		if _, err := fmt.Sscanf(s, "%d", &n); err == nil {
+			*f = flexBool(n != 0)
+			return nil
+		}
 		return fmt.Errorf("cannot unmarshal %s into flexBool", s)
 	}
 	return nil

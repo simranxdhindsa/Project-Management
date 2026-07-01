@@ -319,16 +319,18 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
       })
   }, [columns, columnRoleMap, ignoredIds])
 
-  // Side-effect: notify parent of blocked IDs — kept out of useMemo
+  // Side-effect: notify parent of blocked IDs (excluding parked)
   useEffect(() => {
     const ids = new Set<string>()
     for (const col of columns) {
       if (resolveColRole(col.name, columnRoleMap) === BLOCKED_ROLE) {
-        for (const iss of col.issues) ids.add(iss.idReadable)
+        for (const iss of col.issues) {
+          if (!ignoredIds.has(iss.idReadable)) ids.add(iss.idReadable)
+        }
       }
     }
     onBlockersRef.current(ids)
-  }, [columns, columnRoleMap])
+  }, [columns, columnRoleMap, ignoredIds])
 
   const load = useCallback(async () => {
     if (!sprintId) return
@@ -639,7 +641,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                       .slice()
                       .sort((a, b) => new Date(b.since_date).getTime() - new Date(a.since_date).getTime())
                       .map(iss => (
-                        <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
+                        <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280} issueId={iss.idReadable} summary={iss.summary}>
                           <div className="do-dev-issue-row do-dev-issue-row--done">
                             <span className="dl-done-check">✓</span>
                             <span className="do-issue-id do-issue-id--link"
@@ -667,7 +669,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                       <span className="dl-section-count dl-section-count--active">{dev.activeIssues.length}</span>
                     </div>
                     {dev.activeIssues.slice(0, 4).map(iss => (
-                      <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
+                      <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280} issueId={iss.idReadable} summary={iss.summary}>
                         <div className={`do-dev-issue-row ${priorityClass(iss.priority)}`}>
                           <span className={`do-prio-dot do-prio-dot--${priorityLabel(iss.priority).toLowerCase()}`} />
                           <span className="do-issue-id do-issue-id--link"
@@ -702,13 +704,10 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                         <motion.div
                           key={iss.idReadable}
                           layout
-                          initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                          animate={{ opacity: 1, height: 'auto', marginBottom: 2 }}
-                          exit={{ opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.18 } }}
-                          transition={{ duration: 0.2 }}
+                          exit={{ opacity: 0, height: 0, marginBottom: 0, overflow: 'hidden', transition: { duration: 0.18 } }}
                           className="do-blocked-row-wrap"
                         >
-                          <HoverCard content={ticketHoverContent(iss)} maxWidth={280}>
+                          <HoverCard content={ticketHoverContent(iss)} maxWidth={280} issueId={iss.idReadable} isBlocked summary={iss.summary}>
                             <div className="do-dev-issue-row do-priority-p0 do-blocked-parkable">
                               <span className="do-prio-dot do-prio-dot--p0" />
                               <span className="do-issue-id do-issue-id--link"
@@ -736,7 +735,7 @@ export default function DailyOpsTab({ onBlockersChange, sprintId }: Props) {
                 {dev.queuedIssues.length > 0 && (
                   <div className="do-dev-issues do-dev-issues--todo">
                     {dev.queuedIssues.slice(0, 3).map(iss => (
-                      <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280}>
+                      <HoverCard key={iss.id} content={ticketHoverContent(iss)} maxWidth={280} issueId={iss.idReadable} summary={iss.summary}>
                         <div className={`do-dev-issue-row ${priorityClass(iss.priority)}`}>
                           <span className={`do-prio-dot do-prio-dot--${priorityLabel(iss.priority).toLowerCase()}`} />
                           <span className="do-issue-id do-issue-id--link"

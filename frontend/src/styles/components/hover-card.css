@@ -202,6 +202,70 @@
   border-radius: 4px;
 }
 
+/* ── Footer (ticket actions) ── */
+
+.hc-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hc-footer-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.hc-footer-id:hover { text-decoration: underline; }
+.hc-footer-id--plain { color: var(--text-muted); cursor: default; }
+.hc-footer-id--plain:hover { text-decoration: none; }
+
+.hc-footer-summary {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hc-park-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 1px solid rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.08);
+  color: var(--color-danger);
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.hc-park-btn:hover {
+  background: rgba(239,68,68,0.18);
+  border-color: rgba(239,68,68,0.6);
+}
+.hc-park-btn--parked {
+  border-color: rgba(34,197,94,0.35);
+  background: rgba(34,197,94,0.08);
+  color: var(--color-success);
+}
+.hc-park-btn--parked:hover {
+  background: rgba(34,197,94,0.18);
+  border-color: rgba(34,197,94,0.6);
+}
+
 /* ── Light mode overrides ── */
 [data-theme="light"] .hc-card {
   background: rgba(255, 255, 255, 0.97);

@@ -36,13 +36,42 @@ type ChangelogHandler struct {
 }
 
 func NewChangelogHandler() *ChangelogHandler {
-	// Resolve CHANGELOG.md relative to the binary's working directory
-	path := filepath.Join(".", "..", "CHANGELOG.md")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		// Fallback: same directory as binary
-		path = filepath.Join(".", "CHANGELOG.md")
+	return &ChangelogHandler{changelogPath: findChangelogPath()}
+}
+
+// findChangelogPath searches several candidate locations for CHANGELOG.md so
+// the handler works both in local dev (air running from backend/) and on Render
+// (where the binary may run from a different working directory).
+func findChangelogPath() string {
+	// Honour an explicit env override first.
+	if v := os.Getenv("CHANGELOG_PATH"); v != "" {
+		return v
 	}
-	return &ChangelogHandler{changelogPath: path}
+
+	candidates := []string{
+		filepath.Join(".", "..", "CHANGELOG.md"), // air from backend/
+		filepath.Join(".", "CHANGELOG.md"),        // running from repo root
+	}
+
+	// Also search relative to the running binary's location.
+	if exe, err := os.Executable(); err == nil {
+		exe, _ = filepath.EvalSymlinks(exe)
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, "..", "CHANGELOG.md"),       // binary inside backend/
+			filepath.Join(dir, "CHANGELOG.md"),              // binary at repo root
+			filepath.Join(dir, "..", "..", "CHANGELOG.md"), // binary inside backend/bin/
+		)
+	}
+
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	// Return the most-likely path even if it doesn't exist yet — error surfaces
+	// at request time with a clear HTTP 500 rather than silently at startup.
+	return filepath.Join(".", "..", "CHANGELOG.md")
 }
 
 // GetStatus returns parsed changelog entries and whether the user has unseen entries.

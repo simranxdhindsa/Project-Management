@@ -23,7 +23,7 @@ interface CarouselData {
   hoursLeft: number
   sprintName: string
   sprintFinishMs: number
-  blockedCount: number
+  rawBlockedCount: number
   completionPct: number
   doneIssues: number
   totalIssues: number
@@ -128,7 +128,7 @@ export function StatCarousel({ onNavigate }: StatCarouselProps) {
             hoursLeft,
             sprintName,
             sprintFinishMs,
-            blockedCount: Math.max(0, summary.blocked_count - ignoredIds.size),
+            rawBlockedCount: summary.blocked_count,
             completionPct: summary.completion_pct,
             doneIssues: summary.done_issues,
             totalIssues: summary.total_issues,
@@ -188,7 +188,8 @@ export function StatCarousel({ onNavigate }: StatCarouselProps) {
 
   const countdownAccent = getCountdownAccent(data.daysLeft, data.hoursLeft)
   const countdown = formatCountdown(data.daysLeft, data.hoursLeft)
-  const blockerAccent = data.blockedCount === 0 ? 'var(--color-success)' : 'var(--color-danger)'
+  const blockedCount = Math.max(0, data.rawBlockedCount - ignoredIds.size)
+  const blockerAccent = blockedCount === 0 ? 'var(--color-success)' : 'var(--color-danger)'
 
   const slides = [
     {
@@ -203,8 +204,8 @@ export function StatCarousel({ onNavigate }: StatCarouselProps) {
       key: 'blockers',
       accent: blockerAccent,
       icon: <ShieldAlert size={16} />,
-      main: `${data.blockedCount} blocked`,
-      sub: data.blockedCount === 0 ? 'all clear' : 'need attention',
+      main: `${blockedCount} blocked`,
+      sub: blockedCount === 0 ? 'all clear' : 'need attention',
       target: 'pm-reports',
     },
     {
