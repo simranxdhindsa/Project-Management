@@ -7,7 +7,7 @@
 
 .wc-zone {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
   padding: 4px 7px;
   border-radius: 6px;
@@ -36,6 +36,31 @@
   background: var(--bg-elevated);
 }
 
+.wc-zone--editing {
+  border-color: var(--color-primary);
+  background: var(--bg-elevated);
+  cursor: text;
+}
+
+/* ── Day/night icons ───────────────────────────────────────────────── */
+
+.wc-daynight {
+  flex-shrink: 0;
+  transition: opacity 400ms, color 400ms;
+}
+
+.wc-daynight--sun {
+  color: #f59e0b;
+  opacity: 0.9;
+}
+
+.wc-daynight--moon {
+  color: #818cf8;
+  opacity: 0.8;
+}
+
+/* ── Labels & times ────────────────────────────────────────────────── */
+
 .wc-label {
   font-size: 9px;
   font-weight: 600;
@@ -58,11 +83,55 @@
   color: var(--color-primary);
 }
 
+/* ── Inline edit input ─────────────────────────────────────────────── */
+
+.wc-edit-input {
+  width: 68px;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  line-height: 1;
+  font-family: inherit;
+}
+
+/* ── Separator + pulse dot ─────────────────────────────────────────── */
+
 .wc-sep {
   font-size: 10px;
   color: var(--text-muted);
   line-height: 1;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
 }
+
+.wc-pulse-dot {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  opacity: 0.25;
+  flex-shrink: 0;
+}
+
+.wc-pulse-dot--on {
+  animation: wc-pulse 0.7s ease-out forwards;
+}
+
+@keyframes wc-pulse {
+  0%   { opacity: 1; transform: scale(1.8); }
+  40%  { opacity: 0.9; transform: scale(1.2); }
+  100% { opacity: 0.25; transform: scale(1); }
+}
+
+/* ── Offset badge ──────────────────────────────────────────────────── */
 
 .wc-offset-badge {
   font-size: 9px;
@@ -74,11 +143,14 @@
   color: var(--color-primary);
   line-height: 1.4;
   margin-left: 2px;
+  flex-shrink: 0;
 }
+
+/* ── Copy tooltip ──────────────────────────────────────────────────── */
 
 .wc-copied {
   position: absolute;
-  top: -18px;
+  top: -20px;
   left: 50%;
   transform: translateX(-50%);
   font-size: 9px;
