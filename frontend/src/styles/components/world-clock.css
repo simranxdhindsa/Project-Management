@@ -99,36 +99,29 @@
   font-family: inherit;
 }
 
-/* ── Separator + pulse dot ─────────────────────────────────────────── */
+/* ── Separator + heartbeat ─────────────────────────────────────────── */
 
 .wc-sep {
-  font-size: 10px;
-  color: var(--text-muted);
-  line-height: 1;
   display: flex;
   align-items: center;
-  gap: 3px;
   flex-shrink: 0;
+  padding: 0 1px;
 }
 
-.wc-pulse-dot {
+.wc-pulse {
   display: inline-block;
-  width: 3px;
-  height: 3px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--color-primary);
-  opacity: 0.25;
+  animation: wc-pulse 1s ease-out infinite;
   flex-shrink: 0;
-}
-
-.wc-pulse-dot--on {
-  animation: wc-pulse 0.7s ease-out forwards;
 }
 
 @keyframes wc-pulse {
-  0%   { opacity: 1; transform: scale(1.8); }
-  40%  { opacity: 0.9; transform: scale(1.2); }
-  100% { opacity: 0.25; transform: scale(1); }
+  0%   { transform: scale(1);   opacity: 1; }
+  40%  { transform: scale(1.9); opacity: 0.4; }
+  100% { transform: scale(1);   opacity: 1; }
 }
 
 /* ── Offset badge ──────────────────────────────────────────────────── */

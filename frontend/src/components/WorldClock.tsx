@@ -33,7 +33,6 @@ function getTzTotalMin(date: Date, tz: string): number {
   return (h === 24 ? 0 : h) * 60 + m
 }
 
-// Parses "03:30 PM" or "3:30 am" → minutes since midnight
 function parse12hTime(str: string): number | null {
   const match = str.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i)
   if (!match) return null
@@ -73,6 +72,16 @@ function MoonIcon() {
   )
 }
 
+// Globe illusion: two longitude ellipses with opposite-phase rx animations.
+// Front is solid and shrinks to a line as it rotates to the side, then fades when behind.
+// Back is dashed and appears when front goes behind. Both use the same delay (phase encoded in keyframes).
+function PulseDot() {
+  const syncDelay = useRef(`-${(Date.now() % 1000) / 1000}s`).current
+  return (
+    <span className="wc-pulse" style={{ animationDelay: syncDelay }} aria-hidden />
+  )
+}
+
 export default function WorldClock() {
   const [realNow, setRealNow] = useState(() => new Date())
   const [offsetMin, setOffsetMin] = useState(0)
@@ -85,23 +94,13 @@ export default function WorldClock() {
   const startOffsetRef = useRef(0)
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const dotRef = useRef<HTMLSpanElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Tick every second + pulse dot
   useEffect(() => {
-    const id = setInterval(() => {
-      setRealNow(new Date())
-      if (dotRef.current) {
-        dotRef.current.classList.remove('wc-pulse-dot--on')
-        void dotRef.current.offsetHeight // restart animation
-        dotRef.current.classList.add('wc-pulse-dot--on')
-      }
-    }, 1000)
+    const id = setInterval(() => setRealNow(new Date()), 1000)
     return () => clearInterval(id)
   }, [])
 
-  // Focus input when edit opens
   useEffect(() => {
     if (editingZone && inputRef.current) {
       inputRef.current.focus()
@@ -120,7 +119,6 @@ export default function WorldClock() {
   const onMouseMove = useCallback((e: MouseEvent) => {
     const dx = e.clientX - startXRef.current
     const raw = startOffsetRef.current + dx * PX_PER_MIN
-    // Magnetic snap to nearest round hour
     const nearestHour = Math.round(raw / 60) * 60
     const snapped = Math.abs(raw - nearestHour) < SNAP_ZONE_MIN ? nearestHour : raw
     setOffsetMin(Math.max(CLAMP_MIN, Math.min(CLAMP_MAX, snapped)))
@@ -189,7 +187,6 @@ export default function WorldClock() {
   const istDay = (() => { const h = getLocalHour(displayDate, TZ.IST); return h >= 6 && h < 20 })()
   const cetDay = (() => { const h = getLocalHour(displayDate, TZ.CET); return h >= 6 && h < 20 })()
 
-  // Offset diff IST vs CET for tooltip
   const istMin = getTzTotalMin(realNow, TZ.IST)
   const cetMin = getTzTotalMin(realNow, TZ.CET)
   let diffMin = istMin - cetMin
@@ -197,9 +194,9 @@ export default function WorldClock() {
   const diffH = Math.floor(diffMin / 60)
   const diffM = diffMin % 60
   const diffLabel = diffM === 0 ? `${diffH}h` : `${diffH}h ${diffM}m`
-  const diffTooltip = `IST is +${diffLabel} ahead of CET — drag or double-click any time to explore`
+  const diffTooltip = `IST is +${diffLabel} ahead of CET — drag or double-click to explore`
 
-  const zone = (id: Zone, timeStr: string, isDay: boolean) => (
+  const renderZone = (id: Zone, timeStr: string, isDay: boolean) => (
     <span
       className={[
         'wc-zone',
@@ -234,12 +231,11 @@ export default function WorldClock() {
 
   return (
     <div className="wc-wrap" title={diffTooltip}>
-      {zone('IST', istStr, istDay)}
+      {renderZone('IST', istStr, istDay)}
       <span className="wc-sep">
-        ·
-        <span ref={dotRef} className="wc-pulse-dot" />
+        <PulseDot />
       </span>
-      {zone('CET', cetStr, cetDay)}
+      {renderZone('CET', cetStr, cetDay)}
       {!isLive && <span className="wc-offset-badge">{fmtOffsetLabel(offsetMin)}</span>}
     </div>
   )
