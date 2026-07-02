@@ -1318,6 +1318,25 @@ class ApiService {
     return this.request<TimeTrackingRow[]>(`/reports/time-tracking${query}`)
   }
 
+  // Gantt endpoints
+  async getGanttCharts() {
+    return this.request('/gantt/charts')
+  }
+
+  async getGanttChart(ganttId: string) {
+    return this.request(`/gantt/chart?id=${encodeURIComponent(ganttId)}`)
+  }
+
+  async updateGanttMember(ganttId: string, memberId: string, startMs: number | null, dueMs: number | null) {
+    return this.request(
+      `/gantt/chart/${encodeURIComponent(ganttId)}/members/${encodeURIComponent(memberId)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ startDate: startMs, dueDate: dueMs }),
+      }
+    )
+  }
+
   async pinIssue(issueID: string) {
     return this.request<void>('/reports/pins', { method: 'POST', body: JSON.stringify({ issue_id: issueID }) })
   }

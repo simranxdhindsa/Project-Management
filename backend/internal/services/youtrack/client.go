@@ -116,6 +116,82 @@ func (c *Client) GetBaseURL() string {
 	return c.baseURL
 }
 
+// ── Gantt chart types ─────────────────────────────────────────────────────────
+
+// YTGanttRef is a minimal member reference used in dependsOn lists.
+type YTGanttRef struct {
+	ID string `json:"id"`
+}
+
+// YTGanttMember is one row in a YouTrack Gantt chart.
+type YTGanttMember struct {
+	ID         string       `json:"id"`
+	StartDate  *int64       `json:"startDate"`  // Unix ms; null when unscheduled
+	Estimation int          `json:"estimation"` // minutes
+	SpentTime  int          `json:"spentTime"`  // minutes
+	IsParent   bool         `json:"isParent"`
+	DependsOn  []YTGanttRef `json:"dependsOn"`
+	Issue      *Issue       `json:"issue"`
+}
+
+// YTGanttChart is a YouTrack Gantt chart with all its members.
+type YTGanttChart struct {
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Members []YTGanttMember `json:"members"`
+}
+
+// ganttFields is the fields string used when fetching a full gantt chart.
+const ganttFields = "id,name,members(id,startDate,estimation,spentTime,isParent,dependsOn(id)," +
+	"issue(id,idReadable,summary,fields(id,value(id,name,login,email,avatarUrl,color(id))," +
+	"projectCustomField(field(id,name,fieldType(valueType))))))"
+
+// ListGanttCharts returns all Gantt charts the token has access to.
+func (c *Client) ListGanttCharts(ctx context.Context) ([]YTGanttChart, error) {
+	body, err := c.doRequest(ctx, http.MethodGet, "/api/gantts?fields=id,name&$top=100", nil)
+	if err != nil {
+		return nil, fmt.Errorf("list gantt charts: %w", err)
+	}
+	var charts []YTGanttChart
+	if err := json.Unmarshal(body, &charts); err != nil {
+		return nil, fmt.Errorf("unmarshal gantt charts: %w", err)
+	}
+	return charts, nil
+}
+
+// GetGanttChart fetches one Gantt chart with all members and dependency links.
+func (c *Client) GetGanttChart(ctx context.Context, id string) (*YTGanttChart, error) {
+	path := "/api/gantts/" + url.PathEscape(id) + "?fields=" + url.QueryEscape(ganttFields)
+	body, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get gantt chart: %w", err)
+	}
+	var chart YTGanttChart
+	if err := json.Unmarshal(body, &chart); err != nil {
+		return nil, fmt.Errorf("unmarshal gantt chart: %w", err)
+	}
+	return &chart, nil
+}
+
+// UpdateGanttMember updates startDate and/or estimation on a gantt member.
+// Pass nil to leave a field unchanged.
+func (c *Client) UpdateGanttMember(ctx context.Context, ganttID, memberID string, startDate *int64, estimationMins *int) error {
+	payload := map[string]interface{}{"id": memberID}
+	if startDate != nil {
+		payload["startDate"] = *startDate
+	}
+	if estimationMins != nil {
+		payload["estimation"] = *estimationMins
+	}
+	path := "/api/gantts/" + url.PathEscape(ganttID) +
+		"/members/" + url.PathEscape(memberID) + "?fields=id,startDate,estimation"
+	_, err := c.doRequest(ctx, http.MethodPost, path, payload)
+	if err != nil {
+		return fmt.Errorf("update gantt member %s: %w", memberID, err)
+	}
+	return nil
+}
+
 // GetProjectID returns the project ID/short-name used in YQL queries
 func (c *Client) GetProjectID() string {
 	return c.projectID
@@ -807,6 +883,87 @@ func (c *Client) UpdateIssueState(ctx context.Context, issueID, newState string)
 	return err
 }
 
+// UpdateIssueDates sets the start date, due date, and/or estimation on a YouTrack issue.
+// Pass -1 to leave a field unchanged. startMS and dueMS are Unix milliseconds.
+func (c *Client) UpdateIssueDates(ctx context.Context, issueID string, startMS, dueMS, estimationMins int64) error {
+	var fields []CustomField
+
+	if startMS >= 0 {
+		var val interface{}
+		if startMS == 0 {
+			val = nil
+		} else {
+			val = startMS
+		}
+		fields = append(fields, CustomField{
+			Name:  "Start date",
+			Type:  "DateIssueCustomField",
+			Value: val,
+		})
+	}
+	if dueMS >= 0 {
+		var val interface{}
+		if dueMS == 0 {
+			val = nil
+		} else {
+			val = dueMS
+		}
+		fields = append(fields, CustomField{
+			Name:  "Due date",
+			Type:  "DateIssueCustomField",
+			Value: val,
+		})
+	}
+	if estimationMins >= 0 {
+		// YouTrack stores estimation in minutes as a plain integer
+		fields = append(fields, CustomField{
+			Name:  "Estimation",
+			Type:  "PeriodIssueCustomField",
+			Value: map[string]interface{}{"$type": "PeriodValue", "minutes": estimationMins},
+		})
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	_, err := c.UpdateIssue(ctx, issueID, UpdateIssueRequest{CustomFields: fields})
+	return err
+}
+
+// AddIssueDependency creates a "depends on" link from sourceID → targetID in YouTrack.
+// Returns the new link ID.
+func (c *Client) AddIssueDependency(ctx context.Context, sourceID, targetID string) (string, error) {
+	// First we need the internal issue IDs (not idReadable)
+	// YouTrack link API uses readable IDs just fine in the POST body
+	body := map[string]interface{}{
+		"issues": []map[string]string{
+			{"idReadable": targetID},
+		},
+		"linkType": map[string]string{
+			"name": "Depend",
+		},
+		"direction": "OUTWARD",
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost,
+		fmt.Sprintf("/api/issues/%s/links", url.PathEscape(sourceID)), body)
+	if err != nil {
+		return "", err
+	}
+	var link struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(resp, &link) //nolint — best-effort; ID is nice-to-have
+	return link.ID, nil
+}
+
+// RemoveIssueDependency deletes a link group from sourceID.
+// linkID is the link-group ID returned by GetAllIssueLinks or AddIssueDependency.
+func (c *Client) RemoveIssueDependency(ctx context.Context, sourceID, linkID string) error {
+	path := fmt.Sprintf("/api/issues/%s/links/%s",
+		url.PathEscape(sourceID), url.PathEscape(linkID))
+	_, err := c.doRequest(ctx, http.MethodDelete, path, nil)
+	return err
+}
+
 // GetStatus extracts the status/state from an issue's custom fields
 // GetCustomFieldValue returns the string value of any named custom field on an issue.
 // Works for enum, state, and simple string fields. Returns "" if not found.
@@ -1433,6 +1590,7 @@ type IssueLink struct {
 	Resolved   bool   `json:"resolved"`
 	LinkType   string `json:"link_type,omitempty"`
 	Direction  string `json:"direction,omitempty"` // "outward" | "inward"
+	LinkID     string `json:"link_id,omitempty"`  // YT link-group ID (for deletion)
 }
 
 // GetIssueLinks fetches YouTrack native "Relates To" links for an issue.
@@ -1507,6 +1665,7 @@ func (c *Client) GetAllIssueLinks(ctx context.Context, issueID string) ([]IssueL
 	}
 
 	var raw []struct {
+		ID        string `json:"id"`
 		Direction string `json:"direction"`
 		LinkType  struct {
 			Name           string `json:"name"`
@@ -1554,6 +1713,7 @@ func (c *Client) GetAllIssueLinks(ctx context.Context, issueID string) ([]IssueL
 				Resolved:   bool(issue.Resolved),
 				LinkType:   linkTypeName,
 				Direction:  dir,
+				LinkID:     group.ID,
 			})
 		}
 	}

@@ -55,6 +55,7 @@
 @import "./styles/pages/dev-activity-report.css";
 
 @import "./styles/pages/changelog.css";
+@import "./styles/pages/gantt.css";
 @import "./styles/pages/theme-customizer.css";
 @import "./styles/pages/theme-settings.css";
 @import "./styles/pages/sprint-radar.css";

@@ -79,47 +79,48 @@ export function buildHoverContent(iss: PulseIssue): React.ReactNode {
 // ─── IssueCard ────────────────────────────────────────────────────────────────
 
 export function IssueCard({
-  iss, wfConfig, onTitleClick, onIdClick, showStage = false,
+  iss, wfConfig, onTitleClick, onIdClick, showStage = false, noHover = false,
 }: {
   iss: PulseIssue
   wfConfig: WorkflowConfig | null
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick: (id: string, e: React.MouseEvent) => void
   showStage?: boolean
+  noHover?: boolean
 }) {
   const danger = dangerLevel(iss)
   const canPulse = danger === 2 && !iss.isDone && iss.colRole !== 'backlog'
-  return (
-    <HoverCard content={buildHoverContent(iss)} delay={250}>
-      <div className={`spl-card${iss.isDone ? ' spl-card--done' : ''}${danger === 2 ? ' spl-card--crit' : danger === 1 ? ' spl-card--warn' : ''}${canPulse ? ' spl-card--pulse' : ''}`}>
-        <div className="spl-card-top">
-          <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
-          <IssueTypePill type={iss.issue_type} />
-          <span
-            className="spl-ticket-id"
-            onClick={(e) => onIdClick(iss.idReadable, e)}
-            title={`Open ${iss.idReadable} in YouTrack`}
-          >
-            {iss.idReadable}
-          </span>
-          {iss.is_hotfix && <span className="spl-hf-chip">HF</span>}
-          {iss.bounce_count > 0 && <span className="spl-bounce-chip">↩{iss.bounce_count}</span>}
-          {showStage && <span className={`spl-stage-chip spl-stage-chip--${iss.stageGroup}`}>{iss.current_state}</span>}
-          {!showStage && <span className="spl-state-chip">{iss.current_state}</span>}
-        </div>
-        <div className="spl-card-title" onClick={(e) => onTitleClick(iss.idReadable, e)}>
-          {iss.summary}
-        </div>
-        <div className="spl-card-footer">
-          <DBAvatar name={iss.assignee || '?'} url={iss.avatarUrl} size={16} />
-          <span className="spl-card-assignee">{iss.assignee?.split(' ')[0] || 'Unassigned'}</span>
-          <span className="spl-card-time" style={{ color: danger >= 1 ? 'var(--color-danger)' : undefined }}>
-            {fmtHours(iss.hours_in_state)}
-          </span>
-        </div>
+  const card = (
+    <div className={`spl-card${iss.isDone ? ' spl-card--done' : ''}${danger === 2 ? ' spl-card--crit' : danger === 1 ? ' spl-card--warn' : ''}${canPulse ? ' spl-card--pulse' : ''}`}>
+      <div className="spl-card-top">
+        <PriPill priority={iss.priority} tags={wfConfig?.priority_tags} />
+        <IssueTypePill type={iss.issue_type} />
+        <span
+          className="spl-ticket-id"
+          onClick={(e) => onIdClick(iss.idReadable, e)}
+          title={`Open ${iss.idReadable} in YouTrack`}
+        >
+          {iss.idReadable}
+        </span>
+        {iss.is_hotfix && <span className="spl-hf-chip">HF</span>}
+        {iss.bounce_count > 0 && <span className="spl-bounce-chip">↩{iss.bounce_count}</span>}
+        {showStage && <span className={`spl-stage-chip spl-stage-chip--${iss.stageGroup}`}>{iss.current_state}</span>}
+        {!showStage && <span className="spl-state-chip">{iss.current_state}</span>}
       </div>
-    </HoverCard>
+      <div className="spl-card-title" onClick={(e) => onTitleClick(iss.idReadable, e)}>
+        {iss.summary}
+      </div>
+      <div className="spl-card-footer">
+        <DBAvatar name={iss.assignee || '?'} url={iss.avatarUrl} size={16} />
+        <span className="spl-card-assignee">{iss.assignee?.split(' ')[0] || 'Unassigned'}</span>
+        <span className="spl-card-time" style={{ color: danger >= 1 ? 'var(--color-danger)' : undefined }}>
+          {fmtHours(iss.hours_in_state)}
+        </span>
+      </div>
+    </div>
   )
+  if (noHover) return card
+  return <HoverCard content={buildHoverContent(iss)} delay={250}>{card}</HoverCard>
 }
 
 // ─── Skeleton primitive ───────────────────────────────────────────────────────

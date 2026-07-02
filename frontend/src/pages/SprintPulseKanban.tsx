@@ -25,12 +25,13 @@ const TIER_DEFS: { tier: number; label: string }[] = [
 ]
 
 function SwimDraggableCard({
-  iss, wfConfig, onTitleClick, onIdClick,
+  iss, wfConfig, onTitleClick, onIdClick, noHover = false,
 }: {
   iss:          PulseIssue
   wfConfig:     WorkflowConfig | null
   onTitleClick: (id: string, e?: React.MouseEvent) => void
   onIdClick:    (id: string, e: React.MouseEvent) => void
+  noHover?:     boolean
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: iss.id })
   return (
@@ -40,7 +41,7 @@ function SwimDraggableCard({
       {...attributes}
       {...listeners}
     >
-      <IssueCard iss={iss} wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} />
+      <IssueCard iss={iss} wfConfig={wfConfig} onTitleClick={onTitleClick} onIdClick={onIdClick} noHover={noHover} />
     </div>
   )
 }
@@ -302,6 +303,7 @@ export function PrioritySwimKanban({
                       wfConfig={wfConfig}
                       onTitleClick={onTitleClick}
                       onIdClick={onIdClick}
+                      noHover
                     />
                   ))}
                 </SwimDroppableCell>

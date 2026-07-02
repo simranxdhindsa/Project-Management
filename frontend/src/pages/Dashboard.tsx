@@ -69,6 +69,7 @@ import { SprintPulsePage } from './SprintPulsePage'
 import { SlackIntelligencePage } from './SlackIntelligencePage'
 import { ActivityPage } from './ActivityPage'
 import { DayTrackPage } from './DayTrackPage'
+import { GanttPage } from './GanttPage'
 import { JellySwitch } from '../components/JellySwitch'
 import { ThemeSettingsPage } from './ThemeSettingsPage'
 import { applyUserTheme } from '../utils/themeUtils'
@@ -77,10 +78,10 @@ import type { LocalNotification } from '../components/notifications/RightPanel'
 import ChangelogPanel from '../components/changelog/ChangelogPanel'
 import type { ChangelogEntry } from '../services/api'
 
-type Page = 'dashboard' | 'board' | 'list' | 'sprint-pulse' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme'
+type Page = 'dashboard' | 'board' | 'list' | 'sprint-pulse' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme' | 'gantt'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'sprint-pulse', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'sprint-pulse', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations', 'gantt']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -166,6 +167,7 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'activity': 'activity',
   'daytrack': 'daytrack',
   'theme': 'theme',
+  'gantt': 'gantt',
 }
 
 const PM_REPORTS_TABS = ['tracking', 'daily', 'assignees', 'dailyops', 'deployment'] as const
@@ -213,7 +215,7 @@ export default function Dashboard() {
     const path = location.pathname
     if (path === '/' || path === '') {
       const last = localStorage.getItem(PERSIST.LAST_PAGE) as Page | null
-      const valid: Page[] = ['board', 'list', 'sprint-pulse', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'dev-activity', 'integrations', 'settings', 'bots', 'theme']
+      const valid: Page[] = ['board', 'list', 'sprint-pulse', 'daily-ops', 'pm-reports', 'slack', 'activity', 'daytrack', 'ai-analysis', 'dev-activity', 'integrations', 'settings', 'bots', 'theme', 'gantt']
       if (last && valid.includes(last)) {
         navigate(`/${last}`, { replace: true })
       }
@@ -657,6 +659,13 @@ export default function Dashboard() {
               <Clock size={20} />
               <span>DayTrack</span>
             </button>
+            <button
+              className={`sidebar-nav-item ${currentPage === 'gantt' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('gantt')}
+            >
+              <BarChart3 size={20} />
+              <span>Gantt</span>
+            </button>
 
             <button
               className={`sidebar-nav-item ${currentPage === 'activity' ? 'active' : ''}`}
@@ -805,6 +814,7 @@ export default function Dashboard() {
             {currentPage === 'slack' && 'Slack Intelligence'}
             {currentPage === 'activity' && 'Activity'}
             {currentPage === 'daytrack' && 'DayTrack'}
+            {currentPage === 'gantt' && 'Gantt'}
             {currentPage === 'theme' && 'Theme'}
           </h1>
           <WorldClock />
@@ -917,6 +927,11 @@ export default function Dashboard() {
         {mountedTabs.has('daytrack') && (
           <div className={currentPage !== 'daytrack' ? 'dash-tab-hidden' : undefined}>
             <DayTrackPage />
+          </div>
+        )}
+        {mountedTabs.has('gantt') && (
+          <div className={currentPage !== 'gantt' ? 'dash-tab-hidden' : undefined} style={{ height: '100%' }}>
+            <GanttPage />
           </div>
         )}
         {mountedTabs.has('activity') && (

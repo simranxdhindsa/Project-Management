@@ -174,6 +174,14 @@ func main() {
 	sseRoutes.Use(middleware.AuthMiddleware)
 	sseRoutes.HandleFunc("", sseHub.HandleEvents).Methods("GET")
 
+	// Gantt chart routes (protected)
+	ganttHandler := handlers.NewGanttHandler(database.NewSettingsRepository())
+	ganttRoutes := api.PathPrefix("/gantt").Subrouter()
+	ganttRoutes.Use(middleware.AuthMiddleware)
+	ganttRoutes.HandleFunc("/charts", ganttHandler.GetCharts).Methods("GET")
+	ganttRoutes.HandleFunc("/chart", ganttHandler.GetChart).Methods("GET")
+	ganttRoutes.HandleFunc("/chart/{ganttId}/members/{memberId}", ganttHandler.UpdateMember).Methods("POST")
+
 	// YouTrack routes (protected)
 	youtrackHandler := handlers.NewYouTrackHandler(sseHub)
 
