@@ -2569,29 +2569,65 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 		projectSprint = projectID + " " + sprintToken
 	}
 
+	// Resolve real state tokens from the injected states list so examples use names that
+	// actually exist in this YouTrack instance. Falls back to common names if not found.
+	stateToken := func(keyword string, fallback string) string {
+		kl := strings.ToLower(keyword)
+		for _, s := range states {
+			if strings.ToLower(s.Name) == kl {
+				if strings.ContainsAny(s.Name, " \t") {
+					return "#{" + s.Name + "}"
+				}
+				return "#" + s.Name
+			}
+		}
+		// Partial match (e.g. "done" matches "Mobile Done", "done" in "dev done")
+		for _, s := range states {
+			if strings.Contains(strings.ToLower(s.Name), kl) {
+				if strings.ContainsAny(s.Name, " \t") {
+					return "#{" + s.Name + "}"
+				}
+				return "#" + s.Name
+			}
+		}
+		return fallback
+	}
+	stInProgress := stateToken("in progress", "#{In Progress}")
+	stBlocked := stateToken("blocked", "#Blocked")
+	stDEV := stateToken("dev", "#DEV")
+	// "done" semantics: prefer explicit "Done", fall back to "Closed"
+	stDone := stateToken("done", "")
+	if stDone == "" {
+		stDone = stateToken("closed", "#Closed")
+	}
+	stTodo := stateToken("to do", "#{To Do}")
+	stStage := stateToken("stage", "#Stage")
+	stReadyForProd := stateToken("ready for prod", "#{Ready For Prod}")
+
 	sb.WriteString("PROVEN EXAMPLES (use these exact patterns):\n")
 	sb.WriteString(fmt.Sprintf("  all sprint issues         → project: %s\n", projectSprint))
 	sb.WriteString(fmt.Sprintf("  sprint summary / overview → project: %s\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  blocked tickets           → project: %s #Blocked\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  in progress               → project: %s #{In Progress}\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  moved to DEV today        → project: %s #DEV updated: Today\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  moved to Stage today      → project: %s #Stage updated: Today\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  finished / done today     → project: %s #DEV #Done updated: Today\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  done this sprint          → project: %s #DEV #Done\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  blocked tickets           → project: %s %s\n", projectSprint, stBlocked))
+	sb.WriteString(fmt.Sprintf("  in progress               → project: %s %s\n", projectSprint, stInProgress))
+	sb.WriteString(fmt.Sprintf("  moved to DEV today        → project: %s %s updated: Today\n", projectSprint, stDEV))
+	sb.WriteString(fmt.Sprintf("  moved to Stage today      → project: %s %s updated: Today\n", projectSprint, stStage))
+	sb.WriteString(fmt.Sprintf("  finished / done today     → project: %s %s updated: Today\n", projectSprint, stDEV))
+	sb.WriteString(fmt.Sprintf("  done / dev-complete       → project: %s %s\n", projectSprint, stDEV))
+	sb.WriteString(fmt.Sprintf("  fully closed this sprint  → project: %s %s\n", projectSprint, stDone))
 	sb.WriteString(fmt.Sprintf("  updated this week         → project: %s updated: {This week}\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  DEV + Stage + Prod        → project: %s #DEV #Stage #{Ready For Prod}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  DEV + Stage + Prod        → project: %s %s %s %s\n", projectSprint, stDEV, stStage, stReadyForProd))
 	sb.WriteString(fmt.Sprintf("  single assignee           → project: %s Assignee: rajvirsingh\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  P0 or P1 open             → project: %s #P0 #P1 #{In Progress} #{To Do}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  P0 or P1 open             → project: %s #P0 #P1 %s %s\n", projectSprint, stInProgress, stTodo))
 	sb.WriteString(fmt.Sprintf("  created today             → project: %s created: Today\n", projectSprint))
 	sb.WriteString(fmt.Sprintf("  created yesterday         → project: %s created: yesterday\n", projectSprint))
 	sb.WriteString(fmt.Sprintf("  created this week         → project: %s created: {This week}\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  hotfixes in progress      → project: %s Type: Hotfix #{In Progress}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  hotfixes in progress      → project: %s Type: Hotfix %s\n", projectSprint, stInProgress))
 	sb.WriteString(fmt.Sprintf("  all hotfixes in sprint    → project: %s Type: Hotfix\n", projectSprint))
 	sb.WriteString(fmt.Sprintf("  bugs in sprint            → project: %s Type: Bug\n", projectSprint))
 	sb.WriteString(fmt.Sprintf("  tasks for one person      → project: %s Assignee: simran\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  what is Alice doing?      → project: %s Assignee: alice_login #{In Progress} #Blocked\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  FE MC done tickets        → project: %s #{FE MC} #DEV #Done\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  FE MC in progress         → project: %s #{FE MC} #{In Progress}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  what is Alice doing?      → project: %s Assignee: alice_login %s %s\n", projectSprint, stInProgress, stBlocked))
+	sb.WriteString(fmt.Sprintf("  FE MC done tickets        → project: %s #{FE MC} %s\n", projectSprint, stDEV))
+	sb.WriteString(fmt.Sprintf("  FE MC in progress         → project: %s #{FE MC} %s\n", projectSprint, stInProgress))
 	sb.WriteString(fmt.Sprintf("  MC FE tickets only        → project: %s #{FE MC}\n", projectSprint))
 	sb.WriteString(fmt.Sprintf("  BE excl RAG               → project: %s #{BE MC} #{BE Studio} #{BE UI}\n", projectSprint))
 	sb.WriteString(fmt.Sprintf("  bugs + date filter        → project: %s Type: Bug\n", projectSprint))
@@ -2605,7 +2641,7 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 	sb.WriteString(fmt.Sprintf("  specific ticket 3-2554    → project: %s 3-2554\n", projectID))
 	sb.WriteString(fmt.Sprintf("  tickets assigned to Bob   → project: %s Assignee: bob_login\n", projectSprint))
 	sb.WriteString(fmt.Sprintf("  high priority open        → project: %s #P0 #P1\n", projectSprint))
-	sb.WriteString(fmt.Sprintf("  all open (not done)       → project: %s #{In Progress} #Blocked #{To Do}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  all open (not done)       → project: %s %s %s %s\n", projectSprint, stInProgress, stBlocked, stTodo))
 
 	sb.WriteString("\nCRITICAL RULES:\n")
 	sb.WriteString("1. NEVER use  State: value  or  Priority: value  — always use # prefix\n")
