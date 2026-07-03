@@ -54,27 +54,19 @@ export default function HoverCard({ content, children, delay = 280, maxWidth = 3
   const [ytUrl, setYtUrl] = useState(getYtBaseUrl)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const wrapRef = useRef<HTMLDivElement>(null)
+  const mousePosRef = useRef({ x: 0, y: 0 })
 
   useEffect(() => {
     if (issueId && !ytUrl) fetchYtBaseUrlOnce(setYtUrl)
   }, [issueId, ytUrl])
 
   const show = useCallback(() => {
-    if (!wrapRef.current) return
-    // display:contents wrappers may return zero rect when children are position:absolute.
-    // Fall back to the first visible child element when that happens.
-    let rect = wrapRef.current.getBoundingClientRect()
-    if (rect.width === 0 && rect.height === 0) {
-      const child = wrapRef.current.firstElementChild as HTMLElement | null
-      if (child) rect = child.getBoundingClientRect()
-    }
-    if (rect.width === 0 && rect.height === 0) return
-    const spaceAbove = rect.top
-    const above = spaceAbove > 180
-    let x = rect.left + rect.width / 2 - maxWidth / 2
+    const { x: mx, y: my } = mousePosRef.current
+    if (mx === 0 && my === 0) return
+    const above = my > 180
+    let x = mx - maxWidth / 2
     x = Math.max(8, Math.min(x, window.innerWidth - maxWidth - 8))
-    const y = above ? rect.top - 4 : rect.bottom + 4
+    const y = above ? my - 8 : my + 20
     setPos({ x, y, above })
     setVisible(true)
   }, [maxWidth])
@@ -88,9 +80,10 @@ export default function HoverCard({ content, children, delay = 280, maxWidth = 3
     hideTimerRef.current = setTimeout(() => setVisible(false), 3500)
   }, [])
 
-  const handleEnter = useCallback(() => {
+  const handleEnter = useCallback((e: React.MouseEvent) => {
     if (!content && !issueId) return
     cancelHide()
+    mousePosRef.current = { x: e.clientX, y: e.clientY }
     timerRef.current = setTimeout(show, delay)
   }, [show, delay, content, issueId, cancelHide])
 
@@ -105,7 +98,6 @@ export default function HoverCard({ content, children, delay = 280, maxWidth = 3
 
   return (
     <div
-      ref={wrapRef}
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
       style={{ display: 'contents' }}
