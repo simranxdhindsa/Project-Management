@@ -219,8 +219,7 @@ func (h *BotConfigHandler) GetTemplates(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// getYouTrackClientForBots creates a YouTrack client using the same three-tier
-// lookup as the report handler: per-user integration → admin integration → env vars.
+// getYouTrackClientForBots creates a YouTrack client using per-user integration → env vars.
 func (h *BotConfigHandler) getYouTrackClientForBots(r *http.Request) (*youtrack.Client, error) {
 	ctx := r.Context()
 	var baseURL, token, projectID, boardID string
@@ -235,17 +234,7 @@ func (h *BotConfigHandler) getYouTrackClientForBots(r *http.Request) (*youtrack.
 		}
 	}
 
-	// 2. Admin integration fallback
-	if baseURL == "" {
-		if integ, err := h.settingsRepo.GetAdminYouTrackIntegration(ctx); err == nil && integ != nil && integ.Connected {
-			baseURL = integ.BaseURL
-			token = integ.Token
-			projectID = integ.ProjectID
-			boardID = integ.BoardID
-		}
-	}
-
-	// 3. Env vars as last resort
+	// 2. Env vars as last resort
 	if baseURL == "" {
 		baseURL = os.Getenv("YOUTRACK_BASE_URL")
 	}

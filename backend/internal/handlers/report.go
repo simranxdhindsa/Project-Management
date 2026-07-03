@@ -56,17 +56,7 @@ func (h *ReportHandler) getYouTrackClient(ctx context.Context) (*youtrack.Client
 		}
 	}
 
-	// 2. Admin integration fallback
-	if baseURL == "" && h.settingsRepo != nil {
-		if integ, err := h.settingsRepo.GetAdminYouTrackIntegration(ctx); err == nil && integ != nil && integ.Connected {
-			baseURL = integ.BaseURL
-			token = integ.Token
-			projectID = integ.ProjectID
-			boardID = integ.BoardID
-		}
-	}
-
-	// 3. Env vars as last resort
+	// 2. Env vars as last resort
 	if baseURL == "" {
 		baseURL = os.Getenv("YOUTRACK_BASE_URL")
 	}

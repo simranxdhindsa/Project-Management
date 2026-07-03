@@ -133,20 +133,7 @@ func (h *YouTrackHandler) getYouTrackClientForUser(ctx context.Context, userID s
 		}
 	}
 
-	// 2. Admin personal-token fallback for members/viewers (READ-ONLY use).
-	// Write operations must use getYouTrackClientForWrite instead, which skips this.
-	if baseURL == "" {
-		if u := middleware.GetUserFromCtx(ctx); u != nil && (u.Role == models.RoleMember || u.Role == models.RoleViewer) {
-			if adminInteg, err := h.settingsRepo.GetAdminYouTrackIntegration(ctx); err == nil && adminInteg != nil && adminInteg.Connected {
-				baseURL = adminInteg.BaseURL
-				token = adminInteg.Token
-				projectID = adminInteg.ProjectID
-				boardID = adminInteg.BoardID
-			}
-		}
-	}
-
-	// 3. Global settings DB (org-wide fallback)
+	// 2. Global settings DB (org-wide fallback)
 	if baseURL == "" {
 		if settings, err := h.settingsRepo.GetYouTrackSettings(ctx); err == nil && settings != nil && settings.Configured {
 			baseURL = settings.BaseURL
@@ -190,6 +177,8 @@ func (h *YouTrackHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Collect the resolved config values (for display, no token)
+	// Resolution order mirrors getYouTrackClientForUser so the source shown in UI
+	// matches the credentials actually used for data fetching.
 	var baseURL, projectID, boardID string
 	var source string // "user_db" | "global_db" | "env"
 

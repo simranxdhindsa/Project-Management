@@ -1095,6 +1095,30 @@ func (c *Client) TestConnection(ctx context.Context) error {
 	return err
 }
 
+// ValidateProject checks that c.projectID exists on this YouTrack instance.
+// Returns an error with available project names when not found.
+func (c *Client) ValidateProject(ctx context.Context) error {
+	projects, err := c.GetProjects(ctx)
+	if err != nil {
+		return err
+	}
+	for _, p := range projects {
+		if p.ID == c.projectID || p.ShortName == c.projectID {
+			return nil
+		}
+	}
+	var names []string
+	for _, p := range projects {
+		if p.ShortName != "" {
+			names = append(names, p.ShortName)
+		}
+	}
+	if len(names) > 0 {
+		return fmt.Errorf("project %q not found — available project IDs: %s", c.projectID, strings.Join(names, ", "))
+	}
+	return fmt.Errorf("project %q not found on this YouTrack instance", c.projectID)
+}
+
 // IssueComment is a full comment object with author info
 type IssueComment struct {
 	ID      string `json:"id"`

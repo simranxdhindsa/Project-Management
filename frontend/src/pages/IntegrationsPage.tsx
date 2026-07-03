@@ -933,7 +933,7 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
                 <div className="int-detail-card">
                   <span className="int-detail-label">Credentials source</span>
                   <span className="int-detail-value">
-                    {ytStatus?.source === 'user_db' ? 'Your profile (DB)' : ytStatus?.source === 'global_db' ? 'Org-wide (DB)' : 'Environment variables'}
+                    {ytStatus?.source === 'user_db' ? 'Your profile' : ytStatus?.source === 'global_db' ? 'Org-wide (DB)' : 'Environment variables'}
                   </span>
                 </div>
               </div>

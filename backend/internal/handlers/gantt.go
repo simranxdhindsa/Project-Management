@@ -65,11 +65,7 @@ func (h *GanttHandler) getClient(r *http.Request) (*youtrack.Client, error) {
 	}
 	integ, err := h.settingsRepo.GetYouTrackIntegration(r.Context(), user.ID)
 	if err != nil || integ == nil || !integ.Connected {
-		admin, aerr := h.settingsRepo.GetAdminYouTrackIntegration(r.Context())
-		if aerr != nil || admin == nil || !admin.Connected {
-			return nil, http.ErrNoCookie
-		}
-		return youtrack.NewClient(admin.BaseURL, admin.Token, admin.ProjectID), nil
+		return nil, http.ErrNoCookie
 	}
 	return youtrack.NewClient(integ.BaseURL, integ.Token, integ.ProjectID), nil
 }
