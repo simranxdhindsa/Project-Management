@@ -4,6 +4,92 @@ All notable changes to Velocity are listed here. Most recent entries appear firs
 
 ---
 
+## 2026-07-03
+
+### Enhancements
+- Remove admin credential fallback — YouTrack integration now strictly per-user; members must configure their own token
+- Validate YouTrack project ID on save — connection test checks project short name against live YouTrack project list
+
+### Bug Fixes
+- Fix login flow regression for users with an existing YouTrack integration row
+
+---
+
+## 2026-07-02
+
+### Features
+- Gantt chart tab — interactive sprint timeline with drag/resize bars, dependency arrows, Edit Mode, Day/Week/Month views synced to YouTrack
+
+---
+
+## 2026-07-01
+
+### Enhancements
+- WorldClock — double-click to edit timezone, hour snap, day/night icons, pulse dot, IST/CET diff tooltip
+
+### Bug Fixes
+- Include subtasks in DayTrack Slack post as nested ◦ bullets under their parent task
+
+---
+
+## 2026-06-24
+
+### Features
+- Global per-user parked blocked tickets — DB-backed ignored list, optimistic UI, covers all PM views
+
+### Enhancements
+- Health Rings — clickable/hoverable dots, 8-hour watch dots, percentage center label, legend strip
+
+### Bug Fixes
+- Fix branch-switch logout (switching sprints no longer signs the user out)
+
+---
+
+## 2026-06-23
+
+### Refactors
+- Split SprintPulsePage (1917 lines) into 6 focused files; fix ticket ID display across board, list view, pull panel, and detail view
+
+---
+
+## 2026-06-22
+
+### Features
+- Sprint Pulse Live view — real-time animated sprint status board with attention panel and progress ring
+
+### Styles
+- Add color legend above Pulse Strips bars
+
+### Bug Fixes
+- Fix 6 security vulnerabilities: dev-mode bypass token in production, unauthenticated SSE endpoint, admin credential leak on YouTrack writes, missing AdminOnly guard on whitelist and PM report delete, open developer-config write
+- Fix JWT secret lazy-init — `init()` fires before `godotenv` loads `.env`, causing a false FATAL in local dev
+
+---
+
+## 2026-06-19
+
+### Features
+- Daily Ops: 6 design views with persisted tab switcher — Health Rings, Mission Control, Stuck Detector, Hotfix Command, Pulse Strips, Snapshot
+
+---
+
+## 2026-06-18
+
+### Features
+- Daily Ops: "Done Today" section with corrected role semantics (dev_done only; verified/deployed excluded from developer attribution)
+
+### Bug Fixes
+- Include Meetings category in DayTrack Slack post (was explicitly excluded by mistake)
+
+---
+
+## 2026-06-16
+
+### Features
+- Complete Velocity brand identity — branded loaders and VelocityLogo across all pages, tabs, empty states, and modals
+
+---
+
 ## 2026-06-14
 
 ### Features

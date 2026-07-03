@@ -52,6 +52,7 @@ WORKDIR /app
 
 COPY --from=go-builder /app/server .
 COPY --from=frontend-builder /app/frontend/dist ./public
+COPY CHANGELOG.md .
 
 ENV PORT=8080 \
     ENVIRONMENT=production
