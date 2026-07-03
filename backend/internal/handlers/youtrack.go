@@ -2089,6 +2089,12 @@ func min(a, b int) int {
 
 var priorityRegex = regexp.MustCompile(`^(P[0-3])\s+(.*)`)
 
+// package-level regexes used in PMAssistantQuery — compiled once at init, not per request.
+var (
+	resolvedFilterRe = regexp.MustCompile(`(?i)\bresolved\s*:\s*(\{[^}]*\}|\S+)`)
+	yqlTypeFilterRe  = regexp.MustCompile(`(?i)\bType:\s*\w+`)
+)
+
 // extractPriorityFromSummary parses "P2 FE UI: Avatar Bug" -> ("P2", "P2 FE UI: Avatar Bug")
 // The clean_title keeps the priority prefix since it's part of the Slack message format
 func extractPriorityFromSummary(summary string) (string, string) {
@@ -2542,52 +2548,87 @@ func buildYQLTranslationPrompt(projectID, activeSprint string, states []youtrack
 	sb.WriteString("• 'moved to [state] today/recently' → use that state + updated: Today  (NOT created:)\n")
 	sb.WriteString("• NEVER use 'created:' for transition/movement queries — only for ticket creation date\n\n")
 
+	// Build a name→login lookup hint for assignee queries
+	if len(users) > 0 {
+		sb.WriteString("ASSIGNEE LOOKUP — when user mentions a person's name, use the login from this table:\n")
+		for _, u := range users {
+			if u.Login != "" && u.FullName != "" {
+				sb.WriteString(fmt.Sprintf("  \"%s\" → Assignee: %s\n", u.FullName, u.Login))
+			}
+		}
+		sb.WriteString("  If the person is not in this list, omit the Assignee filter entirely.\n\n")
+	}
+
+	sprintToken := ""
+	if activeSprint != "" {
+		sprintToken = fmt.Sprintf("#{%s}", activeSprint)
+	}
+	// projectSprint is used in examples — avoids double-space when no sprint is active.
+	projectSprint := projectID
+	if sprintToken != "" {
+		projectSprint = projectID + " " + sprintToken
+	}
+
 	sb.WriteString("PROVEN EXAMPLES (use these exact patterns):\n")
-	sb.WriteString(fmt.Sprintf("  all sprint issues       → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  blocked tickets         → project: %s #{%s} #Blocked\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  in progress             → project: %s #{%s} #{In Progress}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  moved to DEV today      → project: %s #{%s} #DEV updated: Today\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  moved to Stage today    → project: %s #{%s} #Stage updated: Today\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  moved to Done today     → project: %s #{%s} #Done updated: Today\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  updated this week       → project: %s #{%s} updated: {This week}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  DEV + Stage + Prod      → project: %s #{%s} #DEV #Stage #{Ready For Prod}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  single assignee         → project: %s #{%s} Assignee: rajvirsingh\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  P0 or P1 open           → project: %s #{%s} #P0 #P1 #{In Progress} #{To Do}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  created today           → project: %s #{%s} created: Today\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  created yesterday       → project: %s #{%s} created: yesterday\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  hotfixes in progress    → project: %s #{%s} Type: Hotfix #{In Progress}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  bugs in sprint          → project: %s #{%s} Type: Bug\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  tasks for one person    → project: %s #{%s} Assignee: simran\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  FE MC done tickets      → project: %s #{%s} #{FE MC} #DEV #Done\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  MC FE tickets only      → project: %s #{%s} #{FE MC}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  MC excl backend         → project: %s #{%s} #{FE MC}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  BE excl RAG             → project: %s #{%s} #{BE MC} #{BE Studio} #{BE UI}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  bugs this sprint only   → project: %s #{%s} Type: Bug\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  bugs not from last week → project: %s #{%s} Type: Bug\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  created this week       → project: %s created: {This week}\n", projectID))
-	sb.WriteString(fmt.Sprintf("  bounced back            → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  bounced tickets         → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  highest bounce count    → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  overdue tickets         → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  past SLA deadline       → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  at-risk tickets         → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  cycle time per dev      → project: %s #{%s}\n", projectID, activeSprint))
-	sb.WriteString(fmt.Sprintf("  developer workload      → project: %s #{%s}\n", projectID, activeSprint))
+	sb.WriteString(fmt.Sprintf("  all sprint issues         → project: %s\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  sprint summary / overview → project: %s\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  blocked tickets           → project: %s #Blocked\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  in progress               → project: %s #{In Progress}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  moved to DEV today        → project: %s #DEV updated: Today\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  moved to Stage today      → project: %s #Stage updated: Today\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  finished / done today     → project: %s #DEV #Done updated: Today\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  done this sprint          → project: %s #DEV #Done\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  updated this week         → project: %s updated: {This week}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  DEV + Stage + Prod        → project: %s #DEV #Stage #{Ready For Prod}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  single assignee           → project: %s Assignee: rajvirsingh\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  P0 or P1 open             → project: %s #P0 #P1 #{In Progress} #{To Do}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  created today             → project: %s created: Today\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  created yesterday         → project: %s created: yesterday\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  created this week         → project: %s created: {This week}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  hotfixes in progress      → project: %s Type: Hotfix #{In Progress}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  all hotfixes in sprint    → project: %s Type: Hotfix\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  bugs in sprint            → project: %s Type: Bug\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  tasks for one person      → project: %s Assignee: simran\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  what is Alice doing?      → project: %s Assignee: alice_login #{In Progress} #Blocked\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  FE MC done tickets        → project: %s #{FE MC} #DEV #Done\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  FE MC in progress         → project: %s #{FE MC} #{In Progress}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  MC FE tickets only        → project: %s #{FE MC}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  BE excl RAG               → project: %s #{BE MC} #{BE Studio} #{BE UI}\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  bugs + date filter        → project: %s Type: Bug\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  bounced / moved back      → project: %s\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  overdue / past SLA        → project: %s\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  at-risk tickets           → project: %s\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  cycle time / workload     → project: %s\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  who has most tickets?     → project: %s\n", projectSprint))
+	// Specific ticket ID — no sprint filter needed, ID is globally unique
+	sb.WriteString(fmt.Sprintf("  specific ticket ARD-1234  → project: %s ARD-1234\n", projectID))
+	sb.WriteString(fmt.Sprintf("  specific ticket 3-2554    → project: %s 3-2554\n", projectID))
+	sb.WriteString(fmt.Sprintf("  tickets assigned to Bob   → project: %s Assignee: bob_login\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  high priority open        → project: %s #P0 #P1\n", projectSprint))
+	sb.WriteString(fmt.Sprintf("  all open (not done)       → project: %s #{In Progress} #Blocked #{To Do}\n", projectSprint))
 
 	sb.WriteString("\nCRITICAL RULES:\n")
 	sb.WriteString("1. NEVER use  State: value  or  Priority: value  — always use # prefix\n")
 	sb.WriteString("2. NEVER use  sprint: {name}  — always use  #{Sprint Name}\n")
-	sb.WriteString("3. Multiple states: #{State1} #{State2} (space-separated, NOT comma-separated)\n")
-	sb.WriteString(fmt.Sprintf("4. Default to active sprint #{%s} unless user asks for historical data\n", activeSprint))
-	sb.WriteString("5. For 'summary' / 'all issues': only add #{SprintName}, no state filter\n")
-	sb.WriteString("6. For 'multiple assignees': use only one Assignee: filter or none — NEVER chain Assignee: x Assignee: y\n")
-	sb.WriteString("7. Type filter: Type: Hotfix / Type: Bug / Type: Task / Type: Feature (never use # for Type)\n")
-	sb.WriteString("8. NEVER use date comparisons like  due: <  or  updated: <=  — these are invalid YQL\n")
-	sb.WriteString("   NEVER use  resolved: {period}  — this project does NOT have resolved dates; use state filters instead\n")
-	sb.WriteString("   For 'exclude resolved last week': just return sprint + type filter — the bot will reason from ticket data\n")
-	sb.WriteString("9. NEVER invent state names like #Bounced #Overdue #AtRisk #Reopened #Fixed — these do not exist\n")
-	sb.WriteString("10. Subsystem EXCLUSION (-Subsystem:) is NOT valid YQL — to get 'MC excluding backend', use Subsystem: {FE MC} only\n")
-	sb.WriteString("11. Only use state names from the STATES list above — do not guess or invent state names\n")
+	sb.WriteString("3. Multiple states/priorities: space-separated, NOT comma-separated: #{State1} #{State2}\n")
+	if activeSprint != "" {
+		sb.WriteString(fmt.Sprintf("4. Default to active sprint #{%s} unless user explicitly asks for another sprint\n", activeSprint))
+	} else {
+		sb.WriteString("4. No active sprint is selected — use project: filter only unless a sprint name is mentioned\n")
+	}
+	sb.WriteString("5. For 'summary' / 'all issues' / 'overview': return project + sprint only, no state filter\n")
+	sb.WriteString("6. For 'multiple assignees' (\"show Alice and Bob\"): omit Assignee filter — let the bot reason from full sprint data\n")
+	sb.WriteString("7. Type filter: Type: Hotfix / Type: Bug / Type: Task / Type: Feature (NEVER use # for Type)\n")
+	sb.WriteString("8. NEVER use  resolved: {period}  or  resolved: Today  — this project has NO resolved dates. Use state filters (#DEV #Done) for 'done' tickets\n")
+	sb.WriteString("   For 'bugs resolved/done last week': return  project: " + projectSprint + " Type: Bug  — the bot handles date reasoning from ticket data\n")
+	sb.WriteString("9. NEVER invent state names like #Bounced #Overdue #AtRisk #Reopened #Fixed — these states do not exist in YouTrack\n")
+	sb.WriteString("10. Subsystem EXCLUSION (-Subsystem:) is NOT valid — to exclude a subsystem, list only the subsystems you WANT\n")
+	sb.WriteString("11. Only use state names from the STATES list above — never guess or invent\n")
+	sb.WriteString("12. For a SPECIFIC TICKET ID in the query (e.g. 'tell me about ARD-1234', 'what is 3-2554'): return  project: " + projectID + " {issueID}  — no sprint filter\n")
+	sb.WriteString("13. For 'what did X finish/complete today': use  #DEV #Done updated: Today Assignee: login\n")
+	sb.WriteString("14. For 'what is X working on?': use  #{In Progress} #Blocked Assignee: login  — look up login from ASSIGNEE LOOKUP table above\n")
+	sb.WriteString("15. NEVER chain multiple Assignee: filters — use at most one, or none for team-wide queries\n")
+	sb.WriteString("16. For any bounce/overdue/SLA/cycle-time query: return plain sprint filter — analytics are computed server-side and embedded in the data\n")
 	return sb.String()
 }
 
@@ -2921,6 +2962,14 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 	yql = strings.TrimSpace(yql)
 	yql = normalizeYQL(yql)
 
+	// Strip resolved: filters — this project has no resolved dates set, they always return 0 results.
+	// The LLM is instructed not to generate them, but this is a safety net for model drift.
+	if resolvedFilterRe.MatchString(yql) {
+		cleaned := strings.TrimSpace(resolvedFilterRe.ReplaceAllString(yql, ""))
+		log.Printf("[PM-YQL] stripped resolved: filter: %q → %q", yql, cleaned)
+		yql = cleaned
+	}
+
 	// Analytics override: queries about computed metrics (bounce, overdue, SLA, cycle time, workload)
 	// have no native YouTrack filter — override to a plain sprint fetch so the bot reads the
 	// bounces:N and [OVERDUE] flags that are embedded in every ticket line of the data context.
@@ -2942,7 +2991,7 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 			}
 			// Preserve Type: filter from the generated YQL if present (e.g. Type: Bug)
 			typeFilter := ""
-			if m := regexp.MustCompile(`(?i)\bType:\s*\w+`).FindString(yql); m != "" {
+			if m := yqlTypeFilterRe.FindString(yql); m != "" {
 				typeFilter = " " + m
 			}
 			yql = fmt.Sprintf("project: %s%s%s", projectID, sprintTag, typeFilter)
@@ -2979,7 +3028,7 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 		ctxSB.WriteString("QUERY RESULTS: No issues found matching this filter. Answer only from the Sprint Summary above — do NOT invent ticket IDs or data.\n")
 	} else {
 		ctxSB.WriteString(fmt.Sprintf("QUERY RESULTS (%d issues — COMPLETE, answer directly from this list):\n", len(yqlIssues)))
-		ctxSB.WriteString("ID | Priority | Type | Summary | State | Assignee\n")
+		ctxSB.WriteString("ID | Priority | Type | Summary | State | Assignee | Subsystem | Created\n")
 		for _, iss := range yqlIssues {
 			issID := iss.IDReadable
 			if issID == "" {
@@ -2990,6 +3039,11 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 			state := youtrack.GetStatus(iss)
 			prio := youtrack.GetPriority(iss)
 			issType := youtrack.GetCustomFieldValue(iss, "Type")
+			subsys := youtrack.GetSubsystem(iss)
+			createdDate := ""
+			if iss.Created > 0 {
+				createdDate = time.UnixMilli(iss.Created).UTC().Format("2006-01-02")
+			}
 			asgn := ""
 			if a := youtrack.GetAssignee(iss); a != nil {
 				asgn = a.FullName
@@ -3012,8 +3066,8 @@ func (h *YouTrackHandler) PMAssistantQuery(w http.ResponseWriter, r *http.Reques
 			if tLines := issueTransitions[lookupID]; len(tLines) > 0 {
 				transitions = "\n" + strings.Join(tLines, "\n")
 			}
-			ctxSB.WriteString(fmt.Sprintf("%s | %s | %s | %s | %s | %s%s%s%s\n",
-				issID, prio, issType, iss.Summary, state, asgn, flags, blocker, transitions))
+			ctxSB.WriteString(fmt.Sprintf("%s | %s | %s | %s | %s | %s | %s | %s%s%s%s\n",
+				issID, prio, issType, iss.Summary, state, asgn, subsys, createdDate, flags, blocker, transitions))
 		}
 	}
 	dataContext := ctxSB.String()
