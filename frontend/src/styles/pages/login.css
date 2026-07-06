@@ -37,31 +37,14 @@
 
 /* ── Logo — glowing 72px float box with halo ─────────────── */
 .login-logo {
-  width: 72px;
-  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--gradient-primary);
-  border-radius: var(--radius-xl);
-  color: white;
   margin: 0 auto 1.5rem;
-  box-shadow: var(--shadow-glow-strong), var(--shadow-xl);
   position: relative;
   flex-shrink: 0;
 }
 
-.login-logo::after {
-  content: '';
-  position: absolute;
-  inset: -5px;
-  border-radius: calc(var(--radius-xl) + 5px);
-  background: var(--gradient-primary);
-  opacity: 0.28;
-  filter: blur(10px);
-  z-index: -1;
-  animation: glowPulse 3s infinite;
-}
 
 /* ── Titles ───────────────────────────────────────────────── */
 .login-title {

@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { KanbanSquare, CheckCircle, Zap, Shield, Sun, Moon } from 'lucide-react'
+import { GitBranch, Activity, BarChart2, BellRing, Sun, Moon } from 'lucide-react'
 import IsoTicketCard from '@/components/IsoTicketCard'
 import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import { QuantumOrbitLoader } from '@/components/brand/VelocityLoaders'
@@ -118,24 +118,24 @@ export default function Login() {
 
   const features = [
     {
-      icon: <KanbanSquare className="feature-icon" />,
-      title: 'Asana Sync',
-      description: 'Two-way sync with your Asana projects',
+      icon: <GitBranch className="feature-icon" />,
+      title: 'YouTrack Integration',
+      description: 'Live sprint boards, issues and workflow sync',
     },
     {
-      icon: <Zap className="feature-icon" />,
-      title: 'AI Analysis',
-      description: 'Smart Slack message analysis with Gemini',
+      icon: <Activity className="feature-icon" />,
+      title: 'Sprint Pulse',
+      description: 'Real-time dev load, blocked tickets and live feed',
     },
     {
-      icon: <CheckCircle className="feature-icon" />,
-      title: 'Daily Carry-Over',
-      description: "Yesterday's pending tasks at a glance",
+      icon: <BarChart2 className="feature-icon" />,
+      title: 'PM Reports',
+      description: 'Velocity, burndown and team performance insights',
     },
     {
-      icon: <Shield className="feature-icon" />,
-      title: 'Role-Based Access',
-      description: 'Admin, PM, Member, and Viewer roles',
+      icon: <BellRing className="feature-icon" />,
+      title: 'Daily Ops',
+      description: 'Standup reports, alerts and Slack digests',
     },
   ]
 
@@ -152,13 +152,13 @@ export default function Login() {
             <VelocityLogo
               variant="icon"
               size="xl"
-              mark="glitch"
+              mark="chevron"
               showStatusDot={false}
             />
           </div>
           <h1 className="login-title text-gradient">Velocity</h1>
           <p className="login-subtitle">
-            Sync your Asana tasks, analyze Slack progress with AI
+            Connect YouTrack, analyze Slack progress with AI
           </p>
         </div>
 
