@@ -857,13 +857,11 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
           YouTrack
           {ytStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
         </button>
-        {!isMember && (
-          <button className={`int-tab ${mainTab === 'slack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('slack'); onTabChange?.('slack') }}>
-            <MessageSquare size={14} />
-            Slack
-            {slackStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
-          </button>
-        )}
+        <button className={`int-tab ${mainTab === 'slack' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('slack'); onTabChange?.('slack') }}>
+          <MessageSquare size={14} />
+          Slack
+          {slackStatus?.connected && <span className="int-tab-dot int-tab-dot-green" />}
+        </button>
         {!isMember && (
           <button className={`int-tab ${mainTab === 'workflow' ? 'int-tab-active' : ''}`} onClick={() => { setMainTab('workflow'); onTabChange?.('workflow') }}>
             <Sliders size={14} />

@@ -81,7 +81,7 @@ import type { ChangelogEntry } from '../services/api'
 type Page = 'dashboard' | 'board' | 'list' | 'sprint-pulse' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme' | 'gantt'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'sprint-pulse', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations', 'gantt']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'sprint-pulse', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations', 'gantt', 'slack']
 
 // YouTrack issue with extracted fields
 interface YTIssue {
@@ -706,8 +706,7 @@ export default function Dashboard() {
               <MessageSquare size={20} />
               <span>PM Reports</span>
             </button>
-            {isFullAccess && (
-              <button
+            <button
                 className={`sidebar-nav-item ${currentPage === 'slack' ? 'active' : ''}`}
                 onClick={() => setCurrentPage('slack')}
               >
@@ -723,7 +722,6 @@ export default function Dashboard() {
                 </svg>
                 <span>Slack</span>
               </button>
-            )}
           </div>
 
           <div className="nav-section">

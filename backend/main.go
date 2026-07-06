@@ -300,7 +300,7 @@ func main() {
 	slackRoutes.HandleFunc("/threads/{threadTS}/snooze", slackHandler.SnoozeThread).Methods("POST")
 	slackRoutes.HandleFunc("/digest", slackHandler.PostDigest).Methods("POST")
 	slackRoutes.HandleFunc("/reminders", slackHandler.CreateFollowupReminder).Methods("POST")
-	slackRoutes.HandleFunc("/post-morning-report", slackHandler.PostMorningReport).Methods("POST")
+	slackRoutes.Handle("/post-morning-report", middleware.ManagerOrAbove(http.HandlerFunc(slackHandler.PostMorningReport))).Methods("POST")
 	// Slack Intelligence v2
 	slackRoutes.HandleFunc("/reply", slackHandler.ReplyToThread).Methods("POST")
 	slackRoutes.HandleFunc("/thread-replies", slackHandler.GetThreadRepliesHandler).Methods("GET")
