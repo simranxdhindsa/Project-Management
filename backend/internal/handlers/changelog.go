@@ -82,10 +82,19 @@ func (h *ChangelogHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := h.parseChangelog()
+	all, err := h.parseChangelog()
 	if err != nil {
 		http.Error(w, "failed to read changelog", http.StatusInternalServerError)
 		return
+	}
+
+	// Only surface the last 30 days of entries in the panel.
+	cutoff := time.Now().UTC().AddDate(0, 0, -30).Format("2006-01-02")
+	var entries []ChangelogEntry
+	for _, e := range all {
+		if e.Date >= cutoff {
+			entries = append(entries, e)
+		}
 	}
 
 	var seenAt *time.Time

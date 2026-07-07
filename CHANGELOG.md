@@ -4,14 +4,32 @@ All notable changes to Velocity are listed here. Most recent entries appear firs
 
 ---
 
+## 2026-07-07
+
+### Enhancements
+- Replace all hardcoded accent/danger colors in modals.css with CSS custom properties
+- Replace Sparkles icon with Megaphone icon for changelog indicator
+
+---
+
+## 2026-07-06
+
+### Enhancements
+- Enable Slack access for member role — members can now read and post to configured Slack channels
+
+---
+
 ## 2026-07-03
 
 ### Enhancements
 - Remove admin credential fallback — YouTrack integration now strictly per-user; members must configure their own token
 - Validate YouTrack project ID on save — connection test checks project short name against live YouTrack project list
+- Replace all hardcoded colour values in PM Assistant with CSS custom properties
 
 ### Bug Fixes
 - Fix login flow regression for users with an existing YouTrack integration row
+- Fix user_ignored_blocked_tickets migration (was not applying on startup)
+- Include CHANGELOG.md in Docker runtime image (was causing 500 on /api/changelog/status in production)
 
 ---
 
