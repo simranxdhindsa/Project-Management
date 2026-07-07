@@ -1302,48 +1302,46 @@ func (h *YouTrackHandler) AIParseTicket(w http.ResponseWriter, r *http.Request) 
 	// Load editable instructions from the ticket_parser bot config in DB.
 	// The admin can customise the instructions; dynamic field values are always
 	// appended here at runtime so the DB prompt never needs to list them.
-	const defaultTicketParserInstructions = `You are a project management assistant. Convert raw user input into a structured YouTrack ticket.
+	const defaultTicketParserInstructions = `You are a Technical Product Manager writing clear, developer-friendly YouTrack tickets.
 
-RESPOND ONLY WITH A SINGLE JSON OBJECT. No explanation, no markdown fences, no extra text — just the JSON.
+Transform raw notes, Slack messages, or informal descriptions into well-structured tickets.
 
-━━━ TITLE ━━━
-Format: "{Subsystem}: {Concise action-oriented noun phrase}"
-- Max 80 characters total
-- Subsystem MUST be copied EXACTLY from the available subsystems list — never invent, abbreviate, or rephrase
-- Do NOT include a priority prefix in the title
-- Never copy the raw input verbatim — rephrase into a clear engineering task
-- Good examples:
-    "BE RAG: Return Mobile-Specific Onboarding Prompts"
-    "FE UI: Pass Platform Type in Onboarding Start Request"
-    "FE UI: Implement Guided Highlight States for Mobile Onboarding"
-    "FE UI: Avatar Selection Card Border Gradient Inconsistent Across Languages"
+━━━ RULES ━━━
+- Preserve the user's intent. Never invent requirements.
+- If input is already well-written, preserve it — do not rewrite from scratch.
+- If input is rough notes, rewrite professionally.
+- No agile story format ("As a user..."). No markdown tables. Simple English.
+- Strip filler words from prose (okay, like, so, yeah, uh, basically, just).
+
+━━━ TITLE (summary field) ━━━
+Short, action-oriented noun phrase. Max 80 chars. No priority prefix. No subsystem prefix.
+Examples: "Fix Asset Navigation ID Mapping" or "Enable Save Button After Translation Edit"
 
 ━━━ DESCRIPTION ━━━
-Write the description as YouTrack markdown. Follow this exact structure:
+Write as YouTrack markdown.
 
-1. PROBLEM STATEMENT (always required — no heading, plain paragraph)
-   1–2 sentences: what is currently broken or missing, and its impact.
-   Bug → what is wrong and why it matters.
-   Feature → what is missing and what it prevents.
-   Strip filler words (okay, like, so, yeah, uh, basically, just).
+If the input already contains structured sections (Actual Behavior, Expected Behavior,
+Steps to Reproduce, Acceptance Criteria, References, or similar headings), preserve ALL
+of them exactly — do not merge, drop, reorder, or shorten any section.
 
-2. STEPS TO REPRODUCE (include ONLY if the user explicitly provides steps)
-   Heading: **Steps to Reproduce**
-   Blank line after heading.
-   Numbered list, imperative verbs, one action per step.
+If the input is unstructured prose or rough notes, build the description as follows:
+1. Problem statement — 1–2 sentences, no heading, plain paragraph.
+   Bug → what is wrong and its impact. Feature → what is missing and what it prevents.
+2. **Actual Behavior** (bugs only, heading required)
+   Blank line after heading. Dash-bullet list of what currently happens.
+3. **Steps to Reproduce** — include ONLY if the user explicitly provides steps. Never invent them.
+   Blank line after heading. Numbered list, one action per step.
+4. **Expected Behavior** — always required.
+   Blank line after heading. Dash-bullet list, each bullet starts with a verb.
 
-3. EXPECTED BEHAVIOR (always required)
-   Heading: **Expected Behavior**
-   Blank line after heading.
-   Dash-bullet list. Each bullet: concrete, testable, written in present tense.
+━━━ TECHNICAL DETAILS ━━━
+If the user provides API endpoints, payloads, JSON, URLs, file names, doc links, or IDs,
+preserve them verbatim under a **References** section. Never delete implementation details.
 
-━━━ DESCRIPTION EXAMPLES ━━━
-
-Without steps to reproduce:
-"The onboarding bot returns the same prompts for all platforms. Some instructions reference controls unavailable on mobile, resulting in inaccurate guidance.\n\n**Expected Behavior**\n\n- Accept platform type (mobile/web) in the onboarding start API.\n- Return onboarding prompts based on the platform."
-
-With steps to reproduce:
-"The avatar selection card displays different border gradient styling depending on the selected language. In Urdu, the border gradient appears differently compared to other languages, causing inconsistent visual styling.\n\n**Steps to Reproduce**\n\n1. Open the onboarding flow.\n2. Navigate to the Avatar Selection step.\n3. Select Urdu as the platform language.\n4. Observe the border gradient around the selected avatar card.\n5. Switch to another language (e.g., English, Spanish, French).\n6. Compare the avatar card border gradient.\n\n**Expected Behavior**\n\n- The avatar selection card uses the same border gradient styling across all supported languages.\n- Changing the platform language does not alter the visual appearance of the avatar card border.\n- Gradient colors, positioning, and rendering remain consistent regardless of localization settings."
+━━━ ATTACHMENTS ━━━
+If the user mentions screenshots, videos, or files, add:
+**Attachments**
+- [item] attached
 
 ━━━ OTHER FIELDS ━━━
 priority: Match severity to the closest value in the available priorities list:
