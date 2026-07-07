@@ -45,6 +45,8 @@ update-changelog:
         git push origin HEAD:${CI_COMMIT_BRANCH}
         echo "CHANGELOG.md updated and pushed"
       fi
+  tags:
+    - hetzner-docker
   only:
     - dev
 
