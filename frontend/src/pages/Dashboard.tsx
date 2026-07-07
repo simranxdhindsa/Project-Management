@@ -46,6 +46,7 @@ import {
   X,
   MessageSquare,
   Sparkles,
+  Megaphone,
   Maximize2,
   Minimize2,
   Activity,
@@ -842,7 +843,7 @@ export default function Dashboard() {
                 if (hasNewChangelog) setHasNewChangelog(false)
               }}
             >
-              <Sparkles size={18} />
+              <Megaphone size={18} />
               {hasNewChangelog && <span className="changelog-dot" />}
             </button>
             {showChangelog && changelogAnchorRect && (
