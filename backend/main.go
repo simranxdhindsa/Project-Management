@@ -299,12 +299,13 @@ func main() {
 	slackRoutes.HandleFunc("/templates", slackHandler.CreateTemplate).Methods("POST")
 	slackRoutes.HandleFunc("/templates/{id}", slackHandler.DeleteTemplate).Methods("DELETE")
 	slackRoutes.HandleFunc("/saved-items", slackHandler.GetSavedItems).Methods("GET")
+	// Per-user Slack actions: connect/disconnect own integration — any authenticated user
+	slackRoutes.HandleFunc("/connect", slackHandler.Connect).Methods("POST")
+	slackRoutes.HandleFunc("/disconnect", slackHandler.Disconnect).Methods("POST")
 	// Slack write routes — workspace config + broadcast: manager or above only
 	slackWriteRoutes := api.PathPrefix("/slack").Subrouter()
 	slackWriteRoutes.Use(middleware.AuthMiddleware)
 	slackWriteRoutes.Use(middleware.ManagerOrAbove)
-	slackWriteRoutes.HandleFunc("/connect", slackHandler.Connect).Methods("POST")
-	slackWriteRoutes.HandleFunc("/disconnect", slackHandler.Disconnect).Methods("POST")
 	slackWriteRoutes.HandleFunc("/channel", slackHandler.SetChannel).Methods("POST")
 	slackWriteRoutes.HandleFunc("/monitor-channel", slackHandler.SetMonitorChannel).Methods("POST")
 	slackWriteRoutes.HandleFunc("/scan", slackHandler.Scan).Methods("POST")
