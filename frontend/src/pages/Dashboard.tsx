@@ -1,16 +1,5 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import {
-  DndContext,
-  DragOverlay,
-  closestCorners,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  useDroppable,
-  useDraggable,
-} from '@dnd-kit/core'
-import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import { useAuth } from '@/contexts/AuthContext'
 import { StatCarousel } from '@/components/StatCarousel'
 import WorldClock from '@/components/WorldClock'
@@ -18,7 +7,6 @@ import { PERSIST } from '@/hooks/usePersistedState'
 import api from '@/services/api'
 import { ConfirmModal } from '@/components/ConfirmModal'
 import CreateIssueModal from '@/components/CreateIssueModal'
-import { useYouTrackEvents } from '@/services/useYouTrackEvents'
 import {
   LayoutDashboard,
   KanbanSquare,
@@ -29,20 +17,13 @@ import {
   BarChart3,
   Settings,
   Users,
-  Search,
   Plus,
-  ChevronRight,
   LogOut,
   Link2,
   Brain,
   CheckCircle,
-  AlertCircle,
-  Clock,
-  Code2,
-  Archive,
-  RefreshCw,
-  User,
   AlertTriangle,
+  Clock,
   X,
   MessageSquare,
   Sparkles,
@@ -84,68 +65,7 @@ type Page = 'dashboard' | 'board' | 'list' | 'sprint-pulse' | 'daily-ops' | 'cal
 // Pages accessible by members/viewers (limited access)
 const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'sprint-pulse', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations', 'gantt', 'slack']
 
-// YouTrack issue with extracted fields
-interface YTIssue {
-  id: string
-  summary: string
-  description: string
-  status: string
-  priority: string
-  assignee?: { id: string; login: string; fullName: string; email?: string }
-}
-
-// Column config for the 3 dashboard columns
-const DASHBOARD_COLUMNS = [
-  { id: 'backlog', label: 'Backlog', ytState: 'Open' },
-  { id: 'in_progress', label: 'In Progress', ytState: 'In Progress' },
-  { id: 'dev', label: 'DEV', ytState: 'DEV' },
-] as const
-
-const COLUMN_ORDER: Record<string, number> = {
-  backlog: 0,
-  in_progress: 1,
-  dev: 2,
-}
-
 type DashboardNotification = LocalNotification
-
-// Droppable column wrapper
-function DroppableColumn({ id, children }: { id: string; children: React.ReactNode }) {
-  const { isOver, setNodeRef } = useDroppable({ id })
-  return (
-    <div
-      ref={setNodeRef}
-      className="kanban-column"
-      style={{
-        outline: isOver ? '2px solid #8250df' : 'none',
-        outlineOffset: '-2px',
-        borderRadius: '12px',
-        transition: 'outline 0.15s ease',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-// Draggable card wrapper
-function DraggableCard({ id, children }: { id: string; children: React.ReactNode }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id })
-  return (
-    <div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      style={{
-        opacity: isDragging ? 0.4 : 1,
-        cursor: 'grab',
-        touchAction: 'none',
-      }}
-    >
-      {children}
-    </div>
-  )
-}
 
 // Map URL path segments to Page values
 const PATH_TO_PAGE: Record<string, Page> = {
@@ -319,13 +239,6 @@ export default function Dashboard() {
     document.title = titles[currentPage] || 'Velocity'
   }, [currentPage])
 
-  // YouTrack state
-  const [ytIssues, setYtIssues] = useState<YTIssue[]>([])
-  const [ytLoading, setYtLoading] = useState(true)
-  const [ytConnected, setYtConnected] = useState(false)
-  const [syncing, setSyncing] = useState(false)
-  const sseDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [activeIssue, setActiveIssue] = useState<YTIssue | null>(null)
   const [dashboardView, setDashboardView] = useState<'board' | 'assignees'>('board')
 
   // New task modal state
@@ -334,9 +247,6 @@ export default function Dashboard() {
 
   // Role-based access
   const isFullAccess = user?.role === 'admin' || user?.role === 'project_manager'
-
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('')
 
   // Notification state — persist to sessionStorage
   const [notifications, setNotifications] = useState<DashboardNotification[]>(() => {
@@ -396,9 +306,6 @@ export default function Dashboard() {
   const handleMoveToBlocked = async (notif: DashboardNotification) => {
     try {
       await api.bulkUpdateYouTrackStates([{ issue_id: notif.issueId, new_state: 'Blocked' }])
-      setYtIssues(prev => prev.map(i =>
-        i.id === notif.issueId ? { ...i, status: 'Blocked' } : i
-      ))
       dismissNotification(notif.id)
       setToast({ message: `${notif.issueId} moved to Blocked`, type: 'info' })
       setTimeout(() => setToast(null), 3000)
@@ -407,119 +314,6 @@ export default function Dashboard() {
       setTimeout(() => setToast(null), 3000)
     }
   }
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-  )
-
-  const handleDragStart = (event: DragStartEvent) => {
-    const issue = ytIssues.find(i => i.id === event.active.id)
-    if (issue) setActiveIssue(issue)
-  }
-
-  const handleDragEnd = async (event: DragEndEvent) => {
-    setActiveIssue(null)
-    const { active, over } = event
-    if (!over) return
-
-    const issueId = active.id as string
-    const targetColumnId = over.id as string
-
-    // Find which column the issue currently belongs to
-    const issue = ytIssues.find(i => i.id === issueId)
-    if (!issue) return
-
-    const currentCol = getColumnForIssue(issue)
-    if (currentCol === targetColumnId) return
-
-    // Find the target YouTrack state
-    const targetCol = DASHBOARD_COLUMNS.find(c => c.id === targetColumnId)
-    if (!targetCol) return
-
-    // Detect backward movement
-    const currentOrder = COLUMN_ORDER[currentCol] ?? 0
-    const targetOrder = COLUMN_ORDER[targetColumnId] ?? 0
-    const isBackward = targetOrder < currentOrder
-
-    if (isBackward) {
-      const fromLabel = DASHBOARD_COLUMNS.find(c => c.id === currentCol)?.label || currentCol
-      const toLabel = targetCol.label
-      addNotification({
-        type: 'backward_move',
-        issueId,
-        summary: issue.summary,
-        fromState: fromLabel,
-        toState: toLabel,
-      })
-      setToast({ message: `${issueId} moved backward: ${fromLabel} → ${toLabel}`, type: 'warning' })
-      setTimeout(() => setToast(null), 4000)
-    }
-
-    // Optimistic update: move the issue locally (even if backward)
-    setYtIssues(prev => prev.map(i =>
-      i.id === issueId ? { ...i, status: targetCol.ytState } : i
-    ))
-
-    // Call YouTrack API to update state
-    try {
-      await api.bulkUpdateYouTrackStates([{ issue_id: issueId, new_state: targetCol.ytState }])
-    } catch (err) {
-      console.error('Failed to update issue state:', err)
-      // Revert on failure
-      fetchYouTrackIssues()
-    }
-  }
-
-  const getColumnForIssue = (issue: YTIssue): string => {
-    const s = issue.status?.toLowerCase() || ''
-    if (s === 'in progress') return 'in_progress'
-    if (s === 'dev') return 'dev'
-    return 'backlog'
-  }
-
-  useEffect(() => {
-    fetchYouTrackIssues()
-  }, [])
-
-  const fetchYouTrackIssues = async () => {
-    try {
-      setYtLoading(true)
-      const status = await api.getYouTrackStatus()
-      if (status.configured) {
-        setYtConnected(true)
-        const response = await api.getYouTrackIssues()
-        if (response.success && response.data) {
-          setYtIssues(response.data as YTIssue[])
-        }
-      }
-    } catch (err) {
-      console.error('Failed to fetch YouTrack issues:', err)
-    } finally {
-      setYtLoading(false)
-    }
-  }
-
-  // SSE: auto-refresh when YouTrack changes arrive via webhook.
-  // Debounced 3s to avoid a full re-fetch on every rapid field change.
-  useYouTrackEvents(useCallback((event) => {
-    setToast({
-      message: `YouTrack: ${event.issue_id} ${event.field} → ${event.new_value}`,
-      type: 'info',
-    })
-    setTimeout(() => setToast(null), 4000)
-
-    if (sseDebounceRef.current) clearTimeout(sseDebounceRef.current)
-    sseDebounceRef.current = setTimeout(() => {
-      fetchYouTrackIssues()
-    }, 3000)
-  }, []))
-
-  const handleSync = async () => {
-    setSyncing(true)
-    await fetchYouTrackIssues()
-    setSyncing(false)
-  }
-
 
   const handleLogout = async () => {
     await logout()
@@ -533,75 +327,6 @@ export default function Dashboard() {
       .join('')
       .toUpperCase()
       .slice(0, 2)
-  }
-
-  const filteredIssues = searchQuery.trim()
-    ? ytIssues.filter(i =>
-        i.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        i.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        i.assignee?.fullName?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : ytIssues
-
-  // Group YouTrack issues by the 3 columns + Backlog
-  const inProgressIssues = filteredIssues.filter(i => i.status?.toLowerCase() === 'in progress')
-  const devIssues = filteredIssues.filter(i => i.status?.toLowerCase() === 'dev')
-  const backlogIssues = filteredIssues.filter(i => {
-    const s = i.status?.toLowerCase() || ''
-    return s !== 'in progress' && s !== 'dev' && s !== 'done' && s !== 'fixed'
-  })
-  const doneIssues = filteredIssues.filter(i => {
-    const s = i.status?.toLowerCase() || ''
-    return s === 'done' || s === 'fixed'
-  })
-
-  // Group issues by assignee for Assignee View
-  const assigneeGroups = useMemo(() => {
-    const groups: Record<string, YTIssue[]> = {}
-    const unassigned: YTIssue[] = []
-
-    const activeIssues = filteredIssues.filter(i => {
-      const s = i.status?.toLowerCase() || ''
-      return s !== 'done' && s !== 'fixed'
-    })
-
-    for (const issue of activeIssues) {
-      if (issue.assignee?.fullName) {
-        const name = issue.assignee.fullName
-        if (!groups[name]) groups[name] = []
-        groups[name].push(issue)
-      } else {
-        unassigned.push(issue)
-      }
-    }
-
-    const statusOrder = (s: string) => {
-      const lower = s?.toLowerCase() || ''
-      if (lower === 'in progress') return 0
-      if (lower === 'dev') return 2
-      return 1
-    }
-
-    for (const name of Object.keys(groups)) {
-      groups[name].sort((a, b) => statusOrder(a.status) - statusOrder(b.status))
-    }
-    unassigned.sort((a, b) => statusOrder(a.status) - statusOrder(b.status))
-
-    return { groups, unassigned }
-  }, [filteredIssues])
-
-  const getStatusBadge = (status: string) => {
-    const s = status?.toLowerCase() || ''
-    if (s === 'in progress') return { label: 'In Progress', bg: 'rgba(234, 179, 8, 0.15)', color: '#eab308' }
-    if (s === 'dev') return { label: 'DEV', bg: 'rgba(130, 80, 223, 0.15)', color: '#8250df' }
-    return { label: status || 'Backlog', bg: 'rgba(128, 128, 128, 0.15)', color: '#888' }
-  }
-
-  const getBadgeClass = (status: string) => {
-    const s = status?.toLowerCase() || ''
-    if (s === 'in progress') return 'badge-progress'
-    if (s === 'dev') return 'badge-review'
-    return 'badge-todo'
   }
 
   return (

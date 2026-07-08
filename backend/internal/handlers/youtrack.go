@@ -1337,8 +1337,12 @@ Examples: "Fix Asset Navigation ID Mapping" or "Enable Save Button After Transla
 Write as YouTrack markdown.
 
 If the input already contains structured sections (Actual Behavior, Expected Behavior,
-Steps to Reproduce, Acceptance Criteria, References, or similar headings), preserve ALL
-of them exactly — do not merge, drop, reorder, or shorten any section.
+Steps to Reproduce, Acceptance Criteria, References, or similar headings), copy the
+ENTIRE description CHARACTER-FOR-CHARACTER into the description field. Do NOT:
+- add ## or any heading markers that were not in the original
+- remove ## or any heading markers that were in the original
+- reword, reorder, merge, or shorten any section
+- add new sections not present in the input
 
 If the input is unstructured prose or rough notes, build the description as follows:
 1. Problem statement — 1–2 sentences, no heading, plain paragraph.
@@ -1370,7 +1374,7 @@ priority: Match severity to the closest value in the available priorities list:
 
 subsystem: MUST exactly match one value from the available subsystems list. REQUIRED. Never invent.
 type_name: MUST exactly match one value from the available types list. REQUIRED.
-assignee_login: Use login from the users list only if a person's name appears in the input. Otherwise "".
+assignee_login: Set ONLY when a person's name or @mention appears EXPLICITLY in the raw_text (e.g. "assign to parv", "parv will handle", "@rajvir"). NEVER infer from subsystem ownership or any other indirect signal. If no name is explicitly mentioned, return "".
 sprint_id: ID of the most recent non-completed sprint from the sprints list. Otherwise "".`
 
 	instructions := defaultTicketParserInstructions
@@ -1406,6 +1410,22 @@ Return ONLY this JSON object (no other text):
 		string(sprintsJSON),
 	)
 
+	// Detect PRESERVE MODE in Go before calling the LLM.
+	// If the raw input already has structured headings, the LLM description output
+	// is unreliable (it adds/removes ## markers). We override it with the raw text directly.
+	preserveKeywords := []string{
+		"problem statement", "actual behavior", "steps to reproduce",
+		"expected behavior", "acceptance criteria",
+	}
+	rawLower := strings.ToLower(req.RawText)
+	isPreserveMode := false
+	for _, kw := range preserveKeywords {
+		if strings.Contains(rawLower, kw) {
+			isPreserveMode = true
+			break
+		}
+	}
+
 	response, err := ai.QueryWithHistory(r.Context(), systemPrompt, nil, req.RawText)
 	if err != nil {
 		http.Error(w, "AI query failed: "+err.Error(), http.StatusInternalServerError)
@@ -1420,6 +1440,18 @@ Return ONLY this JSON object (no other text):
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
 		http.Error(w, "AI returned invalid JSON: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// PRESERVE MODE override: replace LLM description with the original raw text verbatim.
+	// Strip a leading "Title: ..." line if present (used as a hint for the summary field only).
+	if isPreserveMode {
+		desc := strings.TrimSpace(req.RawText)
+		if firstLine := strings.SplitN(desc, "\n", 2); len(firstLine) == 2 &&
+			strings.HasPrefix(strings.ToLower(strings.TrimSpace(firstLine[0])), "title:") {
+			desc = strings.TrimSpace(firstLine[1])
+		}
+		parsed["description"] = desc
+		log.Printf("[AI-Fill] PRESERVE MODE — description kept verbatim (%d chars)", len(desc))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
