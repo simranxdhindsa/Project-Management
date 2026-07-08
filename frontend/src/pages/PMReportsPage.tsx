@@ -38,7 +38,6 @@ import {
   getStageReportColumns, generateStageReport,
   getActiveSource,
 } from '../services/pmDataService'
-import DailyOpsTab from './DailyOpsTab'
 import { StandupCompilerPage } from './StandupCompilerPage'
 import { IssueDetailPanel } from '../components/IssueDetailPanel'
 import DevTimeView from '../components/DevTimeView'
@@ -140,7 +139,6 @@ const TABS = [
   { id: 'tracking',    label: 'Tracking',          icon: Activity   },
   { id: 'daily',       label: 'Reports',            icon: FileText   },
   { id: 'assignees',   label: 'Assignee Stats',     icon: Users      },
-  { id: 'dailyops',    label: 'Daily Ops',          icon: Zap        },
   { id: 'deployment',  label: 'Deployment Report',  icon: Rocket     },
   { id: 'standup',     label: 'Compiler',           icon: Send       },
 ] as const
@@ -2004,7 +2002,7 @@ function getColumnType(col: SprintBoardColumn): 'inprogress' | 'blocked' | 'comp
   return 'compact'
 }
 
-function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs }: { blockerIssueIds?: Set<string>; sprintId?: string; sprintStartMs?: number; sprintFinishMs?: number }) {
+function TrackingTab({ sprintId, sprintStartMs, sprintFinishMs }: { sprintId?: string; sprintStartMs?: number; sprintFinishMs?: number }) {
   const [boardColumns, setBoardColumns] = useState<SprintBoardColumn[]>([])
   const [summary, setSummary] = useState<import('../services/api').SprintSummary | null>(null)
   const [loading, setLoading] = useState(false)
@@ -2418,7 +2416,7 @@ function TrackingTab({ blockerIssueIds, sprintId, sprintStartMs, sprintFinishMs 
       <HoverCard key={issue.id} content={ticketHoverContent(issue)}>
       <React.Fragment>
         <div
-          className={`pm-tracking-issue-row pm-tracking-issue-row--clickable${overdueClass}${bounceClass}${hotfixClass}${blockerIssueIds?.has(issue.idReadable) ? ' pm-tracking-issue-row--blocked' : ''}${isExpanded ? ' pm-tracking-issue-row--expanded' : ''}`}
+          className={`pm-tracking-issue-row pm-tracking-issue-row--clickable${overdueClass}${bounceClass}${hotfixClass}${isExpanded ? ' pm-tracking-issue-row--expanded' : ''}`}
           onClick={() => setExpandedIssue(isExpanded ? null : issue.idReadable)}
         >
           {/* Ticket ID — click opens in YouTrack */}
@@ -5125,7 +5123,6 @@ function fmtSprintDate(ms: number) {
 
 export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReportsPageProps) {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab)
-  const [blockerIssueIds, setBlockerIssueIds] = useState<Set<string>>(new Set())
 
   // ── Sprint state ────────────────────────────────────────────────────────────
   const [sprints, setSprints] = useState<YouTrackSprint[]>([])
@@ -5246,8 +5243,7 @@ export function PMReportsPage({ initialTab = 'tracking', onTabChange }: PMReport
         <div className={`pm-tab-panel glass-card${activeTab === 'daily' ? ' pm-tab-panel--daily' : ''}`}>
           {activeTab === 'daily'      && <DailyReportTab sprintId={activeSprint?.id} sprintName={activeSprint?.name} />}
           {activeTab === 'assignees'  && <AssigneeStatsTab sprintId={activeSprint?.id} />}
-          {activeTab === 'tracking'   && <TrackingTab blockerIssueIds={blockerIssueIds} sprintId={activeSprint?.id} sprintStartMs={activeSprint?.start} sprintFinishMs={activeSprint?.finish} />}
-          {activeTab === 'dailyops'   && <DailyOpsTab onBlockersChange={setBlockerIssueIds} sprintId={activeSprint?.id} />}
+          {activeTab === 'tracking'   && <TrackingTab sprintId={activeSprint?.id} sprintStartMs={activeSprint?.start} sprintFinishMs={activeSprint?.finish} />}
           {activeTab === 'deployment' && <DeploymentReportTab activeSprint={activeSprint} />}
           {activeTab === 'standup'    && <StandupCompilerPage />}
         </div>
