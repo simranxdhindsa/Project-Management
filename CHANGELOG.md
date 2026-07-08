@@ -30,7 +30,8 @@ All notable changes to Velocity are listed here. Most recent entries appear firs
 - Fix login flow regression for users with an existing YouTrack integration row
 - Fix user_ignored_blocked_tickets migration (was not applying on startup)
 - Include CHANGELOG.md in Docker runtime image (was causing 500 on /api/changelog/status in production)
-
+ 
+ 
 ---
 
 ## 2026-07-02
