@@ -1299,6 +1299,22 @@ func (h *YouTrackHandler) AIParseTicket(w http.ResponseWriter, r *http.Request) 
 	usersJSON, _ := json.Marshal(req.Users)
 	sprintsJSON, _ := json.Marshal(req.Sprints)
 
+	// Load developer-subsystem mapping and inject into prompt so the AI can
+	// resolve subsystem from the assignee when the text doesn't make it explicit.
+	var devSubsystemHint string
+	devCfgRepo := database.NewDeveloperConfigRepository()
+	if devCfgs, err2 := devCfgRepo.GetAll(r.Context()); err2 == nil && len(devCfgs) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\nASSIGNEE → SUBSYSTEM MAPPING (from Integrations config):\n")
+		sb.WriteString("If you detect an assignee, use this mapping to resolve subsystem (if they own only one, pick it; if multiple, pick the best fit from context):\n")
+		for _, cfg := range devCfgs {
+			if len(cfg.Subsystems) > 0 {
+				sb.WriteString(fmt.Sprintf("  %s → %s\n", cfg.DeveloperLogin, strings.Join(cfg.Subsystems, ", ")))
+			}
+		}
+		devSubsystemHint = sb.String()
+	}
+
 	// Load editable instructions from the ticket_parser bot config in DB.
 	// The admin can customise the instructions; dynamic field values are always
 	// appended here at runtime so the DB prompt never needs to list them.
@@ -1371,7 +1387,7 @@ sprint_id: ID of the most recent non-completed sprint from the sprints list. Oth
 	// Always append the dynamic runtime data — these are never editable in the DB
 	// because they come live from YouTrack.
 	systemPrompt := fmt.Sprintf(`%s
-
+%s
 Available values — choose ONLY from these lists (return exact strings, no variations):
 - priorities: %s
 - types: %s
@@ -1382,6 +1398,7 @@ Available values — choose ONLY from these lists (return exact strings, no vari
 Return ONLY this JSON object (no other text):
 {"summary":"","description":"","priority":"","type_name":"","subsystem":"","assignee_login":"","sprint_id":""}`,
 		instructions,
+		devSubsystemHint,
 		strings.Join(req.Priorities, ", "),
 		strings.Join(req.Types, ", "),
 		strings.Join(req.Subsystems, ", "),
