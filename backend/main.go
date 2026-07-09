@@ -242,6 +242,25 @@ func main() {
 	ignoredBlockedRoutes.HandleFunc("", ignoredBlockedHandler.IgnoreTicket).Methods("POST")
 	ignoredBlockedRoutes.HandleFunc("/{issue_id}", ignoredBlockedHandler.UnignoreTicket).Methods("DELETE")
 
+	// Update Reminders + Quick Send
+	updateReminderHandler := handlers.NewUpdateReminderHandler()
+	urRoutes := api.PathPrefix("/update-reminders").Subrouter()
+	urRoutes.Use(middleware.AuthMiddleware)
+	urRoutes.HandleFunc("", updateReminderHandler.ListRules).Methods("GET")
+	urRoutes.HandleFunc("", updateReminderHandler.CreateRule).Methods("POST")
+	urRoutes.HandleFunc("/{id}", updateReminderHandler.GetRule).Methods("GET")
+	urRoutes.HandleFunc("/{id}", updateReminderHandler.UpdateRule).Methods("PUT")
+	urRoutes.HandleFunc("/{id}", updateReminderHandler.DeleteRule).Methods("DELETE")
+	urRoutes.HandleFunc("/{id}/toggle", updateReminderHandler.ToggleRule).Methods("PATCH")
+	urRoutes.HandleFunc("/{id}/roster", updateReminderHandler.ListRoster).Methods("GET")
+	urRoutes.HandleFunc("/{id}/roster", updateReminderHandler.AddRosterMember).Methods("POST")
+	urRoutes.HandleFunc("/{id}/roster/{mid}", updateReminderHandler.UpdateRosterMember).Methods("PUT")
+	urRoutes.HandleFunc("/{id}/roster/{mid}", updateReminderHandler.DeleteRosterMember).Methods("DELETE")
+	urRoutes.HandleFunc("/{id}/dry-run", updateReminderHandler.DryRun).Methods("POST")
+	urRoutes.HandleFunc("/{id}/run-now", updateReminderHandler.RunNow).Methods("POST")
+	urRoutes.HandleFunc("/{id}/history", updateReminderHandler.GetHistory).Methods("GET")
+	// workspace-users + quick-send are registered below on the existing slackRoutes subrouter
+
 	// Changelog handler
 	changelogHandler := handlers.NewChangelogHandler()
 	changelogRoutes := api.PathPrefix("/changelog").Subrouter()
@@ -299,6 +318,9 @@ func main() {
 	slackRoutes.HandleFunc("/templates", slackHandler.CreateTemplate).Methods("POST")
 	slackRoutes.HandleFunc("/templates/{id}", slackHandler.DeleteTemplate).Methods("DELETE")
 	slackRoutes.HandleFunc("/saved-items", slackHandler.GetSavedItems).Methods("GET")
+	// Update Reminders: workspace user list + one-off quick send
+	slackRoutes.HandleFunc("/workspace-users", updateReminderHandler.GetWorkspaceUsers).Methods("GET")
+	slackRoutes.HandleFunc("/quick-send", updateReminderHandler.QuickSend).Methods("POST")
 	// Per-user Slack actions: connect/disconnect own integration — any authenticated user
 	slackRoutes.HandleFunc("/connect", slackHandler.Connect).Methods("POST")
 	slackRoutes.HandleFunc("/disconnect", slackHandler.Disconnect).Methods("POST")

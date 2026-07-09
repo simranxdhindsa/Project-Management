@@ -1054,6 +1054,72 @@ WHERE bot_type = 'ticket_parser'`,
 		`CREATE INDEX IF NOT EXISTS idx_sprint_alerts_active ON sprint_alerts(user_id, dismissed_at) WHERE dismissed_at IS NULL`,
 		`ALTER TABLE users ADD COLUMN IF NOT EXISTS changelog_seen_at TIMESTAMP WITH TIME ZONE`,
 
+		// ── Update Reminder Rules ────────────────────────────────────────────────
+		// One row per configured reminder rule per user. All schedule/template/
+		// detection config lives here; roster and run history are separate tables.
+		`CREATE TABLE IF NOT EXISTS update_reminder_rules (
+			id                   TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			user_id              TEXT NOT NULL,
+			name                 VARCHAR(255) NOT NULL DEFAULT 'My Reminder',
+			enabled              BOOLEAN NOT NULL DEFAULT true,
+			schedule_time        VARCHAR(5)  NOT NULL DEFAULT '11:00',
+			schedule_days        JSONB       NOT NULL DEFAULT '[1,2,3,4,5]',
+			timezone             TEXT        NOT NULL DEFAULT 'Asia/Kolkata',
+			source_channel_ids   JSONB       NOT NULL DEFAULT '[]',
+			detection_mode       VARCHAR(20) NOT NULL DEFAULT 'any_message',
+			detection_value      TEXT        NOT NULL DEFAULT '',
+			check_day_offset     INTEGER     NOT NULL DEFAULT -1,
+			check_window_start   VARCHAR(5)  NOT NULL DEFAULT '09:00',
+			check_window_end     VARCHAR(5)  NOT NULL DEFAULT '18:00',
+			leave_channel_id     TEXT        NOT NULL DEFAULT '',
+			leave_channel_name   TEXT        NOT NULL DEFAULT '',
+			leave_keywords       JSONB       NOT NULL DEFAULT '["leave","wfh","sick","holiday","off","vacation","pto"]',
+			leave_action         VARCHAR(20) NOT NULL DEFAULT 'exclude',
+			delivery_channel     BOOLEAN     NOT NULL DEFAULT true,
+			delivery_dm          BOOLEAN     NOT NULL DEFAULT false,
+			delivery_channel_id  TEXT        NOT NULL DEFAULT '',
+			delivery_channel_name TEXT       NOT NULL DEFAULT '',
+			channel_template     TEXT        NOT NULL DEFAULT 'Hey team! The following members haven''t posted their update yet: {mentions}. Please share your update when you get a chance.',
+			dm_template          TEXT        NOT NULL DEFAULT 'Hi! Just a reminder to post your daily update in the team channel.',
+			last_snapshot        JSONB,
+			last_snapshot_at     TIMESTAMP WITH TIME ZONE,
+			created_at           TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at           TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_urr_user_id ON update_reminder_rules(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_urr_enabled  ON update_reminder_rules(enabled) WHERE enabled = true`,
+
+		// ── Update Reminder Roster ───────────────────────────────────────────────
+		// One row per team member per rule. Slack user ID is used to match messages.
+		`CREATE TABLE IF NOT EXISTS update_reminder_roster (
+			id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			rule_id       TEXT NOT NULL REFERENCES update_reminder_rules(id) ON DELETE CASCADE,
+			display_name  VARCHAR(255) NOT NULL,
+			slack_user_id VARCHAR(100) NOT NULL,
+			enabled       BOOLEAN NOT NULL DEFAULT true,
+			created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_urr_roster_rule_id ON update_reminder_roster(rule_id)`,
+
+		// ── Update Reminder Runs ─────────────────────────────────────────────────
+		// One row per execution (scheduled, manual, or dry-run). Purged after 30 days.
+		`CREATE TABLE IF NOT EXISTS update_reminder_runs (
+			id             TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+			rule_id        TEXT NOT NULL REFERENCES update_reminder_rules(id) ON DELETE CASCADE,
+			user_id        TEXT NOT NULL,
+			triggered_by   VARCHAR(20) NOT NULL DEFAULT 'scheduler',
+			ran_at         TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			posted_names   JSONB NOT NULL DEFAULT '[]',
+			on_leave_names JSONB NOT NULL DEFAULT '[]',
+			skipped_names  JSONB NOT NULL DEFAULT '[]',
+			delivered_to   JSONB NOT NULL DEFAULT '[]',
+			error          TEXT,
+			snapshot_used  JSONB,
+			expires_at     TIMESTAMP WITH TIME ZONE NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_urr_runs_rule_id   ON update_reminder_runs(rule_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_urr_runs_expires_at ON update_reminder_runs(expires_at)`,
+
 		// Per-user parked (ignored) blocked tickets — global across all PM views
 		// user_id is VARCHAR to match users.id type; gen_random_uuid() requires no extension
 		`CREATE TABLE IF NOT EXISTS user_ignored_blocked_tickets (

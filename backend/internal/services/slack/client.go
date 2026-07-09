@@ -58,6 +58,8 @@ type User struct {
 	Name     string  `json:"name"`
 	RealName string  `json:"real_name"`
 	Profile  Profile `json:"profile"`
+	IsBot    bool    `json:"is_bot"`
+	Deleted  bool    `json:"deleted"`
 }
 
 // Profile contains Slack user profile info
@@ -443,5 +445,85 @@ func (c *Client) PostThreadReply(ctx context.Context, channelID, threadTS, text 
 	}
 
 	return nil
+}
+
+// GetWorkspaceUsers returns all non-bot, non-deleted workspace members via users.list (paginated)
+func (c *Client) GetWorkspaceUsers(ctx context.Context) ([]User, error) {
+	var all []User
+	cursor := ""
+	for {
+		params := url.Values{}
+		params.Set("limit", "500")
+		if cursor != "" {
+			params.Set("cursor", cursor)
+		}
+
+		body, err := c.doGetRequest(ctx, "/users.list", params)
+		if err != nil {
+			return nil, err
+		}
+
+		var resp struct {
+			Response
+			Members []User `json:"members"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal users.list: %w", err)
+		}
+		if !resp.OK {
+			return nil, fmt.Errorf("slack API error: %s", resp.Error)
+		}
+
+		for _, u := range resp.Members {
+			if !u.Deleted && !u.IsBot {
+				all = append(all, u)
+			}
+		}
+
+		var meta struct {
+			NextCursor string `json:"next_cursor"`
+		}
+		if len(resp.Metadata) > 0 {
+			_ = json.Unmarshal(resp.Metadata, &meta)
+		}
+		if meta.NextCursor == "" {
+			break
+		}
+		cursor = meta.NextCursor
+	}
+	return all, nil
+}
+
+// OpenDirectMessageChannel opens (or retrieves) the DM channel with a user and returns its ID
+func (c *Client) OpenDirectMessageChannel(ctx context.Context, slackUserID string) (string, error) {
+	payload := map[string]string{"users": slackUserID}
+	body, err := c.doRequest(ctx, "POST", "/conversations.open", payload)
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		Response
+		Channel struct {
+			ID string `json:"id"`
+		} `json:"channel"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("failed to unmarshal conversations.open: %w", err)
+	}
+	if !resp.OK {
+		return "", fmt.Errorf("slack API error: %s", resp.Error)
+	}
+	return resp.Channel.ID, nil
+}
+
+// PostDirectMessage sends a DM to a Slack user by their user ID
+func (c *Client) PostDirectMessage(ctx context.Context, slackUserID, text string) error {
+	dmChannelID, err := c.OpenDirectMessageChannel(ctx, slackUserID)
+	if err != nil {
+		return fmt.Errorf("open DM channel: %w", err)
+	}
+	_, err = c.PostMessage(ctx, dmChannelID, text)
+	return err
 }
 

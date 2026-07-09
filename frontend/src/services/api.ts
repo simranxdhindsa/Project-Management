@@ -776,6 +776,89 @@ class ApiService {
     return this.request<{ mentions: SlackMention[] }>('/slack/mentions?pinned=true')
   }
 
+  // ── Update Reminders ────────────────────────────────────────────────────────
+
+  async getWorkspaceUsers() {
+    return this.request<SlackWorkspaceUser[]>('/slack/workspace-users')
+  }
+
+  async quickSend(payload: { channel_id?: string; message: string; dm_user_id?: string }) {
+    return this.request<{ success: boolean }>('/slack/quick-send', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async listUpdateReminderRules() {
+    return this.request<UpdateReminderRule[]>('/update-reminders')
+  }
+
+  async createUpdateReminderRule(req: Partial<UpdateReminderRule>) {
+    return this.request<UpdateReminderRule>('/update-reminders', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    })
+  }
+
+  async getUpdateReminderRule(id: string) {
+    return this.request<UpdateReminderRule>(`/update-reminders/${id}`)
+  }
+
+  async updateUpdateReminderRule(id: string, req: Partial<UpdateReminderRule>) {
+    return this.request<UpdateReminderRule>(`/update-reminders/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    })
+  }
+
+  async deleteUpdateReminderRule(id: string) {
+    return this.request<{ success: boolean }>(`/update-reminders/${id}`, { method: 'DELETE' })
+  }
+
+  async toggleUpdateReminderRule(id: string, enabled: boolean) {
+    return this.request<{ success: boolean }>(`/update-reminders/${id}/toggle`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    })
+  }
+
+  async listUpdateReminderRoster(ruleId: string) {
+    return this.request<UpdateReminderRosterMember[]>(`/update-reminders/${ruleId}/roster`)
+  }
+
+  async addUpdateReminderRosterMember(ruleId: string, req: { display_name: string; slack_user_id: string; enabled: boolean }) {
+    return this.request<UpdateReminderRosterMember>(`/update-reminders/${ruleId}/roster`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    })
+  }
+
+  async updateUpdateReminderRosterMember(ruleId: string, memberId: string, req: { display_name?: string; enabled?: boolean }) {
+    return this.request<UpdateReminderRosterMember>(`/update-reminders/${ruleId}/roster/${memberId}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    })
+  }
+
+  async deleteUpdateReminderRosterMember(ruleId: string, memberId: string) {
+    return this.request<{ success: boolean }>(`/update-reminders/${ruleId}/roster/${memberId}`, { method: 'DELETE' })
+  }
+
+  async dryRunUpdateReminder(ruleId: string) {
+    return this.request<UpdateReminderRunResult>(`/update-reminders/${ruleId}/dry-run`, { method: 'POST' })
+  }
+
+  async runNowUpdateReminder(ruleId: string, forceSnapshot: boolean) {
+    return this.request<UpdateReminderRunResult>(`/update-reminders/${ruleId}/run-now`, {
+      method: 'POST',
+      body: JSON.stringify({ force_snapshot: forceSnapshot }),
+    })
+  }
+
+  async getUpdateReminderHistory(ruleId: string) {
+    return this.request<UpdateReminderRun[]>(`/update-reminders/${ruleId}/history`)
+  }
+
   async analyzeSlackMessages(projectId: string) {
     return this.request<AIAnalysisResponse>(`/ai/analyze?project_id=${projectId}`, {
       method: 'POST',
@@ -1971,6 +2054,89 @@ export interface SlackAnalysis {
     status: string
     confidence: number
   }>
+}
+
+// ── Update Reminder types ─────────────────────────────────────────────────────
+
+export interface ChannelRef { id: string; name: string }
+export interface SnapshotMember { slack_user_id: string; display_name: string }
+export interface UpdateReminderSnapshot {
+  posted: SnapshotMember[]
+  missing: SnapshotMember[]
+  on_leave: SnapshotMember[]
+  computed_at: string
+}
+export interface SnapshotDiff {
+  now_posted: SnapshotMember[]
+  now_missing: SnapshotMember[]
+  now_on_leave: SnapshotMember[]
+  has_changes: boolean
+}
+export interface UpdateReminderRule {
+  id: string
+  user_id: string
+  name: string
+  enabled: boolean
+  schedule_time: string
+  schedule_days: number[]
+  timezone: string
+  source_channel_ids: ChannelRef[]
+  detection_mode: 'any_message' | 'keywords' | 'pattern'
+  detection_value: string
+  check_day_offset: number
+  check_window_start: string
+  check_window_end: string
+  leave_channel_id: string
+  leave_channel_name: string
+  leave_keywords: string[]
+  leave_action: 'exclude' | 'list_separately'
+  delivery_channel: boolean
+  delivery_dm: boolean
+  delivery_channel_id: string
+  delivery_channel_name: string
+  channel_template: string
+  dm_template: string
+  last_snapshot?: UpdateReminderSnapshot
+  last_snapshot_at?: string
+  created_at: string
+  updated_at: string
+}
+export interface UpdateReminderRosterMember {
+  id: string
+  rule_id: string
+  display_name: string
+  slack_user_id: string
+  enabled: boolean
+  created_at: string
+}
+export interface UpdateReminderRun {
+  id: string
+  rule_id: string
+  user_id: string
+  triggered_by: 'scheduler' | 'manual' | 'dry_run'
+  ran_at: string
+  posted_names: string[]
+  on_leave_names: string[]
+  skipped_names: string[]
+  delivered_to: string[]
+  error?: string
+  snapshot_used?: UpdateReminderSnapshot
+  expires_at: string
+}
+export interface UpdateReminderRunResult {
+  snapshot: UpdateReminderSnapshot
+  diff: SnapshotDiff
+  rendered_msg: string
+  rendered_dm: string
+  delivered_to?: string[]
+}
+export interface SlackWorkspaceUser {
+  id: string
+  name: string
+  real_name: string
+  is_bot: boolean
+  deleted: boolean
+  profile: { display_name: string; email: string; image_48: string }
 }
 
 export interface SlackMention {

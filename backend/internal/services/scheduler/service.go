@@ -12,49 +12,54 @@ import (
 	"github.com/dhindsa/project-management/internal/handlers"
 	"github.com/dhindsa/project-management/internal/models"
 	slacksvc "github.com/dhindsa/project-management/internal/services/slack"
+	updatesvc "github.com/dhindsa/project-management/internal/services/update_reminder"
 	"github.com/dhindsa/project-management/internal/services/youtrack"
 )
 
 // Service runs scheduled PM checks and creates notifications
 type Service struct {
-	notifHandler *handlers.NotificationHandler
-	reminderRepo *database.ReminderRepository
-	settingsRepo *database.SettingsRepository
-	dailyRepo    *database.DailyTaskRepository
-	reportRepo   *database.ReportRepository
-	slackRepo    *database.SlackRepository
-	configRepo   *database.WorkflowConfigRepository
-	slackService *slacksvc.Service
-	stop         chan struct{}
+	notifHandler       *handlers.NotificationHandler
+	reminderRepo       *database.ReminderRepository
+	settingsRepo       *database.SettingsRepository
+	dailyRepo          *database.DailyTaskRepository
+	reportRepo         *database.ReportRepository
+	slackRepo          *database.SlackRepository
+	configRepo         *database.WorkflowConfigRepository
+	slackService       *slacksvc.Service
+	updateReminderRepo *database.UpdateReminderRepository
+	updateReminderSvc  *updatesvc.Service
+	stop               chan struct{}
 	// Track which one-per-day checks have fired today (reset at midnight)
 	firedToday map[string]bool
 	// Track which issue IDs have had an overdue notification sent today
 	firedOverdueToday map[string]bool
 	lastDate          string
 	// Last time we synced the state log from YouTrack activity feed
-	lastStateLogSync  time.Time
+	lastStateLogSync time.Time
 	// Last time we auto-scanned Slack for all users
-	lastSlackScan     time.Time
+	lastSlackScan time.Time
 	// Last time SLA breach check ran (runs every 5 minutes)
-	lastSLACheck      time.Time
-	integrationRepo   *database.IntegrationRepository
+	lastSLACheck    time.Time
+	integrationRepo *database.IntegrationRepository
 }
 
 // NewService creates a new scheduler service
 func NewService(notifHandler *handlers.NotificationHandler) *Service {
 	return &Service{
-		notifHandler:      notifHandler,
-		reminderRepo:      database.NewReminderRepository(),
-		settingsRepo:      database.NewSettingsRepository(),
-		dailyRepo:         database.NewDailyTaskRepository(),
-		reportRepo:        database.NewReportRepository(),
-		slackRepo:         database.NewSlackRepository(),
-		configRepo:        database.NewWorkflowConfigRepository(),
-		slackService:      slacksvc.NewService(),
-		integrationRepo:   database.NewIntegrationRepository(),
-		stop:              make(chan struct{}),
-		firedToday:        make(map[string]bool),
-		firedOverdueToday: make(map[string]bool),
+		notifHandler:       notifHandler,
+		reminderRepo:       database.NewReminderRepository(),
+		settingsRepo:       database.NewSettingsRepository(),
+		dailyRepo:          database.NewDailyTaskRepository(),
+		reportRepo:         database.NewReportRepository(),
+		slackRepo:          database.NewSlackRepository(),
+		configRepo:         database.NewWorkflowConfigRepository(),
+		slackService:       slacksvc.NewService(),
+		updateReminderRepo: database.NewUpdateReminderRepository(),
+		updateReminderSvc:  updatesvc.NewService(),
+		integrationRepo:    database.NewIntegrationRepository(),
+		stop:               make(chan struct{}),
+		firedToday:         make(map[string]bool),
+		firedOverdueToday:  make(map[string]bool),
 	}
 }
 
@@ -149,6 +154,61 @@ func (s *Service) tick() {
 	if !s.firedToday["blockers"] && currentTime >= blockerTime {
 		s.firedToday["blockers"] = true
 		s.checkBlockedIssues(ctx)
+	}
+
+	// 5. Update reminder rules — each rule carries its own schedule + timezone
+	s.fireUpdateReminders(ctx, now)
+
+	// 6. Purge expired update reminder run logs (runs once per day)
+	if !s.firedToday["ur_purge"] {
+		s.firedToday["ur_purge"] = true
+		_ = database.PurgeUpdateReminderRuns(ctx)
+	}
+}
+
+// fireUpdateReminders iterates all enabled rules and fires any whose schedule matches now.
+// Uses a per-rule firedToday key so each rule fires at most once per day.
+func (s *Service) fireUpdateReminders(ctx context.Context, now time.Time) {
+	rules, err := s.updateReminderRepo.GetAllEnabledRules(ctx)
+	if err != nil {
+		log.Printf("[Scheduler] update reminders: load rules error: %v", err)
+		return
+	}
+
+	for _, rule := range rules {
+		key := "ur:" + rule.ID
+
+		loc, err := time.LoadLocation(rule.Timezone)
+		if err != nil {
+			loc = time.UTC
+		}
+		localNow := now.In(loc)
+		localTime := localNow.Format("15:04")
+		localWeekday := int(localNow.Weekday()) // 0=Sun … 6=Sat
+
+		// Check if today's weekday is in the rule's schedule_days
+		dayMatch := false
+		for _, d := range rule.ScheduleDays {
+			if d == localWeekday {
+				dayMatch = true
+				break
+			}
+		}
+		if !dayMatch {
+			continue
+		}
+
+		// Fire if current local HH:MM matches the rule's scheduled time and hasn't fired today
+		if localTime == rule.ScheduleTime && !s.firedToday[key] {
+			s.firedToday[key] = true
+			go func(r *models.UpdateReminderRule) {
+				if err := s.updateReminderSvc.ExecuteScheduled(ctx, r); err != nil {
+					log.Printf("[Scheduler] update reminder %s (%s) error: %v", r.ID, r.Name, err)
+				} else {
+					log.Printf("[Scheduler] update reminder fired: %s (%s)", r.Name, r.ID)
+				}
+			}(rule)
+		}
 	}
 }
 

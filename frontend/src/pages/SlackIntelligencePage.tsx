@@ -5,14 +5,15 @@ import {
 import { TerminalLoader, SprintScanLoader, SvgTerminalLoader } from '@/components/brand/VelocityLoaders'
 import { VelocityLogo } from '@/components/brand/VelocityLogo'
 import api from '../services/api'
-import type { SlackMention, SlackThread, ReminderItem } from '../services/api'
+import type { SlackMention, SlackThread, ReminderItem, ChannelRef } from '../services/api'
 import { SlackIcon, MentionCard, ThreadCard, isSnoozed, cleanSlackText, timeAgo } from './SlackCards'
 import { SprintPulseTab, SavedItemsTab, SettingsTabContent, RemindersTabContent, getPresetDate } from './SlackTabs'
 import type { Preset } from './SlackTabs'
+import { UpdateRemindersTab } from './UpdateRemindersTab'
 import '../styles/pages/slack.css'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Tab = 'inbox' | 'threads' | 'reminders' | 'pulse' | 'saved' | 'settings'
+type Tab = 'inbox' | 'threads' | 'reminders' | 'update-reminders' | 'pulse' | 'saved' | 'settings'
 type InboxFilter = 'Needs Action' | 'Pinned' | 'All' | 'Snoozed' | 'Resolved'
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ export function SlackIntelligencePage({
   const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; body: string }>>([])
   const [loading, setLoading] = useState(false)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [slackChannels, setSlackChannels] = useState<ChannelRef[]>([])
 
   // ── Settings state ────────────────────────────────────────────────────────
   const [slackTeamId, setSlackTeamId] = useState('T03Q9638YJJ')
@@ -102,6 +104,9 @@ export function SlackIntelligencePage({
     }).catch(() => {})
     api.getYouTrackStatus().then(res => {
       if (res.base_url) setYtBaseUrl(res.base_url.replace(/\/$/, ''))
+    }).catch(() => {})
+    api.getSlackChannels().then(res => {
+      if (Array.isArray(res)) setSlackChannels(res.map((c: any) => ({ id: c.id, name: c.name })))
     }).catch(() => {})
   }, [fetchAll])
 
@@ -235,8 +240,9 @@ export function SlackIntelligencePage({
   const TABS: Array<{ id: Tab; label: string; badge?: number | 'dot' }> = [
     { id: 'inbox',    label: 'Priority Inbox', badge: needsActionCount > 0 ? needsActionCount : undefined },
     { id: 'threads',  label: 'My Threads',     badge: threads.filter(t => !t.has_reply && !isSnoozed(t.snoozed_until)).length || undefined },
-    { id: 'reminders',label: 'Reminders',      badge: upcomingReminders.length || undefined },
-    { id: 'pulse',    label: 'Sprint Pulse',   badge: 'dot' },
+    { id: 'reminders',       label: 'Reminders',        badge: upcomingReminders.length || undefined },
+    { id: 'update-reminders', label: 'Update Reminders' },
+    { id: 'pulse',           label: 'Sprint Pulse',     badge: 'dot' },
     { id: 'saved',    label: 'Saved' },
     { id: 'settings', label: 'Settings' },
   ]
@@ -414,6 +420,8 @@ export function SlackIntelligencePage({
                 onQuickAdd={handleQuickAdd}
               />
         )}
+
+        {tab === 'update-reminders' && <UpdateRemindersTab channels={slackChannels} />}
 
         {tab === 'pulse' && <SprintPulseTab onOpenPMAssistant={onOpenPMAssistant} ytBaseUrl={ytBaseUrl} />}
 
