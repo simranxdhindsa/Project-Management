@@ -359,12 +359,19 @@ If the same UI pattern is needed in 2+ places, extract it into a shared componen
 | Component | What it encapsulates |
 |---|---|
 | `SprintControlsBar` | `db-controls` bar — left mode dropdown + sprint selector + children slot |
-| `CustomDropdown` | `pm-custom-dropdown` pattern with outside-click |
+| `CustomDropdown` | Portal dropdown — searchable (auto when >7 options), fixed-height scroll, outside-click, auto-flip. **Never use native `<select>`** |
+| `TimePicker` | Portal time selector (hour/min/AM-PM columns). **Never use `<input type="time">`** |
+| `ConfirmModal` | Portal confirmation dialog (danger/warning/info variants). **Never use `window.confirm()`** |
 | `HoverCard` | Portal hover overlay |
 | `IssueDetailPanel` | YouTrack issue detail slide-in |
 | `CalendarView` | Date-range calendar |
 
-**Rule:** If you find yourself copying a block of JSX from one page to another, stop — extract a component instead and use it in both places. The first duplication is the signal to extract; the second is too late.
+**Rules:**
+- Never use native `<select>` — use `CustomDropdown`. It portal-renders so it always floats above panels.
+- Never use `<input type="time">` — use `TimePicker`. Same portal behaviour, consistent styling.
+- Never use `window.confirm()` or `alert()` — use `ConfirmModal`. Supports `danger`/`warning`/`info` variants, `detail` subtext, custom button labels.
+- Full prop reference for all three: [`docs/features/shared-components.md`](docs/features/shared-components.md)
+- If you find yourself copying a block of JSX from one page to another, stop — extract a shared component instead.
 
 ---
 
@@ -400,3 +407,5 @@ Detailed descriptions of each feature/tab live in `docs/features/`. Read the rel
 | [`docs/features/board.md`](docs/features/board.md) | Kanban board, List view, Sprint Dashboard |
 | [`docs/features/dev-activity.md`](docs/features/dev-activity.md) | Dev Activity page — 5 subtabs, CSS map, skeuomorphic report design |
 | [`docs/features/other-tabs.md`](docs/features/other-tabs.md) | Calendar, Reminders, Day Track, Integrations, Settings, Admin, Reports, Slack, Bot Config, AI Analysis |
+| [`docs/features/update-reminders.md`](docs/features/update-reminders.md) | Update Reminders — Slack standup automation, rule CRUD, scheduler, dry-run, quick send |
+| [`docs/features/shared-components.md`](docs/features/shared-components.md) | **Read before building any UI** — CustomDropdown, TimePicker, ConfirmModal, HoverCard, CalendarView, global CSS files |

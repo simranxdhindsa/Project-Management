@@ -12,6 +12,7 @@ import type {
 } from '../services/api'
 import { CustomDropdown } from '../components/CustomDropdown'
 import { TimePicker } from '../components/TimePicker'
+import { ConfirmModal } from '../components/ConfirmModal'
 import '../styles/pages/slack-update-reminders.css'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -223,7 +224,7 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
 
   useEffect(() => {
     if (mode === 'dm' && users.length === 0) {
-      api.getWorkspaceUsers().then(r => { if (r.data) setUsers(r.data as SlackWorkspaceUser[]) }).catch(() => {})
+      api.getWorkspaceUsers().then(r => { if (Array.isArray(r)) setUsers(r as SlackWorkspaceUser[]) }).catch(() => {})
     }
   }, [mode, users.length])
 
@@ -478,7 +479,7 @@ function RuleEditor({
 
   useEffect(() => {
     if (rule?.id) {
-      api.listUpdateReminderRoster(rule.id).then(r => { if (r.data) setRoster(r.data as UpdateReminderRosterMember[]) }).catch(() => {})
+      api.listUpdateReminderRoster(rule.id).then(r => { if (Array.isArray(r)) setRoster(r as UpdateReminderRosterMember[]) }).catch(() => {})
     }
   }, [rule?.id])
 
@@ -644,7 +645,7 @@ function RuleEditor({
                 ruleId={rule!.id!}
                 members={roster}
                 workspaceUsers={workspaceUsers}
-                onChange={() => api.listUpdateReminderRoster(rule!.id!).then(r => { if (r.data) setRoster(r.data as UpdateReminderRosterMember[]) })}
+                onChange={() => api.listUpdateReminderRoster(rule!.id!).then(r => { if (Array.isArray(r)) setRoster(r as UpdateReminderRosterMember[]) })}
               />
             </div>
           )}
@@ -825,7 +826,7 @@ function HistoryModal({ ruleId, ruleName, onClose }: { ruleId: string; ruleName:
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.getUpdateReminderHistory(ruleId).then(r => { if (r.data) setRuns(r.data as UpdateReminderRun[]) }).catch(() => {}).finally(() => setLoading(false))
+    api.getUpdateReminderHistory(ruleId).then(r => { if (Array.isArray(r)) setRuns(r as UpdateReminderRun[]) }).catch(() => {}).finally(() => setLoading(false))
   }, [ruleId])
 
   return (
@@ -871,6 +872,7 @@ const RuleCard = function RuleCard({ rule, channels, workspaceUsers, onRefresh }
   const [dryRunResult, setDryRunResult] = useState<UpdateReminderRunResult | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [running, setRunning] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const handleToggle = async (e: React.ChangeEvent<HTMLInputElement>) => {
     await api.toggleUpdateReminderRule(rule.id, e.target.checked).catch(() => {})
@@ -878,8 +880,8 @@ const RuleCard = function RuleCard({ rule, channels, workspaceUsers, onRefresh }
   }
 
   const handleDelete = async () => {
-    if (!confirm(`Delete rule "${rule.name}"?`)) return
     await api.deleteUpdateReminderRule(rule.id).catch(() => {})
+    setConfirmDelete(false)
     onRefresh()
   }
 
@@ -887,7 +889,7 @@ const RuleCard = function RuleCard({ rule, channels, workspaceUsers, onRefresh }
     setRunning(true)
     try {
       const r = await api.dryRunUpdateReminder(rule.id)
-      if (r.data) setDryRunResult(r.data as UpdateReminderRunResult)
+      if (r && typeof r === 'object' && 'snapshot' in r) setDryRunResult(r as unknown as UpdateReminderRunResult)
     } finally {
       setRunning(false)
     }
@@ -933,7 +935,7 @@ const RuleCard = function RuleCard({ rule, channels, workspaceUsers, onRefresh }
           <button className="ur-action-btn" onClick={handleDryRun} disabled={running}><Eye size={12} />Dry Run</button>
           <button className="ur-action-btn" onClick={() => handleRunNow(true)} disabled={running}><Play size={12} />Run Now</button>
           <button className="ur-action-btn" onClick={() => setShowHistory(true)}><History size={12} />History</button>
-          <button className="ur-action-btn danger" onClick={handleDelete}><Trash2 size={12} />Delete</button>
+          <button className="ur-action-btn danger" onClick={() => setConfirmDelete(true)}><Trash2 size={12} />Delete</button>
         </div>
       </div>
 
@@ -958,6 +960,17 @@ const RuleCard = function RuleCard({ rule, channels, workspaceUsers, onRefresh }
       )}
 
       {showHistory && <HistoryModal ruleId={rule.id} ruleName={rule.name} onClose={() => setShowHistory(false)} />}
+
+      {confirmDelete && (
+        <ConfirmModal
+          message={`Delete "${rule.name}"?`}
+          detail="This will remove the rule and all its run history. This cannot be undone."
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
     </>
   )
 }
@@ -974,7 +987,7 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
     setLoading(true)
     try {
       const r = await api.listUpdateReminderRules()
-      if (r.data) setRules(r.data as UpdateReminderRule[])
+      if (Array.isArray(r)) setRules(r as UpdateReminderRule[])
     } finally {
       setLoading(false)
     }
@@ -983,7 +996,7 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    api.getWorkspaceUsers().then(r => { if (r.data) setWorkspaceUsers(r.data as SlackWorkspaceUser[]) }).catch(() => {})
+    api.getWorkspaceUsers().then(r => { if (Array.isArray(r)) setWorkspaceUsers(r as SlackWorkspaceUser[]) }).catch(() => {})
   }, [])
 
   return (
