@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Plus, X, ChevronDown, Send, Clock, Users, Calendar,
   Play, Eye, History, Trash2, AlertTriangle, CheckCircle,
@@ -10,6 +11,7 @@ import type {
   UpdateReminderRunResult, SlackWorkspaceUser, ChannelRef,
 } from '../services/api'
 import { CustomDropdown } from '../components/CustomDropdown'
+import { TimePicker } from '../components/TimePicker'
 import '../styles/pages/slack-update-reminders.css'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -41,29 +43,74 @@ const DEFAULT_RULE: Partial<UpdateReminderRule> = {
   dm_template: 'Hi! Just a reminder to post your daily update in the team channel.',
 }
 
-// ── Channel dropdown (wraps CustomDropdown for ChannelRef[]) ─────────────────
+// ── Shared portal channel menu ────────────────────────────────────────────────
+// Used by both SourceChannelPicker (multi) and SearchableChannelDd (single).
 
-function ChannelDropdown({ channels, value, onChange, placeholder = 'Select channel…' }: {
-  channels: ChannelRef[]
-  value: string
-  onChange: (id: string, name: string) => void
-  placeholder?: string
+function useChannelMenuPos(triggerRef: React.RefObject<HTMLButtonElement>, open: boolean) {
+  const [style, setStyle] = useState<React.CSSProperties>({})
+  useEffect(() => {
+    if (!open) return
+    const pos = () => {
+      if (!triggerRef.current) return
+      const r = triggerRef.current.getBoundingClientRect()
+      setStyle({ position: 'fixed', top: r.bottom + 4, left: r.left, width: r.width, zIndex: 9999 })
+    }
+    pos()
+    window.addEventListener('scroll', pos, true)
+    window.addEventListener('resize', pos)
+    return () => { window.removeEventListener('scroll', pos, true); window.removeEventListener('resize', pos) }
+  }, [open, triggerRef])
+  return style
+}
+
+function ChannelMenu({ style, search, onSearch, items, activeId, onPick, manualId, onManualId, onManualAdd }: {
+  style: React.CSSProperties
+  search: string
+  onSearch: (v: string) => void
+  items: ChannelRef[]
+  activeId?: string
+  onPick: (c: ChannelRef) => void
+  manualId: string
+  onManualId: (v: string) => void
+  onManualAdd: () => void
 }) {
-  const options = channels.map(c => ({ value: c.id, label: `#${c.name}` }))
-  if (!value) options.unshift({ value: '', label: placeholder })
-  return (
-    <CustomDropdown
-      options={options}
-      value={value}
-      onChange={v => { const ch = channels.find(c => c.id === v); onChange(v, ch?.name ?? '') }}
-      placeholder={placeholder}
-      className="ur-channel-dd"
-    />
+  const searchRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { requestAnimationFrame(() => searchRef.current?.focus()) }, [])
+
+  return createPortal(
+    <div className="cd-portal-menu ur-ch-picker-menu" style={style}>
+      <div className="cd-search-row">
+        <input ref={searchRef} className="cd-search-input" placeholder="Search channels…" value={search} onChange={e => onSearch(e.target.value)} />
+      </div>
+      <div className="cd-option-list" style={{ maxHeight: 180 }}>
+        {items.length === 0
+          ? <div className="cd-no-results">No channels found</div>
+          : items.map(c => (
+            <button key={c.id} type="button" className={`pm-dropdown-item${activeId === c.id ? ' active' : ''}`} onClick={() => onPick(c)}>
+              #{c.name}
+            </button>
+          ))
+        }
+      </div>
+      <div className="ur-ch-picker-manual">
+        <div className="ur-ch-picker-manual-label">Enter channel ID manually</div>
+        <div className="ur-ch-picker-manual-row">
+          <input
+            className="ur-ch-picker-manual-input"
+            placeholder="e.g. C0123456789"
+            value={manualId}
+            onChange={e => onManualId(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onManualAdd() } }}
+          />
+          <button type="button" className="ur-ch-picker-add-btn" onClick={onManualAdd} disabled={!manualId.trim()}>Add</button>
+        </div>
+      </div>
+    </div>,
+    document.body
   )
 }
 
-// ── Source channel picker (searchable, scrollable, manual ID) ────────────────
-
+// Multi-select (source channels)
 function SourceChannelPicker({ channels, selected, onAdd }: {
   channels: ChannelRef[]
   selected: ChannelRef[]
@@ -72,93 +119,88 @@ function SourceChannelPicker({ channels, selected, onAdd }: {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [manualId, setManualId] = useState('')
-  const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuPos = useChannelMenuPos(triggerRef, open)
 
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    if (!open) return
+    const h = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (triggerRef.current?.contains(t)) return
+      const menu = document.querySelector('.ur-ch-picker-menu')
+      if (menu?.contains(t)) return
+      setOpen(false)
+    }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
-  }, [])
+  }, [open])
 
-  const available = channels
-    .filter(c => !selected.find(s => s.id === c.id))
-    .filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase()))
+  const available = useMemo(() =>
+    channels.filter(c => !selected.find(s => s.id === c.id) && (!search || c.name.toLowerCase().includes(search.toLowerCase()))),
+    [channels, selected, search]
+  )
 
   const addManual = () => {
     const id = manualId.trim()
-    if (!id) return
-    if (selected.find(s => s.id === id)) { setManualId(''); return }
-    onAdd({ id, name: id })
-    setManualId('')
+    if (!id || selected.find(s => s.id === id)) { setManualId(''); return }
+    onAdd({ id, name: id }); setManualId(''); setOpen(false)
   }
 
   return (
-    <div className="pm-custom-dropdown ur-channel-dd" ref={ref}>
-      <button
-        type="button"
-        className="pm-custom-dropdown-trigger"
-        style={{ width: '100%', justifyContent: 'space-between' }}
-        onClick={() => setOpen(o => !o)}
-      >
+    <div className="pm-custom-dropdown ur-channel-dd">
+      <button ref={triggerRef} type="button" className="pm-custom-dropdown-trigger" style={{ width: '100%', justifyContent: 'space-between' }} onClick={() => setOpen(o => !o)}>
         <span style={{ color: 'var(--text-muted)' }}>Add channel…</span>
         <ChevronDown size={11} className={`dropdown-chevron${open ? ' open' : ''}`} />
       </button>
+      {open && <ChannelMenu style={menuPos} search={search} onSearch={setSearch} items={available} onPick={c => { onAdd(c); setSearch(''); setOpen(false) }} manualId={manualId} onManualId={setManualId} onManualAdd={addManual} />}
+    </div>
+  )
+}
 
-      {open && (
-        <div className="pm-custom-dropdown-menu ur-ch-picker-menu">
-          {/* Search */}
-          <div className="ur-ch-picker-search">
-            <input
-              className="ur-ch-picker-search-input"
-              placeholder="Search channels…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              autoFocus
-              onClick={e => e.stopPropagation()}
-            />
-          </div>
+// Single-select (leave channel, delivery channel, quick send)
+function SearchableChannelDd({ channels, value, onChange, placeholder = 'Select channel…' }: {
+  channels: ChannelRef[]
+  value: string
+  onChange: (id: string, name: string) => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [manualId, setManualId] = useState('')
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuPos = useChannelMenuPos(triggerRef, open)
 
-          {/* Channel list */}
-          <div className="ur-ch-picker-list">
-            {available.length === 0
-              ? <div className="ur-ch-picker-empty">No channels found</div>
-              : available.map(c => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className="pm-dropdown-item"
-                  onClick={() => { onAdd(c); setSearch(''); setOpen(false) }}
-                >
-                  #{c.name}
-                </button>
-              ))
-            }
-          </div>
+  useEffect(() => {
+    if (!open) return
+    const h = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (triggerRef.current?.contains(t)) return
+      const menu = document.querySelector('.ur-ch-picker-menu')
+      if (menu?.contains(t)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
 
-          {/* Manual channel ID */}
-          <div className="ur-ch-picker-manual">
-            <div className="ur-ch-picker-manual-label">Enter channel ID manually</div>
-            <div className="ur-ch-picker-manual-row">
-              <input
-                className="ur-ch-picker-manual-input"
-                placeholder="e.g. C0123456789"
-                value={manualId}
-                onChange={e => setManualId(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addManual() } }}
-                onClick={e => e.stopPropagation()}
-              />
-              <button
-                type="button"
-                className="ur-ch-picker-add-btn"
-                onClick={e => { e.stopPropagation(); addManual() }}
-                disabled={!manualId.trim()}
-              >
-                Add
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+  const filtered = useMemo(() =>
+    channels.filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase())),
+    [channels, search]
+  )
+
+  const selectedName = channels.find(c => c.id === value)?.name
+  const triggerLabel = selectedName ? `#${selectedName}` : (value || placeholder)
+
+  const pick = (id: string, name: string) => { onChange(id, name); setSearch(''); setOpen(false) }
+  const addManual = () => { const id = manualId.trim(); if (!id) return; pick(id, id); setManualId('') }
+
+  return (
+    <div className="pm-custom-dropdown ur-channel-dd">
+      <button ref={triggerRef} type="button" className="pm-custom-dropdown-trigger" style={{ width: '100%', justifyContent: 'space-between' }} onClick={() => setOpen(o => !o)}>
+        <span style={{ color: value ? 'var(--text-primary)' : 'var(--text-muted)' }}>{triggerLabel}</span>
+        <ChevronDown size={11} className={`dropdown-chevron${open ? ' open' : ''}`} />
+      </button>
+      {open && <ChannelMenu style={menuPos} search={search} onSearch={setSearch} items={filtered} activeId={value} onPick={c => pick(c.id, c.name)} manualId={manualId} onManualId={setManualId} onManualAdd={addManual} />}
     </div>
   )
 }
@@ -234,7 +276,7 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
           </div>
 
           {mode === 'channel' ? (
-            <ChannelDropdown channels={channels} value={channelId} onChange={id => setChannelId(id)} />
+            <SearchableChannelDd channels={channels} value={channelId} onChange={id => setChannelId(id)} />
           ) : (
             <div className="ur-user-search" ref={dmRef}>
               <input
@@ -502,8 +544,8 @@ function RuleEditor({
           <div>
             <div className="ur-section-title">Schedule</div>
             <div className="ur-field" style={{ marginBottom: 10 }}>
-              <label className="ur-label">Fire at time (HH:MM)</label>
-              <input className="ur-input" type="time" value={form.schedule_time ?? '11:00'} onChange={e => set({ schedule_time: e.target.value })} style={{ maxWidth: 120 }} />
+              <label className="ur-label">Fire at time</label>
+              <TimePicker value={form.schedule_time ?? '11:00'} onChange={v => set({ schedule_time: v })} />
             </div>
             <div className="ur-field" style={{ marginBottom: 10 }}>
               <label className="ur-label">Timezone</label>
@@ -563,11 +605,11 @@ function RuleEditor({
               </div>
               <div className="ur-field" style={{ flex: 1 }}>
                 <label className="ur-label">Window start</label>
-                <input className="ur-input" type="time" value={form.check_window_start ?? '09:00'} onChange={e => set({ check_window_start: e.target.value })} />
+                <TimePicker value={form.check_window_start ?? '09:00'} onChange={v => set({ check_window_start: v })} />
               </div>
               <div className="ur-field" style={{ flex: 1 }}>
                 <label className="ur-label">Window end</label>
-                <input className="ur-input" type="time" value={form.check_window_end ?? '18:00'} onChange={e => set({ check_window_end: e.target.value })} />
+                <TimePicker value={form.check_window_end ?? '18:00'} onChange={v => set({ check_window_end: v })} />
               </div>
             </div>
           </div>
@@ -613,7 +655,7 @@ function RuleEditor({
             <div className="ur-section-title">Leave handling</div>
             <div className="ur-field" style={{ marginBottom: 10 }}>
               <label className="ur-label">Leave / availability channel (optional)</label>
-              <ChannelDropdown
+              <SearchableChannelDd
                 channels={channels}
                 value={form.leave_channel_id ?? ''}
                 onChange={(id, name) => set({ leave_channel_id: id, leave_channel_name: name })}
@@ -653,7 +695,7 @@ function RuleEditor({
               </label>
               {form.delivery_channel && (
                 <div style={{ marginTop: 4 }}>
-                  <ChannelDropdown
+                  <SearchableChannelDd
                     channels={channels}
                     value={form.delivery_channel_id ?? ''}
                     onChange={(id, name) => set({ delivery_channel_id: id, delivery_channel_name: name })}

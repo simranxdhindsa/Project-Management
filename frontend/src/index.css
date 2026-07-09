@@ -62,6 +62,8 @@
 @import "./styles/pages/sprint-pulse.css";
 
 /* ── Shared component overlays ── */
+@import "./styles/components/custom-dropdown.css";
+@import "./styles/components/time-picker.css";
 @import "./styles/components/hover-card.css";
 @import "./styles/components/stat-carousel.css";
 
