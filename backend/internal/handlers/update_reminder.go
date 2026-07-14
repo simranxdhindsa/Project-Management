@@ -311,11 +311,13 @@ func (h *UpdateReminderHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"snapshot":     result.Snapshot,
-		"diff":         result.Diff,
-		"rendered_msg": result.RenderedMsg,
-		"rendered_dm":  result.RenderedDM,
-		"delivered_to": result.DeliveredTo,
+		"snapshot":        result.Snapshot,
+		"diff":            result.Diff,
+		"rendered_msg":    result.RenderedMsg,
+		"rendered_dm":     result.RenderedDM,
+		"delivered_to":    result.DeliveredTo,
+		"delivery_errors": result.DeliveryErrors,
+		"skipped_send":    result.SkippedSend,
 	})
 }
 

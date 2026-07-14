@@ -1088,6 +1088,7 @@ WHERE bot_type = 'ticket_parser'`,
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_urr_user_id ON update_reminder_rules(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_urr_enabled  ON update_reminder_rules(enabled) WHERE enabled = true`,
+		`ALTER TABLE update_reminder_rules ADD COLUMN IF NOT EXISTS check_window_end_day_offset INTEGER NOT NULL DEFAULT 0`,
 
 		// ── Update Reminder Roster ───────────────────────────────────────────────
 		// One row per team member per rule. Slack user ID is used to match messages.

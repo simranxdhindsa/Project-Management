@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Plus, X, ChevronDown, Send, Clock, Users, Calendar,
@@ -31,7 +31,8 @@ const DEFAULT_RULE: Partial<UpdateReminderRule> = {
   detection_value: '',
   check_day_offset: -1,
   check_window_start: '09:00',
-  check_window_end: '18:00',
+  check_window_end_day_offset: 0,
+  check_window_end: '09:00',
   leave_channel_id: '',
   leave_channel_name: '',
   leave_keywords: ['leave', 'wfh', 'sick', 'holiday', 'off', 'vacation', 'pto'],
@@ -377,6 +378,7 @@ function RosterManager({ ruleId, members, onChange, workspaceUsers }: {
 }) {
   const [search, setSearch] = useState('')
   const [showDrop, setShowDrop] = useState(false)
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -387,19 +389,26 @@ function RosterManager({ ruleId, members, onChange, workspaceUsers }: {
 
   const filtered = workspaceUsers.filter(u =>
     !u.is_bot && !u.deleted &&
+    !pendingIds.has(u.id) &&
     !members.find(m => m.slack_user_id === u.id) &&
     (u.profile.display_name || u.real_name).toLowerCase().includes(search.toLowerCase())
   )
 
   const addMember = async (u: SlackWorkspaceUser) => {
-    await api.addUpdateReminderRosterMember(ruleId, {
-      display_name: u.profile.display_name || u.real_name,
-      slack_user_id: u.id,
-      enabled: true,
-    })
+    if (pendingIds.has(u.id)) return
+    setPendingIds(prev => new Set(prev).add(u.id))
     setSearch('')
     setShowDrop(false)
-    onChange()
+    try {
+      await api.addUpdateReminderRosterMember(ruleId, {
+        display_name: u.profile.display_name || u.real_name,
+        slack_user_id: u.id,
+        enabled: true,
+      })
+      onChange()
+    } finally {
+      setPendingIds(prev => { const s = new Set(prev); s.delete(u.id); return s })
+    }
   }
 
   const removeMember = async (m: UpdateReminderRosterMember) => {
@@ -461,13 +470,11 @@ function RosterManager({ ruleId, members, onChange, workspaceUsers }: {
 function RuleEditor({
   rule,
   channels,
-  workspaceUsers,
   onClose,
   onSaved,
 }: {
   rule: Partial<UpdateReminderRule> | null
   channels: ChannelRef[]
-  workspaceUsers: SlackWorkspaceUser[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -476,11 +483,14 @@ function RuleEditor({
   const [saving, setSaving] = useState(false)
   const [roster, setRoster] = useState<UpdateReminderRosterMember[]>([])
   const [templateTab, setTemplateTab] = useState<'channel' | 'dm'>('channel')
+  const [workspaceUsers, setWorkspaceUsers] = useState<SlackWorkspaceUser[]>([])
 
   useEffect(() => {
     if (rule?.id) {
       api.listUpdateReminderRoster(rule.id).then(r => { if (Array.isArray(r)) setRoster(r as UpdateReminderRosterMember[]) }).catch(() => {})
     }
+    // Fetch workspace users lazily — only when editor opens, freed when it closes
+    api.getWorkspaceUsers().then(r => { if (Array.isArray(r)) setWorkspaceUsers(r as SlackWorkspaceUser[]) }).catch(() => {})
   }, [rule?.id])
 
   const set = (patch: Partial<UpdateReminderRule>) => setForm(f => ({ ...f, ...patch }))
@@ -589,28 +599,40 @@ function RuleEditor({
                 ))}
               </div>
             </div>
-            <div className="ur-input-row">
-              <div className="ur-field" style={{ flex: 1 }}>
-                <label className="ur-label">Check day offset</label>
-                <CustomDropdown
-                  value={String(form.check_day_offset ?? -1)}
-                  options={[
-                    { value: '0',  label: 'Today' },
-                    { value: '-1', label: 'Yesterday' },
-                    { value: '-2', label: '2 days ago' },
-                    { value: '-3', label: '3 days ago' },
-                  ]}
-                  onChange={v => set({ check_day_offset: Number(v) })}
-                  className="ur-channel-dd"
-                />
-              </div>
+            <div className="ur-input-row" style={{ alignItems: 'flex-end' }}>
               <div className="ur-field" style={{ flex: 1 }}>
                 <label className="ur-label">Window start</label>
-                <TimePicker value={form.check_window_start ?? '09:00'} onChange={v => set({ check_window_start: v })} />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <CustomDropdown
+                    value={String(form.check_day_offset ?? -1)}
+                    options={[
+                      { value: '0',  label: 'Today' },
+                      { value: '-1', label: 'Yesterday' },
+                      { value: '-2', label: '2 days ago' },
+                      { value: '-3', label: '3 days ago' },
+                    ]}
+                    onChange={v => set({ check_day_offset: Number(v) })}
+                    className="ur-channel-dd"
+                  />
+                  <TimePicker value={form.check_window_start ?? '09:00'} onChange={v => set({ check_window_start: v })} />
+                </div>
               </div>
               <div className="ur-field" style={{ flex: 1 }}>
                 <label className="ur-label">Window end</label>
-                <TimePicker value={form.check_window_end ?? '18:00'} onChange={v => set({ check_window_end: v })} />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <CustomDropdown
+                    value={String(form.check_window_end_day_offset ?? 0)}
+                    options={[
+                      { value: '0',  label: 'Today' },
+                      { value: '-1', label: 'Yesterday' },
+                      { value: '-2', label: '2 days ago' },
+                      { value: '-3', label: '3 days ago' },
+                    ]}
+                    onChange={v => set({ check_window_end_day_offset: Number(v) })}
+                    className="ur-channel-dd"
+                  />
+                  <TimePicker value={form.check_window_end ?? '09:00'} onChange={v => set({ check_window_end: v })} />
+                </div>
               </div>
             </div>
           </div>
@@ -757,6 +779,14 @@ function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClo
 }) {
   const { snapshot, diff, rendered_msg } = result
   const hasChanges = diff?.has_changes
+  const missing = snapshot?.missing ?? []
+  const posted = snapshot?.posted ?? []
+  const onLeave = snapshot?.on_leave ?? []
+
+  // Replace <@SLACK_ID> with @DisplayName for human-readable preview
+  const allMembers = [...missing, ...posted, ...onLeave]
+  const idToName = Object.fromEntries(allMembers.map(m => [m.slack_user_id, m.display_name]))
+  const previewMsg = rendered_msg?.replace(/<@([A-Z0-9]+)>/g, (_, id) => `@${idToName[id] ?? id}`) ?? ''
 
   return (
     <div className="ur-result-overlay" onClick={onClose}>
@@ -771,35 +801,39 @@ function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClo
             <div className="ur-diff-banner">
               <AlertTriangle size={14} style={{ flexShrink: 0 }} />
               <span>
-                {diff.now_posted.length > 0 && `${diff.now_posted.map(m => m.display_name).join(', ')} posted since last snapshot. `}
-                {diff.now_missing.length > 0 && `${diff.now_missing.map(m => m.display_name).join(', ')} newly missing. `}
+                {(diff.now_posted?.length ?? 0) > 0 && `${diff.now_posted.map(m => m.display_name).join(', ')} posted since last snapshot. `}
+                {(diff.now_missing?.length ?? 0) > 0 && `${diff.now_missing.map(m => m.display_name).join(', ')} newly missing. `}
                 Sending will use the fresh snapshot.
               </span>
             </div>
           )}
 
-          {snapshot.missing.length > 0 && (
+          {!snapshot && (
+            <div className="ur-names-label" style={{ padding: '12px 0' }}>No snapshot data returned — check that the rule has roster members and Slack is connected.</div>
+          )}
+
+          {missing.length > 0 && (
             <div className="ur-names-group">
-              <div className="ur-names-label">Missing ({snapshot.missing.length})</div>
-              <div>{snapshot.missing.map(m => <span key={m.slack_user_id} className="ur-name-pill missing">{m.display_name}</span>)}</div>
+              <div className="ur-names-label">Missing ({missing.length})</div>
+              <div>{missing.map(m => <span key={m.slack_user_id} className="ur-name-pill missing">{m.display_name}</span>)}</div>
             </div>
           )}
-          {snapshot.posted.length > 0 && (
+          {posted.length > 0 && (
             <div className="ur-names-group">
-              <div className="ur-names-label">Posted ({snapshot.posted.length})</div>
-              <div>{snapshot.posted.map(m => <span key={m.slack_user_id} className="ur-name-pill">{m.display_name}</span>)}</div>
+              <div className="ur-names-label">Posted ({posted.length})</div>
+              <div>{posted.map(m => <span key={m.slack_user_id} className="ur-name-pill">{m.display_name}</span>)}</div>
             </div>
           )}
-          {snapshot.on_leave.length > 0 && (
+          {onLeave.length > 0 && (
             <div className="ur-names-group">
-              <div className="ur-names-label">On leave ({snapshot.on_leave.length})</div>
-              <div>{snapshot.on_leave.map(m => <span key={m.slack_user_id} className="ur-name-pill on-leave">{m.display_name}</span>)}</div>
+              <div className="ur-names-label">On leave ({onLeave.length})</div>
+              <div>{onLeave.map(m => <span key={m.slack_user_id} className="ur-name-pill on-leave">{m.display_name}</span>)}</div>
             </div>
           )}
 
           <div>
             <div className="ur-names-label" style={{ marginBottom: 6 }}>Rendered message</div>
-            <div className="ur-preview">{rendered_msg}</div>
+            <div className="ur-preview">{previewMsg}</div>
           </div>
         </div>
         <div className="ur-result-footer">
@@ -862,10 +896,9 @@ function HistoryModal({ ruleId, ruleName, onClose }: { ruleId: string; ruleName:
 
 // ── Rule card ─────────────────────────────────────────────────────────────────
 
-const RuleCard = function RuleCard({ rule, channels, workspaceUsers, onRefresh }: {
+const RuleCard = React.memo(function RuleCard({ rule, channels, onRefresh }: {
   rule: UpdateReminderRule
   channels: ChannelRef[]
-  workspaceUsers: SlackWorkspaceUser[]
   onRefresh: () => void
 }) {
   const [editing, setEditing] = useState(false)
@@ -943,7 +976,6 @@ const RuleCard = function RuleCard({ rule, channels, workspaceUsers, onRefresh }
         <RuleEditor
           rule={rule}
           channels={channels}
-          workspaceUsers={workspaceUsers}
           onClose={() => setEditing(false)}
           onSaved={onRefresh}
         />
@@ -973,7 +1005,7 @@ const RuleCard = function RuleCard({ rule, channels, workspaceUsers, onRefresh }
       )}
     </>
   )
-}
+})
 
 // ── Main tab component ────────────────────────────────────────────────────────
 
@@ -981,7 +1013,6 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
   const [rules, setRules] = useState<UpdateReminderRule[]>([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
-  const [workspaceUsers, setWorkspaceUsers] = useState<SlackWorkspaceUser[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -994,10 +1025,6 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
   }, [])
 
   useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    api.getWorkspaceUsers().then(r => { if (Array.isArray(r)) setWorkspaceUsers(r as SlackWorkspaceUser[]) }).catch(() => {})
-  }, [])
 
   return (
     <div className="ur-root">
@@ -1032,7 +1059,6 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
             key={rule.id}
             rule={rule}
             channels={channels}
-            workspaceUsers={workspaceUsers}
             onRefresh={load}
           />
         ))
@@ -1042,7 +1068,6 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
         <RuleEditor
           rule={null}
           channels={channels}
-          workspaceUsers={workspaceUsers}
           onClose={() => setShowNew(false)}
           onSaved={load}
         />

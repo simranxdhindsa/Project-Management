@@ -71,9 +71,10 @@ type UpdateReminderRule struct {
 	DetectionValue   string                      `json:"detection_value"` // keywords CSV or regex
 
 	// Check window
-	CheckDayOffset   int    `json:"check_day_offset"`   // 0=today, -1=yesterday
-	CheckWindowStart string `json:"check_window_start"` // HH:MM
-	CheckWindowEnd   string `json:"check_window_end"`   // HH:MM
+	CheckDayOffset          int    `json:"check_day_offset"`              // day for window start (0=today, -1=yesterday)
+	CheckWindowStart        string `json:"check_window_start"`            // HH:MM
+	CheckWindowEndDayOffset int    `json:"check_window_end_day_offset"`   // day for window end (0=today, default; can be same or later than start day)
+	CheckWindowEnd          string `json:"check_window_end"`              // HH:MM
 
 	// Leave handling
 	LeaveChannelID   string                    `json:"leave_channel_id"`
@@ -135,9 +136,10 @@ type CreateUpdateReminderRuleRequest struct {
 	SourceChannelIDs []ChannelRef                `json:"source_channel_ids"`
 	DetectionMode    UpdateReminderDetectionMode `json:"detection_mode"`
 	DetectionValue   string                      `json:"detection_value"`
-	CheckDayOffset   int                         `json:"check_day_offset"`
-	CheckWindowStart string                      `json:"check_window_start"`
-	CheckWindowEnd   string                      `json:"check_window_end"`
+	CheckDayOffset          int                         `json:"check_day_offset"`
+	CheckWindowStart        string                      `json:"check_window_start"`
+	CheckWindowEndDayOffset int                         `json:"check_window_end_day_offset"`
+	CheckWindowEnd          string                      `json:"check_window_end"`
 	LeaveChannelID   string                      `json:"leave_channel_id"`
 	LeaveChannelName string                      `json:"leave_channel_name"`
 	LeaveKeywords    []string                    `json:"leave_keywords"`

@@ -43,13 +43,14 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 		loc = time.UTC
 	}
 	now := time.Now().In(loc)
-	targetDay := now.AddDate(0, 0, rule.CheckDayOffset)
+	startDay := now.AddDate(0, 0, rule.CheckDayOffset)
+	endDay := now.AddDate(0, 0, rule.CheckWindowEndDayOffset)
 
-	windowStart, err := parseHHMM(rule.CheckWindowStart, targetDay, loc)
+	windowStart, err := parseHHMM(rule.CheckWindowStart, startDay, loc)
 	if err != nil {
 		return nil, fmt.Errorf("invalid check_window_start: %w", err)
 	}
-	windowEnd, err := parseHHMM(rule.CheckWindowEnd, targetDay, loc)
+	windowEnd, err := parseHHMM(rule.CheckWindowEnd, endDay, loc)
 	if err != nil {
 		return nil, fmt.Errorf("invalid check_window_end: %w", err)
 	}
@@ -209,12 +210,14 @@ func RenderTemplate(tmpl string, snap *models.UpdateReminderSnapshot) string {
 
 // ExecuteResult is returned by Execute
 type ExecuteResult struct {
-	Snapshot    *models.UpdateReminderSnapshot
-	Diff        *models.SnapshotDiff
-	RenderedMsg string // channel message (rendered)
-	RenderedDM  string // DM message (rendered)
-	DeliveredTo []string
-	IsDryRun    bool
+	Snapshot       *models.UpdateReminderSnapshot
+	Diff           *models.SnapshotDiff
+	RenderedMsg    string // channel message (rendered)
+	RenderedDM     string // DM message (rendered)
+	DeliveredTo    []string
+	DeliveryErrors []string // non-fatal errors per destination
+	SkippedSend    string   // human-readable reason nothing was sent (no missing members, etc.)
+	IsDryRun       bool
 }
 
 // Execute computes a fresh snapshot, optionally diffs against the saved one,
@@ -265,22 +268,37 @@ func (s *Service) Execute(ctx context.Context, rule *models.UpdateReminderRule, 
 	client := slacksvc.NewClient(integration.BotToken)
 
 	var delivered []string
+	var deliveryErrors []string
 
-	if rule.DeliveryChannel && rule.DeliveryChannelID != "" && len(effectiveSnap.Missing) > 0 {
-		if _, err := client.PostMessage(ctx, rule.DeliveryChannelID, renderedChannel); err == nil {
-			delivered = append(delivered, "channel:"+rule.DeliveryChannelID)
+	totalMembers := len(effectiveSnap.Missing) + len(effectiveSnap.Posted) + len(effectiveSnap.OnLeave)
+	if totalMembers == 0 {
+		result.SkippedSend = "roster is empty — add members to the rule before running"
+	} else if len(effectiveSnap.Missing) == 0 {
+		result.SkippedSend = "no missing members — everyone has posted"
+	} else {
+		if rule.DeliveryChannel && rule.DeliveryChannelID != "" {
+			if _, err := client.PostMessage(ctx, rule.DeliveryChannelID, renderedChannel); err != nil {
+				deliveryErrors = append(deliveryErrors, "channel "+rule.DeliveryChannelID+": "+err.Error())
+			} else {
+				delivered = append(delivered, "channel:"+rule.DeliveryChannelID)
+			}
+		} else if !rule.DeliveryChannel || rule.DeliveryChannelID == "" {
+			deliveryErrors = append(deliveryErrors, "channel delivery not configured in rule")
 		}
-	}
 
-	if rule.DeliveryDM {
-		for _, m := range effectiveSnap.Missing {
-			if err := client.PostDirectMessage(ctx, m.SlackUserID, renderedDM); err == nil {
-				delivered = append(delivered, "dm:"+m.SlackUserID)
+		if rule.DeliveryDM {
+			for _, m := range effectiveSnap.Missing {
+				if err := client.PostDirectMessage(ctx, m.SlackUserID, renderedDM); err != nil {
+					deliveryErrors = append(deliveryErrors, "dm "+m.DisplayName+": "+err.Error())
+				} else {
+					delivered = append(delivered, "dm:"+m.SlackUserID)
+				}
 			}
 		}
 	}
 
 	result.DeliveredTo = delivered
+	result.DeliveryErrors = deliveryErrors
 
 	// Persist snapshot and run log
 	_ = s.repo.SaveSnapshot(ctx, rule.ID, freshSnap)

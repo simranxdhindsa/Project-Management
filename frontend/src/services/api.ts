@@ -2085,6 +2085,7 @@ export interface UpdateReminderRule {
   detection_value: string
   check_day_offset: number
   check_window_start: string
+  check_window_end_day_offset: number
   check_window_end: string
   leave_channel_id: string
   leave_channel_name: string
