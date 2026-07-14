@@ -641,13 +641,18 @@ function RuleEditor({
           <div>
             <div className="ur-section-title">What counts as "posted"</div>
             <div className="ur-radio-group" style={{ marginBottom: 10 }}>
-              {(['any_message', 'keywords', 'pattern'] as const).map(m => (
+              {(['any_message', 'keywords', 'pattern', 'mention_missing'] as const).map(m => (
                 <label key={m} className="ur-radio">
                   <input type="radio" name="detection" value={m} checked={form.detection_mode === m} onChange={() => set({ detection_mode: m })} />
-                  {m === 'any_message' ? 'Any message' : m === 'keywords' ? 'Contains keywords' : 'Matches pattern (regex)'}
+                  {m === 'any_message' ? 'Any message' : m === 'keywords' ? 'Contains keywords' : m === 'pattern' ? 'Matches pattern (regex)' : '@Mentioned as missing (PM curated)'}
                 </label>
               ))}
             </div>
+            {form.detection_mode === 'mention_missing' && (
+              <div className="ur-field" style={{ background: 'rgba(var(--color-primary-rgb),0.07)', borderRadius: 8, padding: '10px 12px', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                PM posts a message in the source channel mentioning who hasn't sent their update (e.g. <em>"No update from @Suryansh @Vishal"</em>). The system reads those <strong>@mentions</strong> as the missing list and reminds only them. Everyone else in the roster is considered posted.
+              </div>
+            )}
             {(form.detection_mode === 'keywords' || form.detection_mode === 'pattern') && (
               <div className="ur-field">
                 <label className="ur-label">{form.detection_mode === 'keywords' ? 'Keywords (press Enter to add)' : 'Regex pattern'}</label>
@@ -777,7 +782,7 @@ function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClo
   onSendUpdated: () => void
   onClose: () => void
 }) {
-  const { snapshot, diff, rendered_msg } = result
+  const { snapshot, diff, rendered_msg, channel_errors } = result
   const hasChanges = diff?.has_changes
   const missing = snapshot?.missing ?? []
   const posted = snapshot?.posted ?? []
@@ -786,7 +791,7 @@ function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClo
   // Replace <@SLACK_ID> with @DisplayName for human-readable preview
   const allMembers = [...missing, ...posted, ...onLeave]
   const idToName = Object.fromEntries(allMembers.map(m => [m.slack_user_id, m.display_name]))
-  const previewMsg = rendered_msg?.replace(/<@([A-Z0-9]+)>/g, (_, id) => `@${idToName[id] ?? id}`) ?? ''
+  const previewMsg = rendered_msg?.replace(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g, (_, id) => `@${idToName[id] ?? id}`) ?? ''
 
   return (
     <div className="ur-result-overlay" onClick={onClose}>
@@ -805,6 +810,16 @@ function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClo
                 {(diff.now_missing?.length ?? 0) > 0 && `${diff.now_missing.map(m => m.display_name).join(', ')} newly missing. `}
                 Sending will use the fresh snapshot.
               </span>
+            </div>
+          )}
+
+          {channel_errors && channel_errors.length > 0 && (
+            <div className="ur-diff-banner" style={{ borderColor: 'var(--color-danger)', background: 'var(--color-danger-muted)' }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0, color: 'var(--color-danger)' }} />
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 2 }}>Could not read source channel(s) — bot may not be invited:</div>
+                {channel_errors.map((e, i) => <div key={i} style={{ fontSize: 11, opacity: 0.85 }}>{e}</div>)}
+              </div>
             </div>
           )}
 

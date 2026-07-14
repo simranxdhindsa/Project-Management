@@ -5,9 +5,10 @@ import "time"
 type UpdateReminderDetectionMode string
 
 const (
-	DetectionModeAny      UpdateReminderDetectionMode = "any_message"
-	DetectionModeKeywords UpdateReminderDetectionMode = "keywords"
-	DetectionModePattern  UpdateReminderDetectionMode = "pattern"
+	DetectionModeAny            UpdateReminderDetectionMode = "any_message"
+	DetectionModeKeywords       UpdateReminderDetectionMode = "keywords"
+	DetectionModePattern        UpdateReminderDetectionMode = "pattern"
+	DetectionModeMentionMissing UpdateReminderDetectionMode = "mention_missing" // @mentions in window = missing; everyone else = posted
 )
 
 type UpdateReminderLeaveAction string

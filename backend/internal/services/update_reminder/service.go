@@ -29,10 +29,10 @@ func NewService() *Service {
 
 // ComputeSnapshot fetches Slack messages and determines who posted / who is missing / who is on leave.
 // It uses the rule owner's bot token from their Slack integration.
-func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateReminderRule) (*models.UpdateReminderSnapshot, error) {
+func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateReminderRule) (*models.UpdateReminderSnapshot, []string, error) {
 	integration, err := s.integrationRepo.GetSlackIntegration(ctx, rule.UserID)
 	if err != nil || !integration.Connected {
-		return nil, fmt.Errorf("slack not connected for user %s", rule.UserID)
+		return nil, nil, fmt.Errorf("slack not connected for user %s", rule.UserID)
 	}
 
 	client := slacksvc.NewClient(integration.BotToken)
@@ -48,11 +48,11 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 
 	windowStart, err := parseHHMM(rule.CheckWindowStart, startDay, loc)
 	if err != nil {
-		return nil, fmt.Errorf("invalid check_window_start: %w", err)
+		return nil, nil, fmt.Errorf("invalid check_window_start: %w", err)
 	}
 	windowEnd, err := parseHHMM(rule.CheckWindowEnd, endDay, loc)
 	if err != nil {
-		return nil, fmt.Errorf("invalid check_window_end: %w", err)
+		return nil, nil, fmt.Errorf("invalid check_window_end: %w", err)
 	}
 
 	// Build regex for pattern mode once
@@ -60,7 +60,7 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 	if rule.DetectionMode == models.DetectionModePattern && rule.DetectionValue != "" {
 		patternRe, err = regexp.Compile("(?i)" + rule.DetectionValue)
 		if err != nil {
-			return nil, fmt.Errorf("invalid detection pattern: %w", err)
+			return nil, nil, fmt.Errorf("invalid detection pattern: %w", err)
 		}
 	}
 	keywords := parseKeywords(rule.DetectionValue)
@@ -68,7 +68,7 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 	// Fetch all enabled roster members
 	roster, err := s.repo.ListRoster(ctx, rule.ID)
 	if err != nil {
-		return nil, fmt.Errorf("load roster: %w", err)
+		return nil, nil, fmt.Errorf("load roster: %w", err)
 	}
 
 	// Build a set of enabled slack user IDs to check
@@ -85,18 +85,45 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 
 	// Collect user IDs who posted in ANY of the source channels
 	postedIDs := make(map[string]bool)
+	missingIDs := make(map[string]bool) // only used in mention_missing mode
+	var channelErrors []string
 	for _, ch := range rule.SourceChannelIDs {
 		msgs, err := client.GetChannelHistory(ctx, ch.ID, windowStart.Unix(), windowEnd.Unix(), 1000)
 		if err != nil {
-			// Log but don't fail — partial results are better than none
+			channelErrors = append(channelErrors, fmt.Sprintf("channel %s (%s): %s", ch.Name, ch.ID, err.Error()))
 			continue
 		}
-		for _, msg := range msgs {
-			if msg.Subtype != "" || msg.BotID != "" {
-				continue // skip bot/system messages
+		if rule.DetectionMode == models.DetectionModeMentionMissing {
+			// Find the most recent message (bot or human) that mentions at least one roster member.
+			// That single message defines the missing list — "last curation wins".
+			// Slack conversations.history returns newest-first, so msgs[0] is most recent.
+			for _, msg := range msgs {
+				if msg.Subtype != "" {
+					continue
+				}
+				mentions := extractMentions(msg.Text)
+				hasRosterMention := false
+				for _, uid := range mentions {
+					if _, inRoster := membersByID[uid]; inRoster {
+						hasRosterMention = true
+						break
+					}
+				}
+				if hasRosterMention {
+					for _, uid := range mentions {
+						missingIDs[uid] = true
+					}
+					break // stop — only use this one message
+				}
 			}
-			if messageMatchesDetection(msg.Text, rule.DetectionMode, keywords, patternRe) {
-				postedIDs[msg.User] = true
+		} else {
+			for _, msg := range msgs {
+				if msg.Subtype != "" || msg.BotID != "" {
+					continue // skip bot/system messages for other detection modes
+				}
+				if messageMatchesDetection(msg.Text, rule.DetectionMode, keywords, patternRe) {
+					postedIDs[msg.User] = true
+				}
 			}
 		}
 	}
@@ -131,6 +158,13 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 		member := models.SnapshotMember{SlackUserID: id, DisplayName: info.displayName}
 		if onLeaveIDs[id] {
 			snap.OnLeave = append(snap.OnLeave, member)
+		} else if rule.DetectionMode == models.DetectionModeMentionMissing {
+			// In mention_missing mode: mentioned = missing, not mentioned = posted
+			if missingIDs[id] {
+				snap.Missing = append(snap.Missing, member)
+			} else {
+				snap.Posted = append(snap.Posted, member)
+			}
 		} else if postedIDs[id] {
 			snap.Posted = append(snap.Posted, member)
 		} else {
@@ -138,7 +172,7 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 		}
 	}
 
-	return snap, nil
+	return snap, channelErrors, nil
 }
 
 // DiffSnapshot returns what changed between old and new snapshots
@@ -216,6 +250,7 @@ type ExecuteResult struct {
 	RenderedDM     string // DM message (rendered)
 	DeliveredTo    []string
 	DeliveryErrors []string // non-fatal errors per destination
+	ChannelErrors  []string // errors reading source channels (bot not in channel, etc.)
 	SkippedSend    string   // human-readable reason nothing was sent (no missing members, etc.)
 	IsDryRun       bool
 }
@@ -228,7 +263,7 @@ type ExecuteResult struct {
 // dryRun=true → compute + diff but do not send or update last_snapshot
 func (s *Service) Execute(ctx context.Context, rule *models.UpdateReminderRule, dryRun bool, forceSnapshot bool) (*ExecuteResult, error) {
 	// Always compute a fresh snapshot for the diff and dry-run preview
-	freshSnap, err := s.ComputeSnapshot(ctx, rule)
+	freshSnap, channelErrors, err := s.ComputeSnapshot(ctx, rule)
 	if err != nil {
 		return nil, err
 	}
@@ -249,11 +284,12 @@ func (s *Service) Execute(ctx context.Context, rule *models.UpdateReminderRule, 
 	renderedDM := RenderTemplate(rule.DMTemplate, effectiveSnap)
 
 	result := &ExecuteResult{
-		Snapshot:    freshSnap,
-		Diff:        diff,
-		RenderedMsg: renderedChannel,
-		RenderedDM:  renderedDM,
-		IsDryRun:    dryRun,
+		Snapshot:      freshSnap,
+		Diff:          diff,
+		RenderedMsg:   renderedChannel,
+		RenderedDM:    renderedDM,
+		ChannelErrors: channelErrors,
+		IsDryRun:      dryRun,
 	}
 
 	if dryRun {
@@ -439,4 +475,17 @@ func memberNames(members []models.SnapshotMember) []string {
 		names[i] = m.DisplayName
 	}
 	return names
+}
+
+// extractMentions pulls all Slack user IDs from <@USER_ID> or <@USER_ID|display_name> patterns.
+func extractMentions(text string) []string {
+	re := regexp.MustCompile(`<@([A-Z0-9]+)(?:\|[^>]*)?>`)
+	matches := re.FindAllStringSubmatch(text, -1)
+	var ids []string
+	for _, m := range matches {
+		if len(m) > 1 {
+			ids = append(ids, m[1])
+		}
+	}
+	return ids
 }

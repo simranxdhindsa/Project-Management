@@ -285,10 +285,11 @@ func (h *UpdateReminderHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"snapshot":     result.Snapshot,
-		"diff":         result.Diff,
-		"rendered_msg": result.RenderedMsg,
-		"rendered_dm":  result.RenderedDM,
+		"snapshot":       result.Snapshot,
+		"diff":           result.Diff,
+		"rendered_msg":   result.RenderedMsg,
+		"rendered_dm":    result.RenderedDM,
+		"channel_errors": result.ChannelErrors,
 	})
 }
 
@@ -317,6 +318,7 @@ func (h *UpdateReminderHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 		"rendered_dm":     result.RenderedDM,
 		"delivered_to":    result.DeliveredTo,
 		"delivery_errors": result.DeliveryErrors,
+		"channel_errors":  result.ChannelErrors,
 		"skipped_send":    result.SkippedSend,
 	})
 }

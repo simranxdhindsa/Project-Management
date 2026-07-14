@@ -2081,7 +2081,7 @@ export interface UpdateReminderRule {
   schedule_days: number[]
   timezone: string
   source_channel_ids: ChannelRef[]
-  detection_mode: 'any_message' | 'keywords' | 'pattern'
+  detection_mode: 'any_message' | 'keywords' | 'pattern' | 'mention_missing'
   detection_value: string
   check_day_offset: number
   check_window_start: string
@@ -2130,6 +2130,9 @@ export interface UpdateReminderRunResult {
   rendered_msg: string
   rendered_dm: string
   delivered_to?: string[]
+  channel_errors?: string[]
+  delivery_errors?: string[]
+  skipped_send?: string
 }
 export interface SlackWorkspaceUser {
   id: string
