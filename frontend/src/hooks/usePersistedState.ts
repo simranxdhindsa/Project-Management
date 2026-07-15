@@ -33,6 +33,8 @@ export const PERSIST = {
   DEV_ACTIVITY_DATE: 'dev_activity_date',
   /** Daily Ops tab — which design view is active */
   DAILY_OPS_VIEW: 'daily_ops_view',
+  /** Quick Send — last 10 sent messages for history display */
+  QUICK_SEND_HISTORY: 'quick_send_history',
 } as const
 
 export type PersistKey = typeof PERSIST[keyof typeof PERSIST]

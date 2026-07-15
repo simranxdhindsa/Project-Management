@@ -6,6 +6,7 @@ import {
   ToggleLeft, ToggleRight, Zap,
 } from 'lucide-react'
 import api from '../services/api'
+import { usePersistedState, PERSIST } from '../hooks/usePersistedState'
 import type {
   UpdateReminderRule, UpdateReminderRosterMember, UpdateReminderRun,
   UpdateReminderRunResult, SlackWorkspaceUser, ChannelRef,
@@ -207,6 +208,25 @@ function SearchableChannelDd({ channels, value, onChange, placeholder = 'Select 
   )
 }
 
+// Render message text with mention tokens as blue pills (used in history).
+// Handles both Slack raw format <@ID|Name> and plain @Name inserted by the mention picker.
+function renderMentions(text: string): React.ReactNode {
+  // Split on <@ID|Name> OR <@ID> OR @Word tokens
+  const parts = text.split(/(<@[A-Z0-9]+(?:\|[^>]*)?>|@\S+)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('<@')) {
+      // Extract display name from <@ID|Name> or fall back to ID
+      const match = part.match(/^<@([A-Z0-9]+)(?:\|([^>]*))?>$/)
+      const label = match ? `@${match[2] || match[1]}` : part
+      return <span key={i} className="ur-qs-mention-pill">{label}</span>
+    }
+    if (part.startsWith('@')) {
+      return <span key={i} className="ur-qs-mention-pill">{part}</span>
+    }
+    return part
+  })
+}
+
 // ── Quick Send card ───────────────────────────────────────────────────────────
 
 function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
@@ -214,51 +234,166 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
   const [mode, setMode] = useState<'channel' | 'dm'>('channel')
   const [channelId, setChannelId] = useState('')
   const [dmUserId, setDmUserId] = useState('')
-  const [message, setMessage] = useState('')
+  const [hasContent, setHasContent] = useState(false)
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [users, setUsers] = useState<SlackWorkspaceUser[]>([])
+  const [usersLoaded, setUsersLoaded] = useState(false)
   const [dmSearch, setDmSearch] = useState('')
   const [showDmDrop, setShowDmDrop] = useState(false)
-  const [history, setHistory] = useState<Array<{ channel: string; msg: string; ts: string }>>([])
+  const [history, setHistory] = usePersistedState<Array<{ channel: string; msg: string; ts: string }>>(PERSIST.QUICK_SEND_HISTORY, [])
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionDropStyle, setMentionDropStyle] = useState<React.CSSProperties>({})
+  const [mentionIdx, setMentionIdx] = useState(0)
   const dmRef = useRef<HTMLDivElement>(null)
+  const editRef = useRef<HTMLDivElement>(null)
+  const sendingRef = useRef(false)
 
   useEffect(() => {
-    if (mode === 'dm' && users.length === 0) {
-      api.getWorkspaceUsers().then(r => { if (Array.isArray(r)) setUsers(r as SlackWorkspaceUser[]) }).catch(() => {})
+    if (open && !usersLoaded) {
+      api.getWorkspaceUsers().then(r => { if (Array.isArray(r)) { setUsers(r as SlackWorkspaceUser[]); setUsersLoaded(true) } }).catch(() => {})
     }
-  }, [mode, users.length])
+  }, [open, usersLoaded])
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => { if (dmRef.current && !dmRef.current.contains(e.target as Node)) setShowDmDrop(false) }
+    const handler = (e: MouseEvent) => {
+      if (dmRef.current && !dmRef.current.contains(e.target as Node)) setShowDmDrop(false)
+      if (mentionQuery !== null && editRef.current && !editRef.current.contains(e.target as Node)) setMentionQuery(null)
+    }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [])
+  }, [mentionQuery])
 
-  const filteredUsers = users.filter(u =>
+  const filteredDmUsers = users.filter(u =>
     !u.is_bot && !u.deleted &&
     ((u.profile.display_name || u.real_name).toLowerCase().includes(dmSearch.toLowerCase()))
   )
 
+  const mentionResults = mentionQuery !== null
+    ? users.filter(u => !u.is_bot && !u.deleted && (u.profile.display_name || u.real_name).toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 8)
+    : []
+
   const selectedUser = users.find(u => u.id === dmUserId)
   const selectedChannel = channels.find(c => c.id === channelId)
 
+  // Walk the contenteditable DOM to build the Slack-format message
+  const getSlackMessage = (): string => {
+    if (!editRef.current) return ''
+    let result = ''
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        result += node.textContent
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement
+        if (el.dataset.mention) {
+          result += el.dataset.mention
+        } else if (el.tagName === 'BR') {
+          result += '\n'
+        } else {
+          el.childNodes.forEach(walk)
+          if (el.tagName === 'DIV') result += '\n'
+        }
+      }
+    }
+    editRef.current.childNodes.forEach(walk)
+    return result.trim()
+  }
+
+  const getDisplayText = (): string => editRef.current?.textContent?.trim() || ''
+
+  const handleInput = () => {
+    setHasContent(!!(editRef.current?.textContent?.trim()))
+    const sel = window.getSelection()
+    if (!sel || !sel.rangeCount) { setMentionQuery(null); return }
+    const range = sel.getRangeAt(0)
+    if (range.startContainer.nodeType !== Node.TEXT_NODE) { setMentionQuery(null); return }
+    const textBefore = (range.startContainer.textContent || '').slice(0, range.startOffset)
+    const atIdx = textBefore.lastIndexOf('@')
+    if (atIdx !== -1) {
+      const query = textBefore.slice(atIdx + 1)
+      if (!query.includes(' ') && !query.includes('\n')) {
+        setMentionQuery(query)
+        setMentionIdx(0)
+        if (editRef.current) {
+          const r = editRef.current.getBoundingClientRect()
+          setMentionDropStyle({ position: 'fixed', top: r.bottom + 4, left: r.left, width: Math.min(r.width, 320), zIndex: 9999 })
+        }
+        return
+      }
+    }
+    setMentionQuery(null)
+  }
+
+  const handleMentionSelect = (u: SlackWorkspaceUser) => {
+    const name = u.profile.display_name || u.real_name
+    const sel = window.getSelection()
+    if (!sel || !sel.rangeCount) return
+    const range = sel.getRangeAt(0)
+    if (range.startContainer.nodeType !== Node.TEXT_NODE) return
+
+    const textNode = range.startContainer as Text
+    const textBefore = (textNode.textContent || '').slice(0, range.startOffset)
+    const atIdx = textBefore.lastIndexOf('@')
+    if (atIdx === -1) return
+
+    // Delete @partial text from the text node
+    const delRange = document.createRange()
+    delRange.setStart(textNode, atIdx)
+    delRange.setEnd(textNode, range.startOffset)
+    delRange.deleteContents()
+
+    // Build mention span (non-editable, styled, carries Slack token as data attr)
+    const span = document.createElement('span')
+    span.className = 'ur-qs-mention-pill'
+    span.contentEditable = 'false'
+    span.dataset.mention = `<@${u.id}|${name}>`
+    span.textContent = `@${name}`
+
+    // Insert at cursor (now at atIdx of the text node)
+    const insertRange = window.getSelection()!.getRangeAt(0)
+    insertRange.insertNode(span)
+
+    // Add a trailing space and move cursor after it
+    const space = document.createTextNode(' ')
+    span.after(space)
+    const newRange = document.createRange()
+    newRange.setStart(space, 1)
+    newRange.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(newRange)
+
+    setHasContent(true)
+    setMentionQuery(null)
+    editRef.current?.focus()
+  }
+
+  // Strip HTML on paste — only accept plain text
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text/plain')
+    document.execCommand('insertText', false, text)
+  }
+
   const handleSend = async () => {
-    if (!message.trim()) return
+    const slackMsg = getSlackMessage()
+    if (!slackMsg || sendingRef.current) return
+    sendingRef.current = true
     setSending(true)
     try {
       const payload = mode === 'dm'
-        ? { message, dm_user_id: dmUserId }
-        : { message, channel_id: channelId }
+        ? { message: slackMsg, dm_user_id: dmUserId }
+        : { message: slackMsg, channel_id: channelId }
       await api.quickSend(payload)
       const label = mode === 'dm' ? (selectedUser?.profile.display_name || selectedUser?.real_name || dmUserId) : (selectedChannel?.name || channelId)
-      setHistory(h => [{ channel: label, msg: message, ts: new Date().toLocaleTimeString() }, ...h.slice(0, 9)])
-      setMessage('')
+      setHistory(h => [{ channel: label, msg: getDisplayText(), ts: new Date().toLocaleTimeString() }, ...h.slice(0, 19)])
+      if (editRef.current) editRef.current.innerHTML = ''
+      setHasContent(false)
       setSent(true)
       setTimeout(() => setSent(false), 2500)
     } catch {
       // error shown inline
     } finally {
+      sendingRef.current = false
       setSending(false)
     }
   }
@@ -288,9 +423,9 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
                 onChange={e => { setDmSearch(e.target.value); setDmUserId(''); setShowDmDrop(true) }}
                 onFocus={() => setShowDmDrop(true)}
               />
-              {showDmDrop && filteredUsers.length > 0 && (
+              {showDmDrop && filteredDmUsers.length > 0 && (
                 <div className="ur-user-dropdown">
-                  {filteredUsers.slice(0, 20).map(u => (
+                  {filteredDmUsers.slice(0, 20).map(u => (
                     <div key={u.id} className="ur-user-option" onMouseDown={() => { setDmUserId(u.id); setDmSearch(''); setShowDmDrop(false) }}>
                       {u.profile.image_48 && <img src={u.profile.image_48} className="ur-user-avatar" alt="" />}
                       <div className="ur-user-meta">
@@ -304,19 +439,56 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
             </div>
           )}
 
-          <div className="ur-qs-row">
-            <textarea
-              className="ur-qs-textarea"
-              placeholder="Type your message…"
-              value={message}
-              onChange={e => setMessage(e.target.value)}
-            />
-          </div>
+          <div
+            ref={editRef}
+            className="ur-qs-editor"
+            contentEditable
+            suppressContentEditableWarning
+            data-placeholder="Type your message… use @ to mention a member"
+            onInput={handleInput}
+            onKeyDown={e => {
+              if (mentionQuery !== null && mentionResults.length > 0) {
+                if (e.key === 'ArrowDown' || e.key === 'Tab') {
+                  e.preventDefault()
+                  setMentionIdx(i => (i + 1) % mentionResults.length)
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setMentionIdx(i => (i - 1 + mentionResults.length) % mentionResults.length)
+                } else if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleMentionSelect(mentionResults[mentionIdx])
+                } else if (e.key === 'Escape') {
+                  setMentionQuery(null)
+                }
+              }
+            }}
+            onPaste={handlePaste}
+          />
+
+          {/* @mention portal dropdown */}
+          {mentionQuery !== null && mentionResults.length > 0 && createPortal(
+            <div className="cd-portal-menu ur-ch-picker-menu" style={mentionDropStyle}>
+              <div className="cd-option-list" style={{ maxHeight: 200 }}>
+                {mentionResults.map((u, idx) => {
+                  const name = u.profile.display_name || u.real_name
+                  return (
+                    <button key={u.id} type="button" className={`pm-dropdown-item${idx === mentionIdx ? ' active' : ''}`} onMouseDown={e => { e.preventDefault(); handleMentionSelect(u) }} onMouseEnter={() => setMentionIdx(idx)}>
+                      {u.profile.image_48 && <img src={u.profile.image_48} className="ur-user-avatar" alt="" style={{ marginRight: 6 }} />}
+                      <span>{name}</span>
+                      <span style={{ marginLeft: 4, color: 'var(--text-muted)', fontSize: 11 }}>@{u.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>,
+            document.body
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button
               className="ur-qs-send-btn"
               onClick={handleSend}
-              disabled={sending || !message.trim() || (mode === 'channel' ? !channelId : !dmUserId)}
+              disabled={sending || !hasContent || (mode === 'channel' ? !channelId : !dmUserId)}
             >
               {sent ? <CheckCircle size={13} /> : <Send size={13} />}
               {sent ? 'Sent!' : sending ? 'Sending…' : 'Send Now'}
@@ -328,7 +500,7 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
               {history.map((h, i) => (
                 <div key={i} className="ur-qs-history-item">
                   <span className="ur-qs-history-ch">{h.channel}</span>
-                  <span className="ur-qs-history-msg">{h.msg}</span>
+                  <span className="ur-qs-history-msg">{renderMentions(h.msg)}</span>
                   <span>{h.ts}</span>
                 </div>
               ))}
@@ -775,14 +947,15 @@ function RuleEditor({
 
 // ── Run result modal ──────────────────────────────────────────────────────────
 
-function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClose }: {
-  result: UpdateReminderRunResult
+function RunResultModal({ result, isDryRun, loading, onSendOriginal, onSendUpdated, onClose }: {
+  result: UpdateReminderRunResult | null
   isDryRun: boolean
+  loading?: boolean
   onSendOriginal: () => void
   onSendUpdated: () => void
   onClose: () => void
 }) {
-  const { snapshot, diff, rendered_msg, channel_errors } = result
+  const { snapshot, diff, rendered_msg, channel_errors } = result ?? {}
   const hasChanges = diff?.has_changes
   const missing = snapshot?.missing ?? []
   const posted = snapshot?.posted ?? []
@@ -802,7 +975,28 @@ function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClo
           <button className="ur-editor-close" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="ur-result-body">
-          {hasChanges && isDryRun && (
+          {loading && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div className="skeleton" style={{ width: '100%', height: 44, borderRadius: 8 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="skeleton" style={{ width: 90, height: 11, borderRadius: 4 }} />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[70, 85, 65].map((w, i) => <div key={i} className="skeleton" style={{ width: w, height: 26, borderRadius: 20 }} />)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="skeleton" style={{ width: 70, height: 11, borderRadius: 4 }} />
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {[80, 65, 90, 55, 75].map((w, i) => <div key={i} className="skeleton" style={{ width: w, height: 26, borderRadius: 20 }} />)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className="skeleton" style={{ width: 115, height: 11, borderRadius: 4 }} />
+                <div className="skeleton" style={{ width: '100%', height: 52, borderRadius: 8 }} />
+              </div>
+            </div>
+          )}
+          {!loading && hasChanges && isDryRun && (
             <div className="ur-diff-banner">
               <AlertTriangle size={14} style={{ flexShrink: 0 }} />
               <span>
@@ -813,7 +1007,7 @@ function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClo
             </div>
           )}
 
-          {channel_errors && channel_errors.length > 0 && (
+          {!loading && channel_errors && channel_errors.length > 0 && (
             <div className="ur-diff-banner" style={{ borderColor: 'var(--color-danger)', background: 'var(--color-danger-muted)' }}>
               <AlertTriangle size={14} style={{ flexShrink: 0, color: 'var(--color-danger)' }} />
               <div>
@@ -823,43 +1017,45 @@ function RunResultModal({ result, isDryRun, onSendOriginal, onSendUpdated, onClo
             </div>
           )}
 
-          {!snapshot && (
+          {!loading && !snapshot && (
             <div className="ur-names-label" style={{ padding: '12px 0' }}>No snapshot data returned — check that the rule has roster members and Slack is connected.</div>
           )}
 
-          {missing.length > 0 && (
+          {!loading && missing.length > 0 && (
             <div className="ur-names-group">
               <div className="ur-names-label">Missing ({missing.length})</div>
               <div>{missing.map(m => <span key={m.slack_user_id} className="ur-name-pill missing">{m.display_name}</span>)}</div>
             </div>
           )}
-          {posted.length > 0 && (
+          {!loading && posted.length > 0 && (
             <div className="ur-names-group">
               <div className="ur-names-label">Posted ({posted.length})</div>
               <div>{posted.map(m => <span key={m.slack_user_id} className="ur-name-pill">{m.display_name}</span>)}</div>
             </div>
           )}
-          {onLeave.length > 0 && (
+          {!loading && onLeave.length > 0 && (
             <div className="ur-names-group">
               <div className="ur-names-label">On leave ({onLeave.length})</div>
               <div>{onLeave.map(m => <span key={m.slack_user_id} className="ur-name-pill on-leave">{m.display_name}</span>)}</div>
             </div>
           )}
 
-          <div>
-            <div className="ur-names-label" style={{ marginBottom: 6 }}>Rendered message</div>
-            <div className="ur-preview">{previewMsg}</div>
-          </div>
+          {!loading && (
+            <div>
+              <div className="ur-names-label" style={{ marginBottom: 6 }}>Rendered message</div>
+              <div className="ur-preview">{previewMsg}</div>
+            </div>
+          )}
         </div>
         <div className="ur-result-footer">
           <button className="ur-btn-secondary" onClick={onClose}>Close</button>
-          {isDryRun && hasChanges && (
+          {!loading && isDryRun && hasChanges && (
             <>
               <button className="ur-btn-secondary" onClick={onSendOriginal}>Send Original Snapshot</button>
               <button className="ur-btn-primary" onClick={onSendUpdated}>Send Updated</button>
             </>
           )}
-          {isDryRun && !hasChanges && (
+          {!loading && isDryRun && !hasChanges && (
             <button className="ur-btn-primary" onClick={onSendUpdated}>Send Now</button>
           )}
         </div>
@@ -887,8 +1083,20 @@ function HistoryModal({ ruleId, ruleName, onClose }: { ruleId: string; ruleName:
           <button className="ur-editor-close" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="ur-result-body">
-          {loading ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
-          : runs.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No runs yet.</div>
+          {loading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {[0, 1, 2].map(i => (
+                <div key={i} className="ur-history-row" style={{ gap: 8 }}>
+                  <div className="skeleton" style={{ width: 110, height: 12, borderRadius: 4 }} />
+                  <div className="skeleton" style={{ width: 52, height: 18, borderRadius: 4 }} />
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <div className="skeleton" style={{ width: 68, height: 12, borderRadius: 4 }} />
+                    <div className="skeleton" style={{ width: 72, height: 12, borderRadius: 4 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : runs.length === 0 ? <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No runs yet.</div>
           : runs.map(run => (
             <div key={run.id} className="ur-history-row">
               <div className="ur-history-date">{new Date(run.ran_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</div>
@@ -918,6 +1126,7 @@ const RuleCard = React.memo(function RuleCard({ rule, channels, onRefresh }: {
 }) {
   const [editing, setEditing] = useState(false)
   const [dryRunResult, setDryRunResult] = useState<UpdateReminderRunResult | null>(null)
+  const [dryRunLoading, setDryRunLoading] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [running, setRunning] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -935,10 +1144,13 @@ const RuleCard = React.memo(function RuleCard({ rule, channels, onRefresh }: {
 
   const handleDryRun = async () => {
     setRunning(true)
+    setDryRunResult(null)
+    setDryRunLoading(true)
     try {
       const r = await api.dryRunUpdateReminder(rule.id)
       if (r && typeof r === 'object' && 'snapshot' in r) setDryRunResult(r as unknown as UpdateReminderRunResult)
     } finally {
+      setDryRunLoading(false)
       setRunning(false)
     }
   }
@@ -996,13 +1208,14 @@ const RuleCard = React.memo(function RuleCard({ rule, channels, onRefresh }: {
         />
       )}
 
-      {dryRunResult && (
+      {(dryRunLoading || dryRunResult) && (
         <RunResultModal
           result={dryRunResult}
           isDryRun
+          loading={dryRunLoading}
           onSendOriginal={() => { setDryRunResult(null); handleRunNow(false) }}
           onSendUpdated={() => { setDryRunResult(null); handleRunNow(true) }}
-          onClose={() => setDryRunResult(null)}
+          onClose={() => { setDryRunResult(null); setDryRunLoading(false) }}
         />
       )}
 

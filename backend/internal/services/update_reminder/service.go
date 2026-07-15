@@ -94,11 +94,18 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 			continue
 		}
 		if rule.DetectionMode == models.DetectionModeMentionMissing {
-			// Find the most recent message (bot or human) that mentions at least one roster member.
+			// Find the most recent message that mentions at least one roster member.
 			// That single message defines the missing list — "last curation wins".
 			// Slack conversations.history returns newest-first, so msgs[0] is most recent.
+			// Skip messages that match this rule's own channel template — they are auto-generated
+			// reminders and would create a circular loop (bot sends reminder → reads it back → sends again).
+			templateRe := buildTemplatePattern(rule.ChannelTemplate)
 			for _, msg := range msgs {
 				if msg.Subtype != "" {
+					continue
+				}
+				// Skip auto-generated reminder messages from this rule
+				if templateRe != nil && templateRe.MatchString(msg.Text) {
 					continue
 				}
 				mentions := extractMentions(msg.Text)
@@ -109,6 +116,16 @@ func (s *Service) ComputeSnapshot(ctx context.Context, rule *models.UpdateRemind
 						break
 					}
 				}
+				// Also match plain-text @DisplayName (messages sent via quick-send arrive
+				// as raw text — Slack does not auto-convert @Name to <@USER_ID> format).
+				textLower := strings.ToLower(msg.Text)
+				for uid, info := range membersByID {
+					if strings.Contains(textLower, "@"+strings.ToLower(info.displayName)) {
+						missingIDs[uid] = true
+						hasRosterMention = true
+					}
+				}
+
 				if hasRosterMention {
 					for _, uid := range mentions {
 						missingIDs[uid] = true
@@ -475,6 +492,23 @@ func memberNames(members []models.SnapshotMember) []string {
 		names[i] = m.DisplayName
 	}
 	return names
+}
+
+// buildTemplatePattern converts a channel template into a regex that matches auto-generated
+// reminder messages, so they can be skipped during mention_missing scanning.
+func buildTemplatePattern(tmpl string) *regexp.Regexp {
+	if tmpl == "" {
+		return nil
+	}
+	escaped := regexp.QuoteMeta(tmpl)
+	for _, ph := range []string{`\{mentions\}`, `\{names\}`, `\{date\}`, `\{count\}`, `\{on_leave_names\}`} {
+		escaped = strings.ReplaceAll(escaped, ph, `.+`)
+	}
+	re, err := regexp.Compile(`(?s)` + escaped)
+	if err != nil {
+		return nil
+	}
+	return re
 }
 
 // extractMentions pulls all Slack user IDs from <@USER_ID> or <@USER_ID|display_name> patterns.
