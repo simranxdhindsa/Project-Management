@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -186,6 +187,20 @@ func (h *MCPHandler) callTool(r *http.Request, id interface{}, raw json.RawMessa
 				return toolError(id, "invalid scheduled_at format, use ISO 8601 e.g. 2026-07-16T10:00:00+05:30")
 			}
 			scheduledAt = &t
+		} else {
+			// No explicit time — apply user's saved default send time
+			hhmm := h.tokenRepo.GetDefaultSendTime(ctx, userID)
+			if hhmm != "" {
+				now := time.Now()
+				var hh, mm int
+				fmt.Sscanf(hhmm, "%d:%d", &hh, &mm)
+				candidate := time.Date(now.Year(), now.Month(), now.Day(), hh, mm, 0, 0, now.Location())
+				// If the time has already passed today, schedule for tomorrow
+				if candidate.Before(now) {
+					candidate = candidate.Add(24 * time.Hour)
+				}
+				scheduledAt = &candidate
+			}
 		}
 		msg, err := h.msgRepo.Create(ctx, userID, args.Message, args.ChannelID, args.ChannelLabel, "", scheduledAt)
 		if err != nil {
@@ -270,10 +285,32 @@ func (h *MCPTokenHandler) GetToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"exists":       true,
-		"created_at":   t.CreatedAt,
-		"last_used_at": t.LastUsedAt,
+		"exists":            true,
+		"created_at":        t.CreatedAt,
+		"last_used_at":      t.LastUsedAt,
+		"default_send_time": t.DefaultSendTime,
 	})
+}
+
+// PUT /api/mcp/settings — save user preferences (default_send_time)
+func (h *MCPTokenHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
+	u := middleware.GetUserFromContext(r)
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var body struct {
+		DefaultSendTime string `json:"default_send_time"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DefaultSendTime == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "default_send_time required (HH:MM)"})
+		return
+	}
+	if err := h.tokenRepo.UpdateDefaultSendTime(r.Context(), u.ID, body.DefaultSendTime); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
 // POST /api/mcp/token — generate (or regenerate) a token; returns plain token once

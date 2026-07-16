@@ -517,6 +517,9 @@ func main() {
 	mcpTokenRoutes.HandleFunc("", mcpTokenHandler.GetToken).Methods("GET")
 	mcpTokenRoutes.HandleFunc("", mcpTokenHandler.GenerateToken).Methods("POST")
 	mcpTokenRoutes.HandleFunc("", mcpTokenHandler.RevokeToken).Methods("DELETE")
+	mcpSettingsRoutes := api.PathPrefix("/mcp/settings").Subrouter()
+	mcpSettingsRoutes.Use(middleware.AuthMiddleware)
+	mcpSettingsRoutes.HandleFunc("", mcpTokenHandler.UpdateSettings).Methods("PUT")
 
 	// Start pending-messages scheduler (fires due Slack messages every 60s)
 	handlers.RunPendingMessagesScheduler()

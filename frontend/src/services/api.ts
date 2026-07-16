@@ -837,6 +837,13 @@ class ApiService {
     return this.request<{ success: boolean }>('/mcp/token', { method: 'DELETE' })
   }
 
+  async updateMcpSettings(defaultSendTime: string) {
+    return this.request<{ success: boolean }>('/mcp/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ default_send_time: defaultSendTime }),
+    })
+  }
+
   async listUpdateReminderRules() {
     return this.request<UpdateReminderRule[]>('/update-reminders')
   }

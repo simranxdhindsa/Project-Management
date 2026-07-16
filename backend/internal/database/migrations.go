@@ -1125,13 +1125,15 @@ WHERE bot_type = 'ticket_parser'`,
 		// token_hash stores SHA-256(token) so the plain token is never persisted.
 		// The plain token is returned once at generation time and never stored.
 		`CREATE TABLE IF NOT EXISTS user_mcp_tokens (
-			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			user_id      VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			token_hash   TEXT NOT NULL,
-			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			last_used_at TIMESTAMPTZ,
+			id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id           VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			token_hash        TEXT NOT NULL,
+			created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_used_at      TIMESTAMPTZ,
+			default_send_time VARCHAR(5) NOT NULL DEFAULT '10:00',
 			UNIQUE(user_id)
 		)`,
+		`ALTER TABLE user_mcp_tokens ADD COLUMN IF NOT EXISTS default_send_time VARCHAR(5) NOT NULL DEFAULT '10:00'`,
 		`CREATE INDEX IF NOT EXISTS idx_user_mcp_tokens_user_id ON user_mcp_tokens(user_id)`,
 
 		// ── Pending Slack messages — queued via MCP connector or Quick Send ──────

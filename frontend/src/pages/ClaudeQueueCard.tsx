@@ -24,9 +24,9 @@ const MCP_BASE_URL = (() => {
 
 // ── Compact connection status + manage panel ──────────────────────────────────
 
-type TokenMeta = { exists: boolean; created_at?: string; last_used_at?: string }
+type TokenMeta = { exists: boolean; created_at?: string; last_used_at?: string; default_send_time?: string }
 
-function ConnectionBar() {
+function ConnectionBar({ onDefaultTime }: { onDefaultTime: (t: string) => void }) {
   const [meta, setMeta] = useState<TokenMeta | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [plainToken, setPlainToken] = useState<string | null>(null)
@@ -38,8 +38,12 @@ function ConnectionBar() {
     const r = await api.getMcpToken()
     const raw = r as any
     const m = raw?.exists !== undefined ? raw : raw?.data
-    if (m) setMeta(m)
-  }, [])
+    if (m) {
+      setMeta(m)
+      // Seed the default send time from what the backend has stored
+      if (m.default_send_time) onDefaultTime(m.default_send_time)
+    }
+  }, [onDefaultTime])
 
   useEffect(() => { load() }, [load])
 
@@ -366,13 +370,16 @@ export function ClaudeQueueCard() {
             transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
             style={{ overflow: 'hidden' }}
           >
-            {/* Connection — compact one-liner */}
-            <ConnectionBar />
+            {/* Connection — compact one-liner; seeds defaultTime from backend */}
+            <ConnectionBar onDefaultTime={setDefaultTime} />
 
-            {/* Default time — one compact row */}
+            {/* Default time — one compact row; saves to backend on change */}
             <div className="cq-time-row">
               <span className="cq-label">Default send time</span>
-              <TimePicker value={defaultTime} onChange={setDefaultTime} />
+              <TimePicker
+                value={defaultTime}
+                onChange={t => { setDefaultTime(t); api.updateMcpSettings(t) }}
+              />
             </div>
 
             {/* Queue */}
