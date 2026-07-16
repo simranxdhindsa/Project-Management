@@ -37,6 +37,8 @@ export const PERSIST = {
   QUICK_SEND_HISTORY: 'quick_send_history',
   /** Pending queue — default scheduled time for Claude-queued messages (HH:MM) */
   QUEUE_DEFAULT_TIME: 'queue_default_send_time',
+  /** MCP plain token — stored so connector URL is always visible without re-generating */
+  MCP_PLAIN_TOKEN: 'mcp_plain_token',
 } as const
 
 export type PersistKey = typeof PERSIST[keyof typeof PERSIST]
