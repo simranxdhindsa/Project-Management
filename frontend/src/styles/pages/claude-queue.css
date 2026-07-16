@@ -112,6 +112,30 @@
 }
 .cq-conn-action:hover { background: rgba(var(--color-primary-rgb), 0.18); }
 
+/* ── Always-visible connector URL block ─────────────────────────────────────── */
+
+.cq-url-always {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px 12px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cq-url-label-sm {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* Inline revoke button in conn-row */
+.cq-conn-revoke {
+  padding: 3px 9px !important;
+  font-size: 11px !important;
+  margin-left: auto;
+}
+
 /* ── Manage/setup panel ─────────────────────────────────────────────────────── */
 
 .cq-panel {
