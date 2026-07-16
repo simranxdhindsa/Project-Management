@@ -83,9 +83,9 @@ var mcpTools = []map[string]interface{}{
 					"type":        "string",
 					"description": "Optional. Channel name as the user mentioned it, e.g. 'ardoise-pm', 'simran-demo', '#general'. Omit if not specified.",
 				},
-				"scheduled_at": map[string]string{
+				"send_time": map[string]string{
 					"type":        "string",
-					"description": "Optional. ISO 8601 send time e.g. 2026-07-16T10:00:00+05:30. Omit to use the user's default send time.",
+					"description": "Optional. When to send — accepts natural time like '3:00 PM', '15:30', '9am', or a full ISO 8601 datetime. Omit to use the user's saved default send time.",
 				},
 			},
 			"required": []string{"message"},
@@ -152,9 +152,9 @@ func (h *MCPHandler) callTool(r *http.Request, id interface{}, raw json.RawMessa
 	switch p.Name {
 	case "queue_slack_message":
 		var args struct {
-			Message     string `json:"message"`
-			Channel     string `json:"channel"`      // optional human-readable name
-			ScheduledAt string `json:"scheduled_at"` // optional ISO 8601
+			Message  string `json:"message"`
+			Channel  string `json:"channel"`   // optional human-readable name
+			SendTime string `json:"send_time"` // optional: "3pm", "15:30", ISO 8601
 		}
 		if err := json.Unmarshal(p.Arguments, &args); err != nil || args.Message == "" {
 			return rpcErr(id, -32602, "invalid arguments: message is required")
@@ -166,12 +166,12 @@ func (h *MCPHandler) callTool(r *http.Request, id interface{}, raw json.RawMessa
 		// Resolve @DisplayName → <@UXXX> mentions in message text
 		message := h.resolveMentions(ctx, userID, args.Message)
 
-		// Determine scheduled time
+		// Determine scheduled time — parse flexible natural time or fall back to user default
 		var scheduledAt *time.Time
-		if args.ScheduledAt != "" {
-			t, err := time.Parse(time.RFC3339, args.ScheduledAt)
+		if args.SendTime != "" {
+			t, err := parseFlexTime(args.SendTime)
 			if err != nil {
-				return toolError(id, "invalid scheduled_at — use ISO 8601 e.g. 2026-07-16T10:00:00+05:30")
+				return toolError(id, "couldn't parse send_time '"+args.SendTime+"' — try '3:00 PM', '15:30', or '9am'")
 			}
 			scheduledAt = &t
 		} else {
@@ -278,6 +278,33 @@ func (h *MCPHandler) resolveMentions(ctx context.Context, userID, text string) s
 		i = j
 	}
 	return result.String()
+}
+
+// parseFlexTime parses natural time strings ("3pm", "3:00 PM", "15:30") and
+// full ISO 8601 datetimes. Returns a time on today (or tomorrow if past).
+func parseFlexTime(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	now := time.Now()
+
+	// Try ISO 8601 first
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04"} {
+		if t, err := time.ParseInLocation(layout, s, now.Location()); err == nil {
+			return t, nil
+		}
+	}
+
+	// Try time-only formats, schedule for today (tomorrow if already past)
+	timeLayouts := []string{"3:04 PM", "3:04PM", "15:04", "3 PM", "3PM", "3pm", "15"}
+	for _, layout := range timeLayouts {
+		if t, err := time.ParseInLocation(layout, strings.ToUpper(s), now.Location()); err == nil {
+			candidate := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
+			if candidate.Before(now) {
+				candidate = candidate.Add(24 * time.Hour)
+			}
+			return candidate, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognised time format: %q", s)
 }
 
 func toolOK(id interface{}, text string) rpcResponse {
