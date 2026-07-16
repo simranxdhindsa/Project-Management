@@ -261,9 +261,28 @@ function QueuedMessageCard({
   const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
 
+  const [editingTime, setEditingTime] = useState(false)
+  const [quickTime, setQuickTime] = useState(
+    msg.scheduled_at ? new Date(msg.scheduled_at).toTimeString().slice(0, 5) : defaultTime
+  )
+
   // Save channel immediately when picked without entering full edit mode
   const handlePickChannel = async (ch: ChannelRef) => {
     const r = await api.updateQueuedMessage(msg.id, msg.message, msg.scheduled_at ?? undefined, ch.id, `#${ch.name}`)
+    const raw = r as any
+    const updated = raw?.id ? raw : raw?.data
+    if (updated) onUpdated(updated as PendingSlackMessage)
+  }
+
+  // Save time immediately when changed inline
+  const handlePickTime = async (hhmm: string) => {
+    setQuickTime(hhmm)
+    setEditingTime(false)
+    const base = msg.scheduled_at ? new Date(msg.scheduled_at) : new Date()
+    const [hh, mm] = hhmm.split(':').map(Number)
+    base.setHours(hh, mm, 0, 0)
+    if (base < new Date()) base.setDate(base.getDate() + 1)
+    const r = await api.updateQueuedMessage(msg.id, msg.message, base.toISOString(), msg.channel_id, msg.channel_label)
     const raw = r as any
     const updated = raw?.id ? raw : raw?.data
     if (updated) onUpdated(updated as PendingSlackMessage)
@@ -321,7 +340,18 @@ function QueuedMessageCard({
           ? <span className="cq-msg-channel">{msg.channel_label || msg.channel_id}</span>
           : <InlineChannelPicker channels={channels} onPick={handlePickChannel} />
         }
-        <span className="cq-msg-time"><Clock size={10} />{scheduledLabel}</span>
+        {isPending ? (
+          <span className="cq-msg-time cq-msg-time--editable" onClick={() => setEditingTime(t => !t)}>
+            <Clock size={10} />{scheduledLabel}
+            {editingTime && (
+              <span className="cq-time-inline" onClick={e => e.stopPropagation()}>
+                <TimePicker value={quickTime} onChange={handlePickTime} />
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="cq-msg-time"><Clock size={10} />{scheduledLabel}</span>
+        )}
         <span className={`cq-msg-badge cq-msg-badge--${msg.status}`}>
           {isSent
             ? <><CheckCircle2 size={10} />Sent</>

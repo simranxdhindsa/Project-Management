@@ -366,6 +366,23 @@
   color: var(--text-muted);
 }
 
+.cq-msg-time--editable {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+  transition: background 0.12s;
+  position: relative;
+}
+.cq-msg-time--editable:hover { background: rgba(var(--color-primary-rgb), 0.1); color: var(--color-primary); }
+
+.cq-time-inline {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+}
+
 .cq-msg-badge {
   display: inline-flex;
   align-items: center;
