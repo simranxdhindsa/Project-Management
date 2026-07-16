@@ -728,13 +728,19 @@ func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no entries for "+date, http.StatusBadRequest)
 		return
 	}
-	ownerUpdate := daytracBuildSlackSections(entries, user.Name)
+	ownerUpdate := daytracBuildSlackSections(entries, "")
 	ownerUpdate.IsOwner = true
 	if len(ownerUpdate.Sections) == 0 {
 		http.Error(w, "no entries for "+date, http.StatusBadRequest)
 		return
 	}
-	text := standupFormatMrkdwn([]PersonUpdate{ownerUpdate})
+	displayName := user.Name
+	if displayName == "" {
+		displayName = user.Email
+	}
+	dateParsed, _ := time.Parse("2006-01-02", date)
+	header := fmt.Sprintf("*%s* — %s\n\n", displayName, dateParsed.Format("Mon, Jan 2"))
+	text := header + standupFormatMrkdwn([]PersonUpdate{ownerUpdate})
 	slackSvc := slacksvc.NewService()
 	if err := slackSvc.PostMessage(r.Context(), user.ID, cfg.DestChannelID, text); err != nil {
 		http.Error(w, "failed to post: "+err.Error(), http.StatusInternalServerError)
