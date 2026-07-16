@@ -3,6 +3,7 @@
 ## 2026-07-16
 
 ### Enhancements
+- Make scheduled time on queue card clickable — inline TimePicker saves immediately without entering full edit mode
 - Fetch user display name from DB in DayTrack Slack post (no re-login required)
 - Prepend user name and date header to DayTrack Slack posts
 
