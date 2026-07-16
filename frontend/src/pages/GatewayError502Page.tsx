@@ -116,7 +116,7 @@ export default function GatewayError502Page() {
         </div>
 
         <div style={{ display:'flex', justifyContent:'center', marginBottom:'24px' }}>
-          <VelocityLogo variant="icon" size="xl" mark="quantum" showStatusDot={false} style={{ opacity: 0.3 }} />
+          <VelocityLogo variant="icon" size="xl" mark="chevron" showStatusDot={false} />
         </div>
 
         <div className="g5-icon-wrap">
