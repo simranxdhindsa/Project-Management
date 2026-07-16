@@ -44,6 +44,7 @@ const (
 type CustomClaims struct {
 	UserID     string      `json:"user_id"`
 	Email      string      `json:"email"`
+	Name       string      `json:"name"`
 	Role       models.Role `json:"role"`
 	RememberMe bool        `json:"remember_me"`
 	jwt.RegisteredClaims
@@ -64,6 +65,7 @@ func GenerateTokenWithDuration(user *models.User, rememberMe bool) (string, erro
 	claims := CustomClaims{
 		UserID:     user.ID,
 		Email:      user.Email,
+		Name:       user.Name,
 		Role:       user.Role,
 		RememberMe: rememberMe,
 		RegisteredClaims: jwt.RegisteredClaims{

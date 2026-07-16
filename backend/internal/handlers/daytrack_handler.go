@@ -218,11 +218,15 @@ func timeToMins(t string) int {
 }
 
 type DayTrackHandler struct {
-	repo *database.DayTrackRepository
+	repo     *database.DayTrackRepository
+	userRepo *database.UserRepository
 }
 
 func NewDayTrackHandler() *DayTrackHandler {
-	return &DayTrackHandler{repo: database.NewDayTrackRepository()}
+	return &DayTrackHandler{
+		repo:     database.NewDayTrackRepository(),
+		userRepo: database.NewUserRepository(),
+	}
 }
 
 func dtJSON(w http.ResponseWriter, v interface{}) {
@@ -735,11 +739,11 @@ func (h *DayTrackHandler) PostToSlack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	displayName := user.Name
-	if displayName == "" {
-		displayName = user.Email
+	if dbUser, err2 := h.userRepo.GetByID(r.Context(), user.ID); err2 == nil && dbUser.Name != "" {
+		displayName = dbUser.Name
 	}
 	dateParsed, _ := time.Parse("2006-01-02", date)
-	header := fmt.Sprintf("*%s* — %s\n\n", displayName, dateParsed.Format("Mon, Jan 2"))
+	header := fmt.Sprintf("*%s*\n%s\n\n", displayName, dateParsed.Format("Mon, Jan 2"))
 	text := header + standupFormatMrkdwn([]PersonUpdate{ownerUpdate})
 	slackSvc := slacksvc.NewService()
 	if err := slackSvc.PostMessage(r.Context(), user.ID, cfg.DestChannelID, text); err != nil {

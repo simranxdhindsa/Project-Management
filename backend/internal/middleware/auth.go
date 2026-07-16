@@ -62,6 +62,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			user = &models.User{
 				ID:    claims.UserID,
 				Email: claims.Email,
+				Name:  claims.Name,
 				Role:  claims.Role,
 			}
 		}
