@@ -7,6 +7,14 @@
 - Prepend user name and date header to DayTrack Slack posts
 
 
+### Bug Fixes
+- Persist MCP default send time to DB — backend applies it when Claude queues without explicit scheduled_at
+- Fix MCP connector URL missing origin when VITE_API_URL is a relative path
+
+### Features
+- Accept natural send time in MCP — '3pm', '15:30', '9am' all work
+- Simplify MCP tool — message only required, resolve channel by name, resolve @mentions to Slack IDs, inline channel picker for unset messages
+
 ## 2026-07-15
 
 ### Features
