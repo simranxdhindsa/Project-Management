@@ -409,3 +409,4 @@ Detailed descriptions of each feature/tab live in `docs/features/`. Read the rel
 | [`docs/features/other-tabs.md`](docs/features/other-tabs.md) | Calendar, Reminders, Day Track, Integrations, Settings, Admin, Reports, Slack, Bot Config, AI Analysis |
 | [`docs/features/update-reminders.md`](docs/features/update-reminders.md) | Update Reminders — Slack standup automation, rule CRUD, scheduler, dry-run, quick send |
 | [`docs/features/shared-components.md`](docs/features/shared-components.md) | **Read before building any UI** — CustomDropdown, TimePicker, ConfirmModal, HoverCard, CalendarView, global CSS files |
+
