@@ -177,7 +177,8 @@ function ConnectionBar({ onDefaultTime }: { onDefaultTime: (t: string) => void }
         <ConfirmModal
           variant="danger"
           title="Revoke MCP token?"
-          detail="Claude will lose access immediately. You'll need to regenerate and update the connector URL."
+          message="Claude will lose access to queue messages immediately."
+          detail="You'll need to regenerate a token and re-paste the URL into your Claude.ai connector."
           confirmLabel="Revoke"
           onConfirm={handleRevoke}
           onCancel={() => setShowRevoke(false)}
@@ -378,7 +379,9 @@ function QueuedMessageCard({
       <div className="cq-msg-meta">
         {msg.channel_id
           ? <span className="cq-msg-channel">{msg.channel_label || msg.channel_id}</span>
-          : <InlineChannelPicker channels={channels} onPick={handlePickChannel} />
+          : isPending
+            ? <InlineChannelPicker channels={channels} onPick={handlePickChannel} />
+            : null
         }
         {isPending ? (
           <span className="cq-msg-time cq-msg-time--editable" onClick={() => setEditingTime(t => !t)}>
@@ -462,14 +465,12 @@ function QueuedMessageCard({
           {isSent && msg.slack_ts && (
             <div className="cq-msg-actions">
               <button
-                className="cq-msg-icon-btn cq-msg-icon-btn--danger"
-                title="Delete from Slack"
+                className="cq-panel-btn cq-panel-btn--danger"
                 onClick={() => setShowSlackDeleteConfirm(true)}
                 disabled={deletingFromSlack}
               >
-                <Trash2 size={12} />
+                <Trash2 size={12} />{deletingFromSlack ? 'Deleting…' : 'Delete from Slack'}
               </button>
-              <span className="cq-label" style={{ fontSize: 10 }}>Delete from Slack</span>
             </div>
           )}
         </>

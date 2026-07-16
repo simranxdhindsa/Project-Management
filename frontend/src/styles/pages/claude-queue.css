@@ -339,7 +339,8 @@
   flex-direction: column;
   gap: 7px;
 }
-.cq-msg-card--sent   { opacity: 0.5; }
+.cq-msg-card--sent .cq-msg-meta,
+.cq-msg-card--sent .cq-msg-text { opacity: 0.52; }
 .cq-msg-card--failed { border-color: rgba(239, 68, 68, 0.35); }
 
 .cq-msg-meta {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, X, ChevronDown, Send, Clock, Users, Calendar,
   Play, Eye, History, Trash2, AlertTriangle, CheckCircle,
@@ -250,6 +251,8 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [mentionDropStyle, setMentionDropStyle] = useState<React.CSSProperties>({})
   const [mentionIdx, setMentionIdx] = useState(0)
+  const [confirmDeleteIdx, setConfirmDeleteIdx] = useState<number | null>(null)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
   const dmRef = useRef<HTMLDivElement>(null)
   const editRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false)
@@ -412,7 +415,16 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
         </div>
         <ChevronDown size={14} className={`cq-caret${open ? ' cq-caret--open' : ''}`} />
       </button>
+      <AnimatePresence initial={false}>
       {open && (
+        <motion.div
+          key="qs-body"
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+          style={{ overflow: 'hidden' }}
+        >
         <div className="ur-qs-body">
           <div className="ur-qs-target">
             <button className={`ur-qs-mode-btn${mode === 'channel' ? ' active' : ''}`} onClick={() => setMode('channel')}># Channel</button>
@@ -506,7 +518,7 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
             <div className="ur-qs-history">
               <div className="ur-qs-history-header">
                 <span>Sent History</span>
-                <button className="ur-qs-history-clear" onClick={() => setHistory([])}>Clear all</button>
+                <button className="ur-qs-history-clear" onClick={() => setShowClearConfirm(true)}>Clear all</button>
               </div>
               {history.map((h, i) => (
                 <div key={i} className="ur-qs-history-item">
@@ -555,14 +567,7 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
                             className="ur-qs-history-action-btn ur-qs-history-action-btn--danger"
                             title="Delete from Slack"
                             disabled={deletingIdx === i}
-                            onClick={async () => {
-                              if (!h.slackTs || !h.channelId) return
-                              setDeletingIdx(i)
-                              try {
-                                await api.deleteSlackMessage(h.channelId, h.slackTs)
-                                setHistory(prev => prev.filter((_, j) => j !== i))
-                              } catch { /* ignore */ } finally { setDeletingIdx(null) }
-                            }}
+                            onClick={() => setConfirmDeleteIdx(i)}
                           ><Trash2 size={12} /></button>
                         </div>
                       )}
@@ -573,6 +578,42 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
             </div>
           )}
         </div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {confirmDeleteIdx !== null && (() => {
+        const target = history[confirmDeleteIdx]
+        return (
+          <ConfirmModal
+            variant="danger"
+            title="Delete from Slack?"
+            message="This will permanently delete the message from the Slack channel."
+            confirmLabel="Delete"
+            onConfirm={async () => {
+              const idx = confirmDeleteIdx
+              setConfirmDeleteIdx(null)
+              if (!target?.slackTs || !target?.channelId) return
+              setDeletingIdx(idx)
+              try {
+                await api.deleteSlackMessage(target.channelId, target.slackTs)
+                setHistory(prev => prev.filter((_, j) => j !== idx))
+              } catch { /* ignore */ } finally { setDeletingIdx(null) }
+            }}
+            onCancel={() => setConfirmDeleteIdx(null)}
+          />
+        )
+      })()}
+
+      {showClearConfirm && (
+        <ConfirmModal
+          variant="warning"
+          title="Clear sent history?"
+          message="This clears your local history only — messages already sent stay in Slack."
+          confirmLabel="Clear all"
+          onConfirm={() => { setHistory([]); setShowClearConfirm(false) }}
+          onCancel={() => setShowClearConfirm(false)}
+        />
       )}
     </div>
   )
