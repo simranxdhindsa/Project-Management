@@ -320,7 +320,7 @@ function QueuedMessageCard({
     ? new Date(msg.scheduled_at).toLocaleString(undefined, {
         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
       })
-    : 'Manual only'
+    : `Default (${defaultTime})`
 
   const handleSave = async () => {
     setSaving(true)
@@ -503,8 +503,8 @@ function QueuedMessageCard({
 
 // ── Main exported card ─────────────────────────────────────────────────────────
 
-export function ClaudeQueueCard({ channels = [] }: { channels?: ChannelRef[] }) {
-  const [open, setOpen] = useState(false)
+export function ClaudeQueueCard({ channels = [], autoOpen = false }: { channels?: ChannelRef[]; autoOpen?: boolean }) {
+  const [open, setOpen] = useState(autoOpen)
   const [messages, setMessages] = useState<PendingSlackMessage[]>([])
   const [loadingMsgs, setLoadingMsgs] = useState(false)
   const [defaultTime, setDefaultTime] = usePersistedState<string>(

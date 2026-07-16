@@ -129,6 +129,24 @@
   box-shadow: 0 0 8px rgba(var(--color-primary-rgb),0.7);
 }
 
+/* ── Sidebar nav icon with badge dot ─────────────────────────────────────── */
+.sidebar-nav-icon-rel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-nav-badge-dot {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success);
+  border: 2px solid var(--bg-surface);
+}
+
 .sidebar-nav-icon {
   flex-shrink: 0;
   width: 18px;

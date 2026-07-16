@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, X, ChevronDown, Send, Clock, Users, Calendar,
-  Play, Eye, History, Trash2, AlertTriangle, CheckCircle,
+  Play, Eye, History, Trash2, AlertTriangle, CheckCircle, CheckCircle2,
   ToggleLeft, ToggleRight, Zap, Pencil,
 } from 'lucide-react'
 import api from '../services/api'
@@ -231,8 +231,8 @@ function renderMentions(text: string): React.ReactNode {
 
 // ── Quick Send card ───────────────────────────────────────────────────────────
 
-function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
-  const [open, setOpen] = useState(false)
+function QuickSendCard({ channels, autoOpen = false }: { channels: ChannelRef[]; autoOpen?: boolean }) {
+  const [open, setOpen] = useState(autoOpen)
   const [mode, setMode] = useState<'channel' | 'dm'>('channel')
   const [channelId, setChannelId] = useState('')
   const [dmUserId, setDmUserId] = useState('')
@@ -523,8 +523,11 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
               {history.map((h, i) => (
                 <div key={i} className="ur-qs-history-item">
                   <div className="ur-qs-history-meta">
-                    <span className="ur-qs-history-ch">{h.channel}</span>
-                    <span className="ur-qs-history-time">{h.ts}</span>
+                    <span className="ur-qs-history-ch">
+                      {h.channelId?.match(/^[UW]/) ? h.channel : `#${h.channel}`}
+                    </span>
+                    <span className="ur-qs-history-time"><Clock size={9} />{h.ts}</span>
+                    <span className="ur-qs-history-sent-badge"><CheckCircle2 size={10} />Sent</span>
                   </div>
                   {editingIdx === i ? (
                     <div className="ur-qs-history-edit">
@@ -1344,10 +1347,26 @@ const RuleCard = React.memo(function RuleCard({ rule, channels, onRefresh }: {
 
 // ── Main tab component ────────────────────────────────────────────────────────
 
-export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
+const UR_TABS = ['claude-queue', 'quick-send', 'rules'] as const
+type URTab = typeof UR_TABS[number]
+
+export function UpdateRemindersTab({
+  channels: channelsProp,
+  initialTab = 'claude-queue',
+  onTabChange,
+}: {
+  channels?: ChannelRef[]
+  initialTab?: string
+  onTabChange?: (tab: string) => void
+}) {
   const [rules, setRules] = useState<UpdateReminderRule[]>([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  const [channels, setChannels] = useState<ChannelRef[]>(channelsProp ?? [])
+  const [activeTab, setActiveTab] = useState<URTab>(
+    UR_TABS.includes(initialTab as URTab) ? (initialTab as URTab) : 'claude-queue'
+  )
+  const [queueStats, setQueueStats] = useState({ pending: 0, sentToday: 0 })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -1361,52 +1380,113 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    if (channelsProp) { setChannels(channelsProp); return }
+    api.getSlackChannels().then(r => {
+      if (Array.isArray(r)) setChannels(r.map((c: any) => ({ id: c.id, name: c.name })))
+    }).catch(() => {})
+  }, [channelsProp])
+
+  useEffect(() => {
+    api.listQueuedMessages().then(r => {
+      const list = Array.isArray(r) ? r : Array.isArray((r as any)?.data) ? (r as any).data : []
+      const today = new Date().toDateString()
+      setQueueStats({
+        pending: list.filter((m: any) => m.status === 'pending').length,
+        sentToday: list.filter((m: any) => m.status === 'sent' && m.sent_at && new Date(m.sent_at).toDateString() === today).length,
+      })
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => { setActiveTab(UR_TABS.includes(initialTab as URTab) ? (initialTab as URTab) : 'claude-queue') }, [initialTab])
+
+  const handleTabChange = (tab: URTab) => { setActiveTab(tab); onTabChange?.(tab) }
+  const activeRules = rules.filter(r => r.enabled).length
+
   return (
     <div className="ur-root">
-      <ClaudeQueueCard channels={channels} />
-      <QuickSendCard channels={channels} />
+      {/* KPI row */}
+      <div className="ur-kpi-row">
+        <div className="ur-kpi-card" onClick={() => handleTabChange('claude-queue')} style={{ cursor: 'pointer' }}>
+          <div className="ur-kpi-glow" />
+          <div className="ur-kpi-label">QUEUE</div>
+          <div className="ur-kpi-value ur-kpi-value--primary">{queueStats.pending}</div>
+          <div className="ur-kpi-sub">pending messages</div>
+        </div>
+        <div className="ur-kpi-card">
+          <div className="ur-kpi-glow ur-kpi-glow--success" />
+          <div className="ur-kpi-label">ACTIVE RULES</div>
+          <div className="ur-kpi-value ur-kpi-value--success">{activeRules}</div>
+          <div className="ur-kpi-sub">of {rules.length} total</div>
+        </div>
+        <div className="ur-kpi-card" onClick={() => handleTabChange('quick-send')} style={{ cursor: 'pointer' }}>
+          <div className="ur-kpi-glow ur-kpi-glow--warning" />
+          <div className="ur-kpi-label">SENT TODAY</div>
+          <div className="ur-kpi-value ur-kpi-value--warning">{queueStats.sentToday}</div>
+          <div className="ur-kpi-sub">via Claude queue</div>
+        </div>
+      </div>
 
-      <div className="ur-list-header">
-        <span className="ur-list-title">Reminder Rules</span>
-        <button className="ur-new-btn" onClick={() => setShowNew(true)}>
-          <Plus size={13} /> New Rule
+      {/* Inner tab bar */}
+      <div className="ur-inner-tabs">
+        <button className={`ur-inner-tab${activeTab === 'claude-queue' ? ' active' : ''}`} onClick={() => handleTabChange('claude-queue')}>
+          Claude Queue
+          {queueStats.pending > 0 && <span className="ur-tab-badge">{queueStats.pending}</span>}
+        </button>
+        <button className={`ur-inner-tab${activeTab === 'quick-send' ? ' active' : ''}`} onClick={() => handleTabChange('quick-send')}>
+          Quick Send
+        </button>
+        <button className={`ur-inner-tab${activeTab === 'rules' ? ' active' : ''}`} onClick={() => handleTabChange('rules')}>
+          Reminder Rules
+          {activeRules > 0 && <span className="ur-tab-badge-dot" />}
         </button>
       </div>
 
-      {loading ? (
-        [0, 1, 2].map(i => (
-          <div key={i} className="ur-skeleton-card">
-            <div className="skeleton" style={{ width: '40%', height: 14, borderRadius: 4 }} />
-            <div className="skeleton" style={{ width: '65%', height: 11, borderRadius: 4 }} />
-            <div style={{ display: 'flex', gap: 6 }}>
-              {[80, 70, 75, 70].map((w, j) => <div key={j} className="skeleton" style={{ width: w, height: 26, borderRadius: 6 }} />)}
-            </div>
-          </div>
-        ))
-      ) : rules.length === 0 ? (
-        <div className="ur-empty">
-          <ToggleLeft size={28} style={{ marginBottom: 8, color: 'var(--text-muted)' }} />
-          <div>No reminder rules yet.</div>
-          <div style={{ fontSize: 12, marginTop: 4 }}>Create your first rule to start automating update checks.</div>
+      {/* Tab content */}
+      {activeTab === 'claude-queue' && (
+        <div className="ur-tab-inline">
+          <ClaudeQueueCard channels={channels} autoOpen />
         </div>
-      ) : (
-        rules.map(rule => (
-          <RuleCard
-            key={rule.id}
-            rule={rule}
-            channels={channels}
-            onRefresh={load}
-          />
-        ))
+      )}
+      {activeTab === 'quick-send' && (
+        <div className="ur-tab-inline">
+          <QuickSendCard channels={channels} autoOpen />
+        </div>
+      )}
+      {activeTab === 'rules' && (
+        <>
+          <div className="ur-list-header">
+            <span className="ur-list-title">Reminder Rules</span>
+            <button className="ur-new-btn" onClick={() => setShowNew(true)}>
+              <Plus size={13} /> New Rule
+            </button>
+          </div>
+          {loading ? (
+            [0, 1, 2].map(i => (
+              <div key={i} className="ur-skeleton-card">
+                <div className="skeleton" style={{ width: '40%', height: 14, borderRadius: 4 }} />
+                <div className="skeleton" style={{ width: '65%', height: 11, borderRadius: 4 }} />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[80, 70, 75, 70].map((w, j) => <div key={j} className="skeleton" style={{ width: w, height: 26, borderRadius: 6 }} />)}
+                </div>
+              </div>
+            ))
+          ) : rules.length === 0 ? (
+            <div className="ur-empty">
+              <ToggleLeft size={28} style={{ marginBottom: 8, color: 'var(--text-muted)' }} />
+              <div>No reminder rules yet.</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Create your first rule to start automating update checks.</div>
+            </div>
+          ) : (
+            rules.map(rule => (
+              <RuleCard key={rule.id} rule={rule} channels={channels} onRefresh={load} />
+            ))
+          )}
+        </>
       )}
 
       {showNew && (
-        <RuleEditor
-          rule={null}
-          channels={channels}
-          onClose={() => setShowNew(false)}
-          onSaved={load}
-        />
+        <RuleEditor rule={null} channels={channels} onClose={() => setShowNew(false)} onSaved={load} />
       )}
     </div>
   )

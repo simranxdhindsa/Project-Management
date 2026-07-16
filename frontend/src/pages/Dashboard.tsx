@@ -49,6 +49,7 @@ import { PMReportsPage } from './PMReportsPage'
 import { ListViewPage } from './ListViewPage'
 import { SprintPulsePage } from './SprintPulsePage'
 import { SlackIntelligencePage } from './SlackIntelligencePage'
+import { UpdateRemindersTab } from './UpdateRemindersTab'
 import { ActivityPage } from './ActivityPage'
 import { DayTrackPage } from './DayTrackPage'
 import { GanttPage } from './GanttPage'
@@ -60,10 +61,10 @@ import type { LocalNotification } from '../components/notifications/RightPanel'
 import ChangelogPanel from '../components/changelog/ChangelogPanel'
 import type { ChangelogEntry } from '../services/api'
 
-type Page = 'dashboard' | 'board' | 'list' | 'sprint-pulse' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme' | 'gantt'
+type Page = 'dashboard' | 'board' | 'list' | 'sprint-pulse' | 'daily-ops' | 'calendar' | 'reports' | 'ai-analysis' | 'dev-activity' | 'pm-reports' | 'bots' | 'team' | 'settings' | 'integrations' | 'slack' | 'activity' | 'daytrack' | 'theme' | 'gantt' | 'update-reminders'
 
 // Pages accessible by members/viewers (limited access)
-const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'sprint-pulse', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations', 'gantt', 'slack']
+const MEMBER_PAGES: Page[] = ['dashboard', 'board', 'list', 'sprint-pulse', 'daily-ops', 'activity', 'calendar', 'ai-analysis', 'dev-activity', 'pm-reports', 'daytrack', 'integrations', 'gantt', 'slack', 'update-reminders']
 
 type DashboardNotification = LocalNotification
 
@@ -89,13 +90,17 @@ const PATH_TO_PAGE: Record<string, Page> = {
   'daytrack': 'daytrack',
   'theme': 'theme',
   'gantt': 'gantt',
+  'update-reminders': 'update-reminders',
 }
 
 const PM_REPORTS_TABS = ['tracking', 'daily', 'assignees', 'deployment'] as const
 type PMReportsTab = typeof PM_REPORTS_TABS[number]
 
-const SLACK_TABS = ['inbox', 'threads', 'reminders', 'update-reminders', 'pulse', 'saved', 'settings'] as const
+const SLACK_TABS = ['inbox', 'threads', 'reminders', 'pulse', 'saved', 'settings'] as const
 type SlackTab = typeof SLACK_TABS[number]
+
+const UPDATE_REMINDERS_TABS = ['claude-queue', 'quick-send', 'rules'] as const
+type UpdateRemindersTab_Tab = typeof UPDATE_REMINDERS_TABS[number]
 
 const INTEGRATIONS_TABS = ['youtrack', 'slack', 'workflow', 'developers'] as const
 type IntegrationsTab = typeof INTEGRATIONS_TABS[number]
@@ -124,6 +129,11 @@ export default function Dashboard() {
   const integrationsTab: IntegrationsTab = (INTEGRATIONS_TABS as readonly string[]).includes(subTab ?? '')
     ? (subTab as IntegrationsTab)
     : 'youtrack'
+
+  // Derived sub-tab for update-reminders (with validation)
+  const updateRemindersSubTab: UpdateRemindersTab_Tab = (UPDATE_REMINDERS_TABS as readonly string[]).includes(subTab ?? '')
+    ? (subTab as UpdateRemindersTab_Tab)
+    : 'claude-queue'
 
   // Navigate wrapper — updates URL and persists last page
   const setCurrentPage = (page: Page) => {
@@ -166,6 +176,45 @@ export default function Dashboard() {
     document.body.classList.toggle('sidebar-open', sidebarOpen)
     return () => { document.body.classList.remove('sidebar-open') }
   }, [sidebarOpen])
+
+  // ── Update Reminders: unread queue indicator + browser notifications ─────────
+  const [unreadQueueCount, setUnreadQueueCount] = useState(0)
+  const notifiedQueueCountRef = useRef(0)
+
+  // Poll for new Claude queue messages every 30s
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await api.listQueuedMessages()
+        const list: any[] = Array.isArray(r) ? r : Array.isArray((r as any)?.data) ? (r as any).data : []
+        const lastSeen = parseInt(localStorage.getItem('ur_queue_last_seen_ts') || '0', 10)
+        const newCount = list.filter((m: any) => m.status === 'pending' && new Date(m.created_at).getTime() > lastSeen).length
+        setUnreadQueueCount(newCount)
+        if (newCount > 0 && newCount > notifiedQueueCountRef.current && Notification.permission === 'granted') {
+          notifiedQueueCountRef.current = newCount
+          new Notification('Velocity — Claude Queue', {
+            body: newCount === 1 ? 'Claude queued a message for review' : `Claude queued ${newCount} messages for review`,
+            icon: '/favicon.ico',
+          })
+        }
+      } catch { /* ignore */ }
+    }
+    poll()
+    const id = setInterval(poll, 30_000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Clear unread badge and request notification permission when visiting the page
+  useEffect(() => {
+    if (currentPage === 'update-reminders') {
+      setUnreadQueueCount(0)
+      notifiedQueueCountRef.current = 0
+      localStorage.setItem('ur_queue_last_seen_ts', Date.now().toString())
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission()
+      }
+    }
+  }, [currentPage])
 
   const [showNotifications, setShowNotifications] = useState(false)
   const [notifAnchorRect, setNotifAnchorRect] = useState<DOMRect | null>(null)
@@ -433,6 +482,16 @@ export default function Dashboard() {
               <span>PM Reports</span>
             </button>
             <button
+              className={`sidebar-nav-item ${currentPage === 'update-reminders' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('update-reminders')}
+            >
+              <span className="sidebar-nav-icon-rel">
+                <Bell size={20} />
+                {unreadQueueCount > 0 && <span className="sidebar-nav-badge-dot" />}
+              </span>
+              <span>Update Reminders</span>
+            </button>
+            <button
                 className={`sidebar-nav-item ${currentPage === 'slack' ? 'active' : ''}`}
                 onClick={() => setCurrentPage('slack')}
               >
@@ -536,6 +595,7 @@ export default function Dashboard() {
             {currentPage === 'settings' && 'Access Control'}
             {currentPage === 'integrations' && 'Integrations'}
             {currentPage === 'slack' && 'Slack Intelligence'}
+            {currentPage === 'update-reminders' && 'Update Reminders'}
             {currentPage === 'activity' && 'Activity'}
             {currentPage === 'daytrack' && 'DayTrack'}
             {currentPage === 'gantt' && 'Gantt'}
@@ -677,6 +737,14 @@ export default function Dashboard() {
               initialTab={slackTab}
               onTabChange={(tab) => navigate(`/slack/${tab}`)}
               onOpenPMAssistant={() => setChatOpen(true)}
+            />
+          </div>
+        )}
+        {mountedTabs.has('update-reminders') && (
+          <div className={currentPage !== 'update-reminders' ? 'dash-tab-hidden' : undefined}>
+            <UpdateRemindersTab
+              initialTab={updateRemindersSubTab}
+              onTabChange={(tab) => navigate(`/update-reminders/${tab}`)}
             />
           </div>
         )}

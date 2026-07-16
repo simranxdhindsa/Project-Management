@@ -407,6 +407,6 @@ Detailed descriptions of each feature/tab live in `docs/features/`. Read the rel
 | [`docs/features/board.md`](docs/features/board.md) | Kanban board, List view, Sprint Dashboard |
 | [`docs/features/dev-activity.md`](docs/features/dev-activity.md) | Dev Activity page — 5 subtabs, CSS map, skeuomorphic report design |
 | [`docs/features/other-tabs.md`](docs/features/other-tabs.md) | Calendar, Reminders, Day Track, Integrations, Settings, Admin, Reports, Slack, Bot Config, AI Analysis |
-| [`docs/features/update-reminders.md`](docs/features/update-reminders.md) | Update Reminders — Slack standup automation, rule CRUD, scheduler, dry-run, quick send |
+| [`docs/features/update-reminders.md`](docs/features/update-reminders.md) | Update Reminders — standalone left-nav page with 3 subtabs (Claude Queue, Quick Send, Rules), KPI row, green dot nav indicator, browser notifications, scheduler uses default send time for null-scheduled messages |
 | [`docs/features/shared-components.md`](docs/features/shared-components.md) | **Read before building any UI** — CustomDropdown, TimePicker, ConfirmModal, HoverCard, CalendarView, global CSS files |
 
