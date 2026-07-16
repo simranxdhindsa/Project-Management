@@ -783,9 +783,22 @@ class ApiService {
   }
 
   async quickSend(payload: { channel_id?: string; message: string; dm_user_id?: string }) {
-    return this.request<{ success: boolean }>('/slack/quick-send', {
+    return this.request<{ slack_ts: string; channel_id: string }>('/slack/quick-send', {
       method: 'POST',
       body: JSON.stringify(payload),
+    })
+  }
+
+  async deleteSlackMessage(channelId: string, ts: string) {
+    return this.request<{ success: boolean }>(`/slack/quick-send/messages/${encodeURIComponent(channelId)}/${encodeURIComponent(ts)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async updateSlackMessage(channelId: string, ts: string, message: string) {
+    return this.request<{ success: boolean }>(`/slack/quick-send/messages/${encodeURIComponent(channelId)}/${encodeURIComponent(ts)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ message }),
     })
   }
 

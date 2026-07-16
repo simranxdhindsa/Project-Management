@@ -321,6 +321,8 @@ func main() {
 	// Update Reminders: workspace user list + one-off quick send
 	slackRoutes.HandleFunc("/workspace-users", updateReminderHandler.GetWorkspaceUsers).Methods("GET")
 	slackRoutes.HandleFunc("/quick-send", updateReminderHandler.QuickSend).Methods("POST")
+	slackRoutes.HandleFunc("/quick-send/messages/{channelId}/{ts}", updateReminderHandler.DeleteSlackMessage).Methods("DELETE")
+	slackRoutes.HandleFunc("/quick-send/messages/{channelId}/{ts}", updateReminderHandler.UpdateSlackMessage).Methods("PUT")
 	// Per-user Slack actions: connect/disconnect own integration — any authenticated user
 	slackRoutes.HandleFunc("/connect", slackHandler.Connect).Methods("POST")
 	slackRoutes.HandleFunc("/disconnect", slackHandler.Disconnect).Methods("POST")

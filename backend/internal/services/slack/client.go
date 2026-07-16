@@ -345,9 +345,10 @@ func (c *Client) GetThreadReplies(ctx context.Context, channelID, threadTS strin
 
 // PostMessage posts a message to a channel (chat.postMessage)
 func (c *Client) PostMessage(ctx context.Context, channelID, text string) (string, error) {
-	payload := map[string]string{
-		"channel": channelID,
-		"text":    text,
+	payload := map[string]interface{}{
+		"channel":  channelID,
+		"text":     text,
+		"username": "Velocity",
 	}
 
 	body, err := c.doRequest(ctx, "POST", "/chat.postMessage", payload)
@@ -517,13 +518,53 @@ func (c *Client) OpenDirectMessageChannel(ctx context.Context, slackUserID strin
 	return resp.Channel.ID, nil
 }
 
-// PostDirectMessage sends a DM to a Slack user by their user ID
-func (c *Client) PostDirectMessage(ctx context.Context, slackUserID, text string) error {
+// PostDirectMessage sends a DM to a Slack user by their user ID.
+// Returns (dmChannelID, messageTS, error).
+func (c *Client) PostDirectMessage(ctx context.Context, slackUserID, text string) (string, string, error) {
 	dmChannelID, err := c.OpenDirectMessageChannel(ctx, slackUserID)
 	if err != nil {
-		return fmt.Errorf("open DM channel: %w", err)
+		return "", "", fmt.Errorf("open DM channel: %w", err)
 	}
-	_, err = c.PostMessage(ctx, dmChannelID, text)
-	return err
+	ts, err := c.PostMessage(ctx, dmChannelID, text)
+	return dmChannelID, ts, err
+}
+
+// DeleteMessage deletes a Slack message (chat.delete). Requires chat:write scope.
+func (c *Client) DeleteMessage(ctx context.Context, channelID, ts string) error {
+	payload := map[string]string{"channel": channelID, "ts": ts}
+	body, err := c.doRequest(ctx, "POST", "/chat.delete", payload)
+	if err != nil {
+		return err
+	}
+	var resp Response
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	if !resp.OK {
+		return fmt.Errorf("slack API error: %s", resp.Error)
+	}
+	return nil
+}
+
+// UpdateMessage edits an existing Slack message (chat.update).
+func (c *Client) UpdateMessage(ctx context.Context, channelID, ts, text string) error {
+	payload := map[string]interface{}{
+		"channel":  channelID,
+		"ts":       ts,
+		"text":     text,
+		"username": "Velocity",
+	}
+	body, err := c.doRequest(ctx, "POST", "/chat.update", payload)
+	if err != nil {
+		return err
+	}
+	var resp Response
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+	if !resp.OK {
+		return fmt.Errorf("slack API error: %s", resp.Error)
+	}
+	return nil
 }
 

@@ -341,7 +341,7 @@ func (s *Service) Execute(ctx context.Context, rule *models.UpdateReminderRule, 
 
 		if rule.DeliveryDM {
 			for _, m := range effectiveSnap.Missing {
-				if err := client.PostDirectMessage(ctx, m.SlackUserID, renderedDM); err != nil {
+				if _, _, err := client.PostDirectMessage(ctx, m.SlackUserID, renderedDM); err != nil {
 					deliveryErrors = append(deliveryErrors, "dm "+m.DisplayName+": "+err.Error())
 				} else {
 					delivered = append(delivered, "dm:"+m.SlackUserID)
@@ -398,18 +398,35 @@ func (s *Service) ExecuteScheduled(ctx context.Context, rule *models.UpdateRemin
 }
 
 // QuickSend posts a one-off message to a channel or DM using the user's Slack token
-func (s *Service) QuickSend(ctx context.Context, userID, channelID, message, dmUserID string) error {
-	integration, err := s.integrationRepo.GetSlackIntegration(ctx, userID)
-	if err != nil || !integration.Connected {
-		return fmt.Errorf("slack not connected")
+func (s *Service) QuickSend(ctx context.Context, userID, channelID, message, dmUserID string) (slackTS, resolvedChannelID string, err error) {
+	integration, ferr := s.integrationRepo.GetSlackIntegration(ctx, userID)
+	if ferr != nil || !integration.Connected {
+		return "", "", fmt.Errorf("slack not connected")
 	}
 	client := slacksvc.NewClient(integration.BotToken)
 
 	if dmUserID != "" {
-		return client.PostDirectMessage(ctx, dmUserID, message)
+		ch, ts, e := client.PostDirectMessage(ctx, dmUserID, message)
+		return ts, ch, e
 	}
-	_, err = client.PostMessage(ctx, channelID, message)
-	return err
+	ts, e := client.PostMessage(ctx, channelID, message)
+	return ts, channelID, e
+}
+
+func (s *Service) DeleteSlackMessage(ctx context.Context, userID, channelID, ts string) error {
+	integration, err := s.integrationRepo.GetSlackIntegration(ctx, userID)
+	if err != nil || !integration.Connected {
+		return fmt.Errorf("slack not connected")
+	}
+	return slacksvc.NewClient(integration.BotToken).DeleteMessage(ctx, channelID, ts)
+}
+
+func (s *Service) UpdateSlackMessage(ctx context.Context, userID, channelID, ts, text string) error {
+	integration, err := s.integrationRepo.GetSlackIntegration(ctx, userID)
+	if err != nil || !integration.Connected {
+		return fmt.Errorf("slack not connected")
+	}
+	return slacksvc.NewClient(integration.BotToken).UpdateMessage(ctx, channelID, ts, text)
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────

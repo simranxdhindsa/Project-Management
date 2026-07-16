@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Plus, X, ChevronDown, Send, Clock, Users, Calendar,
   Play, Eye, History, Trash2, AlertTriangle, CheckCircle,
-  ToggleLeft, ToggleRight, Zap,
+  ToggleLeft, ToggleRight, Zap, Pencil,
 } from 'lucide-react'
 import api from '../services/api'
 import { usePersistedState, PERSIST } from '../hooks/usePersistedState'
@@ -241,7 +241,11 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
   const [usersLoaded, setUsersLoaded] = useState(false)
   const [dmSearch, setDmSearch] = useState('')
   const [showDmDrop, setShowDmDrop] = useState(false)
-  const [history, setHistory] = usePersistedState<Array<{ channel: string; msg: string; ts: string }>>(PERSIST.QUICK_SEND_HISTORY, [])
+  const [history, setHistory] = usePersistedState<Array<{ channel: string; channelId: string; msg: string; ts: string; slackTs: string }>>(PERSIST.QUICK_SEND_HISTORY, [])
+  const [editingIdx, setEditingIdx] = useState<number | null>(null)
+  const [editingText, setEditingText] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingIdx, setDeletingIdx] = useState<number | null>(null)
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [mentionDropStyle, setMentionDropStyle] = useState<React.CSSProperties>({})
   const [mentionIdx, setMentionIdx] = useState(0)
@@ -383,9 +387,9 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
       const payload = mode === 'dm'
         ? { message: slackMsg, dm_user_id: dmUserId }
         : { message: slackMsg, channel_id: channelId }
-      await api.quickSend(payload)
+      const res = await api.quickSend(payload)
       const label = mode === 'dm' ? (selectedUser?.profile.display_name || selectedUser?.real_name || dmUserId) : (selectedChannel?.name || channelId)
-      setHistory(h => [{ channel: label, msg: getDisplayText(), ts: new Date().toLocaleTimeString() }, ...h.slice(0, 19)])
+      setHistory(h => [{ channel: label, channelId: res?.channel_id || channelId, msg: getDisplayText(), ts: new Date().toLocaleTimeString(), slackTs: res?.slack_ts || '' }, ...h.slice(0, 19)])
       if (editRef.current) editRef.current.innerHTML = ''
       setHasContent(false)
       setSent(true)
@@ -497,11 +501,70 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
 
           {history.length > 0 && (
             <div className="ur-qs-history">
+              <div className="ur-qs-history-header">
+                <span>Sent History</span>
+                <button className="ur-qs-history-clear" onClick={() => setHistory([])}>Clear all</button>
+              </div>
               {history.map((h, i) => (
                 <div key={i} className="ur-qs-history-item">
-                  <span className="ur-qs-history-ch">{h.channel}</span>
-                  <span className="ur-qs-history-msg">{renderMentions(h.msg)}</span>
-                  <span>{h.ts}</span>
+                  <div className="ur-qs-history-meta">
+                    <span className="ur-qs-history-ch">{h.channel}</span>
+                    <span className="ur-qs-history-time">{h.ts}</span>
+                  </div>
+                  {editingIdx === i ? (
+                    <div className="ur-qs-history-edit">
+                      <textarea
+                        className="ur-qs-history-edit-input"
+                        value={editingText}
+                        onChange={e => setEditingText(e.target.value)}
+                        rows={3}
+                      />
+                      <div className="ur-qs-history-edit-actions">
+                        <button className="ur-btn-secondary ur-btn-xs" onClick={() => setEditingIdx(null)}>Cancel</button>
+                        <button
+                          className="ur-btn-primary ur-btn-xs"
+                          disabled={savingEdit || !editingText.trim()}
+                          onClick={async () => {
+                            if (!h.slackTs || !h.channelId) return
+                            setSavingEdit(true)
+                            try {
+                              await api.updateSlackMessage(h.channelId, h.slackTs, editingText.trim())
+                              setHistory(prev => prev.map((x, j) => j === i ? { ...x, msg: editingText.trim() } : x))
+                              setEditingIdx(null)
+                            } catch { /* ignore */ } finally { setSavingEdit(false) }
+                          }}
+                        >
+                          {savingEdit ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="ur-qs-history-msg-row">
+                      <span className="ur-qs-history-msg">{renderMentions(h.msg)}</span>
+                      {h.slackTs && (
+                        <div className="ur-qs-history-actions">
+                          <button
+                            className="ur-qs-history-action-btn"
+                            title="Edit in Slack"
+                            onClick={() => { setEditingIdx(i); setEditingText(h.msg) }}
+                          ><Pencil size={12} /></button>
+                          <button
+                            className="ur-qs-history-action-btn ur-qs-history-action-btn--danger"
+                            title="Delete from Slack"
+                            disabled={deletingIdx === i}
+                            onClick={async () => {
+                              if (!h.slackTs || !h.channelId) return
+                              setDeletingIdx(i)
+                              try {
+                                await api.deleteSlackMessage(h.channelId, h.slackTs)
+                                setHistory(prev => prev.filter((_, j) => j !== i))
+                              } catch { /* ignore */ } finally { setDeletingIdx(null) }
+                            }}
+                          ><Trash2 size={12} /></button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

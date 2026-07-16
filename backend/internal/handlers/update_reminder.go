@@ -387,7 +387,57 @@ func (h *UpdateReminderHandler) QuickSend(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.service.QuickSend(r.Context(), u.ID, req.ChannelID, req.Message, req.DmUserID); err != nil {
+	slackTS, channelID, err := h.service.QuickSend(r.Context(), u.ID, req.ChannelID, req.Message, req.DmUserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"slack_ts": slackTS, "channel_id": channelID})
+}
+
+// DELETE /api/slack/quick-send/messages/{channelId}/{ts}
+func (h *UpdateReminderHandler) DeleteSlackMessage(w http.ResponseWriter, r *http.Request) {
+	u := middleware.GetUserFromContext(r)
+	if u == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	vars := mux.Vars(r)
+	channelID := vars["channelId"]
+	ts := vars["ts"]
+	if channelID == "" || ts == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channelId and ts are required"})
+		return
+	}
+	if err := h.service.DeleteSlackMessage(r.Context(), u.ID, channelID, ts); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// PUT /api/slack/quick-send/messages/{channelId}/{ts}
+func (h *UpdateReminderHandler) UpdateSlackMessage(w http.ResponseWriter, r *http.Request) {
+	u := middleware.GetUserFromContext(r)
+	if u == nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	vars := mux.Vars(r)
+	channelID := vars["channelId"]
+	ts := vars["ts"]
+	if channelID == "" || ts == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "channelId and ts are required"})
+		return
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Message == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
+		return
+	}
+	if err := h.service.UpdateSlackMessage(r.Context(), u.ID, channelID, ts, body.Message); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
