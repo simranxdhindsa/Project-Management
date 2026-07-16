@@ -3,12 +3,15 @@
 ## 2026-07-16
 
 ### Enhancements
+- Make Quick Send history consistent with Claude Queue cards; send unscheduled messages at user's default time
+- Claude Queue UX — delete confirmation, Slack delete, Quick Send consistency, always-show history
 - Make scheduled time on queue card clickable — inline TimePicker saves immediately without entering full edit mode
 - Fetch user display name from DB in DayTrack Slack post (no re-login required)
 - Prepend user name and date header to DayTrack Slack posts
 
 
 ### Bug Fixes
+- Fix 7 QA issues in Claude Queue and Quick Send
 - Persist MCP default send time to DB — backend applies it when Claude queues without explicit scheduled_at
 - Fix MCP connector URL missing origin when VITE_API_URL is a relative path
 
