@@ -3,6 +3,7 @@
 ## 2026-07-16
 
 ### Enhancements
+- MCP connector URL always visible — auto-generate on first open, store plain token in localStorage, remove Regenerate, show Generate only when revoked
 - Make Quick Send history consistent with Claude Queue cards; send unscheduled messages at user's default time
 - Claude Queue UX — delete confirmation, Slack delete, Quick Send consistency, always-show history
 - Make scheduled time on queue card clickable — inline TimePicker saves immediately without entering full edit mode
