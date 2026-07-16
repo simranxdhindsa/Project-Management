@@ -55,8 +55,10 @@ func (h *PendingMessagesHandler) Update(w http.ResponseWriter, r *http.Request) 
 	id := mux.Vars(r)["id"]
 
 	var req struct {
-		Message     string `json:"message"`
-		ScheduledAt string `json:"scheduled_at"`
+		Message      string `json:"message"`
+		ScheduledAt  string `json:"scheduled_at"`
+		ChannelID    string `json:"channel_id"`
+		ChannelLabel string `json:"channel_label"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -73,7 +75,7 @@ func (h *PendingMessagesHandler) Update(w http.ResponseWriter, r *http.Request) 
 		scheduledAt = &t
 	}
 
-	msg, err := h.repo.Update(r.Context(), id, u.ID, req.Message, scheduledAt)
+	msg, err := h.repo.Update(r.Context(), id, u.ID, req.Message, scheduledAt, req.ChannelID, req.ChannelLabel)
 	if err != nil || msg == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "message not found or already sent"})
 		return

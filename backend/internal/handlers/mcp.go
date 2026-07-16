@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -65,38 +66,29 @@ func rpcErr(id interface{}, code int, msg string) rpcResponse {
 
 var mcpTools = []map[string]interface{}{
 	{
-		"name":        "queue_slack_message",
-		"description": "Queue a Slack message to be sent by the Velocity bot at a scheduled time. The user will see it in their Update Reminders tab and can edit, reschedule, or send it immediately.",
+		"name": "queue_slack_message",
+		"description": "Queue a Slack message to be reviewed and sent by the Velocity bot. " +
+			"Only `message` is required — channel and time are optional. " +
+			"If no channel is given, the user will pick one in Velocity before sending. " +
+			"Include @mentions by display name (e.g. @Suryansh) and they will resolve to Slack mentions automatically. " +
+			"Do NOT call list_slack_channels first — just pass the channel name the user mentioned, or omit it.",
 		"inputSchema": map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"message":       map[string]string{"type": "string", "description": "The message text to send to Slack"},
-				"channel_id":    map[string]string{"type": "string", "description": "Slack channel ID (get from list_slack_channels)"},
-				"channel_label": map[string]string{"type": "string", "description": "Human-readable channel name e.g. #daily-updates"},
-				"scheduled_at":  map[string]string{"type": "string", "description": "ISO 8601 datetime to send (e.g. 2026-07-16T10:00:00+05:30). Omit to queue for manual review only."},
+				"message": map[string]string{
+					"type":        "string",
+					"description": "The message text. Use @DisplayName for mentions (e.g. @Suryansh).",
+				},
+				"channel": map[string]string{
+					"type":        "string",
+					"description": "Optional. Channel name as the user mentioned it, e.g. 'ardoise-pm', 'simran-demo', '#general'. Omit if not specified.",
+				},
+				"scheduled_at": map[string]string{
+					"type":        "string",
+					"description": "Optional. ISO 8601 send time e.g. 2026-07-16T10:00:00+05:30. Omit to use the user's default send time.",
+				},
 			},
-			"required": []string{"message", "channel_id", "channel_label"},
-		},
-	},
-	{
-		"name":        "list_slack_channels",
-		"description": "List all Slack channels the Velocity bot has access to. Use this to find the correct channel_id before calling queue_slack_message.",
-		"inputSchema": map[string]interface{}{
-			"type":       "object",
-			"properties": map[string]interface{}{},
-		},
-	},
-	{
-		"name":        "send_slack_message_now",
-		"description": "Send a Slack message immediately via the Velocity bot, bypassing the queue. Use only when the user explicitly asks to send right now.",
-		"inputSchema": map[string]interface{}{
-			"type": "object",
-			"properties": map[string]interface{}{
-				"message":       map[string]string{"type": "string", "description": "The message text to send"},
-				"channel_id":    map[string]string{"type": "string", "description": "Slack channel ID"},
-				"channel_label": map[string]string{"type": "string", "description": "Human-readable channel name"},
-			},
-			"required": []string{"message", "channel_id", "channel_label"},
+			"required": []string{"message"},
 		},
 	},
 }
@@ -158,80 +150,134 @@ func (h *MCPHandler) callTool(r *http.Request, id interface{}, raw json.RawMessa
 	ctx := r.Context()
 
 	switch p.Name {
-	case "list_slack_channels":
-		channels, err := h.slackSvc.GetChannels(ctx, userID)
-		if err != nil {
-			return toolError(id, "Failed to list channels: "+err.Error())
-		}
-		lines := make([]string, 0, len(channels))
-		for _, ch := range channels {
-			lines = append(lines, ch.ID+"\t#"+ch.Name)
-		}
-		text := "Available Slack channels (id \\t name):\n" + strings.Join(lines, "\n")
-		return toolOK(id, text)
-
 	case "queue_slack_message":
 		var args struct {
-			Message      string `json:"message"`
-			ChannelID    string `json:"channel_id"`
-			ChannelLabel string `json:"channel_label"`
-			ScheduledAt  string `json:"scheduled_at"`
+			Message     string `json:"message"`
+			Channel     string `json:"channel"`      // optional human-readable name
+			ScheduledAt string `json:"scheduled_at"` // optional ISO 8601
 		}
-		if err := json.Unmarshal(p.Arguments, &args); err != nil {
-			return rpcErr(id, -32602, "invalid arguments")
+		if err := json.Unmarshal(p.Arguments, &args); err != nil || args.Message == "" {
+			return rpcErr(id, -32602, "invalid arguments: message is required")
 		}
+
+		// Resolve channel name → ID (best-effort; user can fix in Velocity if wrong)
+		channelID, channelLabel := h.resolveChannel(ctx, userID, args.Channel)
+
+		// Resolve @DisplayName → <@UXXX> mentions in message text
+		message := h.resolveMentions(ctx, userID, args.Message)
+
+		// Determine scheduled time
 		var scheduledAt *time.Time
 		if args.ScheduledAt != "" {
 			t, err := time.Parse(time.RFC3339, args.ScheduledAt)
 			if err != nil {
-				return toolError(id, "invalid scheduled_at format, use ISO 8601 e.g. 2026-07-16T10:00:00+05:30")
+				return toolError(id, "invalid scheduled_at — use ISO 8601 e.g. 2026-07-16T10:00:00+05:30")
 			}
 			scheduledAt = &t
 		} else {
-			// No explicit time — apply user's saved default send time
 			hhmm := h.tokenRepo.GetDefaultSendTime(ctx, userID)
 			if hhmm != "" {
 				now := time.Now()
 				var hh, mm int
 				fmt.Sscanf(hhmm, "%d:%d", &hh, &mm)
 				candidate := time.Date(now.Year(), now.Month(), now.Day(), hh, mm, 0, 0, now.Location())
-				// If the time has already passed today, schedule for tomorrow
 				if candidate.Before(now) {
 					candidate = candidate.Add(24 * time.Hour)
 				}
 				scheduledAt = &candidate
 			}
 		}
-		msg, err := h.msgRepo.Create(ctx, userID, args.Message, args.ChannelID, args.ChannelLabel, "", scheduledAt)
+
+		msg, err := h.msgRepo.Create(ctx, userID, message, channelID, channelLabel, "", scheduledAt)
 		if err != nil {
 			return toolError(id, "Failed to queue message: "+err.Error())
 		}
-		result := "Message queued (id: " + msg.ID + ")."
-		if scheduledAt != nil {
-			result += " Scheduled for " + scheduledAt.Format("02 Jan 2006, 15:04 MST") + "."
+
+		result := "Queued (id: " + msg.ID + ")."
+		if channelLabel != "" {
+			result += " Channel: " + channelLabel + "."
 		} else {
-			result += " It will appear in the Update Reminders tab for manual send."
+			result += " No channel set — user will pick one in Velocity."
+		}
+		if scheduledAt != nil {
+			result += " Scheduled for " + scheduledAt.Format("02 Jan 15:04 MST") + "."
 		}
 		return toolOK(id, result)
-
-	case "send_slack_message_now":
-		var args struct {
-			Message      string `json:"message"`
-			ChannelID    string `json:"channel_id"`
-			ChannelLabel string `json:"channel_label"`
-		}
-		if err := json.Unmarshal(p.Arguments, &args); err != nil {
-			return rpcErr(id, -32602, "invalid arguments")
-		}
-		slackTS, _, err := h.updateSvc.QuickSend(ctx, userID, args.ChannelID, args.Message, "")
-		if err != nil {
-			return toolError(id, "Failed to send: "+err.Error())
-		}
-		return toolOK(id, "Message sent to "+args.ChannelLabel+" (ts: "+slackTS+")")
 
 	default:
 		return rpcErr(id, -32601, "unknown tool: "+p.Name)
 	}
+}
+
+// resolveChannel looks up a human-readable channel name (e.g. "ardoise-pm", "#general")
+// and returns (channelID, "#channelName"). Returns ("", "") if name is blank or not found.
+func (h *MCPHandler) resolveChannel(ctx context.Context, userID, name string) (string, string) {
+	if name == "" {
+		return "", ""
+	}
+	name = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(name)), "#")
+	channels, err := h.slackSvc.GetChannels(ctx, userID)
+	if err != nil {
+		return "", "#" + name // store the label at least
+	}
+	for _, ch := range channels {
+		if strings.ToLower(ch.Name) == name {
+			return ch.ID, "#" + ch.Name
+		}
+	}
+	// Not found — store empty ID so frontend shows channel picker
+	return "", "#" + name
+}
+
+// resolveMentions replaces @DisplayName tokens with Slack <@UXXX> format.
+// Unknown names are left as-is so the user can correct in Velocity.
+func (h *MCPHandler) resolveMentions(ctx context.Context, userID, text string) string {
+	if !strings.Contains(text, "@") {
+		return text
+	}
+	users, err := h.slackSvc.GetWorkspaceUsers(ctx, userID)
+	if err != nil || len(users) == 0 {
+		return text
+	}
+	// Build name→ID map (display_name and real_name, case-insensitive)
+	nameMap := make(map[string]string, len(users)*2)
+	for _, u := range users {
+		if u.ID == "" || u.IsBot || u.Deleted {
+			continue
+		}
+		if u.Profile.DisplayName != "" {
+			nameMap[strings.ToLower(u.Profile.DisplayName)] = u.ID
+		}
+		if u.RealName != "" {
+			nameMap[strings.ToLower(u.RealName)] = u.ID
+		}
+		if u.Name != "" {
+			nameMap[strings.ToLower(u.Name)] = u.ID
+		}
+	}
+	// Replace @Name tokens — greedy word match after @
+	var result strings.Builder
+	i := 0
+	for i < len(text) {
+		if text[i] != '@' {
+			result.WriteByte(text[i])
+			i++
+			continue
+		}
+		// Extract the word following @
+		j := i + 1
+		for j < len(text) && (text[j] != ' ' && text[j] != '\n' && text[j] != ',' && text[j] != ':') {
+			j++
+		}
+		mention := text[i+1 : j]
+		if uid, ok := nameMap[strings.ToLower(mention)]; ok {
+			result.WriteString("<@" + uid + ">")
+		} else {
+			result.WriteString(text[i:j]) // leave as-is
+		}
+		i = j
+	}
+	return result.String()
 }
 
 func toolOK(id interface{}, text string) rpcResponse {

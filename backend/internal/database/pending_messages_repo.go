@@ -117,7 +117,7 @@ func (r *PendingMessagesRepository) GetDueMessages(ctx context.Context) ([]Pendi
 	return msgs, nil
 }
 
-func (r *PendingMessagesRepository) Update(ctx context.Context, id, userID, message string, scheduledAt *time.Time) (*PendingSlackMessage, error) {
+func (r *PendingMessagesRepository) Update(ctx context.Context, id, userID, message string, scheduledAt *time.Time, channelID, channelLabel string) (*PendingSlackMessage, error) {
 	pool := GetPool()
 	if pool == nil {
 		return nil, nil
@@ -125,11 +125,14 @@ func (r *PendingMessagesRepository) Update(ctx context.Context, id, userID, mess
 	m := &PendingSlackMessage{}
 	err := pool.QueryRow(ctx, `
 		UPDATE pending_slack_messages
-		SET message = $3, scheduled_at = $4
+		SET message      = $3,
+		    scheduled_at = $4,
+		    channel_id   = CASE WHEN $5 != '' THEN $5 ELSE channel_id END,
+		    channel_label= CASE WHEN $6 != '' THEN $6 ELSE channel_label END
 		WHERE id::text = $1 AND user_id = $2 AND status = 'pending'
 		RETURNING id::text, user_id, message, channel_id, channel_label, dm_user_id,
 		          scheduled_at, status, slack_ts, COALESCE(error_message,''), created_at, sent_at
-	`, id, userID, message, scheduledAt).Scan(
+	`, id, userID, message, scheduledAt, channelID, channelLabel).Scan(
 		&m.ID, &m.UserID, &m.Message, &m.ChannelID, &m.ChannelLabel, &m.DmUserID,
 		&m.ScheduledAt, &m.Status, &m.SlackTs, &m.ErrorMessage, &m.CreatedAt, &m.SentAt,
 	)

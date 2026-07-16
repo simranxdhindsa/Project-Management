@@ -119,6 +119,19 @@ func (s *Service) GetChannels(ctx context.Context, userID string) ([]Channel, er
 	return client.GetChannels(ctx)
 }
 
+// GetWorkspaceUsers returns all non-bot workspace members for the user's Slack integration.
+func (s *Service) GetWorkspaceUsers(ctx context.Context, userID string) ([]User, error) {
+	integration, err := s.integrationRepo.GetSlackIntegration(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get integration: %w", err)
+	}
+	if !integration.Connected {
+		return nil, fmt.Errorf("slack not connected")
+	}
+	client := NewClient(integration.BotToken)
+	return client.GetWorkspaceUsers(ctx)
+}
+
 // SetChannel sets the channel to monitor
 func (s *Service) SetChannel(ctx context.Context, userID, channelID, channelName string) error {
 	integration, err := s.integrationRepo.GetSlackIntegration(ctx, userID)

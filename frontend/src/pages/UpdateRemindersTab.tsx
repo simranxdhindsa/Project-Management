@@ -1320,7 +1320,7 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
 
   return (
     <div className="ur-root">
-      <ClaudeQueueCard />
+      <ClaudeQueueCard channels={channels} />
       <QuickSendCard channels={channels} />
 
       <div className="ur-list-header">

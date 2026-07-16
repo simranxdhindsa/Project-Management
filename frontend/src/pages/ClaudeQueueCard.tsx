@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bot, ChevronDown, Copy, Check, RefreshCw, Trash2,
@@ -6,7 +6,7 @@ import {
   CheckCircle2, CircleDashed, Settings,
 } from 'lucide-react'
 import api from '../services/api'
-import type { PendingSlackMessage } from '../services/api'
+import type { PendingSlackMessage, ChannelRef } from '../services/api'
 import { usePersistedState, PERSIST } from '../hooks/usePersistedState'
 import { TimePicker } from '../components/TimePicker'
 import { ConfirmModal } from '../components/ConfirmModal'
@@ -186,19 +186,73 @@ function ConnectionBar({ onDefaultTime }: { onDefaultTime: (t: string) => void }
   )
 }
 
+// ── Inline channel picker (for cards with no channel set) ─────────────────────
+
+function InlineChannelPicker({ channels, onPick }: {
+  channels: ChannelRef[]
+  onPick: (ch: ChannelRef) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const filtered = channels.filter(c =>
+    !search || c.name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div className="cq-ch-picker" ref={ref}>
+      <button className="cq-ch-trigger" onClick={() => setOpen(o => !o)}>
+        <AlertCircle size={11} /> Pick channel
+      </button>
+      {open && (
+        <div className="cq-ch-menu">
+          <input
+            className="cq-ch-search"
+            placeholder="Search…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            autoFocus
+          />
+          <div className="cq-ch-list">
+            {filtered.map(c => (
+              <button key={c.id} className="cq-ch-item" onClick={() => { onPick(c); setOpen(false) }}>
+                #{c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Individual queued message card ─────────────────────────────────────────────
 
 function QueuedMessageCard({
-  msg, defaultTime, onUpdated, onDeleted, onSent,
+  msg, defaultTime, channels, onUpdated, onDeleted, onSent,
 }: {
   msg: PendingSlackMessage
   defaultTime: string
+  channels: ChannelRef[]
   onUpdated: (m: PendingSlackMessage) => void
   onDeleted: (id: string) => void
   onSent: (id: string, slackTs: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(msg.message)
+  const [editChannel, setEditChannel] = useState<ChannelRef | null>(
+    msg.channel_id ? { id: msg.channel_id, name: msg.channel_label.replace(/^#/, '') } : null
+  )
   const [editTime, setEditTime] = useState(
     msg.scheduled_at
       ? new Date(msg.scheduled_at).toTimeString().slice(0, 5)
@@ -206,6 +260,14 @@ function QueuedMessageCard({
   )
   const [saving, setSaving] = useState(false)
   const [sending, setSending] = useState(false)
+
+  // Save channel immediately when picked without entering full edit mode
+  const handlePickChannel = async (ch: ChannelRef) => {
+    const r = await api.updateQueuedMessage(msg.id, msg.message, msg.scheduled_at ?? undefined, ch.id, `#${ch.name}`)
+    const raw = r as any
+    const updated = raw?.id ? raw : raw?.data
+    if (updated) onUpdated(updated as PendingSlackMessage)
+  }
 
   const scheduledLabel = msg.scheduled_at
     ? new Date(msg.scheduled_at).toLocaleString(undefined, {
@@ -223,7 +285,11 @@ function QueuedMessageCard({
         base.setHours(hh, mm, 0, 0)
         scheduledAt = base.toISOString()
       }
-      const r = await api.updateQueuedMessage(msg.id, editText, scheduledAt)
+      const r = await api.updateQueuedMessage(
+        msg.id, editText, scheduledAt,
+        editChannel?.id ?? msg.channel_id,
+        editChannel ? `#${editChannel.name}` : msg.channel_label,
+      )
       const raw = r as any
       const updated = raw?.id ? raw : raw?.data
       if (updated) { onUpdated(updated as PendingSlackMessage); setEditing(false) }
@@ -251,7 +317,10 @@ function QueuedMessageCard({
   return (
     <div className={`cq-msg-card cq-msg-card--${msg.status}`}>
       <div className="cq-msg-meta">
-        <span className="cq-msg-channel">{msg.channel_label || msg.channel_id}</span>
+        {msg.channel_id
+          ? <span className="cq-msg-channel">{msg.channel_label || msg.channel_id}</span>
+          : <InlineChannelPicker channels={channels} onPick={handlePickChannel} />
+        }
         <span className="cq-msg-time"><Clock size={10} />{scheduledLabel}</span>
         <span className={`cq-msg-badge cq-msg-badge--${msg.status}`}>
           {isSent
@@ -273,6 +342,14 @@ function QueuedMessageCard({
             autoFocus
           />
           <div className="cq-msg-edit-footer">
+            <div className="cq-msg-edit-time">
+              <span className="cq-label">Channel</span>
+              <InlineChannelPicker
+                channels={channels}
+                onPick={ch => setEditChannel(ch)}
+              />
+              {editChannel && <span className="cq-msg-channel">#{editChannel.name}</span>}
+            </div>
             <div className="cq-msg-edit-time">
               <span className="cq-label">Send at</span>
               <TimePicker value={editTime} onChange={setEditTime} />
@@ -320,7 +397,7 @@ function QueuedMessageCard({
 
 // ── Main exported card ─────────────────────────────────────────────────────────
 
-export function ClaudeQueueCard() {
+export function ClaudeQueueCard({ channels = [] }: { channels?: ChannelRef[] }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<PendingSlackMessage[]>([])
   const [loadingMsgs, setLoadingMsgs] = useState(false)
@@ -408,7 +485,7 @@ export function ClaudeQueueCard() {
                 <div className="cq-msg-list">
                   {pendingMsgs.map(m => (
                     <QueuedMessageCard
-                      key={m.id} msg={m} defaultTime={defaultTime}
+                      key={m.id} msg={m} defaultTime={defaultTime} channels={channels}
                       onUpdated={u => setMessages(ms => ms.map(x => x.id === u.id ? u : x))}
                       onDeleted={id => setMessages(ms => ms.filter(x => x.id !== id))}
                       onSent={(id, ts) => setMessages(ms => ms.map(x =>
