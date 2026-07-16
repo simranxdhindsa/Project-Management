@@ -521,8 +521,6 @@
 
 /* ── Inline channel picker ───────────────────────────────────────────────────── */
 
-.cq-ch-picker { position: relative; }
-
 .cq-ch-trigger {
   display: inline-flex;
   align-items: center;
@@ -540,15 +538,10 @@
 .cq-ch-trigger:hover { background: rgba(239, 68, 68, 0.14); }
 
 .cq-ch-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 100;
-  width: 200px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
   overflow: hidden;
 }
 

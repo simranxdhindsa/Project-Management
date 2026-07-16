@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bot, ChevronDown, Copy, Check, RefreshCw, Trash2,
@@ -194,12 +195,30 @@ function InlineChannelPicker({ channels, onPick }: {
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({})
+
+  // Position menu using trigger's bounding rect
+  useEffect(() => {
+    if (!open || !triggerRef.current) return
+    const r = triggerRef.current.getBoundingClientRect()
+    setMenuStyle({
+      position: 'fixed',
+      top: r.bottom + 4,
+      left: r.left,
+      zIndex: 9999,
+      width: 200,
+    })
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (
+        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
+        menuRef.current && !menuRef.current.contains(e.target as Node)
+      ) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -210,12 +229,16 @@ function InlineChannelPicker({ channels, onPick }: {
   )
 
   return (
-    <div className="cq-ch-picker" ref={ref}>
-      <button className="cq-ch-trigger" onClick={() => setOpen(o => !o)}>
+    <>
+      <button
+        ref={triggerRef}
+        className="cq-ch-trigger"
+        onClick={() => setOpen(o => !o)}
+      >
         <AlertCircle size={11} /> Pick channel
       </button>
-      {open && (
-        <div className="cq-ch-menu">
+      {open && createPortal(
+        <div ref={menuRef} className="cq-ch-menu" style={menuStyle}>
           <input
             className="cq-ch-search"
             placeholder="Search…"
@@ -225,14 +248,15 @@ function InlineChannelPicker({ channels, onPick }: {
           />
           <div className="cq-ch-list">
             {filtered.map(c => (
-              <button key={c.id} className="cq-ch-item" onClick={() => { onPick(c); setOpen(false) }}>
+              <button key={c.id} className="cq-ch-item" onClick={() => { onPick(c); setOpen(false); setSearch('') }}>
                 #{c.name}
               </button>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   )
 }
 
@@ -265,6 +289,9 @@ function QueuedMessageCard({
   const [quickTime, setQuickTime] = useState(
     msg.scheduled_at ? new Date(msg.scheduled_at).toTimeString().slice(0, 5) : defaultTime
   )
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showSlackDeleteConfirm, setShowSlackDeleteConfirm] = useState(false)
+  const [deletingFromSlack, setDeletingFromSlack] = useState(false)
 
   // Save channel immediately when picked without entering full edit mode
   const handlePickChannel = async (ch: ChannelRef) => {
@@ -317,6 +344,18 @@ function QueuedMessageCard({
     }
   }
 
+  const handleDeleteFromSlack = async () => {
+    setDeletingFromSlack(true)
+    try {
+      await api.deleteSlackMessage(msg.channel_id, msg.slack_ts)
+      await api.deleteQueuedMessage(msg.id)
+      onDeleted(msg.id)
+    } catch { /* ignore */ } finally {
+      setDeletingFromSlack(false)
+      setShowSlackDeleteConfirm(false)
+    }
+  }
+
   const handleSendNow = async () => {
     setSending(true)
     try {
@@ -334,6 +373,7 @@ function QueuedMessageCard({
   const isFailed = msg.status === 'failed'
 
   return (
+    <>
     <div className={`cq-msg-card cq-msg-card--${msg.status}`}>
       <div className="cq-msg-meta">
         {msg.channel_id
@@ -410,7 +450,7 @@ function QueuedMessageCard({
               <button
                 className="cq-msg-icon-btn cq-msg-icon-btn--danger"
                 title="Remove"
-                onClick={() => { api.deleteQueuedMessage(msg.id); onDeleted(msg.id) }}
+                onClick={() => setShowDeleteConfirm(true)}
               >
                 <X size={12} />
               </button>
@@ -419,9 +459,44 @@ function QueuedMessageCard({
               </button>
             </div>
           )}
+          {isSent && msg.slack_ts && (
+            <div className="cq-msg-actions">
+              <button
+                className="cq-msg-icon-btn cq-msg-icon-btn--danger"
+                title="Delete from Slack"
+                onClick={() => setShowSlackDeleteConfirm(true)}
+                disabled={deletingFromSlack}
+              >
+                <Trash2 size={12} />
+              </button>
+              <span className="cq-label" style={{ fontSize: 10 }}>Delete from Slack</span>
+            </div>
+          )}
         </>
       )}
     </div>
+
+    {showDeleteConfirm && (
+      <ConfirmModal
+        variant="danger"
+        title="Remove from queue?"
+        message="This message will be cancelled and won't be sent."
+        confirmLabel="Remove"
+        onConfirm={async () => { await api.deleteQueuedMessage(msg.id); onDeleted(msg.id) }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+    )}
+    {showSlackDeleteConfirm && (
+      <ConfirmModal
+        variant="danger"
+        title="Delete from Slack?"
+        message="This will permanently delete the message from the Slack channel."
+        confirmLabel="Delete"
+        onConfirm={handleDeleteFromSlack}
+        onCancel={() => setShowSlackDeleteConfirm(false)}
+      />
+    )}
+    </>
   )
 }
 
@@ -527,12 +602,14 @@ export function ClaudeQueueCard({ channels = [] }: { channels?: ChannelRef[] }) 
               )}
 
               {recentMsgs.length > 0 && (
-                <details className="cq-recent">
-                  <summary className="cq-recent-toggle">Recent ({recentMsgs.length})</summary>
-                  <div className="cq-msg-list cq-msg-list--recent">
+                <div className="cq-recent">
+                  <div className="cq-queue-hd">
+                    <span className="cq-queue-title">Recent</span>
+                  </div>
+                  <div className="cq-msg-list">
                     {recentMsgs.map(m => (
                       <QueuedMessageCard
-                        key={m.id} msg={m} defaultTime={defaultTime}
+                        key={m.id} msg={m} defaultTime={defaultTime} channels={channels}
                         onUpdated={u => setMessages(ms => ms.map(x => x.id === u.id ? u : x))}
                         onDeleted={id => setMessages(ms => ms.filter(x => x.id !== id))}
                         onSent={(id, ts) => setMessages(ms => ms.map(x =>
@@ -541,7 +618,7 @@ export function ClaudeQueueCard({ channels = [] }: { channels?: ChannelRef[] }) 
                       />
                     ))}
                   </div>
-                </details>
+                </div>
               )}
             </div>
           </motion.div>

@@ -404,12 +404,14 @@ function QuickSendCard({ channels }: { channels: ChannelRef[] }) {
   }
 
   return (
-    <div className="ur-quick-send">
-      <div className={`ur-qs-header${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)}>
-        <Zap size={14} />
-        Quick Send
-        <ChevronDown size={13} className="ur-qs-caret" />
-      </div>
+    <div className="cq-card">
+      <button className={`cq-header${open ? ' cq-header--open' : ''}`} onClick={() => setOpen(o => !o)}>
+        <div className="cq-header-left">
+          <div className="cq-header-icon"><Zap size={14} /></div>
+          <span className="cq-header-title">Quick Send</span>
+        </div>
+        <ChevronDown size={14} className={`cq-caret${open ? ' cq-caret--open' : ''}`} />
+      </button>
       {open && (
         <div className="ur-qs-body">
           <div className="ur-qs-target">
