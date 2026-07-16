@@ -29,7 +29,6 @@ type TokenMeta = { exists: boolean; created_at?: string; last_used_at?: string; 
 
 function ConnectionBar({ onDefaultTime }: { onDefaultTime: (t: string) => void }) {
   const [meta, setMeta] = useState<TokenMeta | null>(null)
-  // Plain token persisted in localStorage so the connector URL is always visible
   const [storedToken, setStoredToken] = usePersistedState<string>(PERSIST.MCP_PLAIN_TOKEN, '')
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -60,17 +59,13 @@ function ConnectionBar({ onDefaultTime }: { onDefaultTime: (t: string) => void }
       if (!m) return
       setMeta(m)
       if (m.default_send_time) onDefaultTime(m.default_send_time)
-      // Auto-generate on first use — no manual setup step needed
-      if (!m.exists) {
-        await generateToken()
-      } else if (!storedToken) {
-        // Token exists in DB but we lost the plain text (e.g. cleared localStorage)
-        // Re-generate silently so the URL is always available
+      if (!m.exists || !storedToken) {
+        // No token in DB, or we lost the plain text — auto-generate silently
         await generateToken()
       }
     }
     init()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const isConnected = meta?.exists === true || !!storedToken
@@ -94,7 +89,7 @@ function ConnectionBar({ onDefaultTime }: { onDefaultTime: (t: string) => void }
       })}`
     : null
 
-  // Revoked state — show generate button
+  // Revoked state — token explicitly removed, show generate button
   if (meta !== null && !isConnected) {
     return (
       <div className="cq-conn">
@@ -102,7 +97,7 @@ function ConnectionBar({ onDefaultTime }: { onDefaultTime: (t: string) => void }
           <CircleDashed size={12} className="cq-conn-icon" />
           <span className="cq-conn-label">Not connected</span>
           <button className="cq-conn-action" onClick={generateToken} disabled={loading}>
-            {loading ? <RefreshCw size={11} className="cq-spin" /> : null}
+            {loading && <RefreshCw size={11} className="cq-spin" />}
             Generate token
           </button>
         </div>
@@ -131,7 +126,6 @@ function ConnectionBar({ onDefaultTime }: { onDefaultTime: (t: string) => void }
         )}
       </div>
 
-      {/* Connector URL — always visible once connected */}
       {connectorUrl && (
         <div className="cq-url-always">
           <div className="cq-url-label-sm">Claude.ai connector URL</div>

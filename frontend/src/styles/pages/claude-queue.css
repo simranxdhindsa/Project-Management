@@ -129,7 +129,6 @@
   color: var(--text-muted);
 }
 
-/* Inline revoke button in conn-row */
 .cq-conn-revoke {
   padding: 3px 9px !important;
   font-size: 11px !important;
