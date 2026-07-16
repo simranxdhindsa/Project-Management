@@ -13,8 +13,12 @@ import { ConfirmModal } from '../components/ConfirmModal'
 import '../styles/pages/claude-queue.css'
 
 const MCP_BASE_URL = (() => {
-  if (import.meta.env.VITE_API_URL)
-    return import.meta.env.VITE_API_URL.replace(/\/api$/, '/api/mcp')
+  const apiUrl = import.meta.env.VITE_API_URL
+  if (apiUrl) {
+    const path = apiUrl.replace(/\/api$/, '/api/mcp')
+    // VITE_API_URL may be a relative path (e.g. "/api") in production builds
+    return path.startsWith('/') ? `${window.location.origin}${path}` : path
+  }
   return `${window.location.origin}/api/mcp`
 })()
 
