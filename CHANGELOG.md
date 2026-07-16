@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-16
+
+### Enhancements
+- Prepend user name and date header to DayTrack Slack posts
+
+
 ## 2026-07-15
 
 ### Features
