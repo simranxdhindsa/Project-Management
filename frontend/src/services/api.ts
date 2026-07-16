@@ -802,6 +802,41 @@ class ApiService {
     })
   }
 
+  // ── Pending message queue (Claude MCP connector) ──────────────────────────
+
+  async listQueuedMessages() {
+    return this.request<PendingSlackMessage[]>('/slack/queued')
+  }
+
+  async updateQueuedMessage(id: string, message: string, scheduledAt?: string) {
+    return this.request<PendingSlackMessage>(`/slack/queued/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ message, scheduled_at: scheduledAt }),
+    })
+  }
+
+  async deleteQueuedMessage(id: string) {
+    return this.request<{ success: boolean }>(`/slack/queued/${id}`, { method: 'DELETE' })
+  }
+
+  async sendQueuedMessageNow(id: string) {
+    return this.request<{ slack_ts: string }>(`/slack/queued/${id}/send-now`, { method: 'POST' })
+  }
+
+  // ── MCP token management ──────────────────────────────────────────────────
+
+  async getMcpToken() {
+    return this.request<{ exists: boolean; created_at?: string; last_used_at?: string }>('/mcp/token')
+  }
+
+  async generateMcpToken() {
+    return this.request<{ token: string }>('/mcp/token', { method: 'POST' })
+  }
+
+  async revokeMcpToken() {
+    return this.request<{ success: boolean }>('/mcp/token', { method: 'DELETE' })
+  }
+
   async listUpdateReminderRules() {
     return this.request<UpdateReminderRule[]>('/update-reminders')
   }
@@ -2147,6 +2182,21 @@ export interface UpdateReminderRunResult {
   delivery_errors?: string[]
   skipped_send?: string
 }
+export interface PendingSlackMessage {
+  id: string
+  user_id: string
+  message: string
+  channel_id: string
+  channel_label: string
+  dm_user_id: string
+  scheduled_at: string | null
+  status: 'pending' | 'sent' | 'failed' | 'cancelled'
+  slack_ts: string
+  error_message: string
+  created_at: string
+  sent_at: string | null
+}
+
 export interface SlackWorkspaceUser {
   id: string
   name: string

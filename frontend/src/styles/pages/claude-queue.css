@@ -1,0 +1,331 @@
+/* ── Claude Queue card (.cq-*) ────────────────────────────────────────────── */
+
+.cq-card { /* inherits .ur-quick-send base styles */ }
+
+.cq-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cq-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── MCP setup ───────────────────────────────────────────────────────────── */
+
+.cq-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cq-setup-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cq-setup-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.cq-token-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 12px;
+  overflow: hidden;
+}
+
+.cq-token-code {
+  flex: 1;
+  font-size: 11px;
+  font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  color: var(--color-primary);
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.cq-token-placeholder {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+.cq-icon-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.cq-icon-btn:hover { color: var(--color-primary); background: rgba(var(--color-primary-rgb), 0.08); }
+
+.cq-token-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cq-last-used {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.cq-token-warning {
+  font-size: 11px;
+  color: var(--color-warning);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(var(--color-warning-rgb, 234, 179, 8), 0.08);
+  border: 1px solid rgba(var(--color-warning-rgb, 234, 179, 8), 0.2);
+}
+
+/* ── Default send time ────────────────────────────────────────────────────── */
+
+.cq-default-time {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cq-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.cq-label-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Queue section ────────────────────────────────────────────────────────── */
+
+.cq-queue-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cq-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cq-refresh-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.cq-refresh-btn:hover { color: var(--color-primary); }
+.cq-refresh-btn:disabled { opacity: 0.5; cursor: default; }
+
+@keyframes cq-spin { to { transform: rotate(360deg); } }
+.cq-spin { animation: cq-spin 0.8s linear infinite; }
+
+.cq-queue-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 16px;
+  text-align: center;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 8px;
+}
+
+/* ── Individual message card ──────────────────────────────────────────────── */
+
+.cq-msg-card {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cq-msg-card--sent   { opacity: 0.6; }
+.cq-msg-card--failed { border-color: rgba(var(--color-danger-rgb, 239, 68, 68), 0.4); }
+
+.cq-msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cq-msg-channel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.1);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.cq-msg-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.cq-msg-status {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.cq-msg-status--pending  { background: rgba(99, 102, 241, 0.12); color: var(--color-primary); }
+.cq-msg-status--sent     { background: rgba(34, 197, 94, 0.12);  color: var(--color-success); }
+.cq-msg-status--failed   { background: rgba(239, 68, 68, 0.12);  color: var(--color-danger); }
+.cq-msg-status--cancelled{ background: var(--bg-elevated);       color: var(--text-muted); }
+
+.cq-msg-text {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.cq-msg-error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--color-danger);
+}
+
+.cq-msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.cq-msg-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.cq-msg-action-btn:hover { color: var(--text-primary); background: var(--bg-elevated); }
+.cq-msg-action-btn--danger:hover { color: var(--color-danger); }
+
+.cq-msg-send-btn { margin-left: auto; }
+
+.cq-msg-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cq-msg-edit-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.cq-msg-edit-input:focus { outline: none; border-color: var(--color-primary); }
+
+.cq-msg-edit-time {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cq-msg-edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* ── Shared button variants (if not already in global CSS) ────────────────── */
+
+.ur-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--color-danger-rgb, 239, 68, 68), 0.3);
+  background: rgba(var(--color-danger-rgb, 239, 68, 68), 0.08);
+  color: var(--color-danger);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ur-btn-danger:hover { background: rgba(var(--color-danger-rgb, 239, 68, 68), 0.15); }
+
+/* ── Light mode ───────────────────────────────────────────────────────────── */
+
+[data-theme="light"] .cq-token-url,
+[data-theme="light"] .cq-msg-card { background: var(--bg-elevated); }
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .cq-default-time { flex-direction: column; align-items: flex-start; }
+  .cq-token-url    { flex-direction: column; align-items: flex-start; }
+}

@@ -14,6 +14,7 @@ import type {
 import { CustomDropdown } from '../components/CustomDropdown'
 import { TimePicker } from '../components/TimePicker'
 import { ConfirmModal } from '../components/ConfirmModal'
+import { ClaudeQueueCard } from './ClaudeQueueCard'
 import '../styles/pages/slack-update-reminders.css'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1319,6 +1320,7 @@ export function UpdateRemindersTab({ channels }: { channels: ChannelRef[] }) {
 
   return (
     <div className="ur-root">
+      <ClaudeQueueCard />
       <QuickSendCard channels={channels} />
 
       <div className="ur-list-header">

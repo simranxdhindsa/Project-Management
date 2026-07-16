@@ -1,0 +1,178 @@
+package database
+
+import (
+	"context"
+	"time"
+)
+
+type PendingMessagesRepository struct{}
+
+func NewPendingMessagesRepository() *PendingMessagesRepository {
+	return &PendingMessagesRepository{}
+}
+
+type PendingSlackMessage struct {
+	ID           string     `json:"id"`
+	UserID       string     `json:"user_id"`
+	Message      string     `json:"message"`
+	ChannelID    string     `json:"channel_id"`
+	ChannelLabel string     `json:"channel_label"`
+	DmUserID     string     `json:"dm_user_id"`
+	ScheduledAt  *time.Time `json:"scheduled_at"`
+	Status       string     `json:"status"`
+	SlackTs      string     `json:"slack_ts"`
+	ErrorMessage string     `json:"error_message"`
+	CreatedAt    time.Time  `json:"created_at"`
+	SentAt       *time.Time `json:"sent_at"`
+}
+
+func (r *PendingMessagesRepository) Create(ctx context.Context, userID, message, channelID, channelLabel, dmUserID string, scheduledAt *time.Time) (*PendingSlackMessage, error) {
+	pool := GetPool()
+	if pool == nil {
+		return nil, nil
+	}
+	m := &PendingSlackMessage{}
+	err := pool.QueryRow(ctx, `
+		INSERT INTO pending_slack_messages
+			(user_id, message, channel_id, channel_label, dm_user_id, scheduled_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id::text, user_id, message, channel_id, channel_label, dm_user_id,
+		          scheduled_at, status, slack_ts, COALESCE(error_message,''), created_at, sent_at
+	`, userID, message, channelID, channelLabel, dmUserID, scheduledAt).Scan(
+		&m.ID, &m.UserID, &m.Message, &m.ChannelID, &m.ChannelLabel, &m.DmUserID,
+		&m.ScheduledAt, &m.Status, &m.SlackTs, &m.ErrorMessage, &m.CreatedAt, &m.SentAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (r *PendingMessagesRepository) ListByUser(ctx context.Context, userID string) ([]PendingSlackMessage, error) {
+	pool := GetPool()
+	if pool == nil {
+		return []PendingSlackMessage{}, nil
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT id::text, user_id, message, channel_id, channel_label, dm_user_id,
+		       scheduled_at, status, slack_ts, COALESCE(error_message,''), created_at, sent_at
+		FROM pending_slack_messages
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+		LIMIT 50
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []PendingSlackMessage
+	for rows.Next() {
+		var m PendingSlackMessage
+		if err := rows.Scan(
+			&m.ID, &m.UserID, &m.Message, &m.ChannelID, &m.ChannelLabel, &m.DmUserID,
+			&m.ScheduledAt, &m.Status, &m.SlackTs, &m.ErrorMessage, &m.CreatedAt, &m.SentAt,
+		); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	if msgs == nil {
+		msgs = []PendingSlackMessage{}
+	}
+	return msgs, nil
+}
+
+// GetDueMessages returns all pending messages whose scheduled_at is in the past.
+// Used by the scheduler goroutine.
+func (r *PendingMessagesRepository) GetDueMessages(ctx context.Context) ([]PendingSlackMessage, error) {
+	pool := GetPool()
+	if pool == nil {
+		return nil, nil
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT id::text, user_id, message, channel_id, channel_label, dm_user_id,
+		       scheduled_at, status, slack_ts, COALESCE(error_message,''), created_at, sent_at
+		FROM pending_slack_messages
+		WHERE status = 'pending' AND scheduled_at IS NOT NULL AND scheduled_at <= NOW()
+		ORDER BY scheduled_at ASC
+		LIMIT 100
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []PendingSlackMessage
+	for rows.Next() {
+		var m PendingSlackMessage
+		if err := rows.Scan(
+			&m.ID, &m.UserID, &m.Message, &m.ChannelID, &m.ChannelLabel, &m.DmUserID,
+			&m.ScheduledAt, &m.Status, &m.SlackTs, &m.ErrorMessage, &m.CreatedAt, &m.SentAt,
+		); err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, nil
+}
+
+func (r *PendingMessagesRepository) Update(ctx context.Context, id, userID, message string, scheduledAt *time.Time) (*PendingSlackMessage, error) {
+	pool := GetPool()
+	if pool == nil {
+		return nil, nil
+	}
+	m := &PendingSlackMessage{}
+	err := pool.QueryRow(ctx, `
+		UPDATE pending_slack_messages
+		SET message = $3, scheduled_at = $4
+		WHERE id::text = $1 AND user_id = $2 AND status = 'pending'
+		RETURNING id::text, user_id, message, channel_id, channel_label, dm_user_id,
+		          scheduled_at, status, slack_ts, COALESCE(error_message,''), created_at, sent_at
+	`, id, userID, message, scheduledAt).Scan(
+		&m.ID, &m.UserID, &m.Message, &m.ChannelID, &m.ChannelLabel, &m.DmUserID,
+		&m.ScheduledAt, &m.Status, &m.SlackTs, &m.ErrorMessage, &m.CreatedAt, &m.SentAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (r *PendingMessagesRepository) Delete(ctx context.Context, id, userID string) error {
+	pool := GetPool()
+	if pool == nil {
+		return nil
+	}
+	_, err := pool.Exec(ctx, `
+		DELETE FROM pending_slack_messages
+		WHERE id::text = $1 AND user_id = $2
+	`, id, userID)
+	return err
+}
+
+func (r *PendingMessagesRepository) MarkSent(ctx context.Context, id, slackTs string) error {
+	pool := GetPool()
+	if pool == nil {
+		return nil
+	}
+	_, err := pool.Exec(ctx, `
+		UPDATE pending_slack_messages
+		SET status = 'sent', slack_ts = $2, sent_at = NOW()
+		WHERE id::text = $1
+	`, id, slackTs)
+	return err
+}
+
+func (r *PendingMessagesRepository) MarkFailed(ctx context.Context, id, errMsg string) error {
+	pool := GetPool()
+	if pool == nil {
+		return nil
+	}
+	_, err := pool.Exec(ctx, `
+		UPDATE pending_slack_messages
+		SET status = 'failed', error_message = $2
+		WHERE id::text = $1
+	`, id, errMsg)
+	return err
+}

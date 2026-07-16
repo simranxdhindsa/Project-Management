@@ -323,6 +323,12 @@ func main() {
 	slackRoutes.HandleFunc("/quick-send", updateReminderHandler.QuickSend).Methods("POST")
 	slackRoutes.HandleFunc("/quick-send/messages/{channelId}/{ts}", updateReminderHandler.DeleteSlackMessage).Methods("DELETE")
 	slackRoutes.HandleFunc("/quick-send/messages/{channelId}/{ts}", updateReminderHandler.UpdateSlackMessage).Methods("PUT")
+	// Pending message queue (Claude MCP connector sends messages here)
+	pendingMsgHandler := handlers.NewPendingMessagesHandler()
+	slackRoutes.HandleFunc("/queued", pendingMsgHandler.List).Methods("GET")
+	slackRoutes.HandleFunc("/queued/{id}", pendingMsgHandler.Update).Methods("PUT")
+	slackRoutes.HandleFunc("/queued/{id}", pendingMsgHandler.Delete).Methods("DELETE")
+	slackRoutes.HandleFunc("/queued/{id}/send-now", pendingMsgHandler.SendNow).Methods("POST")
 	// Per-user Slack actions: connect/disconnect own integration — any authenticated user
 	slackRoutes.HandleFunc("/connect", slackHandler.Connect).Methods("POST")
 	slackRoutes.HandleFunc("/disconnect", slackHandler.Disconnect).Methods("POST")
@@ -500,6 +506,20 @@ func main() {
 	dayTrackRoutes.HandleFunc("/slack-resolve-user", dayTrackHandler.ResolveSlackUser).Methods("GET")
 	dayTrackRoutes.HandleFunc("/transcribe", dayTrackHandler.Transcribe).Methods("POST")
 	dayTrackRoutes.HandleFunc("/post-to-slack", dayTrackHandler.PostToSlack).Methods("POST")
+
+	// MCP server — Claude connector endpoint (token auth, not JWT)
+	mcpHandler := handlers.NewMCPHandler()
+	api.HandleFunc("/mcp", mcpHandler.Handle).Methods("POST")
+	// MCP token management (JWT-protected)
+	mcpTokenHandler := handlers.NewMCPTokenHandler()
+	mcpTokenRoutes := api.PathPrefix("/mcp/token").Subrouter()
+	mcpTokenRoutes.Use(middleware.AuthMiddleware)
+	mcpTokenRoutes.HandleFunc("", mcpTokenHandler.GetToken).Methods("GET")
+	mcpTokenRoutes.HandleFunc("", mcpTokenHandler.GenerateToken).Methods("POST")
+	mcpTokenRoutes.HandleFunc("", mcpTokenHandler.RevokeToken).Methods("DELETE")
+
+	// Start pending-messages scheduler (fires due Slack messages every 60s)
+	handlers.RunPendingMessagesScheduler()
 
 	// Start DayTrack Slack background scanner (5-min polling)
 	handlers.RunDayTrackSlackScanner(database.NewDayTrackRepository())

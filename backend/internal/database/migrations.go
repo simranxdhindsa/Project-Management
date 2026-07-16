@@ -1121,6 +1121,40 @@ WHERE bot_type = 'ticket_parser'`,
 		`CREATE INDEX IF NOT EXISTS idx_urr_runs_rule_id   ON update_reminder_runs(rule_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_urr_runs_expires_at ON update_reminder_runs(expires_at)`,
 
+		// ── MCP API tokens — one token per user for Claude connector auth ─────────
+		// token_hash stores SHA-256(token) so the plain token is never persisted.
+		// The plain token is returned once at generation time and never stored.
+		`CREATE TABLE IF NOT EXISTS user_mcp_tokens (
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id      VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			token_hash   TEXT NOT NULL,
+			created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			last_used_at TIMESTAMPTZ,
+			UNIQUE(user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_mcp_tokens_user_id ON user_mcp_tokens(user_id)`,
+
+		// ── Pending Slack messages — queued via MCP connector or Quick Send ──────
+		// Messages Claude queues land here; the scheduler fires them at scheduled_at.
+		// status: pending | sent | failed | cancelled
+		// dm_user_id: when set, message is sent as a DM instead of to channel_id.
+		`CREATE TABLE IF NOT EXISTS pending_slack_messages (
+			id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id       VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			message       TEXT NOT NULL,
+			channel_id    TEXT NOT NULL DEFAULT '',
+			channel_label TEXT NOT NULL DEFAULT '',
+			dm_user_id    TEXT NOT NULL DEFAULT '',
+			scheduled_at  TIMESTAMPTZ,
+			status        VARCHAR(20) NOT NULL DEFAULT 'pending',
+			slack_ts      TEXT NOT NULL DEFAULT '',
+			error_message TEXT,
+			created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			sent_at       TIMESTAMPTZ
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_pending_slack_messages_user_id ON pending_slack_messages(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_pending_slack_messages_scheduled ON pending_slack_messages(scheduled_at) WHERE status = 'pending'`,
+
 		// Per-user parked (ignored) blocked tickets — global across all PM views
 		// user_id is VARCHAR to match users.id type; gen_random_uuid() requires no extension
 		`CREATE TABLE IF NOT EXISTS user_ignored_blocked_tickets (

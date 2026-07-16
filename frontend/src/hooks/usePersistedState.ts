@@ -35,6 +35,8 @@ export const PERSIST = {
   DAILY_OPS_VIEW: 'daily_ops_view',
   /** Quick Send — last 10 sent messages for history display */
   QUICK_SEND_HISTORY: 'quick_send_history',
+  /** Pending queue — default scheduled time for Claude-queued messages (HH:MM) */
+  QUEUE_DEFAULT_TIME: 'queue_default_send_time',
 } as const
 
 export type PersistKey = typeof PERSIST[keyof typeof PERSIST]
