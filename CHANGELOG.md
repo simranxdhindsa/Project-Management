@@ -1,8 +1,19 @@
 # Changelog
 
+## 2026-07-15
+
+### Features
+- Enhance Quick Send functionality with mention support and message history
+- Update Reminders sub-tab — rule CRUD, roster, dry-run/run-now with diff, quick send, 30-day history
+
+
 All notable changes to Velocity are listed here. Most recent entries appear first.
 
 ---
+
+### Bug Fixes
+- extractMentions regex didnt handle @ID|display_name Slack mention format
+- Fix Update Reminders bugs — null snapshot crash, delivery diagnostics, memory leak, duplicate roster adds, cross-day check window, preview mention humanization
 
 ## 2026-07-07
 
