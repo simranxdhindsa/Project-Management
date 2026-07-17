@@ -66,6 +66,7 @@ class ApiService {
     })
 
     if (response.status === 502 || response.status === 503 || response.status === 504) {
+      window.dispatchEvent(new CustomEvent('velocity:gateway-down'))
       throw new GatewayError(response.status)
     }
 
