@@ -17,11 +17,12 @@ func NewMCPTokenRepository() *MCPTokenRepository {
 }
 
 type MCPToken struct {
-	ID              string
-	UserID          string
-	CreatedAt       time.Time
-	LastUsedAt      *time.Time
-	DefaultSendTime string // HH:MM, e.g. "10:00"
+	ID                  string
+	UserID              string
+	CreatedAt           time.Time
+	LastUsedAt          *time.Time
+	DefaultSendTime     string // HH:MM, e.g. "10:00"
+	DefaultSendTimezone string // IANA tz, e.g. "Asia/Kolkata"
 }
 
 // GenerateToken creates a new MCP token for the user (replaces any existing one).
@@ -92,39 +93,44 @@ func (r *MCPTokenRepository) GetToken(ctx context.Context, userID string) (*MCPT
 	}
 	t := &MCPToken{}
 	err := pool.QueryRow(ctx, `
-		SELECT id::text, user_id, created_at, last_used_at, default_send_time
+		SELECT id::text, user_id, created_at, last_used_at, default_send_time, default_send_timezone
 		FROM user_mcp_tokens WHERE user_id = $1
-	`, userID).Scan(&t.ID, &t.UserID, &t.CreatedAt, &t.LastUsedAt, &t.DefaultSendTime)
+	`, userID).Scan(&t.ID, &t.UserID, &t.CreatedAt, &t.LastUsedAt, &t.DefaultSendTime, &t.DefaultSendTimezone)
 	if err != nil {
 		return nil, nil // no token
 	}
 	return t, nil
 }
 
-// GetDefaultSendTime returns the user's preferred default send time (HH:MM).
-func (r *MCPTokenRepository) GetDefaultSendTime(ctx context.Context, userID string) string {
+// GetDefaultSendSettings returns the user's default send time (HH:MM) and IANA timezone.
+func (r *MCPTokenRepository) GetDefaultSendSettings(ctx context.Context, userID string) (hhmm, tz string) {
 	pool := GetPool()
 	if pool == nil {
-		return "10:00"
+		return "10:00", "UTC"
 	}
-	var t string
 	if err := pool.QueryRow(ctx, `
-		SELECT default_send_time FROM user_mcp_tokens WHERE user_id = $1
-	`, userID).Scan(&t); err != nil || t == "" {
-		return "10:00"
+		SELECT default_send_time, default_send_timezone FROM user_mcp_tokens WHERE user_id = $1
+	`, userID).Scan(&hhmm, &tz); err != nil || hhmm == "" {
+		return "10:00", "UTC"
 	}
-	return t
+	if tz == "" {
+		tz = "UTC"
+	}
+	return hhmm, tz
 }
 
-// UpdateDefaultSendTime persists the user's preferred default send time.
-func (r *MCPTokenRepository) UpdateDefaultSendTime(ctx context.Context, userID, hhmm string) error {
+// UpdateDefaultSendSettings persists the user's preferred send time and timezone.
+func (r *MCPTokenRepository) UpdateDefaultSendSettings(ctx context.Context, userID, hhmm, tz string) error {
 	pool := GetPool()
 	if pool == nil {
 		return nil
 	}
+	if tz == "" {
+		tz = "UTC"
+	}
 	_, err := pool.Exec(ctx, `
-		UPDATE user_mcp_tokens SET default_send_time = $1 WHERE user_id = $2
-	`, hhmm, userID)
+		UPDATE user_mcp_tokens SET default_send_time = $1, default_send_timezone = $2 WHERE user_id = $3
+	`, hhmm, tz, userID)
 	return err
 }
 

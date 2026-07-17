@@ -278,7 +278,7 @@ type ExecuteResult struct {
 // forceSnapshot=true → always use the freshly computed snapshot (Run Now → "Send updated")
 // forceSnapshot=false + rule.LastSnapshot != nil → use the saved snapshot (Run Now → "Send original")
 // dryRun=true → compute + diff but do not send or update last_snapshot
-func (s *Service) Execute(ctx context.Context, rule *models.UpdateReminderRule, dryRun bool, forceSnapshot bool) (*ExecuteResult, error) {
+func (s *Service) Execute(ctx context.Context, rule *models.UpdateReminderRule, dryRun bool, forceSnapshot bool, triggeredBy models.UpdateReminderTriggeredBy) (*ExecuteResult, error) {
 	// Always compute a fresh snapshot for the diff and dry-run preview
 	freshSnap, channelErrors, err := s.ComputeSnapshot(ctx, rule)
 	if err != nil {
@@ -363,7 +363,7 @@ func (s *Service) Execute(ctx context.Context, rule *models.UpdateReminderRule, 
 	_, _ = s.repo.SaveRun(ctx, &models.UpdateReminderRun{
 		RuleID:       rule.ID,
 		UserID:       rule.UserID,
-		TriggeredBy:  models.TriggeredByManual,
+		TriggeredBy:  triggeredBy,
 		PostedNames:  postedNames,
 		OnLeaveNames: onLeaveNames,
 		SkippedNames: missingNames,
@@ -377,7 +377,7 @@ func (s *Service) Execute(ctx context.Context, rule *models.UpdateReminderRule, 
 
 // ExecuteScheduled is called by the scheduler — always uses fresh snapshot, writes triggered_by=scheduler
 func (s *Service) ExecuteScheduled(ctx context.Context, rule *models.UpdateReminderRule) error {
-	result, err := s.Execute(ctx, rule, false, true)
+	result, err := s.Execute(ctx, rule, false, true, models.TriggeredByScheduler)
 	if err != nil {
 		errStr := err.Error()
 		_, _ = s.repo.SaveRun(ctx, &models.UpdateReminderRun{
@@ -390,10 +390,7 @@ func (s *Service) ExecuteScheduled(ctx context.Context, rule *models.UpdateRemin
 		return err
 	}
 
-	// Fix triggered_by to scheduler (Execute writes manual)
-	if len(result.DeliveredTo) > 0 || result.Diff != nil {
-		_ = s.repo.SaveSnapshot(ctx, rule.ID, result.Snapshot)
-	}
+	_ = result
 	return nil
 }
 

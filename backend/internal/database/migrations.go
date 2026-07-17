@@ -1134,6 +1134,7 @@ WHERE bot_type = 'ticket_parser'`,
 			UNIQUE(user_id)
 		)`,
 		`ALTER TABLE user_mcp_tokens ADD COLUMN IF NOT EXISTS default_send_time VARCHAR(5) NOT NULL DEFAULT '10:00'`,
+		`ALTER TABLE user_mcp_tokens ADD COLUMN IF NOT EXISTS default_send_timezone VARCHAR(100) NOT NULL DEFAULT 'UTC'`,
 		`CREATE INDEX IF NOT EXISTS idx_user_mcp_tokens_user_id ON user_mcp_tokens(user_id)`,
 
 		// ── Pending Slack messages — queued via MCP connector or Quick Send ──────

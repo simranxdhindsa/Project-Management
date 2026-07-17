@@ -279,7 +279,7 @@ func (h *UpdateReminderHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := h.service.Execute(r.Context(), rule, true, true)
+	result, err := h.service.Execute(r.Context(), rule, true, true, models.TriggeredByDryRun)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -306,7 +306,7 @@ func (h *UpdateReminderHandler) RunNow(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
-	result, err := h.service.Execute(r.Context(), rule, false, body.ForceSnapshot)
+	result, err := h.service.Execute(r.Context(), rule, false, body.ForceSnapshot, models.TriggeredByManual)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

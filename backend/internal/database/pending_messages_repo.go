@@ -143,7 +143,7 @@ func (r *PendingMessagesRepository) Update(ctx context.Context, id, userID, mess
 	err := pool.QueryRow(ctx, `
 		UPDATE pending_slack_messages
 		SET message      = $3,
-		    scheduled_at = $4,
+		    scheduled_at = CASE WHEN $4::timestamptz IS NOT NULL THEN $4::timestamptz ELSE scheduled_at END,
 		    channel_id   = CASE WHEN $5 != '' THEN $5 ELSE channel_id END,
 		    channel_label= CASE WHEN $6 != '' THEN $6 ELSE channel_label END
 		WHERE id::text = $1 AND user_id = $2 AND status = 'pending'

@@ -837,10 +837,13 @@ class ApiService {
     return this.request<{ success: boolean }>('/mcp/token', { method: 'DELETE' })
   }
 
-  async updateMcpSettings(defaultSendTime: string) {
+  async updateMcpSettings(defaultSendTime: string, timezone?: string) {
     return this.request<{ success: boolean }>('/mcp/settings', {
       method: 'PUT',
-      body: JSON.stringify({ default_send_time: defaultSendTime }),
+      body: JSON.stringify({
+        default_send_time: defaultSendTime,
+        default_send_timezone: timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
     })
   }
 

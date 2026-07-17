@@ -166,26 +166,30 @@ func (h *MCPHandler) callTool(r *http.Request, id interface{}, raw json.RawMessa
 		// Resolve @DisplayName → <@UXXX> mentions in message text
 		message := h.resolveMentions(ctx, userID, args.Message)
 
+		// Fetch user's default settings once — timezone used for both explicit and default paths
+		defaultHHMM, tzName := h.tokenRepo.GetDefaultSendSettings(ctx, userID)
+		userLoc, locErr := time.LoadLocation(tzName)
+		if locErr != nil {
+			userLoc = time.UTC
+		}
+
 		// Determine scheduled time — parse flexible natural time or fall back to user default
 		var scheduledAt *time.Time
 		if args.SendTime != "" {
-			t, err := parseFlexTime(args.SendTime)
+			t, err := parseFlexTime(args.SendTime, userLoc)
 			if err != nil {
 				return toolError(id, "couldn't parse send_time '"+args.SendTime+"' — try '3:00 PM', '15:30', or '9am'")
 			}
 			scheduledAt = &t
 		} else {
-			hhmm := h.tokenRepo.GetDefaultSendTime(ctx, userID)
-			if hhmm != "" {
-				now := time.Now()
-				var hh, mm int
-				fmt.Sscanf(hhmm, "%d:%d", &hh, &mm)
-				candidate := time.Date(now.Year(), now.Month(), now.Day(), hh, mm, 0, 0, now.Location())
-				if candidate.Before(now) {
-					candidate = candidate.Add(24 * time.Hour)
-				}
-				scheduledAt = &candidate
+			now := time.Now().In(userLoc)
+			var hh, mm int
+			fmt.Sscanf(defaultHHMM, "%d:%d", &hh, &mm)
+			candidate := time.Date(now.Year(), now.Month(), now.Day(), hh, mm, 0, 0, userLoc)
+			if !candidate.After(now) {
+				candidate = candidate.Add(24 * time.Hour)
 			}
+			scheduledAt = &candidate
 		}
 
 		msg, err := h.msgRepo.Create(ctx, userID, message, channelID, channelLabel, "", scheduledAt)
@@ -282,23 +286,26 @@ func (h *MCPHandler) resolveMentions(ctx context.Context, userID, text string) s
 
 // parseFlexTime parses natural time strings ("3pm", "3:00 PM", "15:30") and
 // full ISO 8601 datetimes. Returns a time on today (or tomorrow if past).
-func parseFlexTime(s string) (time.Time, error) {
+func parseFlexTime(s string, loc *time.Location) (time.Time, error) {
 	s = strings.TrimSpace(s)
-	now := time.Now()
+	if loc == nil {
+		loc = time.UTC
+	}
+	now := time.Now().In(loc)
 
-	// Try ISO 8601 first
+	// Try ISO 8601 first (already timezone-aware via the offset in the string)
 	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04"} {
-		if t, err := time.ParseInLocation(layout, s, now.Location()); err == nil {
+		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
 			return t, nil
 		}
 	}
 
-	// Try time-only formats, schedule for today (tomorrow if already past)
+	// Try time-only formats in user's timezone, rolling to tomorrow if past
 	timeLayouts := []string{"3:04 PM", "3:04PM", "15:04", "3 PM", "3PM", "3pm", "15"}
 	for _, layout := range timeLayouts {
-		if t, err := time.ParseInLocation(layout, strings.ToUpper(s), now.Location()); err == nil {
-			candidate := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, now.Location())
-			if candidate.Before(now) {
+		if t, err := time.ParseInLocation(layout, strings.ToUpper(s), loc); err == nil {
+			candidate := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, loc)
+			if !candidate.After(now) {
 				candidate = candidate.Add(24 * time.Hour)
 			}
 			return candidate, nil
@@ -358,14 +365,15 @@ func (h *MCPTokenHandler) GetToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"exists":            true,
-		"created_at":        t.CreatedAt,
-		"last_used_at":      t.LastUsedAt,
-		"default_send_time": t.DefaultSendTime,
+		"exists":                true,
+		"created_at":            t.CreatedAt,
+		"last_used_at":          t.LastUsedAt,
+		"default_send_time":     t.DefaultSendTime,
+		"default_send_timezone": t.DefaultSendTimezone,
 	})
 }
 
-// PUT /api/mcp/settings — save user preferences (default_send_time)
+// PUT /api/mcp/settings — save user preferences (default_send_time + timezone)
 func (h *MCPTokenHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	u := middleware.GetUserFromContext(r)
 	if u == nil {
@@ -373,13 +381,19 @@ func (h *MCPTokenHandler) UpdateSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var body struct {
-		DefaultSendTime string `json:"default_send_time"`
+		DefaultSendTime     string `json:"default_send_time"`
+		DefaultSendTimezone string `json:"default_send_timezone"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.DefaultSendTime == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "default_send_time required (HH:MM)"})
 		return
 	}
-	if err := h.tokenRepo.UpdateDefaultSendTime(r.Context(), u.ID, body.DefaultSendTime); err != nil {
+	if body.DefaultSendTimezone != "" {
+		if _, err := time.LoadLocation(body.DefaultSendTimezone); err != nil {
+			body.DefaultSendTimezone = "UTC"
+		}
+	}
+	if err := h.tokenRepo.UpdateDefaultSendSettings(r.Context(), u.ID, body.DefaultSendTime, body.DefaultSendTimezone); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
