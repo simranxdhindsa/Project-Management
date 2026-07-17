@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-17
+
+### Enhancements
+- ClockTimePicker — real-time drag with pointer capture, framer-motion spring animation on hand and thumb, display numbers animate on change
+- Replace TimePicker with ClockTimePicker in Claude Queue card (default send time + inline message time pickers)
+- MCP connector URL always visible — auto-generate on first open, store plain token in localStorage, remove Regenerate, show Generate only when revoked
+- MCP connector URL always visible — auto-generate on first open, store plain token in localStorage, remove Regenerate, show Generate only when revoked
+
+
+### Features
+- ClockTimePicker — analog clock-face time selector component, used in Update Reminders rule editor
+
+### Bug Fixes
+- fix 5 QA issues in Update Reminders + Claude Queue scheduler
+
 ## 2026-07-16
 
 ### Enhancements
