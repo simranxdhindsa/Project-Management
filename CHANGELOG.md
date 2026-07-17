@@ -3,6 +3,7 @@
 ## 2026-07-17
 
 ### Enhancements
+- Global 502 detection via DOM event + unlimited 2s retry + Framer Motion animations on 502 page
 - ClockTimePicker — real-time drag with pointer capture, framer-motion spring animation on hand and thumb, display numbers animate on change
 - Replace TimePicker with ClockTimePicker in Claude Queue card (default send time + inline message time pickers)
 - MCP connector URL always visible — auto-generate on first open, store plain token in localStorage, remove Regenerate, show Generate only when revoked
