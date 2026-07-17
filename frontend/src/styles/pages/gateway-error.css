@@ -231,5 +231,39 @@
 }
 
 [data-theme="light"] .g5-logo-wrap {
-  filter: drop-shadow(0 0 16px rgba(var(--color-primary-rgb), 0.25));
+  filter: drop-shadow(0 0 16px rgba(var(--color-primary-rgb), 0.3));
+}
+
+[data-theme="light"] .g5-orbit {
+  border-color: rgba(var(--color-primary-rgb), 0.2);
+}
+
+[data-theme="light"] .g5-orbit-inner {
+  border-color: rgba(6, 182, 212, 0.18);
+}
+
+[data-theme="light"] .g5-orbit-dot--primary {
+  box-shadow: 0 0 10px 2px rgba(var(--color-primary-rgb), 0.5);
+}
+
+[data-theme="light"] .g5-orbit-dot--accent {
+  box-shadow: 0 0 8px 2px rgba(6, 182, 212, 0.5);
+}
+
+[data-theme="light"] .g5-particle {
+  background: rgba(var(--color-primary-rgb), 0.35);
+  box-shadow: 0 0 6px rgba(var(--color-primary-rgb), 0.3);
+}
+
+[data-theme="light"] .g5-brand {
+  opacity: 0.65;
+}
+
+[data-theme="light"] .g5-scanner-track {
+  background: rgba(var(--color-primary-rgb), 0.1);
+}
+
+[data-theme="light"] .g5-scanner-glow {
+  background: linear-gradient(90deg, transparent 0%, rgba(var(--color-primary-rgb), 0.7) 50%, transparent 100%);
+  box-shadow: 0 0 6px 1px rgba(var(--color-primary-rgb), 0.35);
 }
