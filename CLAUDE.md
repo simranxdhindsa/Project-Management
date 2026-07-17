@@ -360,7 +360,8 @@ If the same UI pattern is needed in 2+ places, extract it into a shared componen
 |---|---|
 | `SprintControlsBar` | `db-controls` bar — left mode dropdown + sprint selector + children slot |
 | `CustomDropdown` | Portal dropdown — searchable (auto when >7 options), fixed-height scroll, outside-click, auto-flip. **Never use native `<select>`** |
-| `TimePicker` | Portal time selector (hour/min/AM-PM columns). **Never use `<input type="time">`** |
+| `TimePicker` | Portal dropdown time selector (hour/min/AM-PM columns). **Never use `<input type="time">`** |
+| `ClockTimePicker` | Analog clock-face time picker (modal dialog). Use in rule editors/settings; `TimePicker` for compact inline pickers |
 | `ConfirmModal` | Portal confirmation dialog (danger/warning/info variants). **Never use `window.confirm()`** |
 | `HoverCard` | Portal hover overlay |
 | `IssueDetailPanel` | YouTrack issue detail slide-in |

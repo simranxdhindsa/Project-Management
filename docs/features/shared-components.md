@@ -62,6 +62,42 @@ import { CustomDropdown } from '../components/CustomDropdown'
 
 ---
 
+## ClockTimePicker
+
+**File:** `frontend/src/components/ClockTimePicker.tsx`  
+**CSS:** `frontend/src/styles/components/clock-time-picker.css` (imported inside component)
+
+Analog clock-face time picker. Same trigger button and `HH:MM` 24-hour interface as `TimePicker`, but opens a centered modal dialog with a clock face instead of a dropdown column list. Use this where there's enough vertical space for the dialog (rule editors, settings forms). Use `TimePicker` for compact inline pickers (message cards, etc.).
+
+### Key behaviours
+- **Modal overlay** (fixed, `z-index: 9999`), click outside to cancel
+- Two-phase: click hour → auto-advances to minute selection
+- Hour/minute display boxes clickable to switch phase
+- AM/PM toggle
+- Keyboard icon switches to manual text input (`H:MM AM/PM` or `HH:MM`)
+- Escape key closes without saving
+
+### Props
+
+```ts
+interface ClockTimePickerProps {
+  value: string        // HH:MM 24-hour
+  onChange: (v: string) => void
+  className?: string
+  placeholder?: string
+}
+```
+
+### Usage
+
+```tsx
+import { ClockTimePicker } from '../components/ClockTimePicker'
+
+<ClockTimePicker value={form.schedule_time} onChange={v => set({ schedule_time: v })} />
+```
+
+---
+
 ## TimePicker
 
 **File:** `frontend/src/components/TimePicker.tsx`  

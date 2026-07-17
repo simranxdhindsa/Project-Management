@@ -13,7 +13,7 @@ import type {
   UpdateReminderRunResult, SlackWorkspaceUser, ChannelRef,
 } from '../services/api'
 import { CustomDropdown } from '../components/CustomDropdown'
-import { TimePicker } from '../components/TimePicker'
+import { ClockTimePicker } from '../components/ClockTimePicker'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { ClaudeQueueCard } from './ClaudeQueueCard'
 import '../styles/pages/slack-update-reminders.css'
@@ -838,7 +838,7 @@ function RuleEditor({
             <div className="ur-section-title">Schedule</div>
             <div className="ur-field" style={{ marginBottom: 10 }}>
               <label className="ur-label">Fire at time</label>
-              <TimePicker value={form.schedule_time ?? '11:00'} onChange={v => set({ schedule_time: v })} />
+              <ClockTimePicker value={form.schedule_time ?? '11:00'} onChange={v => set({ schedule_time: v })} />
             </div>
             <div className="ur-field" style={{ marginBottom: 10 }}>
               <label className="ur-label">Timezone</label>
@@ -896,7 +896,7 @@ function RuleEditor({
                     onChange={v => set({ check_day_offset: Number(v) })}
                     className="ur-channel-dd"
                   />
-                  <TimePicker value={form.check_window_start ?? '09:00'} onChange={v => set({ check_window_start: v })} />
+                  <ClockTimePicker value={form.check_window_start ?? '09:00'} onChange={v => set({ check_window_start: v })} />
                 </div>
               </div>
               <div className="ur-field" style={{ flex: 1 }}>
@@ -913,7 +913,7 @@ function RuleEditor({
                     onChange={v => set({ check_window_end_day_offset: Number(v) })}
                     className="ur-channel-dd"
                   />
-                  <TimePicker value={form.check_window_end ?? '09:00'} onChange={v => set({ check_window_end: v })} />
+                  <ClockTimePicker value={form.check_window_end ?? '09:00'} onChange={v => set({ check_window_end: v })} />
                 </div>
               </div>
             </div>
