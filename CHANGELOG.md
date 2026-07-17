@@ -3,6 +3,7 @@
 ## 2026-07-17
 
 ### Enhancements
+- Complete light-mode overrides for 502 page — orbit rings, particles, scanner, brand text
 - 502 page — full redesign with orbital rings, particles, shimmer scanner, global detection via DOM event, unlimited 2s retry
 - Global 502 detection via DOM event + unlimited 2s retry + Framer Motion animations on 502 page
 - ClockTimePicker — real-time drag with pointer capture, framer-motion spring animation on hand and thumb, display numbers animate on change
