@@ -9,7 +9,7 @@ import {
 import api from '../services/api'
 import type { PendingSlackMessage, ChannelRef } from '../services/api'
 import { usePersistedState, PERSIST } from '../hooks/usePersistedState'
-import { TimePicker } from '../components/TimePicker'
+import { ClockTimePicker } from '../components/ClockTimePicker'
 import { ConfirmModal } from '../components/ConfirmModal'
 import '../styles/pages/claude-queue.css'
 
@@ -362,7 +362,7 @@ function QueuedMessageCard({
             <Clock size={10} />{scheduledLabel}
             {editingTime && (
               <span className="cq-time-inline" onClick={e => e.stopPropagation()}>
-                <TimePicker value={quickTime} onChange={handlePickTime} />
+                <ClockTimePicker value={quickTime} onChange={handlePickTime} />
               </span>
             )}
           </span>
@@ -399,7 +399,7 @@ function QueuedMessageCard({
             </div>
             <div className="cq-msg-edit-time">
               <span className="cq-label">Send at</span>
-              <TimePicker value={editTime} onChange={setEditTime} />
+              <ClockTimePicker value={editTime} onChange={setEditTime} />
             </div>
             <div className="cq-msg-edit-actions">
               <button className="cq-btn-ghost" onClick={() => setEditing(false)}>Cancel</button>
@@ -533,7 +533,7 @@ export function ClaudeQueueCard({ channels = [], autoOpen = false }: { channels?
             {/* Default time — one compact row; saves to backend on change */}
             <div className="cq-time-row">
               <span className="cq-label">Default send time</span>
-              <TimePicker
+              <ClockTimePicker
                 value={defaultTime}
                 onChange={t => { setDefaultTime(t); api.updateMcpSettings(t) }}
               />
