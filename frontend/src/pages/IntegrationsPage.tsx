@@ -1239,7 +1239,12 @@ export function IntegrationsPage({ initialTab = 'youtrack', onTabChange, userRol
                     <label>To</label>
                     <input type="date" value={msgDateTo} onChange={e => setMsgDateTo(e.target.value)} className="int-input" />
                   </div>
-                  <button className="int-btn int-btn-primary int-date-btn" onClick={handleFetchMessages} disabled={fetchingMessages}>
+                  <button
+                    className="int-btn int-btn-primary int-date-btn"
+                    onClick={handleFetchMessages}
+                    disabled={fetchingMessages || !slackStatus.channel_id}
+                    title={!slackStatus.channel_id ? 'Configure a channel first' : undefined}
+                  >
                     {fetchingMessages ? <><RefreshCw size={13} className="spin" /> Fetching…</> : <><Download size={13} /> Fetch</>}
                   </button>
                 </div>

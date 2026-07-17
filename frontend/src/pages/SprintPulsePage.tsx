@@ -49,8 +49,13 @@ export function SprintPulsePage() {
       const list = ((res as any).data as YouTrackSprint[]) ?? []
       setSprints(list)
       const savedId = localStorage.getItem(SPRINT_ID_KEY)
-      const saved   = savedId ? list.find(s => s.id === savedId) : null
-      setActiveSprint(saved || list.find(s => !s.isCompleted) || list[0] || null)
+      const now = Date.now()
+      const saved = savedId ? list.find(s => s.id === savedId && !s.isCompleted && s.finish > now) : null
+      const auto = list.filter(s => !s.isCompleted && s.finish > now).sort((a, b) => a.finish - b.finish)[0]
+        ?? list.find(s => !s.isCompleted)
+        ?? list[list.length - 1]
+        ?? null
+      setActiveSprint(saved ?? auto)
     }).catch(() => {})
   }, [])
 

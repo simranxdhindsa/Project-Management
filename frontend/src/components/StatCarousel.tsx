@@ -67,7 +67,9 @@ export function StatCarousel({ onNavigate }: StatCarouselProps) {
 
         const sprints: YouTrackSprint[] = sprintsRes.data ?? []
         const savedId = localStorage.getItem('pm_active_sprint_id')
-        const activeSprint = (savedId ? sprints.find(s => s.id === savedId) : null)
+        const now2 = Date.now()
+        const activeSprint = (savedId ? sprints.find(s => s.id === savedId && !s.isCompleted && s.finish > now2) : null)
+          ?? sprints.filter(s => !s.isCompleted && s.finish > now2).sort((a, b) => a.finish - b.finish)[0]
           ?? sprints.find(s => !s.isCompleted)
 
         if (!activeSprint) {

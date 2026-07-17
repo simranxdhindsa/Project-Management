@@ -6,7 +6,6 @@
 - ClockTimePicker — real-time drag with pointer capture, framer-motion spring animation on hand and thumb, display numbers animate on change
 - Replace TimePicker with ClockTimePicker in Claude Queue card (default send time + inline message time pickers)
 - MCP connector URL always visible — auto-generate on first open, store plain token in localStorage, remove Regenerate, show Generate only when revoked
-- MCP connector URL always visible — auto-generate on first open, store plain token in localStorage, remove Regenerate, show Generate only when revoked
 
 
 ### Features
@@ -40,11 +39,6 @@
 ### Features
 - Enhance Quick Send functionality with mention support and message history
 - Update Reminders sub-tab — rule CRUD, roster, dry-run/run-now with diff, quick send, 30-day history
-
-
-All notable changes to Velocity are listed here. Most recent entries appear first.
-
----
 
 ### Bug Fixes
 - extractMentions regex didnt handle @ID|display_name Slack mention format
