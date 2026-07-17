@@ -22,13 +22,6 @@ function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5)
 }
 
-function fmtElapsed(s: number) {
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const sec = s % 60
-  return sec === 0 ? `${m}m` : `${m}m ${sec}s`
-}
-
 // Floating particle — drifts upward and fades
 function Particle({ x, delay, duration }: { x: number; delay: number; duration: number }) {
   return (
@@ -57,7 +50,6 @@ export default function GatewayError502Page() {
   const { clear } = useGatewayError()
   const [msgQueue] = useState(() => shuffle(MESSAGES))
   const [msgIndex, setMsgIndex] = useState(0)
-  const [elapsed, setElapsed] = useState(0)
   const checkingRef = useRef(false)
 
   const probe = async () => {
@@ -80,11 +72,6 @@ export default function GatewayError502Page() {
     const interval = setInterval(() => setMsgIndex(i => (i + 1) % msgQueue.length), 4000)
     return () => clearInterval(interval)
   }, [msgQueue.length])
-
-  useEffect(() => {
-    const interval = setInterval(() => setElapsed(s => s + 1), 1000)
-    return () => clearInterval(interval)
-  }, [])
 
   return (
     <div className="g5-root">
@@ -164,27 +151,19 @@ export default function GatewayError502Page() {
           </AnimatePresence>
         </div>
 
-        {/* Staggered bouncing dots */}
-        <div className="g5-dots">
-          {[0, 1, 2].map(i => (
-            <motion.span
-              key={i}
-              className="g5-dot"
-              animate={{ y: [0, -8, 0], opacity: [0.4, 1, 0.4] }}
-              transition={{ duration: 1, repeat: Infinity, delay: i * 0.2, ease: 'easeInOut' }}
-            />
-          ))}
-        </div>
-
-        {/* Elapsed — subtle anchor */}
-        <motion.p
-          className="g5-elapsed"
+        {/* Shimmer scanner */}
+        <motion.div
+          className="g5-scanner-track"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 1.5 }}
+          transition={{ delay: 0.6 }}
         >
-          {fmtElapsed(elapsed)}
-        </motion.p>
+          <motion.div
+            className="g5-scanner-glow"
+            animate={{ x: ['-100%', '200%'] }}
+            transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut', repeatDelay: 0.6 }}
+          />
+        </motion.div>
       </div>
     </div>
   )
