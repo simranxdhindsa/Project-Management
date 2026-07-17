@@ -329,15 +329,15 @@ func main() {
 	slackRoutes.HandleFunc("/queued/{id}", pendingMsgHandler.Update).Methods("PUT")
 	slackRoutes.HandleFunc("/queued/{id}", pendingMsgHandler.Delete).Methods("DELETE")
 	slackRoutes.HandleFunc("/queued/{id}/send-now", pendingMsgHandler.SendNow).Methods("POST")
-	// Per-user Slack actions: connect/disconnect own integration — any authenticated user
+	// Per-user Slack actions: connect/disconnect + channel selection — any authenticated user
 	slackRoutes.HandleFunc("/connect", slackHandler.Connect).Methods("POST")
 	slackRoutes.HandleFunc("/disconnect", slackHandler.Disconnect).Methods("POST")
-	// Slack write routes — workspace config + broadcast: manager or above only
+	slackRoutes.HandleFunc("/channel", slackHandler.SetChannel).Methods("POST")
+	slackRoutes.HandleFunc("/monitor-channel", slackHandler.SetMonitorChannel).Methods("POST")
+	// Slack write routes — broadcast/digest actions: manager or above only
 	slackWriteRoutes := api.PathPrefix("/slack").Subrouter()
 	slackWriteRoutes.Use(middleware.AuthMiddleware)
 	slackWriteRoutes.Use(middleware.ManagerOrAbove)
-	slackWriteRoutes.HandleFunc("/channel", slackHandler.SetChannel).Methods("POST")
-	slackWriteRoutes.HandleFunc("/monitor-channel", slackHandler.SetMonitorChannel).Methods("POST")
 	slackWriteRoutes.HandleFunc("/scan", slackHandler.Scan).Methods("POST")
 	slackWriteRoutes.HandleFunc("/digest", slackHandler.PostDigest).Methods("POST")
 	slackWriteRoutes.HandleFunc("/reply", slackHandler.ReplyToThread).Methods("POST")
